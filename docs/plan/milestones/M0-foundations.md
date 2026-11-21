@@ -3,7 +3,7 @@
 - Issue: [M0-00]
 - Milestone: [M0 · Foundations](https://github.com/jcore9/Aphelion/milestone/1)
 - Release: v0.1.0-alpha.1 ([decision 0003](../../decisions/0003-release-versioning.md))
-- Status: Draft, waiting for review. All open questions are answered (decisions 0005 to 0015).
+- Status: Draft, waiting for review. Q1 to Q8 are answered (decisions 0005 to 0015); the headless server is now one Docker container ([decision 0016](../../decisions/0016-one-docker-container.md)); Q9 is open.
 - Last updated: 2026-11-21
 
 M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
@@ -12,7 +12,7 @@ M0 builds the ground everything else stands on: the repo, the docs, the config, 
 
 The service starts on boot and answers `/health` from a client over Tailscale.
 
-That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers everything up to it (the server answers `/health`, unauthenticated sockets are rejected, the unit file passes `systemd-analyze verify`), and the full test is run by hand on a VM using the steps in [Exit test](#exit-test). Its output goes into the retro note.
+That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers everything up to it (the server answers `/health`, unauthenticated sockets are rejected, the image builds, the Compose file validates, and inside the container `aphelion-agent` can't read the server's or the broker's files), and the full test is run by hand on a VM using the steps in [Exit test](#exit-test). Its output goes into the retro note.
 
 ## Scope
 
@@ -33,7 +33,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-09] | Protocol package v0 | feature, server, client | M0-04, M0-16 |
 | [M0-10] | API server skeleton | feature, server, security, **risk/security** | M0-09 |
 | [M0-11] | CLI and headless mode | feature, server, desktop | M0-03, M0-10 |
-| [M0-12] | Linux install script and systemd unit | feature, server, security, **risk/security** | M0-11 |
+| [M0-12] | Container image, Compose file and host unit | feature, server, security, **risk/security** | M0-11 |
 | [M0-13] | Plugin host v0 | feature, plugins, **risk/security** | M0-04, M0-07, M0-16 |
 | [M0-14] | Secrets broker v0 | feature, security, **risk/security** | M0-08 |
 | [M0-15] | 1Password backend plugin | feature, plugins, security, **risk/security** | M0-13, M0-14 |
@@ -65,7 +65,7 @@ flowchart LR
   m09 --> m10["M0-10 API server"]
   m10 --> m11["M0-11 CLI, headless"]
   s3 --> m11
-  m11 --> m12["M0-12 install, unit"]
+  m11 --> m12["M0-12 image, Compose"]
   m07 --> m13["M0-13 plugin host"]
   m16 --> m13
   m08 --> m14["M0-14 secrets broker"]
@@ -133,18 +133,18 @@ What changes depending on the answer:
 
 ### M0-03: headless without Electron, on Bun
 
-The acceptance criterion asks for a prototype where one install exposes `aphelion --headless` and runs on a server VM with no GUI libraries. Decisions [0007](../../decisions/0007-bun-runtime.md) and [0009](../../decisions/0009-electron-desktop-shell.md) settle the runtime: the server is a Bun binary built with `bun build --compile`, and Electron starts that same binary in local mode. The spike checks that this shape holds, and that Bun runs everything the project depends on.
+Decisions [0007](../../decisions/0007-bun-runtime.md), [0009](../../decisions/0009-electron-desktop-shell.md) and [0016](../../decisions/0016-one-docker-container.md) settle the shape. The server is one Bun binary built with `bun build --compile`. The headless install is a Docker image that runs that binary, and the desktop app starts the same binary directly in local mode. The original question, "no GUI libraries on a server", is answered by the image, so the spike checks that the shape holds and that Bun runs everything the project depends on.
 
 Questions:
 
-1. On a minimal Ubuntu Server LTS image ([decision 0011](../../decisions/0011-ubuntu-lts.md)) with no X11, Wayland, GTK or NSS libraries, does the compiled binary start with `--headless` and answer a stub `/health`? Show what it loads (for example with `ldd` and `/proc/<pid>/maps`).
-2. What does "one install" mean in practice? Candidates to test: one `.deb` with the server binary and the desktop app, where the GUI libraries are optional (`Recommends`); a server package that the desktop package depends on. Which one gives a clean upgrade path for both?
-3. Can an Electron prototype start the compiled server as a child process in local mode, and stop it cleanly when the window closes?
-4. Does each dependency work on Bun, with a minimal call that proves it: the MCP TypeScript SDK (stdio and Streamable HTTP), the ACP TypeScript SDK, the Claude ACP adapter, `@1password/sdk`, `@bitwarden/sdk-napi` and `age-encryption`? Do they still work inside a `--compile` binary?
-5. How do Vitest tests reach the Bun-only adapter modules: Vitest running under Bun's runtime, or `bun test` for those modules only?
-6. How do the systemd unit and the upgrade path look for that shape?
+1. Does the compiled binary run inside an Ubuntu LTS image with no X11, Wayland, GTK or NSS libraries, under the Compose hardening from decision 0016 (read-only root filesystem, `cap_drop: ALL` plus the minimum added back, `no-new-privileges`), and answer a stub `/health` on a port published only on a tailnet address?
+2. Can a minimal init start three processes as three different users with only `SETUID` and `SETGID` added back? Which init tool fits (for example tini plus a small launcher, or s6-overlay), and does it shut them down cleanly?
+3. Does each dependency work on Bun, with a minimal call that proves it: the MCP TypeScript SDK (stdio and Streamable HTTP), the ACP TypeScript SDK, the Claude ACP adapter, `@1password/sdk`, `@bitwarden/sdk-napi` and `age-encryption`? Do they still work inside a `--compile` binary?
+4. How do Vitest tests reach the Bun-only adapter modules: Vitest running under Bun's runtime, or `bun test` for those modules only?
+5. Can an Electron prototype start the compiled server as a child process in local mode, and stop it cleanly when the window closes?
+6. How does a host `aphelion.service` start the Compose project on boot and pass it the bootstrap secret from `LoadCredentialEncrypted=` as a Compose secret?
 
-If a dependency fails on Bun, or no install shape gives both "one install" and "no GUI libraries", the spike says so and the owner decides. The options are a workaround, running that piece on Node, or revisiting decision 0007.
+If a dependency fails on Bun, or the hardening can't hold with three users in one container, the spike says so and the owner decides.
 
 ## Design notes
 
@@ -164,15 +164,22 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-09, protocol v0.** Every frame carries `v: 1`. The server assigns increasing sequence numbers to events; a client reconnects with its last sequence number and gets what it missed. If its cursor is older than what the server kept, the server tells it to resync instead of replaying a partial history. Commands carry a client-generated id, and a retried id is applied once. M0 defines the frame envelope and the types it needs; later milestones add their own commands and events. **DR:** how the spec is generated from the TypeScript types.
 
-**M0-10, API server.** It binds only to the configured address and refuses a wildcard address such as `0.0.0.0`, since the server is meant to be reachable only over the tailnet. `/health` needs no token and returns only `{"status":"ok"}`, without a version or other details, to keep the attack surface small. Device tokens are issued on the host (`aphelion device add <name>` prints the token once), stored hashed, expire, and can be revoked. Any WebSocket without a valid token is closed. Tailscale device identity depends on [Q5](#q5-tailscale-device-identity-in-m0).
+**M0-10, API server.** It binds to the address in its config. In the container that's the container's own interface, and the Compose file publishes the port only on the host's tailnet address; `aphelion config check` refuses a Compose file that publishes it anywhere else ([decision 0016](../../decisions/0016-one-docker-container.md)). `/health` needs no token and returns only `{"status":"ok"}`, without a version or other details, to keep the attack surface small. Device tokens are issued with `aphelion device add <name>` (run through `docker compose exec`), which prints the token once. They're stored hashed, expire, and can be revoked. Any WebSocket without a valid token is closed. The container doesn't get the host's Tailscale socket, so Tailscale identity is likely to move to M5 ([decision 0013](../../decisions/0013-tailscale-identity.md)).
 
-**M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, built as one Bun binary in the shape M0-03 settles. Headless mode never loads Electron, and the desktop app starts this same binary ([decision 0009](../../decisions/0009-electron-desktop-shell.md)).
+**M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, built as one Bun binary. The Docker image runs it with `--headless`, and the desktop app starts the same binary in local mode ([decisions 0009 and 0016](../../decisions/0016-one-docker-container.md)). Headless mode never loads Electron.
 
-**M0-12, install script and unit.** The script runs as root once. It creates three system users, `harness`, `aphelion-agent` and `aphelion-secrets` ([decision 0012](../../decisions/0012-secrets-broker-process.md)), none with sudo rights, and the directories from [decision 0014](../../decisions/0014-filesystem-layout.md). It sets directory ownership and modes so `aphelion-agent` can't read or write the config, the database or the managed hooks, and it installs a hardened unit for the harness (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, no capabilities). It also installs the `aphelion-agent@.service` template and the polkit rule that lets `harness` start and stop only those units ([decision 0006](../../decisions/0006-shared-agent-user.md)); M1-04 is the first to use them. It also creates the agents root folder, owned by `aphelion-agent` and readable by `harness` ([decision 0010](../../decisions/0010-agent-folders.md)). The issue's "without sudo" means the users get no sudo rights; the script itself needs root. The install guide ships in the same PR.
+**M0-12, container image, Compose file and host unit.** Rewritten by [decision 0016](../../decisions/0016-one-docker-container.md). The image is built on Ubuntu LTS and contains:
 
-**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Server plugins run on Bun, and each one still runs as its own Unix user, started through systemd the same way as agents ([decision 0006](../../decisions/0006-shared-agent-user.md)). **DR:** the API reference generator.
+- the users `harness`, `aphelion-agent` and `aphelion-secrets`, with fixed UIDs and no sudo;
+- the server binary, the broker and the agent runner;
+- pinned versions of the Claude Code and Grok Build CLIs, and git;
+- the managed CLI settings and hooks, owned by root on a read-only root filesystem.
 
-**M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), a local store encrypted with the `age-encryption` package, and the bootstrap secret loaded with `LoadCredentialEncrypted=`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file. Where it runs is [Q4](#q4-where-the-secrets-broker-runs-before-the-gateway-exists).
+A minimal init starts the three processes as their users. The paths from [decision 0014](../../decisions/0014-filesystem-layout.md) are volumes with fixed owners and modes. The Compose file carries the hardening from decision 0016, publishes the port only on the tailnet address, and never mounts the Docker socket. The host side is a short script plus a guide that installs `aphelion.service`, which starts Compose on boot and passes in the bootstrap secret. **DR:** the init tool, informed by M0-03. The install guide ships in the same PR.
+
+**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Server plugins run on Bun. Which user they run as inside the container is [Q9](#q9-which-user-server-plugins-run-as-inside-the-container). **DR:** the API reference generator.
+
+**M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), and a local store encrypted with the `age-encryption` package. The broker runs inside the container as `aphelion-secrets`, behind a Unix socket that only `harness` can open ([decisions 0012 and 0016](../../decisions/0016-one-docker-container.md)). The bootstrap secret comes from the host's `LoadCredentialEncrypted=` as a Compose secret readable only by `aphelion-secrets`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file.
 
 **M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
 
@@ -186,9 +193,9 @@ The workflow says an issue a coding tool can't finish in one focused session, or
 | [M0-09] | (a) Frame and message types, sequence numbers, replay and idempotent ids, with the replay test. (b) Spec generated into the docs. | (b) touches the docs workspace and build tooling. |
 | [M0-10] | (a) HTTP and WebSocket server bound to the configured address, and `/health`. (b) Per-device tokens and rejecting unauthenticated sockets, **risk/security**. | Auth gets its own line-by-line review. |
 | [M0-13] | (a) Manifest schema and API-range check in `plugin-sdk`, with the out-of-range refusal. (b) Process-per-plugin JSON-RPC host and the sample plugin. (c) Permission grants stored and enforced, **risk/security**. (d) API reference generated into the docs. | Four concerns across three packages. |
-| [M0-14] | (a) `Secret` wrapper, reference syntax and the "never in logs or the database" test. (b) Local age-encrypted store. (c) Bootstrap secret through `systemd-creds`. | Three separate security-sensitive pieces. |
+| [M0-14] | (a) `Secret` wrapper, reference syntax and the "never in logs or the database" test. (b) Local age-encrypted store. (c) Bootstrap secret from the host's `systemd-creds` through a Compose secret. | Three separate security-sensitive pieces. |
 
-M0-12 stays whole: the script, the unit and the install guide only make sense together, and the PR is still well under the size limit.
+M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (b) the Compose file and its hardening, (c) the host unit and the install guide. M0-03 shows how big each piece is, and the split is proposed then.
 
 ## Risks
 
@@ -197,9 +204,10 @@ M0-12 stays whole: the script, the unit and the install guide only make sense to
 | A spike finds that a subscription path doesn't work, or that the terms don't allow it | M1, M4 and M7 change shape | Spikes run first; a "no" or an unclear answer stops for the owner. |
 | The bot account has the Write role before branch protection exists | It could push to `dev` or `main` directly | M0-05 (b) goes first in wave 3 ([decision 0005](../../decisions/0005-bot-account-authors-prs.md)). |
 | All agents share one Unix user | A prompt-injected agent can read or damage other agents' workspaces | Accepted by design ([decision 0006](../../decisions/0006-shared-agent-user.md)). Snapshots, backups and git are the recovery path, and the threat model says so. |
-| "One install" and "no GUI libraries" turn out to conflict | M0-11 and M5-15 packaging | M0-03 answers it before M0-04 starts. |
+| Three users in one container can't hold the hardening (read-only root, minimal capabilities) | M0-12 and M1-04 change shape | M0-03 tests the init and the hardening before M0-04 starts. |
 | An SDK the project needs doesn't work on Bun | Parts of M0, M1 and M3 can't run as planned | M0-03 tests each one before M0-04 commits to Bun; a failure goes to the owner ([decision 0007](../../decisions/0007-bun-runtime.md)). |
 | M0-16 moves docs into the Starlight content folder | The plan links in every issue body break | M0-16 keeps `docs/plan/aphelion-plan.md` resolving, or updates the issue bodies in the same PR. |
+| Docker's daemon runs as root, so a container escape reaches the host | Weaker than rootless Podman would be | Hardened Compose file, no Docker socket mount, no one in the `docker` group, the plan's LAN firewall on the hypervisor ([decision 0016](../../decisions/0016-one-docker-container.md)). |
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
 | The spikes need real Claude Pro or Max and SuperGrok logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
 | Six security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
@@ -214,7 +222,7 @@ All eight are settled; each answer links to its decision record.
 
 ### Q2. How the harness starts processes as other Unix users
 
-**Answered in [decision 0006](../../decisions/0006-shared-agent-user.md):** all agents share one `aphelion-agent` user and can read and write each other's workspaces, while the harness, config and approval layer stay out of their reach. systemd starts each agent in its own unit, so the harness never needs root. Manager agents change other agents' definitions only through built-in tools that go through approvals.
+**Answered in [decision 0006](../../decisions/0006-shared-agent-user.md):** all agents share one `aphelion-agent` user and can read and write each other's workspaces, while the harness, config and approval layer stay out of their reach. An agent runner inside the container starts agents on the server's request, so the server never needs root ([decision 0016](../../decisions/0016-one-docker-container.md)). Manager agents change other agents' definitions only through built-in tools that go through approvals.
 
 ### Q3. Which Linux distros v1 supports
 
@@ -240,22 +248,32 @@ All eight are settled; each answer links to its decision record.
 
 **Obsolete:** with one shared agent user ([decision 0006](../../decisions/0006-shared-agent-user.md)), a new agent needs no new Unix user.
 
+### Q9. Which user server plugins run as inside the container
+
+The plan runs each server plugin as its own Unix user. That relied on systemd starting processes as other users, and the container from [decision 0016](../../decisions/0016-one-docker-container.md) has no systemd. A user per plugin would also bring back the "new user for every addition" problem.
+
+- **Recommended:** one shared `aphelion-plugins` user for every server plugin, started by a plugin runner (the same design as the agent runner, which accepts requests only from `harness`). Plugins can't read the server's or the broker's files. What each one may do is enforced by the host's permission grants, not by Unix users. Per-plugin users can come back later if a plugin needs stronger separation.
+- Alternative: run plugins as `harness`, inside the server's trust. Simpler, but any plugin could read the approval rules and the database.
+
+Blocks: M0-13 (b).
+
 ## What I need from you
 
-1. A review and approval of this plan, including the proposed splits.
+1. An answer to Q9, and a review and approval of this plan, including the proposed splits.
 2. For M0-01 and M0-02: a Linux VM where you sign in to Claude Code with your Pro or Max account and to Grok Build with your SuperGrok account, on a fresh Unix user. The sign-ins are yours to do; the spikes don't need your credentials passed to them.
-3. For the exit test: a VM on your tailnet that the install script can be run on.
+3. For the exit test: an Ubuntu LTS VM on your tailnet with Docker Engine and the Compose plugin.
 
 ## Exit test
 
-Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu-lts.md)):
+Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu-lts.md)) with Docker Engine, the Compose plugin and Tailscale:
 
-1. Run the install script as root.
+1. Follow the install guide: install `aphelion.service`, store the bootstrap secret with `systemd-creds`, and start the service.
 2. Check that `systemctl is-enabled aphelion` reports `enabled`, then reboot.
-3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`.
+3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`. The same request to the host's LAN address fails.
 4. A WebSocket opened without a token is closed; one opened with a token from `aphelion device add` is accepted.
-5. `sudo -l -U` shows no sudo rights for `harness`, `aphelion-agent` or `aphelion-secrets`. `aphelion-agent` can't read `/etc/aphelion/`, `/var/lib/aphelion/` or `/var/lib/aphelion-secrets/`, can't write the unit files, and can't connect to the broker's socket.
-6. The output of each step goes into the retro note.
+5. Inside the container: `harness`, `aphelion-agent` and `aphelion-secrets` have no sudo. `aphelion-agent` can't read `/etc/aphelion/`, `/var/lib/aphelion/` or `/var/lib/aphelion-secrets/`, can't write the managed hooks, and can't connect to the broker's socket or start agents through the runner.
+6. `docker inspect` shows a read-only root filesystem, `no-new-privileges`, only the expected capabilities, and no Docker socket mount.
+7. The output of each step goes into the retro note.
 
 ## Docs M0 produces
 
@@ -269,7 +287,7 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 | Config reference | M0-06 |
 | Protocol spec (generated) | M0-09 |
 | Plugin API reference (generated) | M0-13 |
-| Install guide for the headless server | M0-12 |
+| Install guide for the headless server (Docker, Compose, `aphelion.service`) | M0-12 |
 | Security and threat model (first draft: users, shared agent workspaces, secrets, bind address) | M0-12, M0-14 |
 | Architecture overview, kept current | Every PR that changes it |
 | Changelog | The M0 release PR |

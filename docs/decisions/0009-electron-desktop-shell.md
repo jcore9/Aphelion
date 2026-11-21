@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-21
 - Decided by: project owner
+- Amended by: [decision 0016](0016-one-docker-container.md) (desktop local mode runs everything as the desktop user, with an advisory banner)
 - Confirms: the plan's choice of Electron, with a new reason now that the server runs on Bun ([decision 0007](0007-bun-runtime.md))
 
 ## Context

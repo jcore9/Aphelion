@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-21
 - Decided by: project owner
+- Amended by: [decision 0016](0016-one-docker-container.md) (no per-agent systemd units; the runner starts agents)
 - Amends: [decision 0006](0006-shared-agent-user.md) (which agent changes need approval)
 
 ## Context

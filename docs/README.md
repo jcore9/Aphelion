@@ -29,3 +29,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0013](decisions/0013-tailscale-identity.md) | Tailscale identity ships in M0 only if it needs no operator rights | Accepted |
 | [0014](decisions/0014-filesystem-layout.md) | Config in /etc/aphelion, state in /var/lib/aphelion, agents in /var/lib/aphelion-agents | Accepted |
 | [0015](decisions/0015-1password-ci-mock.md) | The 1Password backend is tested against a mock in CI | Accepted |
+| [0016](decisions/0016-one-docker-container.md) | The headless server ships as one Docker container, with separate users inside | Accepted |

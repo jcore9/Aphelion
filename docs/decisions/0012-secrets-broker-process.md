@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-21
 - Decided by: project owner
+- Amended by: [decision 0016](0016-one-docker-container.md) (the broker runs inside the container as `aphelion-secrets`)
 - Answers: M0 plan, Q4
 
 ## Context

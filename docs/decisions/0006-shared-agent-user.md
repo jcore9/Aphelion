@@ -5,6 +5,7 @@
 - Decided by: project owner
 - Answers: M0 plan, Q2 (and makes Q8 obsolete)
 - Amended by: [decision 0010](0010-agent-folders.md) (agent folders, and which changes need approval)
+- Amended by: [decision 0016](0016-one-docker-container.md) (agents are started by a runner inside the container, not by systemd units)
 - Amends: the plan's Trust boundaries, Session manager and Components sections, and issues M0-12 and M1-04
 
 ## Context
