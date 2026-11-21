@@ -3,7 +3,7 @@
 - Issue: [M0-00]
 - Milestone: [M0 · Foundations](https://github.com/jcore9/Aphelion/milestone/1)
 - Release: v0.1.0-alpha.1 ([decision 0003](../../decisions/0003-release-versioning.md))
-- Status: Draft, waiting for review. Q1 to Q8 are answered (decisions 0005 to 0015); the headless server is now one Docker container ([decision 0016](../../decisions/0016-one-docker-container.md)); Q9 is open.
+- Status: Draft, waiting for review. Q1 to Q8 are answered (decisions 0005 to 0015); the headless server is now one Docker container ([decision 0016](../../decisions/0016-one-docker-container.md)); Q9 is open. The desktop app only connects to a server ([decision 0017](../../decisions/0017-desktop-remote-only.md)).
 - Last updated: 2026-11-21
 
 M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
@@ -133,7 +133,7 @@ What changes depending on the answer:
 
 ### M0-03: headless without Electron, on Bun
 
-Decisions [0007](../../decisions/0007-bun-runtime.md), [0009](../../decisions/0009-electron-desktop-shell.md) and [0016](../../decisions/0016-one-docker-container.md) settle the shape. The server is one Bun binary built with `bun build --compile`. The headless install is a Docker image that runs that binary, and the desktop app starts the same binary directly in local mode. The original question, "no GUI libraries on a server", is answered by the image, so the spike checks that the shape holds and that Bun runs everything the project depends on.
+Decisions [0007](../../decisions/0007-bun-runtime.md), [0009](../../decisions/0009-electron-desktop-shell.md) and [0016](../../decisions/0016-one-docker-container.md) settle the shape. The server is one Bun binary built with `bun build --compile`. The server ships only as a Docker image that runs that binary. The desktop app is a client that connects to it and never runs a server ([decision 0017](../../decisions/0017-desktop-remote-only.md)). The original question, "no GUI libraries on a server", is answered by the image, so the spike checks that the shape holds and that Bun runs everything the project depends on.
 
 Questions:
 
@@ -141,8 +141,7 @@ Questions:
 2. Can a minimal init start three processes as three different users with only `SETUID` and `SETGID` added back? Which init tool fits (for example tini plus a small launcher, or s6-overlay), and does it shut them down cleanly?
 3. Does each dependency work on Bun, with a minimal call that proves it: the MCP TypeScript SDK (stdio and Streamable HTTP), the ACP TypeScript SDK, the Claude ACP adapter, `@1password/sdk`, `@bitwarden/sdk-napi` and `age-encryption`? Do they still work inside a `--compile` binary?
 4. How do Vitest tests reach the Bun-only adapter modules: Vitest running under Bun's runtime, or `bun test` for those modules only?
-5. Can an Electron prototype start the compiled server as a child process in local mode, and stop it cleanly when the window closes?
-6. How does a host `aphelion.service` start the Compose project on boot and pass it the bootstrap secret from `LoadCredentialEncrypted=` as a Compose secret?
+5. How does a host `aphelion.service` start the Compose project on boot and pass it the bootstrap secret from `LoadCredentialEncrypted=` as a Compose secret?
 
 If a dependency fails on Bun, or the hardening can't hold with three users in one container, the spike says so and the owner decides.
 
@@ -166,7 +165,7 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-10, API server.** It binds to the address in its config. In the container that's the container's own interface, and the Compose file publishes the port only on the host's tailnet address; `aphelion config check` refuses a Compose file that publishes it anywhere else ([decision 0016](../../decisions/0016-one-docker-container.md)). `/health` needs no token and returns only `{"status":"ok"}`, without a version or other details, to keep the attack surface small. Device tokens are issued with `aphelion device add <name>` (run through `docker compose exec`), which prints the token once. They're stored hashed, expire, and can be revoked. Any WebSocket without a valid token is closed. The container doesn't get the host's Tailscale socket, so Tailscale identity is likely to move to M5 ([decision 0013](../../decisions/0013-tailscale-identity.md)).
 
-**M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, built as one Bun binary. The Docker image runs it with `--headless`, and the desktop app starts the same binary in local mode ([decisions 0009 and 0016](../../decisions/0016-one-docker-container.md)). Headless mode never loads Electron.
+**M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, built as one Bun binary. The Docker image runs it with `--headless`. The desktop app doesn't bundle it ([decision 0017](../../decisions/0017-desktop-remote-only.md)). Headless mode never loads Electron.
 
 **M0-12, container image, Compose file and host unit.** Rewritten by [decision 0016](../../decisions/0016-one-docker-container.md). The image is built on Ubuntu LTS and contains:
 

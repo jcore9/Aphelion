@@ -30,3 +30,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0014](decisions/0014-filesystem-layout.md) | Config in /etc/aphelion, state in /var/lib/aphelion, agents in /var/lib/aphelion-agents | Accepted |
 | [0015](decisions/0015-1password-ci-mock.md) | The 1Password backend is tested against a mock in CI | Accepted |
 | [0016](decisions/0016-one-docker-container.md) | The headless server ships as one Docker container, with separate users inside | Accepted |
+| [0017](decisions/0017-desktop-remote-only.md) | The desktop app only connects to a server; it never runs one | Accepted |
