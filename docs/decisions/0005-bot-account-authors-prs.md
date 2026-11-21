@@ -26,6 +26,6 @@ Option 1, using a machine user account, `jcore9-bot`.
 ## Consequences
 
 - The owner approves PRs from their own account, which is the review the Development workflow asks for.
-- Until M0-05 turns on branch protection, the Write role lets the bot push to `dev` and `main` directly. The coding tools follow the workflow and don't, but nothing stops them until M0-05 (b) lands, so that sub-issue should go early in wave 2.
+- Until M0-05 turns on branch protection, the Write role lets the bot push to `dev` and `main` directly. The coding tools follow the workflow and don't, but nothing stops them until M0-05 (b) lands, so that sub-issue goes first once M0-04 lands.
 - The bot's GitHub sign-in on the dev machine is a long-lived credential. It's separate from the GitHub App that the M3 connector uses, which mints short-lived tokens per call.
 - PR #90 (the M0 plan) was opened from the owner's account before this decision. It gets reopened from the bot so it can be approved.

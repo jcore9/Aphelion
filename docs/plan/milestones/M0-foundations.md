@@ -3,7 +3,7 @@
 - Issue: [M0-00]
 - Milestone: [M0 · Foundations](https://github.com/jcore9/Aphelion/milestone/1)
 - Release: v0.1.0-alpha.1 ([decision 0003](../../decisions/0003-release-versioning.md))
-- Status: Draft, waiting for review. Q1 and Q2 are answered ([0005](../../decisions/0005-bot-account-authors-prs.md), [0006](../../decisions/0006-shared-agent-user.md)); Q8 is obsolete.
+- Status: Draft, waiting for review. Q1 and Q2 are answered ([0005](../../decisions/0005-bot-account-authors-prs.md), [0006](../../decisions/0006-shared-agent-user.md)); Q8 is obsolete. Runtime, UI framework and desktop shell are decided ([0007](../../decisions/0007-bun-runtime.md), [0008](../../decisions/0008-react-and-tailwind.md), [0009](../../decisions/0009-electron-desktop-shell.md)).
 - Last updated: 2026-11-21
 
 M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
@@ -24,7 +24,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-01] | Spike: Claude over ACP on a subscription login | spike, server | M0-00 |
 | [M0-02] | Spike: Grok headless billing | spike, server | M0-00 |
 | [M0-03] | Spike: headless without Electron | spike, desktop | M0-00 |
-| [M0-04] | Monorepo scaffold | chore | M0-00 |
+| [M0-04] | Monorepo scaffold | chore | M0-03 |
 | [M0-05] | Repo hygiene and MIT license | chore, security, **risk/security** | M0-04 |
 | [M0-16] | Docs site and decision records | docs | M0-04 |
 | [M0-06] | Config directory and schema | feature, server | M0-04 |
@@ -55,7 +55,7 @@ flowchart LR
   m00["M0-00 plan"] --> s1["M0-01 spike: Claude"]
   m00 --> s2["M0-02 spike: Grok"]
   m00 --> s3["M0-03 spike: headless"]
-  m00 --> m04["M0-04 scaffold"]
+  s3 --> m04["M0-04 scaffold"]
   m04 --> m05["M0-05 hygiene"]
   m04 --> m16["M0-16 docs site"]
   m04 --> m06["M0-06 config"]
@@ -76,14 +76,15 @@ flowchart LR
 
 | Wave | Starts when | Issues, all in parallel |
 | --- | --- | --- |
-| 1 | This plan is approved | M0-01, M0-02, M0-03, M0-04 |
-| 2 | M0-04 merges | M0-05, M0-16, M0-06, M0-07 |
-| 3 | Its dependencies merge | M0-08, M0-09, M0-13 |
-| 4 | Its dependencies merge | M0-10, M0-14 |
-| 5 | Its dependencies merge | M0-11, M0-15 |
-| 6 | M0-11 merges | M0-12, then the exit test |
+| 1 | This plan is approved | M0-01, M0-02, M0-03 |
+| 2 | M0-03's finding is approved | M0-04 |
+| 3 | M0-04 merges | M0-05, M0-16, M0-06, M0-07 |
+| 4 | Its dependencies merge | M0-08, M0-09, M0-13 |
+| 5 | Its dependencies merge | M0-10, M0-14 |
+| 6 | Its dependencies merge | M0-11, M0-15 |
+| 7 | M0-11 merges | M0-12, then the exit test |
 
-The critical path is M0-04, M0-16, M0-09, M0-10, M0-11, M0-12. M0-03 has to finish before M0-11 starts, so it runs in wave 1 even though nothing else waits on it.
+The critical path is M0-03, M0-04, M0-16, M0-09, M0-10, M0-11, M0-12. M0-04 waits for M0-03 because the spike checks that Bun runs the SDKs the project depends on ([decision 0007](../../decisions/0007-bun-runtime.md)) before the scaffold commits to it.
 
 M0-01 and M0-02 block nothing inside M0. They block [M1-02] and [M4-01], and their answers can change the shape of M1, M4 and M7, which is why they run first instead of at the start of M1.
 
@@ -130,34 +131,34 @@ What changes depending on the answer:
 | Needs an API key | Stop. The owner decides whether Grok runs on API billing in v1. M7-03 changes from estimating a pool to reading API usage. |
 | Terms don't allow it | Stop. The owner decides whether Grok stays in v1. |
 
-### M0-03: headless without Electron
+### M0-03: headless without Electron, on Bun
 
-The acceptance criterion asks for a prototype where one install exposes `aphelion --headless` and runs on a server VM with no GUI libraries.
+The acceptance criterion asks for a prototype where one install exposes `aphelion --headless` and runs on a server VM with no GUI libraries. Decisions [0007](../../decisions/0007-bun-runtime.md) and [0009](../../decisions/0009-electron-desktop-shell.md) settle the runtime: the server is a Bun binary built with `bun build --compile`, and Electron starts that same binary in local mode. The spike checks that this shape holds, and that Bun runs everything the project depends on.
 
 Questions:
 
-1. What does "one install" mean in practice? Candidates to test: one `.deb` that contains both the server and the desktop app, with the GUI libraries as optional (`Recommends`) dependencies; a server package that the desktop package depends on; an npm global install with Electron as an optional dependency.
-2. Which Node runtime does headless mode run on: the system's Node LTS, a Node bundled with Aphelion, or Electron's own Node through `ELECTRON_RUN_AS_NODE`? The last one still starts the Electron binary, which links GUI libraries, so the spike checks whether that rules it out.
-3. On a minimal server image of each target distro ([Q3](#q3-which-linux-distros-v1-supports)) with no X11, Wayland, GTK or NSS libraries, does `aphelion --headless` start and answer a stub `/health`? Show what's loaded (for example with `ldd` and `/proc/<pid>/maps`).
-4. How do the systemd unit and the upgrade path look for that shape, for both the headless and the desktop install?
+1. On a minimal server image of each target distro ([Q3](#q3-which-linux-distros-v1-supports)) with no X11, Wayland, GTK or NSS libraries, does the compiled binary start with `--headless` and answer a stub `/health`? Show what it loads (for example with `ldd` and `/proc/<pid>/maps`).
+2. What does "one install" mean in practice? Candidates to test: one `.deb` with the server binary and the desktop app, where the GUI libraries are optional (`Recommends`); a server package that the desktop package depends on. Which one gives a clean upgrade path for both?
+3. Can an Electron prototype start the compiled server as a child process in local mode, and stop it cleanly when the window closes?
+4. Does each dependency work on Bun, with a minimal call that proves it: the MCP TypeScript SDK (stdio and Streamable HTTP), the ACP TypeScript SDK, the Claude ACP adapter, `@1password/sdk`, `@bitwarden/sdk-napi` and `age-encryption`? Do they still work inside a `--compile` binary?
+5. How do Vitest tests reach the Bun-only adapter modules: Vitest running under Bun's runtime, or `bun test` for those modules only?
+6. How do the systemd unit and the upgrade path look for that shape?
 
-If no shape gives both "one install" and "no GUI libraries", the spike says so and the owner picks which one gives.
-
-M0-04 lays out the `cli` package without committing to a packaging shape, so M0-03's answer doesn't force a rework.
+If a dependency fails on Bun, or no install shape gives both "one install" and "no GUI libraries", the spike says so and the owner decides. The options are a workaround, running that piece on Node, or revisiting decision 0007.
 
 ## Design notes
 
 These are starting points for each issue's PR, not final designs. Where an issue has to choose a tool or library, its PR includes a decision record that weighs the options, and the owner approves it with the PR. Expected records are marked **DR**.
 
-**M0-04, monorepo scaffold.** Packages are `@aphelion/server`, `client`, `protocol`, `plugin-sdk` and `cli`, plus a `docs` workspace that M0-16 fills in. Node is pinned to the current Active LTS through `engines` and `.nvmrc`, and pnpm through the `packageManager` field. CI runs lint, typecheck and test on every PR into `dev`. **DR:** linter (ESLint with typescript-eslint, or Biome), keeping in mind that M5-02 needs a token lint rule later. This issue touches every package by nature, which is the one accepted exception to the "one package per issue" size rule.
+**M0-04, monorepo scaffold.** Bun workspaces with packages `@aphelion/server`, `client`, `protocol`, `plugin-sdk` and `cli`, plus a `docs` workspace that M0-16 fills in ([decision 0007](../../decisions/0007-bun-runtime.md)). The Bun version is pinned in the repo and in CI, and `bun.lock` is committed. Tests run on Vitest, in the way M0-03 settles. A lint rule allows `bun:` imports and the `Bun` global only in designated adapter modules. `protocol` and `plugin-sdk` use only web-standard APIs, so they run in Bun, Node and the browser. CI runs lint, typecheck and test on every PR into `dev`. **DR:** linter (ESLint with typescript-eslint, or Biome), keeping in mind that M5-02 needs a token lint rule later. This issue touches every package by nature, which is the one accepted exception to the "one package per issue" size rule.
 
-**M0-05, repo hygiene.** SECURITY.md points to GitHub's private vulnerability reporting, which is a repo setting that has to be switched on. CODEOWNERS covers the security-sensitive paths named in the workflow, including paths that don't exist yet, so they're protected from their first commit. The label set already exists ([decision 0002](../../decisions/0002-type-docs-label.md)); CONTRIBUTING documents it. Branch protection is a repo setting, not part of the diff. It requires an approving review and blocks direct pushes to `dev` and `main`, so the bot account from [decision 0005](../../decisions/0005-bot-account-authors-prs.md) can only push its own branches. M0-05 (b) goes early in wave 2, because until it lands nothing technically stops the bot from pushing to `dev`.
+**M0-05, repo hygiene.** SECURITY.md points to GitHub's private vulnerability reporting, which is a repo setting that has to be switched on. CODEOWNERS covers the security-sensitive paths named in the workflow, including paths that don't exist yet, so they're protected from their first commit. The label set already exists ([decision 0002](../../decisions/0002-type-docs-label.md)); CONTRIBUTING documents it. Branch protection is a repo setting, not part of the diff. It requires an approving review and blocks direct pushes to `dev` and `main`, so the bot account from [decision 0005](../../decisions/0005-bot-account-authors-prs.md) can only push its own branches. M0-05 (b) goes first in wave 3, because until it lands nothing technically stops the bot from pushing to `dev`.
 
-**M0-16, docs site.** Starlight in the `docs` workspace, built in CI with a link check (for example the `starlight-links-validator` plugin). It moves this plan, the imported [plan](../aphelion-plan.md) and decision records 0001 to 0004 into the site, adds the decision-record template in the same format as those records, and writes up the plan's existing decisions from 0005 on. It also adds the M1-00 to M9-00 rows to the plan's Issue breakdown ([decision 0001](../../decisions/0001-planning-issue-per-milestone.md)).
+**M0-16, docs site.** Starlight in the `docs` workspace, built in CI with a link check (for example the `starlight-links-validator` plugin). It moves this plan, the imported [plan](../aphelion-plan.md) and the decision records into the site, adds the decision-record template in the same format as those records, and writes up the plan's remaining decisions, numbered after the records that already exist. It updates the plan text that decisions 0006 to 0009 amend. It also adds the M1-00 to M9-00 rows to the plan's Issue breakdown ([decision 0001](../../decisions/0001-planning-issue-per-milestone.md)).
 
 **M0-06, config directory.** One versioned directory for agents, policy, routines and connectors, which can be a git repo. Each file carries a `version` field, and a migration moves it forward. Agents can never write to it; its location and owner depend on [Q6](#q6-where-the-config-directory-lives). **DR:** the schema library, which needs to export JSON Schema so the docs and editors can use it.
 
-**M0-07, SQLite store.** WAL mode, forward-only numbered migrations, and a migration test in CI. The database file is owned by the harness user with mode 0600. **DR:** the driver (Node's built-in `node:sqlite` or `better-sqlite3`).
+**M0-07, SQLite store.** WAL mode, forward-only numbered migrations, and a migration test in CI. The database file is owned by the harness user with mode 0600. **DR:** the driver: `bun:sqlite` inside the store adapter, or a portable driver. Either way it sits behind the store interface ([decision 0007](../../decisions/0007-bun-runtime.md)).
 
 **M0-08, logging and audit log.** Structured JSON logs, redacted by field name and by value pattern. M0-14 adds the `Secret` type, which redacts itself, and extends the redaction test to cover it, because M0-08 lands before that type exists. The audit table is append-only, enforced by SQLite triggers that reject `UPDATE` and `DELETE`. **DR:** the logging library.
 
@@ -165,15 +166,15 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-10, API server.** It binds only to the configured address and refuses a wildcard address such as `0.0.0.0`, since the server is meant to be reachable only over the tailnet. `/health` needs no token and returns only `{"status":"ok"}`, without a version or other details, to keep the attack surface small. Device tokens are issued on the host (`aphelion device add <name>` prints the token once), stored hashed, expire, and can be revoked. Any WebSocket without a valid token is closed. Tailscale device identity depends on [Q5](#q5-tailscale-device-identity-in-m0).
 
-**M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, shaped by M0-03's finding. Headless mode never loads Electron.
+**M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, built as one Bun binary in the shape M0-03 settles. Headless mode never loads Electron, and the desktop app starts this same binary ([decision 0009](../../decisions/0009-electron-desktop-shell.md)).
 
 **M0-12, install script and unit.** The script runs as root once. It creates two system users, `harness` and `aphelion-agent`, neither with sudo rights. It sets directory ownership and modes so `aphelion-agent` can't read or write the config, the database or the managed hooks, and it installs a hardened unit for the harness (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, no capabilities). It also installs the `aphelion-agent@.service` template and the polkit rule that lets `harness` start and stop only those units ([decision 0006](../../decisions/0006-shared-agent-user.md)); M1-04 is the first to use them. The issue's "without sudo" means the users get no sudo rights; the script itself needs root. The install guide ships in the same PR.
 
-**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Each plugin still runs as its own Unix user, started through systemd the same way as agents ([decision 0006](../../decisions/0006-shared-agent-user.md)). **DR:** the API reference generator.
+**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Server plugins run on Bun, and each one still runs as its own Unix user, started through systemd the same way as agents ([decision 0006](../../decisions/0006-shared-agent-user.md)). **DR:** the API reference generator.
 
 **M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), a local store encrypted with the `age-encryption` package, and the bootstrap secret loaded with `LoadCredentialEncrypted=`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file. Where it runs is [Q4](#q4-where-the-secrets-broker-runs-before-the-gateway-exists).
 
-**M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. The service account token is the bootstrap secret from M0-14. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
+**M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
 
 ## Proposed splits
 
@@ -194,9 +195,10 @@ M0-12 stays whole: the script, the unit and the install guide only make sense to
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
 | A spike finds that a subscription path doesn't work, or that the terms don't allow it | M1, M4 and M7 change shape | Spikes run first; a "no" or an unclear answer stops for the owner. |
-| The bot account has the Write role before branch protection exists | It could push to `dev` or `main` directly | M0-05 (b) goes early in wave 2 ([decision 0005](../../decisions/0005-bot-account-authors-prs.md)). |
+| The bot account has the Write role before branch protection exists | It could push to `dev` or `main` directly | M0-05 (b) goes first in wave 3 ([decision 0005](../../decisions/0005-bot-account-authors-prs.md)). |
 | All agents share one Unix user | A prompt-injected agent can read or damage other agents' workspaces | Accepted by design ([decision 0006](../../decisions/0006-shared-agent-user.md)). Snapshots, backups and git are the recovery path, and the threat model says so. |
-| "One install" and "no GUI libraries" turn out to conflict | M0-11 and M5-15 packaging | M0-03 answers it before M0-11 starts. |
+| "One install" and "no GUI libraries" turn out to conflict | M0-11 and M5-15 packaging | M0-03 answers it before M0-04 starts. |
+| An SDK the project needs doesn't work on Bun | Parts of M0, M1 and M3 can't run as planned | M0-03 tests each one before M0-04 commits to Bun; a failure goes to the owner ([decision 0007](../../decisions/0007-bun-runtime.md)). |
 | M0-16 moves docs into the Starlight content folder | The plan links in every issue body break | M0-16 keeps `docs/plan/aphelion-plan.md` resolving, or updates the issue bodies in the same PR. |
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
 | The spikes need real Claude Pro or Max and SuperGrok logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
