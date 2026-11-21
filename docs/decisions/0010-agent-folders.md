@@ -21,12 +21,12 @@ The question was which parts of an agent's description belong in its folder, whe
 
 Option 1.
 
-**Two Linux users, never more.** `harness` runs the server, and `aphelion-agent` runs every agent, however many there are. Adding an agent creates a folder, not a user. Each running agent gets a systemd unit created on the fly from one template and discarded when the agent stops; it needs no setup.
+**One Linux user for all agents.** `aphelion-agent` runs every agent, however many there are, and `harness` runs the server. (The secrets broker has its own user too, per [decision 0012](0012-secrets-broker-process.md), but that number never grows with the agent count.) Adding an agent creates a folder, not a user. Each running agent gets a systemd unit created on the fly from one template and discarded when the agent stops; it needs no setup.
 
 **One folder per agent**, owned by `aphelion-agent`:
 
 ```
-<agents root>/            for example /var/lib/aphelion-agents/, settled with Q6
+/var/lib/aphelion-agents/ the agents root (decision 0014)
   <agent name>/
     workspace/            repos, notes, scratch files
     <instructions file>   what the agent is told to do (its name is settled in M4-02)

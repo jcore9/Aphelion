@@ -24,3 +24,8 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0008](decisions/0008-react-and-tailwind.md) | The web client uses React and Tailwind | Accepted |
 | [0009](decisions/0009-electron-desktop-shell.md) | Electron is the desktop shell, and the server runs beside it as a Bun process | Accepted |
 | [0010](decisions/0010-agent-folders.md) | Each agent has a folder; instructions live there, permissions stay in the server's config | Accepted |
+| [0011](decisions/0011-ubuntu-lts.md) | v1 supports the current Ubuntu LTS | Accepted |
+| [0012](decisions/0012-secrets-broker-process.md) | The secrets broker is its own process from the start | Accepted |
+| [0013](decisions/0013-tailscale-identity.md) | Tailscale identity ships in M0 only if it needs no operator rights | Accepted |
+| [0014](decisions/0014-filesystem-layout.md) | Config in /etc/aphelion, state in /var/lib/aphelion, agents in /var/lib/aphelion-agents | Accepted |
+| [0015](decisions/0015-1password-ci-mock.md) | The 1Password backend is tested against a mock in CI | Accepted |

@@ -3,7 +3,7 @@
 - Issue: [M0-00]
 - Milestone: [M0 · Foundations](https://github.com/jcore9/Aphelion/milestone/1)
 - Release: v0.1.0-alpha.1 ([decision 0003](../../decisions/0003-release-versioning.md))
-- Status: Draft, waiting for review. Q1 and Q2 are answered ([0005](../../decisions/0005-bot-account-authors-prs.md), [0006](../../decisions/0006-shared-agent-user.md)); Q8 is obsolete. Runtime, UI framework and desktop shell are decided ([0007](../../decisions/0007-bun-runtime.md), [0008](../../decisions/0008-react-and-tailwind.md), [0009](../../decisions/0009-electron-desktop-shell.md)). Agent folders are decided ([0010](../../decisions/0010-agent-folders.md)).
+- Status: Draft, waiting for review. All open questions are answered (decisions 0005 to 0015).
 - Last updated: 2026-11-21
 
 M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
@@ -137,7 +137,7 @@ The acceptance criterion asks for a prototype where one install exposes `aphelio
 
 Questions:
 
-1. On a minimal server image of each target distro ([Q3](#q3-which-linux-distros-v1-supports)) with no X11, Wayland, GTK or NSS libraries, does the compiled binary start with `--headless` and answer a stub `/health`? Show what it loads (for example with `ldd` and `/proc/<pid>/maps`).
+1. On a minimal Ubuntu Server LTS image ([decision 0011](../../decisions/0011-ubuntu-lts.md)) with no X11, Wayland, GTK or NSS libraries, does the compiled binary start with `--headless` and answer a stub `/health`? Show what it loads (for example with `ldd` and `/proc/<pid>/maps`).
 2. What does "one install" mean in practice? Candidates to test: one `.deb` with the server binary and the desktop app, where the GUI libraries are optional (`Recommends`); a server package that the desktop package depends on. Which one gives a clean upgrade path for both?
 3. Can an Electron prototype start the compiled server as a child process in local mode, and stop it cleanly when the window closes?
 4. Does each dependency work on Bun, with a minimal call that proves it: the MCP TypeScript SDK (stdio and Streamable HTTP), the ACP TypeScript SDK, the Claude ACP adapter, `@1password/sdk`, `@bitwarden/sdk-napi` and `age-encryption`? Do they still work inside a `--compile` binary?
@@ -168,7 +168,7 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, built as one Bun binary in the shape M0-03 settles. Headless mode never loads Electron, and the desktop app starts this same binary ([decision 0009](../../decisions/0009-electron-desktop-shell.md)).
 
-**M0-12, install script and unit.** The script runs as root once. It creates two system users, `harness` and `aphelion-agent`, neither with sudo rights. It sets directory ownership and modes so `aphelion-agent` can't read or write the config, the database or the managed hooks, and it installs a hardened unit for the harness (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, no capabilities). It also installs the `aphelion-agent@.service` template and the polkit rule that lets `harness` start and stop only those units ([decision 0006](../../decisions/0006-shared-agent-user.md)); M1-04 is the first to use them. It also creates the agents root folder, owned by `aphelion-agent` and readable by `harness` ([decision 0010](../../decisions/0010-agent-folders.md)). The issue's "without sudo" means the users get no sudo rights; the script itself needs root. The install guide ships in the same PR.
+**M0-12, install script and unit.** The script runs as root once. It creates three system users, `harness`, `aphelion-agent` and `aphelion-secrets` ([decision 0012](../../decisions/0012-secrets-broker-process.md)), none with sudo rights, and the directories from [decision 0014](../../decisions/0014-filesystem-layout.md). It sets directory ownership and modes so `aphelion-agent` can't read or write the config, the database or the managed hooks, and it installs a hardened unit for the harness (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, no capabilities). It also installs the `aphelion-agent@.service` template and the polkit rule that lets `harness` start and stop only those units ([decision 0006](../../decisions/0006-shared-agent-user.md)); M1-04 is the first to use them. It also creates the agents root folder, owned by `aphelion-agent` and readable by `harness` ([decision 0010](../../decisions/0010-agent-folders.md)). The issue's "without sudo" means the users get no sudo rights; the script itself needs root. The install guide ships in the same PR.
 
 **M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Server plugins run on Bun, and each one still runs as its own Unix user, started through systemd the same way as agents ([decision 0006](../../decisions/0006-shared-agent-user.md)). **DR:** the API reference generator.
 
@@ -206,7 +206,7 @@ M0-12 stays whole: the script, the unit and the install guide only make sense to
 
 ## Open questions
 
-Each question has a recommended answer. The answers go into decision records, numbered from 0005 in the order they're settled (M0-16 continues after them).
+All eight are settled; each answer links to its decision record.
 
 ### Q1. How you approve PRs that come from your own account
 
@@ -218,42 +218,23 @@ Each question has a recommended answer. The answers go into decision records, nu
 
 ### Q3. Which Linux distros v1 supports
 
-The install script, the spikes and the exit test need a target.
-
-- **Recommended:** current Debian stable and the current Ubuntu LTS, on systemd 250 or later (the first version with `systemd-creds` encrypted credentials bound to a TPM).
-
-Blocks: M0-03, M0-12.
+**Answered in [decision 0011](../../decisions/0011-ubuntu-lts.md):** the current Ubuntu LTS only (26.04 at the time of writing). Debian and other distros aren't tested or supported in v1.
 
 ### Q4. Where the secrets broker runs before the gateway exists
 
-The plan puts the broker on the gateway host, which arrives in M3-01.
-
-- **Recommended:** M0 builds the broker as its own process from the start, under its own Unix user, reached over a local socket that only the harness can open. M3-01 then moves the process to the gateway host without changing its API.
-- Alternative: a library inside the harness for now, made into a separate process in M3.
-
-Blocks: M0-14.
+**Answered in [decision 0012](../../decisions/0012-secrets-broker-process.md):** a separate process from the start, as its own `aphelion-secrets` user, reached over a Unix socket only `harness` can open. M3-01 moves it to the gateway host.
 
 ### Q5. Tailscale device identity in M0
 
-The plan wants device identity from Tailscale plus a per-device token. Asking Tailscale who a peer is (its `whois` lookup) may need access to the local Tailscale socket that the harness user doesn't have by default, and granting operator rights would give the harness more control over Tailscale than it needs.
-
-- **Recommended:** M0-10 (b) checks whether the harness can do the lookup without operator rights. If it can, it ships in M0. If it can't, M0 ships token-only plus binding to the tailnet address, and the identity check gets its own issue in M5.
-
-Blocks: M0-10 (b).
+**Answered in [decision 0013](../../decisions/0013-tailscale-identity.md):** M0-10 (b) checks whether the lookup works without operator rights; if not, M0 ships token-only plus the tailnet bind, and the identity check moves to an M5 issue. The harness is never a Tailscale operator.
 
 ### Q6. Where the config directory lives
 
-The harness must be able to write it, because the web client edits the policy file, and agents must not be able to read or write it.
-
-- **Recommended:** `/etc/aphelion/`, owned by the `harness` user with mode 0750, and the database and state under `/var/lib/aphelion/`. Both paths can be overridden for development.
-
-Blocks: M0-06, M0-12.
+**Answered in [decision 0014](../../decisions/0014-filesystem-layout.md):** config in `/etc/aphelion/`, state in `/var/lib/aphelion/`, agent folders in `/var/lib/aphelion-agents/`, and the broker's store in `/var/lib/aphelion-secrets/`, each with fixed owners and modes that `config check` enforces.
 
 ### Q7. A live 1Password test in CI
 
-- **Recommended:** CI tests the backend against a mocked SDK. A live test against a real vault runs by hand, and its output goes into the PR. A live test in CI would need a service-account token stored as a GitHub Actions secret, which adds a credential outside the gateway.
-
-Blocks: M0-15.
+**Answered in [decision 0015](../../decisions/0015-1password-ci-mock.md):** a mocked SDK in CI; a live run by hand with its output in the PR, repeated on every SDK version bump.
 
 ### Q8. How agent users are added after install
 
@@ -261,19 +242,19 @@ Blocks: M0-15.
 
 ## What I need from you
 
-1. A review of this plan, including the proposed splits and answers to Q3 to Q7.
+1. A review and approval of this plan, including the proposed splits.
 2. For M0-01 and M0-02: a Linux VM where you sign in to Claude Code with your Pro or Max account and to Grok Build with your SuperGrok account, on a fresh Unix user. The sign-ins are yours to do; the spikes don't need your credentials passed to them.
 3. For the exit test: a VM on your tailnet that the install script can be run on.
 
 ## Exit test
 
-Run on a fresh VM of each target distro:
+Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu-lts.md)):
 
 1. Run the install script as root.
 2. Check that `systemctl is-enabled aphelion` reports `enabled`, then reboot.
 3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`.
 4. A WebSocket opened without a token is closed; one opened with a token from `aphelion device add` is accepted.
-5. `sudo -l -U aphelion-agent` and `sudo -l -U harness` show no sudo rights, and `aphelion-agent` can't read or write the config directory, the database or the unit files.
+5. `sudo -l -U` shows no sudo rights for `harness`, `aphelion-agent` or `aphelion-secrets`. `aphelion-agent` can't read `/etc/aphelion/`, `/var/lib/aphelion/` or `/var/lib/aphelion-secrets/`, can't write the unit files, and can't connect to the broker's socket.
 6. The output of each step goes into the retro note.
 
 ## Docs M0 produces
