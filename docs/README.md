@@ -32,3 +32,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0016](decisions/0016-one-docker-container.md) | The headless server ships as one Docker container, with separate users inside | Accepted |
 | [0017](decisions/0017-desktop-remote-only.md) | The desktop app only connects to a server; it never runs one | Accepted |
 | [0018](decisions/0018-shared-plugin-user.md) | Server plugins share one user and are started by a plugin runner | Accepted |
+| [0020](decisions/0020-1password-grok-bot-style.md) | 1Password works like Grok Bot's, built on a service account | Accepted |
