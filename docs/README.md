@@ -23,3 +23,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0007](decisions/0007-bun-runtime.md) | Bun is the server runtime and package manager; Vitest runs the tests | Accepted |
 | [0008](decisions/0008-react-and-tailwind.md) | The web client uses React and Tailwind | Accepted |
 | [0009](decisions/0009-electron-desktop-shell.md) | Electron is the desktop shell, and the server runs beside it as a Bun process | Accepted |
+| [0010](decisions/0010-agent-folders.md) | Each agent has a folder; instructions live there, permissions stay in the server's config | Accepted |

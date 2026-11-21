@@ -4,6 +4,7 @@
 - Date: 2026-11-21
 - Decided by: project owner
 - Answers: M0 plan, Q2 (and makes Q8 obsolete)
+- Amended by: [decision 0010](0010-agent-folders.md) (agent folders, and which changes need approval)
 - Amends: the plan's Trust boundaries, Session manager and Components sections, and issues M0-12 and M1-04
 
 ## Context
@@ -41,7 +42,7 @@ Option 1 for both.
 
 - Alongside the messaging tools from M4-06, the harness gives agents tools to list, create, edit and archive agents.
 - Every call goes through the policy engine and lands in the audit log.
-- Default policy:
+- Default policy (superseded by the table in [decision 0010](0010-agent-folders.md), which moves instructions into each agent's folder):
 
 | Change | Risk class | Default |
 | --- | --- | --- |
