@@ -8,6 +8,12 @@ These are plain Markdown files until M0-16 builds them into a Starlight site.
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
 
+## Spike findings
+
+Each spike answers its questions in writing before anything builds on it. Prototype code stays on its `spike/` branch and is never merged.
+
+- [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
+
 ## Decision records
 
 One numbered record per significant decision: context, options, choice, consequences.
