@@ -58,4 +58,4 @@ Option 1 for both.
 - **The approval layer is unaffected.** The policy engine, the managed hooks and the credentials stay outside the agents' reach, exactly as before.
 - **Simpler install.** Q8 (adding agent users after install) goes away, because a new agent needs no new Unix user.
 - **Plugins are a separate question.** Server plugins still run under their own Unix users as the plan says (M0-13), started by the same systemd mechanism.
-- **Issues change.** M0-12 creates `harness` and `aphelion-agent` instead of one user per agent. M1-04 runs each agent as `aphelion-agent` in its own systemd unit instead of under its own Unix user. A new M4 issue adds the agent management tools. M0-16 updates the plan text when it moves the plan into the docs site.
+- **Issues change.** M0-12 creates `harness` and `aphelion-agent` instead of one user per agent. M1-04 runs each agent as `aphelion-agent` in its own systemd unit instead of under its own Unix user. M4-09 ([#91](https://github.com/jcore9/Aphelion/issues/91)) adds the agent management tools. M0-16 updates the plan text when it moves the plan into the docs site.

@@ -197,7 +197,7 @@ M0-12 stays whole: the script, the unit and the install guide only make sense to
 | The bot account has the Write role before branch protection exists | It could push to `dev` or `main` directly | M0-05 (b) goes early in wave 2 ([decision 0005](../../decisions/0005-bot-account-authors-prs.md)). |
 | All agents share one Unix user | A prompt-injected agent can read or damage other agents' workspaces | Accepted by design ([decision 0006](../../decisions/0006-shared-agent-user.md)). Snapshots, backups and git are the recovery path, and the threat model says so. |
 | "One install" and "no GUI libraries" turn out to conflict | M0-11 and M5-15 packaging | M0-03 answers it before M0-11 starts. |
-| M0-16 moves docs into the Starlight content folder | The plan links in all 89 issue bodies break | M0-16 keeps `docs/plan/aphelion-plan.md` resolving, or updates the issue bodies in the same PR. |
+| M0-16 moves docs into the Starlight content folder | The plan links in every issue body break | M0-16 keeps `docs/plan/aphelion-plan.md` resolving, or updates the issue bodies in the same PR. |
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
 | The spikes need real Claude Pro or Max and SuperGrok logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
 | Six security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
