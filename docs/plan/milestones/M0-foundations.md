@@ -1,0 +1,312 @@
+# M0 plan: Foundations
+
+- Issue: [M0-00]
+- Milestone: [M0 · Foundations](https://github.com/jcore9/Aphelion/milestone/1)
+- Release: v0.1.0-alpha.1 ([decision 0003](../../decisions/0003-release-versioning.md))
+- Status: Draft, waiting for review. Q1 to Q8 are answered (decisions 0005 to 0015); the headless server is now one Docker container ([decision 0016](../../decisions/0016-one-docker-container.md)); Q9 is answered ([0018](../../decisions/0018-shared-plugin-user.md)), so every open question is settled. The desktop app only connects to a server ([decision 0017](../../decisions/0017-desktop-remote-only.md)).
+- Last updated: 2026-11-21
+
+M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
+
+## Exit criterion
+
+The service starts on boot and answers `/health` from a client over Tailscale.
+
+That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers everything up to it (the server answers `/health`, unauthenticated sockets are rejected, the image builds, the Compose file validates, and inside the container `aphelion-agent` can't read the server's or the broker's files), and the full test is run by hand on a VM using the steps in [Exit test](#exit-test). Its output goes into the retro note.
+
+## Scope
+
+### In scope
+
+| ID | Issue | Labels | Depends on |
+| --- | --- | --- | --- |
+| [M0-00] | Milestone plan (this document) | docs | none |
+| [M0-01] | Spike: Claude over ACP on a subscription login | spike, server | M0-00 |
+| [M0-02] | Spike: Grok headless billing | spike, server | M0-00 |
+| [M0-03] | Spike: headless without Electron | spike, desktop | M0-00 |
+| [M0-04] | Monorepo scaffold | chore | M0-03 |
+| [M0-05] | Repo hygiene and MIT license | chore, security, **risk/security** | M0-04 |
+| [M0-16] | Docs site and decision records | docs | M0-04 |
+| [M0-06] | Config directory and schema | feature, server | M0-04 |
+| [M0-07] | SQLite store and migrations | feature, server | M0-04 |
+| [M0-08] | Structured logging and audit log | feature, server, security | M0-07 |
+| [M0-09] | Protocol package v0 | feature, server, client | M0-04, M0-16 |
+| [M0-10] | API server skeleton | feature, server, security, **risk/security** | M0-09 |
+| [M0-11] | CLI and headless mode | feature, server, desktop | M0-03, M0-10 |
+| [M0-12] | Container image, Compose file and host unit | feature, server, security, **risk/security** | M0-11 |
+| [M0-13] | Plugin host v0 | feature, plugins, **risk/security** | M0-04, M0-07, M0-16 |
+| [M0-14] | Secrets broker v0 | feature, security, **risk/security** | M0-08 |
+| [M0-15] | 1Password backend plugin | feature, plugins, security, **risk/security** | M0-13, M0-14 |
+
+Six of the sixteen work issues carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
+
+### Out of scope
+
+- Agents, adapters and sessions (M1). M0-01 and M0-02 only answer questions; they don't build adapters.
+- Policy rules and approvals (M2). M0 builds the audit table that M2 writes to, not the policy engine.
+- The gateway host (M3). The secrets broker is built so it can move there, but in M0 it runs on the same machine (see [Q4](#q4-where-the-secrets-broker-runs-before-the-gateway-exists)).
+- Any client UI beyond `curl` and the test client in M1.
+- Anything that looks like a coding app.
+
+## Sequencing
+
+```mermaid
+flowchart LR
+  m00["M0-00 plan"] --> s1["M0-01 spike: Claude"]
+  m00 --> s2["M0-02 spike: Grok"]
+  m00 --> s3["M0-03 spike: headless"]
+  s3 --> m04["M0-04 scaffold"]
+  m04 --> m05["M0-05 hygiene"]
+  m04 --> m16["M0-16 docs site"]
+  m04 --> m06["M0-06 config"]
+  m04 --> m07["M0-07 store"]
+  m07 --> m08["M0-08 logging, audit"]
+  m16 --> m09["M0-09 protocol"]
+  m09 --> m10["M0-10 API server"]
+  m10 --> m11["M0-11 CLI, headless"]
+  s3 --> m11
+  m11 --> m12["M0-12 image, Compose"]
+  m07 --> m13["M0-13 plugin host"]
+  m16 --> m13
+  m08 --> m14["M0-14 secrets broker"]
+  m13 --> m15["M0-15 1Password"]
+  m14 --> m15
+  m12 --> exit(["Exit test"])
+```
+
+| Wave | Starts when | Issues, all in parallel |
+| --- | --- | --- |
+| 1 | This plan is approved | M0-01, M0-02, M0-03 |
+| 2 | M0-03's finding is approved | M0-04 |
+| 3 | M0-04 merges | M0-05, M0-16, M0-06, M0-07 |
+| 4 | Its dependencies merge | M0-08, M0-09, M0-13 |
+| 5 | Its dependencies merge | M0-10, M0-14 |
+| 6 | Its dependencies merge | M0-11, M0-15 |
+| 7 | M0-11 merges | M0-12, then the exit test |
+
+The critical path is M0-03, M0-04, M0-16, M0-09, M0-10, M0-11, M0-12. M0-04 waits for M0-03 because the spike checks that Bun runs the SDKs the project depends on ([decision 0007](../../decisions/0007-bun-runtime.md)) before the scaffold commits to it.
+
+M0-01 and M0-02 block nothing inside M0. They block [M1-02] and [M4-01], and their answers can change the shape of M1, M4 and M7, which is why they run first instead of at the start of M1.
+
+## The three spikes
+
+Each spike is a set of questions answered in writing before anything builds on them. A spike ends with a finding at `docs/spikes/M0-0N-<slug>.md` that answers every question below, cites its sources with the date they were checked, and states what changes downstream. Prototype code stays on the `spike/` branch and isn't merged. If a finding needs a decision, it becomes a decision record that the owner approves.
+
+The spikes don't assume their answers. Where an answer is "no", or the terms are unclear, the spike stops and asks the owner instead of choosing a workaround.
+
+### M0-01: Claude over ACP on a subscription login
+
+Questions:
+
+1. Which ACP adapters for Claude Code exist today (for example [claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp)), at which versions, and how are they maintained?
+2. For each candidate: with `ANTHROPIC_API_KEY` unset, on a fresh Unix user that has signed in to Claude Code with a Pro or Max account, does a full turn with a tool call complete? Does the usage show up against the subscription and not against API billing?
+3. Do Anthropic's current terms allow a subscription login to be driven from a self-hosted harness for one person's own use? Quote the exact terms and their dates. If they're unclear, the spike says so and stops.
+4. Does the adapter send a permission request for every tool call, and can it run without any bypass or always-approve mode? M2-04 depends on this.
+5. Does ACP session resume work after the process restarts, and does it depend on the working directory? M1-04 depends on this.
+6. Does the `-p --output-format stream-json --verbose --resume` path ([M1-03]) answer questions 2 and 4 the same way?
+
+What changes depending on the answer:
+
+| Finding | Consequence |
+| --- | --- |
+| ACP works on a subscription and the terms allow it | M1-02 goes ahead as planned. |
+| Only stream-json works on a subscription | M1-03 becomes the primary path, and a decision record amends "ACP first" for Claude. |
+| Neither works without an API key, or the terms don't allow it | Stop. The owner decides between API-key billing and changing scope. M7's Claude collector changes with it. |
+
+### M0-02: Grok headless billing
+
+Questions:
+
+1. With no `XAI_API_KEY` set, on a fresh Unix user signed in with the owner's SuperGrok subscription, does `grok agent stdio` complete a turn with a tool call?
+2. Does that turn draw from the shared weekly pool shown in Settings → Usage, or does it bill to an xAI API account at token rates?
+3. Which subscription tiers include headless and ACP use?
+4. Do xAI's current terms allow driving it from a self-hosted harness? Quote them with dates, and stop if they're unclear.
+5. In stdio mode, are permission requests sent over ACP for every tool call, and do `auto_update = false` and a root-owned `/etc/grok/requirements.toml` still apply? M2-05 depends on this.
+
+What changes depending on the answer:
+
+| Finding | Consequence |
+| --- | --- |
+| Works on the subscription and the terms allow it | M4-01 goes ahead as planned. |
+| Needs an API key | Stop. The owner decides whether Grok runs on API billing in v1. M7-03 changes from estimating a pool to reading API usage. |
+| Terms don't allow it | Stop. The owner decides whether Grok stays in v1. |
+
+### M0-03: headless without Electron, on Bun
+
+Decisions [0007](../../decisions/0007-bun-runtime.md), [0009](../../decisions/0009-electron-desktop-shell.md) and [0016](../../decisions/0016-one-docker-container.md) settle the shape. The server is one Bun binary built with `bun build --compile`. The server ships only as a Docker image that runs that binary. The desktop app is a client that connects to it and never runs a server ([decision 0017](../../decisions/0017-desktop-remote-only.md)). The original question, "no GUI libraries on a server", is answered by the image, so the spike checks that the shape holds and that Bun runs everything the project depends on.
+
+Questions:
+
+1. Does the compiled binary run inside an Ubuntu LTS image with no X11, Wayland, GTK or NSS libraries, under the Compose hardening from decision 0016 (read-only root filesystem, `cap_drop: ALL` plus the minimum added back, `no-new-privileges`), and answer a stub `/health` on a port published only on a tailnet address?
+2. Can a minimal init start four processes as four different users with only `SETUID` and `SETGID` added back? Which init tool fits (for example tini plus a small launcher, or s6-overlay), and does it shut them down cleanly?
+3. Does each dependency work on Bun, with a minimal call that proves it: the MCP TypeScript SDK (stdio and Streamable HTTP), the ACP TypeScript SDK, the Claude ACP adapter, `@1password/sdk`, `@bitwarden/sdk-napi` and `age-encryption`? Do they still work inside a `--compile` binary?
+4. How do Vitest tests reach the Bun-only adapter modules: Vitest running under Bun's runtime, or `bun test` for those modules only?
+5. How does a host `aphelion.service` start the Compose project on boot and pass it the bootstrap secret from `LoadCredentialEncrypted=` as a Compose secret?
+
+If a dependency fails on Bun, or the hardening can't hold with three users in one container, the spike says so and the owner decides.
+
+## Design notes
+
+These are starting points for each issue's PR, not final designs. Where an issue has to choose a tool or library, its PR includes a decision record that weighs the options, and the owner approves it with the PR. Expected records are marked **DR**.
+
+**M0-04, monorepo scaffold.** Bun workspaces with packages `@aphelion/server`, `client`, `protocol`, `plugin-sdk` and `cli`, plus a `docs` workspace that M0-16 fills in ([decision 0007](../../decisions/0007-bun-runtime.md)). The Bun version is pinned in the repo and in CI, and `bun.lock` is committed. Tests run on Vitest, in the way M0-03 settles. A lint rule allows `bun:` imports and the `Bun` global only in designated adapter modules. `protocol` and `plugin-sdk` use only web-standard APIs, so they run in Bun, Node and the browser. CI runs lint, typecheck and test on every PR into `dev`. **DR:** linter (ESLint with typescript-eslint, or Biome), keeping in mind that M5-02 needs a token lint rule later. This issue touches every package by nature, which is the one accepted exception to the "one package per issue" size rule.
+
+**M0-05, repo hygiene.** SECURITY.md points to GitHub's private vulnerability reporting, which is a repo setting that has to be switched on. CODEOWNERS covers the security-sensitive paths named in the workflow, including paths that don't exist yet, so they're protected from their first commit. The label set already exists ([decision 0002](../../decisions/0002-type-docs-label.md)); CONTRIBUTING documents it. Branch protection is a repo setting, not part of the diff. It requires an approving review and blocks direct pushes to `dev` and `main`, so the bot account from [decision 0005](../../decisions/0005-bot-account-authors-prs.md) can only push its own branches. M0-05 (b) goes first in wave 3, because until it lands nothing technically stops the bot from pushing to `dev`.
+
+**M0-16, docs site.** Starlight in the `docs` workspace, built in CI with a link check (for example the `starlight-links-validator` plugin). It moves this plan, the imported [plan](../aphelion-plan.md) and the decision records into the site, adds the decision-record template in the same format as those records, and writes up the plan's remaining decisions, numbered after the records that already exist. It updates the plan text that decisions 0006 to 0009 amend. It also adds the M1-00 to M9-00 rows to the plan's Issue breakdown ([decision 0001](../../decisions/0001-planning-issue-per-milestone.md)).
+
+**M0-06, config directory.** One versioned directory for agents, policy, routines and connectors, which can be a git repo. Each file carries a `version` field, and a migration moves it forward. Agents can never write to it; its location and owner depend on [Q6](#q6-where-the-config-directory-lives). **DR:** the schema library, which needs to export JSON Schema so the docs and editors can use it.
+
+**M0-07, SQLite store.** WAL mode, forward-only numbered migrations, and a migration test in CI. The database file is owned by the harness user with mode 0600. **DR:** the driver: `bun:sqlite` inside the store adapter, or a portable driver. Either way it sits behind the store interface ([decision 0007](../../decisions/0007-bun-runtime.md)).
+
+**M0-08, logging and audit log.** Structured JSON logs, redacted by field name and by value pattern. M0-14 adds the `Secret` type, which redacts itself, and extends the redaction test to cover it, because M0-08 lands before that type exists. The audit table is append-only, enforced by SQLite triggers that reject `UPDATE` and `DELETE`. **DR:** the logging library.
+
+**M0-09, protocol v0.** Every frame carries `v: 1`. The server assigns increasing sequence numbers to events; a client reconnects with its last sequence number and gets what it missed. If its cursor is older than what the server kept, the server tells it to resync instead of replaying a partial history. Commands carry a client-generated id, and a retried id is applied once. M0 defines the frame envelope and the types it needs; later milestones add their own commands and events. **DR:** how the spec is generated from the TypeScript types.
+
+**M0-10, API server.** It binds to the address in its config. In the container that's the container's own interface, and the Compose file publishes the port only on the host's tailnet address; `aphelion config check` refuses a Compose file that publishes it anywhere else ([decision 0016](../../decisions/0016-one-docker-container.md)). `/health` needs no token and returns only `{"status":"ok"}`, without a version or other details, to keep the attack surface small. Device tokens are issued with `aphelion device add <name>` (run through `docker compose exec`), which prints the token once. They're stored hashed, expire, and can be revoked. Any WebSocket without a valid token is closed. The container doesn't get the host's Tailscale socket, so Tailscale identity is likely to move to M5 ([decision 0013](../../decisions/0013-tailscale-identity.md)).
+
+**M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, built as one Bun binary. The Docker image runs it with `--headless`. The desktop app doesn't bundle it ([decision 0017](../../decisions/0017-desktop-remote-only.md)). Headless mode never loads Electron.
+
+**M0-12, container image, Compose file and host unit.** Rewritten by [decision 0016](../../decisions/0016-one-docker-container.md). The image is built on Ubuntu LTS and contains:
+
+- the users `harness`, `aphelion-agent`, `aphelion-secrets` and `aphelion-plugins` ([decision 0018](../../decisions/0018-shared-plugin-user.md)), with fixed UIDs and no sudo;
+- the server binary, the broker, the agent runner and the plugin runner;
+- pinned versions of the Claude Code and Grok Build CLIs, and git;
+- the managed CLI settings and hooks, owned by root on a read-only root filesystem.
+
+A minimal init starts the four processes as their users. A fifth volume holds `/var/lib/aphelion-plugins/`. The paths from [decision 0014](../../decisions/0014-filesystem-layout.md) are volumes with fixed owners and modes. The Compose file carries the hardening from decision 0016, publishes the port only on the tailnet address, and never mounts the Docker socket. The host side is a short script plus a guide that installs `aphelion.service`, which starts Compose on boot and passes in the bootstrap secret. **DR:** the init tool, informed by M0-03. The install guide ships in the same PR.
+
+**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Server plugins run on Bun. They run as the shared `aphelion-plugins` user, started by a plugin runner that accepts requests only from `harness`, with one data folder per plugin ([decision 0018](../../decisions/0018-shared-plugin-user.md)). **DR:** the API reference generator.
+
+**M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), and a local store encrypted with the `age-encryption` package. The broker runs inside the container as `aphelion-secrets`, behind a Unix socket that only `harness` can open ([decisions 0012 and 0016](../../decisions/0016-one-docker-container.md)). The bootstrap secret comes from the host's `LoadCredentialEncrypted=` as a Compose secret readable only by `aphelion-secrets`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file.
+
+**M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
+
+## Proposed splits
+
+The workflow says an issue a coding tool can't finish in one focused session, or that touches more than one package, gets split during milestone planning. These five are too large for one PR. Once this plan is approved, each one becomes sub-issues under the original issue, and the original closes when its sub-issues do.
+
+| Issue | Split into | Why |
+| --- | --- | --- |
+| [M0-05] | (a) LICENSE, README, CONTRIBUTING, SECURITY.md, issue and PR templates. (b) CODEOWNERS and branch protection on `main` and `dev`, **risk/security**. | (b) changes who can merge, so it gets its own review. |
+| [M0-09] | (a) Frame and message types, sequence numbers, replay and idempotent ids, with the replay test. (b) Spec generated into the docs. | (b) touches the docs workspace and build tooling. |
+| [M0-10] | (a) HTTP and WebSocket server bound to the configured address, and `/health`. (b) Per-device tokens and rejecting unauthenticated sockets, **risk/security**. | Auth gets its own line-by-line review. |
+| [M0-13] | (a) Manifest schema and API-range check in `plugin-sdk`, with the out-of-range refusal. (b) Process-per-plugin JSON-RPC host and the sample plugin. (c) Permission grants stored and enforced, **risk/security**. (d) API reference generated into the docs. | Four concerns across three packages. |
+| [M0-14] | (a) `Secret` wrapper, reference syntax and the "never in logs or the database" test. (b) Local age-encrypted store. (c) Bootstrap secret from the host's `systemd-creds` through a Compose secret. | Three separate security-sensitive pieces. |
+
+M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (b) the Compose file and its hardening, (c) the host unit and the install guide. M0-03 shows how big each piece is, and the split is proposed then.
+
+## Risks
+
+| Risk | Effect | Mitigation |
+| --- | --- | --- |
+| A spike finds that a subscription path doesn't work, or that the terms don't allow it | M1, M4 and M7 change shape | Spikes run first; a "no" or an unclear answer stops for the owner. |
+| The bot account has the Write role before branch protection exists | It could push to `dev` or `main` directly | M0-05 (b) goes first in wave 3 ([decision 0005](../../decisions/0005-bot-account-authors-prs.md)). |
+| All agents share one Unix user | A prompt-injected agent can read or damage other agents' workspaces | Accepted by design ([decision 0006](../../decisions/0006-shared-agent-user.md)). Snapshots, backups and git are the recovery path, and the threat model says so. |
+| Three users in one container can't hold the hardening (read-only root, minimal capabilities) | M0-12 and M1-04 change shape | M0-03 tests the init and the hardening before M0-04 starts. |
+| An SDK the project needs doesn't work on Bun | Parts of M0, M1 and M3 can't run as planned | M0-03 tests each one before M0-04 commits to Bun; a failure goes to the owner ([decision 0007](../../decisions/0007-bun-runtime.md)). |
+| M0-16 moves docs into the Starlight content folder | The plan links in every issue body break | M0-16 keeps `docs/plan/aphelion-plan.md` resolving, or updates the issue bodies in the same PR. |
+| Docker's daemon runs as root, so a container escape reaches the host | Weaker than rootless Podman would be | Hardened Compose file, no Docker socket mount, no one in the `docker` group, the plan's LAN firewall on the hypervisor ([decision 0016](../../decisions/0016-one-docker-container.md)). |
+| The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
+| The spikes need real Claude Pro or Max and SuperGrok logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
+| Six security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
+
+## Open questions
+
+All eight are settled; each answer links to its decision record.
+
+### Q1. How you approve PRs that come from your own account
+
+**Answered in [decision 0005](../../decisions/0005-bot-account-authors-prs.md):** agent PRs are authored by the `jcore9-bot` account with the Write role, and you approve them from your own account.
+
+### Q2. How the harness starts processes as other Unix users
+
+**Answered in [decision 0006](../../decisions/0006-shared-agent-user.md):** all agents share one `aphelion-agent` user and can read and write each other's workspaces, while the harness, config and approval layer stay out of their reach. An agent runner inside the container starts agents on the server's request, so the server never needs root ([decision 0016](../../decisions/0016-one-docker-container.md)). Manager agents change other agents' definitions only through built-in tools that go through approvals.
+
+### Q3. Which Linux distros v1 supports
+
+**Answered in [decision 0011](../../decisions/0011-ubuntu-lts.md):** the current Ubuntu LTS only (26.04 at the time of writing). Debian and other distros aren't tested or supported in v1.
+
+### Q4. Where the secrets broker runs before the gateway exists
+
+**Answered in [decision 0012](../../decisions/0012-secrets-broker-process.md):** a separate process from the start, as its own `aphelion-secrets` user, reached over a Unix socket only `harness` can open. M3-01 moves it to the gateway host.
+
+### Q5. Tailscale device identity in M0
+
+**Answered in [decision 0013](../../decisions/0013-tailscale-identity.md):** M0-10 (b) checks whether the lookup works without operator rights; if not, M0 ships token-only plus the tailnet bind, and the identity check moves to an M5 issue. The harness is never a Tailscale operator.
+
+### Q6. Where the config directory lives
+
+**Answered in [decision 0014](../../decisions/0014-filesystem-layout.md):** config in `/etc/aphelion/`, state in `/var/lib/aphelion/`, agent folders in `/var/lib/aphelion-agents/`, and the broker's store in `/var/lib/aphelion-secrets/`, each with fixed owners and modes that `config check` enforces.
+
+### Q7. A live 1Password test in CI
+
+**Answered in [decision 0015](../../decisions/0015-1password-ci-mock.md):** a mocked SDK in CI; a live run by hand with its output in the PR, repeated on every SDK version bump.
+
+### Q8. How agent users are added after install
+
+**Obsolete:** with one shared agent user ([decision 0006](../../decisions/0006-shared-agent-user.md)), a new agent needs no new Unix user.
+
+### Q9. Which user server plugins run as inside the container
+
+**Answered in [decision 0018](../../decisions/0018-shared-plugin-user.md):** one shared `aphelion-plugins` user, with a plugin runner that accepts requests only from `harness`. Each plugin gets its own data folder, and the host's permission grants limit what each plugin can reach. The image has four users in total, however many agents or plugins are added.
+
+## What I need from you
+
+1. A review and approval of this plan, including the proposed splits.
+2. For M0-01 and M0-02: a Linux VM where you sign in to Claude Code with your Pro or Max account and to Grok Build with your SuperGrok account, on a fresh Unix user. The sign-ins are yours to do; the spikes don't need your credentials passed to them.
+3. For the exit test: an Ubuntu LTS VM on your tailnet with Docker Engine and the Compose plugin.
+
+## Exit test
+
+Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu-lts.md)) with Docker Engine, the Compose plugin and Tailscale:
+
+1. Follow the install guide: install `aphelion.service`, store the bootstrap secret with `systemd-creds`, and start the service.
+2. Check that `systemctl is-enabled aphelion` reports `enabled`, then reboot.
+3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`. The same request to the host's LAN address fails.
+4. A WebSocket opened without a token is closed; one opened with a token from `aphelion device add` is accepted.
+5. Inside the container: none of the four users has sudo. `aphelion-plugins` can't read `/etc/aphelion/`, `/var/lib/aphelion/`, `/var/lib/aphelion-secrets/` or the agent folders. `aphelion-agent` can't read `/etc/aphelion/`, `/var/lib/aphelion/` or `/var/lib/aphelion-secrets/`, can't write the managed hooks, and can't connect to the broker's socket or start agents through the runner.
+6. `docker inspect` shows a read-only root filesystem, `no-new-privileges`, only the expected capabilities, and no Docker socket mount.
+7. The output of each step goes into the retro note.
+
+## Docs M0 produces
+
+| Doc | Issues |
+| --- | --- |
+| README | M0-05 |
+| CONTRIBUTING, SECURITY.md, issue and PR templates | M0-05 |
+| Decision records and template | This PR (0001 to 0004), M0-16, and each DR above |
+| Docs site and the plan in `docs/plan` | This PR, M0-16 |
+| Spike findings | M0-01, M0-02, M0-03 |
+| Config reference | M0-06 |
+| Protocol spec (generated) | M0-09 |
+| Plugin API reference (generated) | M0-13 |
+| Install guide for the headless server (Docker, Compose, `aphelion.service`) | M0-12 |
+| Security and threat model (first draft: users, shared agent workspaces, secrets, bind address) | M0-12, M0-14 |
+| Architecture overview, kept current | Every PR that changes it |
+| Changelog | The M0 release PR |
+
+## Retro
+
+Written when M0 closes.
+
+[M0-00]: https://github.com/jcore9/Aphelion/issues/1
+[M0-01]: https://github.com/jcore9/Aphelion/issues/2
+[M0-02]: https://github.com/jcore9/Aphelion/issues/3
+[M0-03]: https://github.com/jcore9/Aphelion/issues/4
+[M0-04]: https://github.com/jcore9/Aphelion/issues/5
+[M0-05]: https://github.com/jcore9/Aphelion/issues/6
+[M0-16]: https://github.com/jcore9/Aphelion/issues/7
+[M0-06]: https://github.com/jcore9/Aphelion/issues/8
+[M0-07]: https://github.com/jcore9/Aphelion/issues/9
+[M0-08]: https://github.com/jcore9/Aphelion/issues/10
+[M0-09]: https://github.com/jcore9/Aphelion/issues/11
+[M0-10]: https://github.com/jcore9/Aphelion/issues/12
+[M0-11]: https://github.com/jcore9/Aphelion/issues/13
+[M0-12]: https://github.com/jcore9/Aphelion/issues/14
+[M0-13]: https://github.com/jcore9/Aphelion/issues/15
+[M0-14]: https://github.com/jcore9/Aphelion/issues/16
+[M0-15]: https://github.com/jcore9/Aphelion/issues/17
+[M1-02]: https://github.com/jcore9/Aphelion/issues/20
+[M1-03]: https://github.com/jcore9/Aphelion/issues/21
+[M4-01]: https://github.com/jcore9/Aphelion/issues/44
