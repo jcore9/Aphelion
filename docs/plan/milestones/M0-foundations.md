@@ -3,7 +3,7 @@
 - Issue: [M0-00]
 - Milestone: [M0 · Foundations](https://github.com/jcore9/Aphelion/milestone/1)
 - Release: v0.1.0-alpha.1 ([decision 0003](../../decisions/0003-release-versioning.md))
-- Status: Draft, waiting for review
+- Status: Draft, waiting for review. Q1 and Q2 are answered ([0005](../../decisions/0005-bot-account-authors-prs.md), [0006](../../decisions/0006-shared-agent-user.md)); Q8 is obsolete.
 - Last updated: 2026-11-21
 
 M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
@@ -151,7 +151,7 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-04, monorepo scaffold.** Packages are `@aphelion/server`, `client`, `protocol`, `plugin-sdk` and `cli`, plus a `docs` workspace that M0-16 fills in. Node is pinned to the current Active LTS through `engines` and `.nvmrc`, and pnpm through the `packageManager` field. CI runs lint, typecheck and test on every PR into `dev`. **DR:** linter (ESLint with typescript-eslint, or Biome), keeping in mind that M5-02 needs a token lint rule later. This issue touches every package by nature, which is the one accepted exception to the "one package per issue" size rule.
 
-**M0-05, repo hygiene.** SECURITY.md points to GitHub's private vulnerability reporting, which is a repo setting that has to be switched on. CODEOWNERS covers the security-sensitive paths named in the workflow, including paths that don't exist yet, so they're protected from their first commit. The label set already exists ([decision 0002](../../decisions/0002-type-docs-label.md)); CONTRIBUTING documents it. Branch protection is a repo setting, not part of the diff, and it depends on [Q1](#q1-how-you-approve-prs-that-come-from-your-own-account).
+**M0-05, repo hygiene.** SECURITY.md points to GitHub's private vulnerability reporting, which is a repo setting that has to be switched on. CODEOWNERS covers the security-sensitive paths named in the workflow, including paths that don't exist yet, so they're protected from their first commit. The label set already exists ([decision 0002](../../decisions/0002-type-docs-label.md)); CONTRIBUTING documents it. Branch protection is a repo setting, not part of the diff. It requires an approving review and blocks direct pushes to `dev` and `main`, so the bot account from [decision 0005](../../decisions/0005-bot-account-authors-prs.md) can only push its own branches. M0-05 (b) goes early in wave 2, because until it lands nothing technically stops the bot from pushing to `dev`.
 
 **M0-16, docs site.** Starlight in the `docs` workspace, built in CI with a link check (for example the `starlight-links-validator` plugin). It moves this plan, the imported [plan](../aphelion-plan.md) and decision records 0001 to 0004 into the site, adds the decision-record template in the same format as those records, and writes up the plan's existing decisions from 0005 on. It also adds the M1-00 to M9-00 rows to the plan's Issue breakdown ([decision 0001](../../decisions/0001-planning-issue-per-milestone.md)).
 
@@ -167,9 +167,9 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-11, CLI.** `aphelion --headless`, `aphelion --version` and `aphelion config check`, shaped by M0-03's finding. Headless mode never loads Electron.
 
-**M0-12, install script and unit.** The script runs as root once. It creates a `harness` system user and agent users with no sudo rights, sets directory ownership and modes, and installs a hardened unit (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, an empty capability set where possible). The issue title's "without sudo" means the agent users get no sudo rights; the script itself needs root. How the harness later starts processes as those users is [Q2](#q2-how-the-harness-starts-processes-as-other-unix-users), and it has to be settled before the unit's hardening is final. The install guide ships in the same PR.
+**M0-12, install script and unit.** The script runs as root once. It creates two system users, `harness` and `aphelion-agent`, neither with sudo rights. It sets directory ownership and modes so `aphelion-agent` can't read or write the config, the database or the managed hooks, and it installs a hardened unit for the harness (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, no capabilities). It also installs the `aphelion-agent@.service` template and the polkit rule that lets `harness` start and stop only those units ([decision 0006](../../decisions/0006-shared-agent-user.md)); M1-04 is the first to use them. The issue's "without sudo" means the users get no sudo rights; the script itself needs root. The install guide ships in the same PR.
 
-**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Running each plugin as its own Unix user uses the same mechanism as [Q2](#q2-how-the-harness-starts-processes-as-other-unix-users). **DR:** the API reference generator.
+**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Each plugin still runs as its own Unix user, started through systemd the same way as agents ([decision 0006](../../decisions/0006-shared-agent-user.md)). **DR:** the API reference generator.
 
 **M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), a local store encrypted with the `age-encryption` package, and the bootstrap secret loaded with `LoadCredentialEncrypted=`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file. Where it runs is [Q4](#q4-where-the-secrets-broker-runs-before-the-gateway-exists).
 
@@ -194,8 +194,8 @@ M0-12 stays whole: the script, the unit and the install guide only make sense to
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
 | A spike finds that a subscription path doesn't work, or that the terms don't allow it | M1, M4 and M7 change shape | Spikes run first; a "no" or an unclear answer stops for the owner. |
-| PRs come from the owner's own GitHub account, and GitHub doesn't let an author approve their own PR | Required reviews on `dev` would block every PR | [Q1](#q1-how-you-approve-prs-that-come-from-your-own-account), settled before M0-05 turns on branch protection. |
-| The harness has to start processes as other Unix users, which a capability-free hardened service can't do | M0-12 hardening and M1-04 conflict | [Q2](#q2-how-the-harness-starts-processes-as-other-unix-users), settled before M0-12. |
+| The bot account has the Write role before branch protection exists | It could push to `dev` or `main` directly | M0-05 (b) goes early in wave 2 ([decision 0005](../../decisions/0005-bot-account-authors-prs.md)). |
+| All agents share one Unix user | A prompt-injected agent can read or damage other agents' workspaces | Accepted by design ([decision 0006](../../decisions/0006-shared-agent-user.md)). Snapshots, backups and git are the recovery path, and the threat model says so. |
 | "One install" and "no GUI libraries" turn out to conflict | M0-11 and M5-15 packaging | M0-03 answers it before M0-11 starts. |
 | M0-16 moves docs into the Starlight content folder | The plan links in all 89 issue bodies break | M0-16 keeps `docs/plan/aphelion-plan.md` resolving, or updates the issue bodies in the same PR. |
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
@@ -208,22 +208,11 @@ Each question has a recommended answer. The answers go into decision records, nu
 
 ### Q1. How you approve PRs that come from your own account
 
-PRs opened by coding tools in this setup are authored by your GitHub account, and GitHub doesn't let a PR's author approve it. If branch protection requires an approving review, nothing can merge into `dev`.
-
-- **Recommended:** a dedicated bot identity (a machine user or a GitHub App) authors agent PRs, and you approve them from your account. This matches the plan's "agent actions show up as the app's bot account" and gives the `agent-authored` label a real meaning.
-- Alternative: protection requires a PR and green CI but no approving review, and your merge stands in for the approval.
-
-Blocks: M0-05 (b).
+**Answered in [decision 0005](../../decisions/0005-bot-account-authors-prs.md):** agent PRs are authored by the `jcore9-bot` account with the Write role, and you approve them from your own account.
 
 ### Q2. How the harness starts processes as other Unix users
 
-Agents (M1-04), plugins (M0-13) and possibly the secrets broker run as their own Unix users. Switching user needs root or `CAP_SETUID`, and the harness is meant to run unprivileged.
-
-- **Recommended:** systemd template units (for example `aphelion-agent@<name>.service` with `User=<name>`), started by the harness through a polkit rule that only allows those units. systemd does the user switch, its cgroups give whole-tree kill and the CPU and memory limits M4-04 needs, and the harness holds no capabilities.
-- Alternative: a small root-owned helper that the harness calls through a sudoers rule limited to that one command.
-- Rejected: giving the harness `CAP_SETUID` and `CAP_SETGID`, because a compromised harness could then become any user.
-
-Blocks: M0-12 hardening, M0-13 (b), M1-04.
+**Answered in [decision 0006](../../decisions/0006-shared-agent-user.md):** all agents share one `aphelion-agent` user and can read and write each other's workspaces, while the harness, config and approval layer stay out of their reach. systemd starts each agent in its own unit, so the harness never needs root. Manager agents change other agents' definitions only through built-in tools that go through approvals.
 
 ### Q3. Which Linux distros v1 supports
 
@@ -266,15 +255,11 @@ Blocks: M0-15.
 
 ### Q8. How agent users are added after install
 
-Agents are defined in config (M4-02), but creating a Unix user needs root, and the harness never holds root.
-
-- **Recommended:** the install script creates the agent users listed at install time, and adding one later is an explicit root command (`sudo aphelion-install agent add <name>`). The harness can define an agent in config but can't start it until its user exists, and it says so.
-
-Blocks: M0-12; M4-02 builds on it.
+**Obsolete:** with one shared agent user ([decision 0006](../../decisions/0006-shared-agent-user.md)), a new agent needs no new Unix user.
 
 ## What I need from you
 
-1. A review of this plan, including the proposed splits and answers to Q1 to Q8.
+1. A review of this plan, including the proposed splits and answers to Q3 to Q7.
 2. For M0-01 and M0-02: a Linux VM where you sign in to Claude Code with your Pro or Max account and to Grok Build with your SuperGrok account, on a fresh Unix user. The sign-ins are yours to do; the spikes don't need your credentials passed to them.
 3. For the exit test: a VM on your tailnet that the install script can be run on.
 
@@ -286,7 +271,7 @@ Run on a fresh VM of each target distro:
 2. Check that `systemctl is-enabled aphelion` reports `enabled`, then reboot.
 3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`.
 4. A WebSocket opened without a token is closed; one opened with a token from `aphelion device add` is accepted.
-5. `sudo -l -U <agent user>` shows no sudo rights, and agent users can't read or write the config directory, the database or the unit file.
+5. `sudo -l -U aphelion-agent` and `sudo -l -U harness` show no sudo rights, and `aphelion-agent` can't read or write the config directory, the database or the unit files.
 6. The output of each step goes into the retro note.
 
 ## Docs M0 produces
@@ -302,7 +287,7 @@ Run on a fresh VM of each target distro:
 | Protocol spec (generated) | M0-09 |
 | Plugin API reference (generated) | M0-13 |
 | Install guide for the headless server | M0-12 |
-| Security and threat model (first draft: users, secrets, bind address) | M0-12, M0-14 |
+| Security and threat model (first draft: users, shared agent workspaces, secrets, bind address) | M0-12, M0-14 |
 | Architecture overview, kept current | Every PR that changes it |
 | Changelog | The M0 release PR |
 
