@@ -3,7 +3,7 @@
 - Issue: [M0-00]
 - Milestone: [M0 · Foundations](https://github.com/jcore9/Aphelion/milestone/1)
 - Release: v0.1.0-alpha.1 ([decision 0003](../../decisions/0003-release-versioning.md))
-- Status: Draft, waiting for review. Q1 to Q8 are answered (decisions 0005 to 0015); the headless server is now one Docker container ([decision 0016](../../decisions/0016-one-docker-container.md)); Q9 is open. The desktop app only connects to a server ([decision 0017](../../decisions/0017-desktop-remote-only.md)).
+- Status: Draft, waiting for review. Q1 to Q8 are answered (decisions 0005 to 0015); the headless server is now one Docker container ([decision 0016](../../decisions/0016-one-docker-container.md)); Q9 is answered ([0018](../../decisions/0018-shared-plugin-user.md)), so every open question is settled. The desktop app only connects to a server ([decision 0017](../../decisions/0017-desktop-remote-only.md)).
 - Last updated: 2026-11-21
 
 M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
@@ -138,7 +138,7 @@ Decisions [0007](../../decisions/0007-bun-runtime.md), [0009](../../decisions/00
 Questions:
 
 1. Does the compiled binary run inside an Ubuntu LTS image with no X11, Wayland, GTK or NSS libraries, under the Compose hardening from decision 0016 (read-only root filesystem, `cap_drop: ALL` plus the minimum added back, `no-new-privileges`), and answer a stub `/health` on a port published only on a tailnet address?
-2. Can a minimal init start three processes as three different users with only `SETUID` and `SETGID` added back? Which init tool fits (for example tini plus a small launcher, or s6-overlay), and does it shut them down cleanly?
+2. Can a minimal init start four processes as four different users with only `SETUID` and `SETGID` added back? Which init tool fits (for example tini plus a small launcher, or s6-overlay), and does it shut them down cleanly?
 3. Does each dependency work on Bun, with a minimal call that proves it: the MCP TypeScript SDK (stdio and Streamable HTTP), the ACP TypeScript SDK, the Claude ACP adapter, `@1password/sdk`, `@bitwarden/sdk-napi` and `age-encryption`? Do they still work inside a `--compile` binary?
 4. How do Vitest tests reach the Bun-only adapter modules: Vitest running under Bun's runtime, or `bun test` for those modules only?
 5. How does a host `aphelion.service` start the Compose project on boot and pass it the bootstrap secret from `LoadCredentialEncrypted=` as a Compose secret?
@@ -169,14 +169,14 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-12, container image, Compose file and host unit.** Rewritten by [decision 0016](../../decisions/0016-one-docker-container.md). The image is built on Ubuntu LTS and contains:
 
-- the users `harness`, `aphelion-agent` and `aphelion-secrets`, with fixed UIDs and no sudo;
-- the server binary, the broker and the agent runner;
+- the users `harness`, `aphelion-agent`, `aphelion-secrets` and `aphelion-plugins` ([decision 0018](../../decisions/0018-shared-plugin-user.md)), with fixed UIDs and no sudo;
+- the server binary, the broker, the agent runner and the plugin runner;
 - pinned versions of the Claude Code and Grok Build CLIs, and git;
 - the managed CLI settings and hooks, owned by root on a read-only root filesystem.
 
-A minimal init starts the three processes as their users. The paths from [decision 0014](../../decisions/0014-filesystem-layout.md) are volumes with fixed owners and modes. The Compose file carries the hardening from decision 0016, publishes the port only on the tailnet address, and never mounts the Docker socket. The host side is a short script plus a guide that installs `aphelion.service`, which starts Compose on boot and passes in the bootstrap secret. **DR:** the init tool, informed by M0-03. The install guide ships in the same PR.
+A minimal init starts the four processes as their users. A fifth volume holds `/var/lib/aphelion-plugins/`. The paths from [decision 0014](../../decisions/0014-filesystem-layout.md) are volumes with fixed owners and modes. The Compose file carries the hardening from decision 0016, publishes the port only on the tailnet address, and never mounts the Docker socket. The host side is a short script plus a guide that installs `aphelion.service`, which starts Compose on boot and passes in the bootstrap secret. **DR:** the init tool, informed by M0-03. The install guide ships in the same PR.
 
-**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Server plugins run on Bun. Which user they run as inside the container is [Q9](#q9-which-user-server-plugins-run-as-inside-the-container). **DR:** the API reference generator.
+**M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Server plugins run on Bun. They run as the shared `aphelion-plugins` user, started by a plugin runner that accepts requests only from `harness`, with one data folder per plugin ([decision 0018](../../decisions/0018-shared-plugin-user.md)). **DR:** the API reference generator.
 
 **M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), and a local store encrypted with the `age-encryption` package. The broker runs inside the container as `aphelion-secrets`, behind a Unix socket that only `harness` can open ([decisions 0012 and 0016](../../decisions/0016-one-docker-container.md)). The bootstrap secret comes from the host's `LoadCredentialEncrypted=` as a Compose secret readable only by `aphelion-secrets`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file.
 
@@ -249,16 +249,11 @@ All eight are settled; each answer links to its decision record.
 
 ### Q9. Which user server plugins run as inside the container
 
-The plan runs each server plugin as its own Unix user. That relied on systemd starting processes as other users, and the container from [decision 0016](../../decisions/0016-one-docker-container.md) has no systemd. A user per plugin would also bring back the "new user for every addition" problem.
-
-- **Recommended:** one shared `aphelion-plugins` user for every server plugin, started by a plugin runner (the same design as the agent runner, which accepts requests only from `harness`). Plugins can't read the server's or the broker's files. What each one may do is enforced by the host's permission grants, not by Unix users. Per-plugin users can come back later if a plugin needs stronger separation.
-- Alternative: run plugins as `harness`, inside the server's trust. Simpler, but any plugin could read the approval rules and the database.
-
-Blocks: M0-13 (b).
+**Answered in [decision 0018](../../decisions/0018-shared-plugin-user.md):** one shared `aphelion-plugins` user, with a plugin runner that accepts requests only from `harness`. Each plugin gets its own data folder, and the host's permission grants limit what each plugin can reach. The image has four users in total, however many agents or plugins are added.
 
 ## What I need from you
 
-1. An answer to Q9, and a review and approval of this plan, including the proposed splits.
+1. A review and approval of this plan, including the proposed splits.
 2. For M0-01 and M0-02: a Linux VM where you sign in to Claude Code with your Pro or Max account and to Grok Build with your SuperGrok account, on a fresh Unix user. The sign-ins are yours to do; the spikes don't need your credentials passed to them.
 3. For the exit test: an Ubuntu LTS VM on your tailnet with Docker Engine and the Compose plugin.
 
@@ -270,7 +265,7 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 2. Check that `systemctl is-enabled aphelion` reports `enabled`, then reboot.
 3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`. The same request to the host's LAN address fails.
 4. A WebSocket opened without a token is closed; one opened with a token from `aphelion device add` is accepted.
-5. Inside the container: `harness`, `aphelion-agent` and `aphelion-secrets` have no sudo. `aphelion-agent` can't read `/etc/aphelion/`, `/var/lib/aphelion/` or `/var/lib/aphelion-secrets/`, can't write the managed hooks, and can't connect to the broker's socket or start agents through the runner.
+5. Inside the container: none of the four users has sudo. `aphelion-plugins` can't read `/etc/aphelion/`, `/var/lib/aphelion/`, `/var/lib/aphelion-secrets/` or the agent folders. `aphelion-agent` can't read `/etc/aphelion/`, `/var/lib/aphelion/` or `/var/lib/aphelion-secrets/`, can't write the managed hooks, and can't connect to the broker's socket or start agents through the runner.
 6. `docker inspect` shows a read-only root filesystem, `no-new-privileges`, only the expected capabilities, and no Docker socket mount.
 7. The output of each step goes into the retro note.
 
