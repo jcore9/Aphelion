@@ -23,6 +23,12 @@ export interface AuditEntry {
   readonly detail?: Fields;
 }
 
+function detailObject(detail: unknown): object {
+  return typeof detail === "object" && detail !== null && !Array.isArray(detail)
+    ? detail
+    : { unreadable: true };
+}
+
 export function appendAudit(
   db: Database,
   entry: AuditEntry,
@@ -43,7 +49,7 @@ export function appendAudit(
       text(entry.agentId),
       text(entry.sessionId),
       text(entry.requestId),
-      JSON.stringify(redact(entry.detail ?? {}, rules)),
+      JSON.stringify(detailObject(redact(entry.detail ?? {}, rules))),
     ],
   );
   return Number(row?.["id"]);

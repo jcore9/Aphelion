@@ -174,3 +174,30 @@ test("rejects an explicit id of -1 or 0, and later appends still work", () => {
   expect(second).toBeGreaterThan(first);
   expect(db.all("SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 2 }]);
 });
+
+test("stores a marker object when the detail can't be read, and keeps the row", () => {
+  const db = openDatabase();
+  const unreadable = new Proxy(
+    {},
+    {
+      ownKeys() {
+        throw new Error("plain-detail-error");
+      },
+    },
+  );
+  const id = appendAudit(db, { ...approval, detail: unreadable });
+  const other = appendAudit(db, {
+    ...approval,
+    detail: { toJSON: () => "not an object" },
+  });
+
+  expect(
+    db.all("SELECT id, detail FROM audit_log WHERE id IN (?, ?) ORDER BY id", [
+      id,
+      other,
+    ]),
+  ).toEqual([
+    { id, detail: '{"unreadable":true}' },
+    { id: other, detail: '{"unreadable":true}' },
+  ]);
+});

@@ -51,3 +51,19 @@ test("writes info and above by default", () => {
 
   expect(lines).toHaveLength(1);
 });
+
+test("writes a line for a message that isn't a string", () => {
+  const { log, lines } = capture();
+  log.info(42 as unknown as string);
+  log.info(Symbol("x") as unknown as string);
+  log.info({
+    toJSON() {
+      throw new Error("plain-message-error");
+    },
+  } as unknown as string);
+  log.info({ toJSON: () => "Bearer abc123def456ghi" } as unknown as string);
+
+  expect(
+    lines.map((line) => (JSON.parse(line) as { msg: string }).msg),
+  ).toEqual(["42", "[Unreadable]", "[Unreadable]", "Bearer [REDACTED]"]);
+});

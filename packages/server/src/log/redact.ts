@@ -53,6 +53,48 @@ function redactPemPrivateKeys(text: string): string {
   return result + text.slice(from);
 }
 
+function jwtHeaderStart(segment: string): number {
+  for (
+    let at = segment.indexOf("eyJ");
+    at >= 0;
+    at = segment.indexOf("eyJ", at + 1)
+  ) {
+    if (at > 0 && /[A-Za-z0-9_]/.test(segment.charAt(at - 1))) continue;
+    return segment.length - at >= 11 ? at : -1;
+  }
+  return -1;
+}
+
+function redactJwtsInRun(run: string): string {
+  const segments = run.split(".");
+  const kept: string[] = [];
+  for (let i = 0; i < segments.length; i += 1) {
+    const header = segments[i] ?? "";
+    const payload = segments[i + 1] ?? "";
+    const signature = segments[i + 2];
+    const start = jwtHeaderStart(header);
+    if (
+      start >= 0 &&
+      payload.startsWith("eyJ") &&
+      payload.length >= 11 &&
+      signature !== undefined &&
+      signature.length >= 8
+    ) {
+      kept.push(header.slice(0, start) + REDACTED);
+      i += 2;
+    } else {
+      kept.push(header);
+    }
+  }
+  return kept.join(".");
+}
+
+function redactJsonWebTokens(text: string): string {
+  return text.replace(/[\w.-]+/g, (run) =>
+    run.includes("eyJ") ? redactJwtsInRun(run) : run,
+  );
+}
+
 export const defaultRules: RedactionRules = {
   fieldNameEndings: [
     "token",
@@ -82,27 +124,30 @@ export const defaultRules: RedactionRules = {
       /(\/\/[^\s/@:]+:)[^\s/@]+@/g,
       `$1${REDACTED}@`,
     ),
-    pattern("Anthropic API key", /(?<![\w-])sk-ant-[a-z]+\d*-[\w-]{20,}/g),
+    pattern(
+      "Anthropic API key",
+      /(?<![A-Za-z0-9_])sk-ant-[a-z]{1,16}\d{0,4}-[\w-]{20,}/g,
+    ),
     pattern(
       "OpenAI API key",
-      /(?<![\w-])sk-(?:(?:proj|svcacct|admin)-[\w-]{20,}|[A-Za-z0-9]{32,})/g,
+      /(?<![A-Za-z0-9_])sk-(?:(?:proj|svcacct|admin)-[\w-]{20,}|[A-Za-z0-9]{32,})/g,
     ),
-    pattern("xAI API key", /(?<![\w-])xai-[A-Za-z0-9]{20,}/g),
+    pattern("xAI API key", /(?<![A-Za-z0-9_])xai-[A-Za-z0-9]{20,}/g),
     pattern(
       "GitHub token",
-      /(?<![\w-])(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_\w{30,})/g,
+      /(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_\w{30,})/g,
     ),
-    pattern("1Password service account token", /(?<![\w-])ops_[\w-]{20,}/g),
-    pattern("Slack token", /(?<![\w-])xox[abeposr]-[\w-]{10,}/g),
+    pattern(
+      "1Password service account token",
+      /(?<![A-Za-z0-9_])ops_[\w-]{20,}/g,
+    ),
+    pattern("Slack token", /(?<![A-Za-z0-9_])xox[abeposr]-[\w-]{10,}/g),
     pattern(
       "AWS access key ID",
-      /(?<![\w-])(?:AKIA|ASIA)[0-9A-Z]{16}(?![\w-])/g,
+      /(?<![A-Za-z0-9_])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9_])/g,
     ),
-    pattern("age secret key", /(?<![\w-])AGE-SECRET-KEY-1[0-9A-Z]{58}/g),
-    pattern(
-      "JSON Web Token",
-      /(?<![\w.-])eyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{8,}/g,
-    ),
+    pattern("age secret key", /(?<![A-Za-z0-9_])AGE-SECRET-KEY-1[0-9A-Z]{58}/g),
+    { name: "JSON Web Token", replace: redactJsonWebTokens },
     { name: "PEM private key", replace: redactPemPrivateKeys },
   ],
 };
@@ -118,18 +163,35 @@ export function isSensitiveName(
   );
 }
 
+function decodedJsonName(name: string): string {
+  try {
+    return String(JSON.parse(`"${name}"`));
+  } catch {
+    return name;
+  }
+}
+
 export function redactText(
   text: string,
   rules: RedactionRules = defaultRules,
 ): string {
   const named = text
+    .replace(
+      /([?&])([\w.-]+)=([^&\s]*)/g,
+      (match, separator: string, name: string) =>
+        isSensitiveName(name, rules)
+          ? `${separator}${name}=${REDACTED}`
+          : match,
+    )
     .replace(/(?<![\w.-])([\w.-]+)=([^\s&#"',;]+)/g, (match, name: string) =>
       isSensitiveName(name, rules) ? `${name}=${REDACTED}` : match,
     )
     .replace(
-      /"([^"\\]{1,100})"(\s*:\s*)"[^"\\]*(?:\\.[^"\\]*)*"/g,
+      /"((?:[^"\\]|\\[^"]){1,64})"(\s*:\s*)"[^"\\]*(?:\\.[^"\\]*)*"/g,
       (match, name: string, colon: string) =>
-        isSensitiveName(name, rules) ? `"${name}"${colon}"${REDACTED}"` : match,
+        isSensitiveName(decodedJsonName(name), rules)
+          ? `"${name}"${colon}"${REDACTED}"`
+          : match,
     );
   return rules.valueRules.reduce((result, rule) => rule.replace(result), named);
 }
@@ -164,7 +226,12 @@ export function redact(
   function walkObject(value: object, depth: number): unknown {
     const hook = (value as { [redactSelf]?: unknown })[redactSelf];
     if (typeof hook === "function") return walk(hook.call(value), depth);
-    if (ArrayBuffer.isView(value)) return `[${String(value.byteLength)} bytes]`;
+    if (ArrayBuffer.isView(value)) {
+      const length: unknown = value.byteLength;
+      return typeof length === "number" && Number.isSafeInteger(length)
+        ? `[${String(length)} bytes]`
+        : "[bytes]";
+    }
     const toJSON = (value as { toJSON?: unknown }).toJSON;
     if (typeof toJSON === "function") return walk(toJSON.call(value), depth);
     if (Array.isArray(value)) {
@@ -177,7 +244,9 @@ export function redact(
     for (const key of keys) {
       const result = isSensitiveName(key, rules)
         ? REDACTED
-        : field(value, key, depth);
+        : key === "toJSON"
+          ? walk(toJSON, depth)
+          : field(value, key, depth);
       if (result !== undefined) entries.push([key, result]);
     }
     return Object.fromEntries(entries);

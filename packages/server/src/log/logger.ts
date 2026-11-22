@@ -1,8 +1,8 @@
 import {
   defaultRules,
   redact,
-  redactText,
   type RedactionRules,
+  UNREADABLE,
 } from "./redact";
 
 export const levels = ["debug", "info", "warn", "error"] as const;
@@ -22,6 +22,15 @@ function payloadEntries(payload: unknown): [string, unknown][] {
     return [["fields", payload]];
   }
   return Object.entries(payload).filter(([name]) => !envelope.has(name));
+}
+
+function messageText(msg: unknown, rules: RedactionRules): string {
+  const redacted = redact(msg, rules);
+  return typeof redacted === "string" ||
+    typeof redacted === "number" ||
+    typeof redacted === "boolean"
+    ? String(redacted)
+    : UNREADABLE;
 }
 
 export interface Logger {
@@ -51,7 +60,7 @@ export function createLogger({
       const record = Object.fromEntries([
         ["time", now().toISOString()],
         ["level", level],
-        ["msg", redactText(msg, rules)],
+        ["msg", messageText(msg, rules)],
         ...payloadEntries(redact(fields, rules)),
       ]);
       write(JSON.stringify(record));

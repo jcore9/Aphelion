@@ -485,11 +485,147 @@ describe("large hostile strings", () => {
     "JSON keys with no value": '"k": '.repeat(size / 5),
     "an open JSON value": `"password":"${"x".repeat(size)}`,
     "ghp_ repeated": "ghp_".repeat(size / 4),
+    "JWT starts after hyphens": "key-eyJaaaaaaaa".repeat(size / 15),
+    "JWT headers with no payload": "eyJaaaaaaaa.".repeat(size / 12) + "x",
+    "sk-proj- after hyphens": "-sk-proj-a".repeat(size / 10),
+    "query names with no value": "&a".repeat(size / 2),
+    "escaped JSON names": '"\\'.repeat(size / 2),
+    "AWS prefixes": "AKIA-".repeat(size / 5),
   };
 
   test.each(Object.entries(inputs))("%s finishes quickly", (_name, input) => {
     const started = performance.now();
     redactText(input);
     expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe("token boundaries", () => {
+  const families: Record<string, { token: string; secret: string }> = {
+    Anthropic: {
+      token: "sk-ant-api03-abcdefghijklmnopqrstuv",
+      secret: "abcdefghijklmnopqrstuv",
+    },
+    OpenAI: {
+      token: "sk-proj-abcdefghijklmnopqrstuvwx",
+      secret: "abcdefghijklmnopqrstuvwx",
+    },
+    xAI: {
+      token: "xai-abcdefghijklmnopqrstuvwxyz",
+      secret: "abcdefghijklmnopqrstuvwxyz",
+    },
+    GitHub: {
+      token: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+      secret: "abcdefghijklmnopqrstuvwxyz0123456789",
+    },
+    "GitHub fine-grained": {
+      token: "github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz",
+      secret: "11ABCDEFG0abcdefghijklmnopqrstuvwxyz",
+    },
+    "1Password": {
+      token: "ops_eyJzaWduSW5BZGRyZXNzIjoibXkuMXBhc3N3b3JkLmNvbSJ9",
+      secret: "eyJzaWduSW5BZGRyZXNzIjoibXkuMXBhc3N3b3JkLmNvbSJ9",
+    },
+    Slack: {
+      token: "xoxb-1234567890-abcdefghij",
+      secret: "1234567890-abcdefghij",
+    },
+    AWS: { token: "AKIAIOSFODNN7EXAMPLE", secret: "IOSFODNN7EXAMPLE" },
+    age: {
+      token: `AGE-SECRET-KEY-1${"Q".repeat(58)}`,
+      secret: "Q".repeat(58),
+    },
+    JWT: { token: jwt, secret: "c2lnbmF0dXJlc2lnbmF0dXJl" },
+  };
+  const contexts: Record<string, (token: string) => string> = {
+    "after a hyphen": (t) => `key-${t}`,
+    "after a dot": (t) => `key.${t}`,
+    "after a slash": (t) => `path/${t}`,
+    "after an equals sign": (t) => `value=${t}`,
+    "after a colon": (t) => `key:${t}`,
+    "in double quotes": (t) => `"${t}"`,
+    "in single quotes": (t) => `'${t}'`,
+    "in brackets": (t) => `[${t}] (${t}) {${t}}`,
+    "between spaces": (t) => `use ${t} now`,
+    "before a hyphen": (t) => `${t}-suffix`,
+    "before a dot": (t) => `${t}.`,
+    "before a slash or colon": (t) => `${t}/x ${t}:x`,
+    "in a URL path": (t) => `https://example.com/hooks/${t}/run`,
+    "in a URL query": (t) => `https://example.com/cb?q=${t}&page=2`,
+    "in a name=value pair": (t) => `note=${t} other=1`,
+  };
+  const cases = Object.entries(families).flatMap(
+    ([family, { token, secret }]) =>
+      Object.entries(contexts).map(
+        ([context, wrap]) => [family, context, wrap(token), secret] as const,
+      ),
+  );
+
+  test.each(cases)(
+    "%s token %s is masked",
+    (_family, _context, text, secret) => {
+      const redacted = redactText(text);
+      expect(redacted).not.toContain(secret);
+      expect(redacted).toContain(REDACTED);
+    },
+  );
+
+  test.each(Object.entries(families))(
+    "%s token joined to a letter in front is kept",
+    (_family, { token }) => {
+      expect(redactText(`x${token}`)).toBe(`x${token}`);
+    },
+  );
+});
+
+describe("text rules", () => {
+  test("masks a secret query value up to the next & even with commas", () => {
+    const redacted = redactText(
+      "https://example.com/cb?token=plain-a,plain-b;plain-c&page=2",
+    );
+
+    expect(redacted).toBe("https://example.com/cb?token=[REDACTED]&page=2");
+  });
+
+  test("decodes escapes in a JSON field name before matching it", () => {
+    const redacted = redactText(
+      '{"pass\\u0077ord":"plain-escaped","us\\u0065r":"ada"}',
+    );
+
+    expect(redacted).not.toContain("plain-escaped");
+    expect(redacted).toContain('"us\\u0065r":"ada"');
+  });
+});
+
+describe("more hostile values", () => {
+  test("reads an enumerable toJSON accessor once", () => {
+    let reads = 0;
+    const value = Object.defineProperty({ kept: "ada" }, "toJSON", {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return reads === 1 ? "plain-first-read" : "plain-second-read";
+      },
+    });
+    const line = logLine({ value });
+
+    expect(reads).toBe(1);
+    expect(line).not.toContain("plain-second-read");
+    expect(JSON.parse(line)).toMatchObject({
+      value: { kept: "ada", toJSON: "plain-first-read" },
+    });
+  });
+
+  test("writes a byte count only when byteLength is a number", () => {
+    const forged = Object.defineProperty(new Uint8Array(4), "byteLength", {
+      get: () => "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+    });
+    const line = logLine({ forged, real: new Uint8Array(3) });
+
+    expect(line).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(JSON.parse(line)).toMatchObject({
+      forged: "[bytes]",
+      real: "[3 bytes]",
+    });
   });
 });

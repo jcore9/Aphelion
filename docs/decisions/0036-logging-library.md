@@ -46,8 +46,8 @@ The rules that follow:
 - Code logs through the `Logger` interface from `packages/server/src/log/logger.ts`. It never imports a logging library, so a later move to LogTape changes one file.
 - `createLogger` passes every record through `redact` before it writes the line, and adds `time`, `level` and `msg` afterwards. Redaction catches the field names and the secret formats in its rules. It doesn't catch every secret, and [the logging reference](../reference/logging.md#what-redaction-doesnt-catch) lists what it misses.
 - The redaction rules are data, in `defaultRules` in `packages/server/src/log/redact.ts`. Adding a rule is a one-line change with a paired test.
-- The redactor's output is plain data. It reads each value once, so a getter can't return one thing when it is checked and another when it is copied. A value that throws becomes `[Unreadable]`, and nesting beyond 32 levels becomes `[Too deep]`, so a log call doesn't throw because of what it is given.
-- Each value rule runs in time proportional to the length of the string. A test runs each one on a hostile 1 MB string.
+- The redactor's output is plain data. It reads each property it uses at most once, so a getter can't return one thing when it is checked and another when it is copied. A test checks this for `toJSON`. A value that throws becomes `[Unreadable]`, and nesting beyond 32 levels becomes `[Too deep]`. The tests show a log call writing one line, without throwing, for each hostile value they cover. The [logging reference](../reference/logging.md#log-format) lists them.
+- Each value rule is written so that it doesn't scan the same run of characters again from every position inside it. A test runs the text rules on 19 hostile 1 MB strings and requires each to finish in under 1 second.
 - A value that has a method under `Symbol.for("aphelion.redactSelf")` is replaced by what that method returns. `Symbol.for` reads a registry that every module shares, so `plugin-sdk` can define `Secret` without importing the server. M0-14 builds `Secret` on this.
 - The audit writer applies the same rules to every text column and to the detail before the insert.
 

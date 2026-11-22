@@ -30,7 +30,9 @@ Each call writes one line. A line is a JSON object with `time`, `level` and `msg
 
 The logger redacts the fields first and adds `time`, `level` and `msg` afterwards, so a field can't replace them. A field named `time`, `level` or `msg` is dropped. If the fields object turns into something other than an object, for example because it has its own `toJSON`, the result is written under `fields`.
 
-A log call doesn't throw because of the values it is given, and it always writes a line.
+The tests cover getters, `toJSON` methods and `redactSelf` methods that throw, a proxy that throws, nesting 10,000 levels deep, and a message that isn't a string. In each case the call writes one line and doesn't throw. A `write` function that throws still makes the call throw.
+
+A message that isn't a string is written as text if it is a number or a boolean, or if its `toJSON` returns text. Any other message is written as `[Unreadable]`.
 
 ```ts
 import { createLogger } from "@aphelion/server/log";
@@ -58,7 +60,7 @@ How the redactor writes other values:
 | A function or a symbol | Left out |
 | A value that throws when it is read, converted or redacted | `"[Unreadable]"` |
 | An object nested more than 32 levels deep | `"[Too deep]"` at level 32 |
-| Bytes, such as a `Uint8Array` | `"[N bytes]"`. The bytes are never written. |
+| Bytes, such as a `Uint8Array` | `"[N bytes]"`, or `"[bytes]"` if its `byteLength` isn't a whole number. The bytes are never written. |
 | A `bigint` | A string of its digits |
 | An object that contains itself | `"[Circular]"` at the point where it repeats |
 
@@ -80,12 +82,13 @@ The same names are matched inside text, in two forms:
 
 | Form | Example | Written as |
 | --- | --- | --- |
-| `name=value`, as in a URL query or an environment variable | `?access_token=abc&page=2` | `?access_token=[REDACTED]&page=2` |
-| A JSON string field inside a string | `{"password":"abc"}` | `{"password":"[REDACTED]"}` |
+| A URL query parameter, after `?` or `&` | `?access_token=a,b;c&page=2` | `?access_token=[REDACTED]&page=2`. The value is masked up to the next `&`, whitespace or the end of the string. |
+| `name=value` elsewhere, as in an environment variable | `GITHUB_TOKEN=abc PORT=8080` | `GITHUB_TOKEN=[REDACTED] PORT=8080`. The value ends at whitespace, `&`, `#`, a quote, `,` or `;`. |
+| A JSON string field inside a string | `{"password":"abc"}` | `{"password":"[REDACTED]"}`. Escapes in the name, such as `\u0077`, are decoded before the name is compared. |
 
 ### By value pattern
 
-Every string is searched for these patterns, in `valueRules`, and each match is replaced. The rest of the string stays. Each rule runs in time proportional to the length of the string, and a test runs each one on a hostile 1 MB string.
+Every string is searched for these patterns, in `valueRules`, and each match is replaced. The rest of the string stays. Each rule is written so that it doesn't scan the same run of characters again from every position inside it. A test runs the text rules on 19 hostile 1 MB strings and requires each to finish in under 1 second. On the development machine on 2026-11-22, each took under 60 ms.
 
 | Pattern | Matches |
 | --- | --- |
@@ -102,7 +105,7 @@ Every string is searched for these patterns, in `valueRules`, and each match is 
 | JSON Web Token | Three dot-separated parts, the first two starting with `eyJ` |
 | PEM private key | A whole `-----BEGIN ... PRIVATE KEY-----` block. Without an `-----END` line, everything from `-----BEGIN` to the end of the string. |
 
-The minimum lengths keep ordinary words such as `sk-learn`, `sk-this-is-an-ordinary-slug` and `ghp_short`. A token that is joined to the word before it by a letter, a digit, `_` or `-`, as in `xghp_...`, isn't matched.
+The minimum lengths keep ordinary words such as `sk-learn`, `sk-this-is-an-ordinary-slug` and `ghp_short`. A token is matched when the character in front of it isn't a letter, a digit or `_`. So `key-ghp_...`, `key.ghp_...`, `/ghp_...`, `=ghp_...` and `"ghp_..."` are masked, and `xghp_...` isn't. A test checks each token type in 15 positions, including inside a URL and in a `name=value` pair.
 
 ### Values that redact themselves
 
@@ -123,6 +126,7 @@ The redactor works from names and formats. These reach the log unchanged:
 - A secret with no known format, in a field whose name isn't on the list. Examples are a password in a field named `value`, or a list of tokens named `tokens`.
 - A secret used as a field name, for example an object keyed by token.
 - A secret in a `name=value` pair whose value is in quotes, as in `password="abc"`, or a JSON field whose value isn't a string, as in `{"pin": 1234}`.
+- A JSON field whose name is longer than 64 characters, or contains an escaped quote `\"`.
 - A secret that has been encoded, such as base64 of a token, or split across two fields.
 - What a `toJSON` or `redactSelf` method returns, beyond the rules above.
 
@@ -154,7 +158,7 @@ The `audit_log` table in the SQLite store holds one row per audited action. M2's
 | `request_id` | Text or empty | The request that caused it. The same ID can appear in log lines. |
 | `detail` | Text | A JSON object with anything else, after redaction. `{}` when empty. |
 
-`appendAudit` applies the text rules to every text column, and the full redactor to `detail`, before the insert. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked by the TypeScript types in `packages/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
+`appendAudit` applies the text rules to every text column, and the full redactor to `detail`, before the insert. If the redacted `detail` isn't an object, for example because it couldn't be read, the row is stored with the detail `{"unreadable":true}`, so the write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked by the TypeScript types in `packages/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
 
 Write a row with `appendAudit`, which returns the new row's `id`:
 
