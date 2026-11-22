@@ -25,7 +25,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-02] | Spike: Grok headless billing | spike, server | M0-00 |
 | [M0-03] | Spike: headless without Electron | spike, desktop | M0-00 |
 | [M0-17] | Spike: Codex headless on a ChatGPT login | spike, server | M0-00 |
-| [M0-18] | Spike: per-agent isolation with user namespaces | spike, server, **risk/security** | M0-00 |
+| [M0-18] | Spike: per-agent isolation with user namespaces | spike, security, **risk/security** | M0-00 |
 | [M0-04] | Monorepo scaffold | chore | M0-03 |
 | [M0-05] | Repo hygiene and MIT license | chore, security, **risk/security** | M0-04 |
 | [M0-16] | Docs site and decision records | docs | M0-04 |
@@ -35,12 +35,12 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-09] | Protocol package v0 | feature, server, client | M0-04, M0-16 |
 | [M0-10] | API server skeleton | feature, server, security, **risk/security** | M0-09 |
 | [M0-11] | CLI and headless mode | feature, server, desktop | M0-03, M0-10 |
-| [M0-12] | Container image, Compose file and host unit | feature, server, security, **risk/security** | M0-11 |
+| [M0-12] | Container image, Compose file and host unit | feature, server, security, **risk/security** | M0-11, M0-18 |
 | [M0-13] | Plugin host v0 | feature, plugins, **risk/security** | M0-04, M0-07, M0-16 |
 | [M0-14] | Secrets broker v0 | feature, security, **risk/security** | M0-08 |
 | [M0-15] | 1Password backend plugin | feature, plugins, security, **risk/security** | M0-13, M0-14 |
 
-Six of the seventeen work issues carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
+Seven of the eighteen work issues carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
 
 ### Out of scope
 
@@ -87,7 +87,7 @@ flowchart LR
 | 4 | Its dependencies merge | M0-08, M0-09, M0-13 |
 | 5 | Its dependencies merge | M0-10, M0-14 |
 | 6 | Its dependencies merge | M0-11, M0-15 |
-| 7 | M0-11 merges | M0-12, then the exit test |
+| 7 | M0-11 and M0-18 merge | M0-12, then the exit test |
 
 The critical path is M0-03, M0-04, M0-16, M0-09, M0-10, M0-11, M0-12. M0-04 waits for M0-03 because the spike checks that Bun runs the SDKs the project depends on ([decision 0007](../../decisions/0007-bun-runtime.md)) before the scaffold commits to it.
 
@@ -95,7 +95,9 @@ M0-01 and M0-02 block nothing inside M0. They block [M1-02] and [M4-01], and the
 
 M0-17 blocks nothing inside M0 either. It blocks [M4-10], the Codex adapter ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)).
 
-M0-18 was added on 2026-11-22 by [decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md). It depends only on M0-00, so it belongs to wave 1 and can start now. It blocks [M0-12], the container image, because the image carries the seccomp profile (a list of system calls the container may make) that the spike measures. It also blocks [M1-04], the session manager, because the answer decides how each agent is started.
+M0-18 was added on 2026-11-22 by [decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md). It depends only on M0-00, so it belongs to wave 1 and can start now. It blocks [M0-12], the container image, because the image's seccomp profile (the list of system calls the container may make) and its host setup depend on what the spike finds. It also blocks [M1-04], the session manager, because the answer decides how each agent is started. An unfinished M0-18 can therefore delay the exit test.
+
+The seccomp profile ships once. By default [M4-10] ships it with Codex. M0-12 ships it instead only if M0-18 recommends namespaces for every bot.
 
 ## The spikes
 
@@ -185,7 +187,7 @@ What changes depending on the answer:
 
 ### M0-18: per-agent isolation with user namespaces
 
-[Decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md) lets the container create user namespaces. A user namespace is a Linux feature that gives a process its own private view of users, files or processes. Codex's sandbox needs one. The owner asked whether the same feature could isolate each agent from the others, in place of one Unix user per agent ([decision 0006](../../decisions/0006-shared-agent-user.md)). The full question list is in [issue #124][M0-18]. The finding goes to `docs/spikes/M0-18-per-agent-isolation-with-user-namespaces.md`.
+[Decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md) lets the container create user namespaces. A user namespace is a Linux feature that changes how the kernel treats user IDs and privileges: a process can look like root inside it and stay an ordinary user outside. Codex's sandbox needs one. Other kinds of namespace give a process a private view of the file system (mount namespace) or of the process list (PID namespace). Isolating an agent would combine these. The owner asked whether the same feature could isolate each agent from the others, in place of one Unix user per agent ([decision 0006](../../decisions/0006-shared-agent-user.md)). The full question list is in [issue #124][M0-18]. The finding goes to `docs/spikes/M0-18-per-agent-isolation-with-user-namespaces.md`.
 
 Questions:
 
@@ -200,7 +202,7 @@ What changes depending on the answer:
 
 | Finding | Consequence |
 | --- | --- |
-| Per-agent isolation works for all three CLIs, and the profile adds only what `bwrap` needs | A decision record amends 0006. M1-04 starts agents in their own namespaces. M0-12 ships the profile and any AppArmor change. |
+| Per-agent isolation works for all three CLIs, and the profile adds only what `bwrap` needs | A decision record amends 0006. M1-04 starts agents in their own namespaces. M0-12 ships the profile and any AppArmor change, in place of M4-10. |
 | Codex's sandbox starts, but isolation fails for some CLI | 0006 stands. The profile serves Codex only, and the finding names the CLI that fails. |
 | Codex's sandbox fails inside an agent's namespace | The finding says whether the namespace can stand in for Codex's sandbox. A change to decision 0035 becomes a decision record. |
 | The profile needs more than the namespace and mount calls | Stop. The owner decides whether decision 0035's profile stands. |
@@ -288,7 +290,7 @@ M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
 | The spikes need real Claude Pro or Max, SuperGrok and ChatGPT logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
 | Codex asks only for what its sandbox blocks, or OpenAI's terms don't cover a self-hosted harness | M4-10 changes shape, or Codex stays out | M0-17 answers both before M4-10 starts; a "no" or an unclear answer stops for the owner ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)). |
-| The seccomp profile that lets Codex's sandbox run also exposes more kernel code to every process in the container | A kernel bug becomes reachable from a prompt-injected agent | M0-18 measures the profile before M0-12 ships it. The profile stays as small as `bwrap` allows ([decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md)). |
+| The seccomp profile that lets Codex's sandbox run also exposes more kernel code to every process in the container | A kernel bug becomes reachable from a prompt-injected agent | M0-18 measures the profile before anything ships it: M4-10 with Codex, or M0-12 if M0-18 recommends namespaces for every bot. The profile stays as small as `bwrap` allows ([decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md)). |
 | Six security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
 
 ## Open questions

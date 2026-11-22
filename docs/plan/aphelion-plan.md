@@ -40,7 +40,7 @@ Aphelion is a self-hosted bot application, not a coding app. Its bots (called ag
 
 **Design principles**
 
-- **Extremely opinionated.** Aphelion makes the hard choices for the user instead of hiding them behind options: approvals on by default, agents unprivileged and isolated, credentials never on the agent host, ACP for agents, MCP for tools, design tokens for every pixel. Plugins and themes extend it within those rules; they don't relax them.
+- **Extremely opinionated.** Aphelion makes the hard choices for the user instead of hiding them behind options: approvals on by default, agents unprivileged and isolated, credentials never on the agent host, ~~ACP for agents~~ each CLI driven over its vendor's own protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)), MCP for tools, design tokens for every pixel. Plugins and themes extend it within those rules; they don't relax them.
 - **Bots manage; tools build.** Bots break work down, file and triage issues, coordinate other bots, delegate implementation to coding tools over MCP and check the results. Aphelion has no code editor, diff viewer or terminal UI, and doesn't try to.
 - **The agents are untrusted.** Enforcement lives outside their reach (root-owned config, separate machine for credentials).
 - **Minimal attack surface.** Every feature added must justify its attack surface and maintenance cost.
@@ -161,7 +161,7 @@ flowchart TB
       store["Store<br/>SQLite, audit log"]
     end
     subgraph agents["Agent processes · own Unix user, no sudo"]
-      claude["Claude Code<br/>via ACP"]
+      claude["Claude Code<br/>via Agent SDK"]
       grok["Grok Build<br/>via ACP"]
       hooks["Managed hooks<br/>root-owned, fail closed"]
     end
@@ -191,12 +191,12 @@ The harness is one server process with a handful of modules, plus a connector ga
 | --- | --- | --- |
 | API server | Serves clients: commands in, events out | WebSocket for streaming, REST for everything else. Binds to the tailnet only. Device identity from Tailscale, plus a per-device token so a lost phone can be revoked. |
 | Agent registry | Defines each agent | Name, provider, model, instructions, workspace path, policy profile. Stored as YAML in git, loaded into SQLite. |
-| Agent adapters | Talk to the AI CLIs | [ACP](https://agentclientprotocol.com/) client first: Grok via `grok agent stdio`, Claude via an ACP adapter. Fallback: `-p --output-format stream-json` with `--resume`. One normalized event type out. |
+| Agent adapters | Talk to the AI CLIs | ~~[ACP](https://agentclientprotocol.com/) client first: Grok via `grok agent stdio`, Claude via an ACP adapter. Fallback: `-p --output-format stream-json` with `--resume`.~~ Each CLI over its vendor's own protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)): Claude Code through the Claude Agent SDK, Codex through `codex app-server`, Grok via `grok agent stdio` ([ACP](https://agentclientprotocol.com/)). One normalized event type out. |
 | Session manager | Owns agent processes | One live process per agent, ~~run as that agent's Unix user~~ run as the shared `aphelion-agent` user and started by the agent runner ([0006](../decisions/0006-shared-agent-user.md), [0016](../decisions/0016-one-docker-container.md)). Restart on crash, resume by session id, kill the whole process tree on cancel. |
 | Queue | Orders work per agent | FIFO per agent, one turn at a time. Pause, resume, cancel, reorder. Survives restarts. |
 | Scheduler | Runs routines | Routine = agent + prompt + schedule + policy profile. Cron expressions in an explicit time zone. Missed-run and overlap policy per routine. Run history kept. |
 | Usage monitor | Tracks subscription headroom | One collector per provider, polled on a timer, stored as snapshots. Budget guard can pause routines near a cap. |
-| Policy engine | Decides every gated action | Inputs: ACP permission requests and hook callbacks. Order: static rules, then reviewer, then you. Rules, reviewer and timeout behavior are configurable per agent, connector and tool. Every decision logged. |
+| Policy engine | Decides every gated action | Inputs: ~~ACP permission requests~~ each adapter's permission requests ([0034](../decisions/0034-vendor-protocol-per-cli.md)) and hook callbacks. Order: static rules, then reviewer, then you. Rules, reviewer and timeout behavior are configurable per agent, connector and tool. Every decision logged. |
 | Reviewer | Second opinion on risky calls | A separate model call that sees only the action and its arguments, never the content that triggered it. No tools of its own. |
 | Connector gateway | Holds third-party credentials | Separate LXC or VM. Runs the native connectors (GitHub first) and any custom MCP servers the user adds, and exposes their tools to agents through the harness MCP endpoint. Scoped tokens, read-only by default, writes routed through the policy engine. |
 | Store | Persists state | SQLite in WAL mode: agents, messages, runs, approvals, usage snapshots, audit log. CLI transcripts stay in the CLIs' own files, referenced by session id. No secrets in the database. |
@@ -260,7 +260,7 @@ Assume every agent can be prompt-injected, so the agents get nothing they could 
 
 1. Network: the host firewall blocks the LAN and allows only the gateway host; consider an outbound allowlist for the provider APIs.
 2. Credentials: tokens on the gateway, scoped and read-only by default; GitHub branch protection as a backstop.
-3. Harness policy: ACP permission requests routed to the policy engine. The harness never starts an agent in a bypass or always-approve mode.
+3. Harness policy: ~~ACP permission requests~~ each adapter's permission requests ([0034](../decisions/0034-vendor-protocol-per-cli.md)) routed to the policy engine. The harness never starts an agent in a bypass or always-approve mode.
 4. CLI hooks: root-owned managed settings (`/etc/claude-code/managed-settings.json`, `/etc/grok/requirements.toml`) with a fail-closed `PreToolUse` hook that calls the policy engine. This catches anything that skips layer 3.
 5. Recovery: VM snapshots and backups of anything an agent can write to.
 
@@ -536,10 +536,10 @@ Stages 0 to 4 form the v0.1 internal alpha, stages 5 to 8 complete v1.0, and sta
    - Deliverable: TypeScript monorepo (server, web client, shared protocol types) on GitHub with CI and protected main and dev branches, secrets broker with the local encrypted store and one vault backend, VM users (`harness`, one per agent, no sudo), headless CLI mode with a systemd unit, health endpoint, SQLite schema with migrations, plugin host with manifest loader and a versioned plugin API (v0), docs site with decision-record and planning templates.
    - Exit: the service starts on boot and answers `/health` from a client over Tailscale.
 2. **Stage 1: One agent, end to end**
-   - Deliverable: Claude adapter as the first first-party plugin (ACP, with stream-json fallback), session manager, message history, a bare CLI or one-page client.
+   - Deliverable: Claude adapter as the first first-party plugin (~~ACP, with stream-json fallback~~ the Claude Agent SDK, [0034](../decisions/0034-vendor-protocol-per-cli.md)), session manager, message history, a bare CLI or one-page client.
    - Exit: a conversation survives a server restart and resumes in the same CLI session.
 3. **Stage 2: Approvals**
-   - Deliverable: policy engine with static rules, ACP permission handling, managed `PreToolUse` hook as backstop, approval events, audit log, deny on timeout.
+   - Deliverable: policy engine with static rules, ~~ACP~~ adapter permission handling ([0034](../decisions/0034-vendor-protocol-per-cli.md)), managed `PreToolUse` hook as backstop, approval events, audit log, deny on timeout.
    - Exit: a denied `rm -rf` is blocked, a `git push` waits for your decision, and both appear in the audit log.
 4. **Stage 3: Connector framework and GitHub**
    - Deliverable: gateway host (LXC), connector plugin interface, encrypted credential store, harness MCP endpoint with per-session tokens, GitHub App connector with per-call scoped tokens, git credential helper, custom MCP server registration, per-tool policies.
@@ -622,7 +622,7 @@ Each has a recommended default so stage 0 can start now; the first two matter mo
 | Decision | Options | Recommended default |
 | --- | --- | --- |
 | Server language | TypeScript, Rust, Go | Decided: TypeScript ~~on Node.js LTS~~ on Bun ([0007](../decisions/0007-bun-runtime.md)). Official ACP, MCP and 1Password SDKs, and one language with the web client |
-| Adapter protocol | ACP, native stream-json per CLI | ACP first, stream-json as fallback per provider ([0027](../decisions/0027-acp-first-adapters.md)) |
+| Adapter protocol | ACP, native stream-json per CLI | ~~ACP first, stream-json as fallback per provider~~ Each CLI's vendor protocol: Agent SDK for Claude, `codex app-server` for Codex, ACP for Grok ([0027](../decisions/0027-acp-first-adapters.md), amended by [0034](../decisions/0034-vendor-protocol-per-cli.md)) |
 | Where the policy engine runs | Inside the harness (own Unix user), on the gateway host | Inside the harness for v1; move it next to the gateway once connectors land ([0028](../decisions/0028-policy-engine-in-harness.md)) |
 | Reviewer model | Small hosted model via API key, local model on your own GPU | Small hosted model; revisit local once the rules are stable ([0029](../decisions/0029-hosted-reviewer-model.md)) |
 | Web client stack | SolidJS, React, Svelte; Tailwind for styling | ~~SolidJS + Tailwind~~ Decided: React + Tailwind ([0008](../decisions/0008-react-and-tailwind.md)) |
@@ -710,12 +710,12 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | --- | --- | --- | --- |
 | M1-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M1 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M1-01 | Agent adapter contract | Plugin interface that emits normalized events: text delta, tool start and end, permission request, turn end, error, usage | M0-13 |
-| M1-02 | Claude adapter plugin (ACP) | Streams a full turn with tool calls, using the auth path from M0-01 | M1-01, M0-01 |
-| M1-03 | Claude stream-json fallback | `-p --output-format stream-json --verbose --resume` behind the same contract, switchable per agent | M1-01 |
+| M1-02 | Claude adapter plugin (~~ACP~~ Agent SDK) | Streams a full turn with tool calls through the Claude Agent SDK, using the auth path from M0-01 ([0034](../decisions/0034-vendor-protocol-per-cli.md)) | M1-01, M0-01 |
+| M1-03 | ~~Claude stream-json fallback~~ Closed as not planned: the Agent SDK is the stream-json protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)) | ~~`-p --output-format stream-json --verbose --resume` behind the same contract, switchable per agent~~ | M1-01 |
 | M1-04 | Session manager | One process per agent ~~under its own Unix user~~ as the shared `aphelion-agent` user ([0006](../decisions/0006-shared-agent-user.md)); restart on crash; resume by session id and working directory; cancel kills the whole process group | M1-02, M0-12 |
 | M1-05 | Message history | Turns and events persisted; a client that reconnects gets the missed events replayed | M1-04, M0-09 |
 | M1-06 | Minimal test client | CLI chat against the API that shows streaming text and tool events | M0-10, M1-05 |
-| M1-07 | Adapter contract tests | Recorded event streams for each adapter replayed in CI | M1-02, M1-03 |
+| M1-07 | Adapter contract tests | Recorded event streams for each adapter replayed in CI | M1-02 (~~M1-03~~, closed by [0034](../decisions/0034-vendor-protocol-per-cli.md)) |
 
 ## M2 · Approvals (v0.1)
 
@@ -725,7 +725,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M2-01 | Policy model and file format | Rules match on agent, tool, connector and arguments; actions are allow, review, ask and deny; presets, scopes and a hard floor; schema-validated | M0-06 |
 | M2-02 | Policy engine | Tests cover most-specific-wins, the hard floor and every preset | M2-01 |
 | M2-03 | Approval lifecycle | Requests bound to a hash of the exact tool and arguments; pending, decided and expired states; timeout defaults to deny; grant lengths (once, session, timed, always) | M2-02, M0-07 |
-| M2-04 | ACP permission routing | Adapter permission requests go to the policy engine; agents never start in a bypass or always-approve mode | M2-03, M1-02 |
+| M2-04 | ~~ACP~~ Adapter permission routing | Adapter permission requests go to the policy engine ([0034](../decisions/0034-vendor-protocol-per-cli.md)); agents never start in a bypass or always-approve mode | M2-03, M1-02 |
 | M2-05 | Managed-hook backstop | Root-owned managed settings for Claude and Grok install a fail-closed `PreToolUse` hook that calls the engine over a local socket, and blocks when the harness is down | M2-03 |
 | M2-06 | Approval protocol and test client | `approval.requested` and `approval.resolved` events and the `approval.decide` command; decisions work from the test client | M2-03, M1-06 |
 | M2-07 | Policy change control | Only authenticated clients can change policy; every change is audited | M2-01, M0-08 |

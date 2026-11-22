@@ -10,7 +10,7 @@
 [Decision 0027](0027-acp-first-adapters.md) made the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) the first choice for every CLI, with each CLI's own streaming output as a fallback. Two spikes then tested ACP against what Aphelion needs:
 
 - **Claude.** The [M0-01 finding](../spikes/M0-01-claude-over-acp.md) found that `@agentclientprotocol/claude-agent-acp` works. That adapter is built on Anthropic's [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview.md), so ACP adds a second translation on top of the SDK and a third-party package between Aphelion and the CLI.
-- **Codex.** The [M0-17 finding](../spikes/M0-17-codex-headless.md) found that `codex-acp` can't make every tool call ask, and fails every prompt under a root-owned `requirements.toml` that allows only `untrusted`. `codex app-server` JSON-RPC can do both.
+- **Codex.** The [M0-17 finding](../spikes/M0-17-codex-headless.md) found that `codex-acp` fails every prompt under a root-owned `requirements.toml` that allows only `untrusted`. `codex app-server` JSON-RPC (a way to send requests and replies as JSON messages) works under it, and under `untrusted` it asks before each shell command and file change. It doesn't make every call ask: [decision 0035](0035-codex-login-sandbox-approvals.md) lists the limits that M0-17 measured, and the managed hook covers some of them.
 
 Grok Build speaks ACP itself, as `grok agent stdio` ([M0-02](https://github.com/jcore9/Aphelion/issues/3)).
 
@@ -36,12 +36,12 @@ The options were `pathToClaudeCodeExecutable: "/usr/bin/claude"`, `permissionMod
 
 Still unknown, for M1-02:
 
-- **A read inside the working directory doesn't ask.** M0-01 found that Claude Code allows these with no request in `default` mode. This turn didn't retest it. The managed hook (M2-05) is still the only layer that sees every call. Whether the SDK's own `PreToolUse` callback can share that job is M2-05's question.
+- **Does a read inside the working directory ask?** Not known for the bare SDK. M0-01 measured the ACP wrapper, where such a read ran with no request in `default` mode. This turn read a file outside the working directory only. M1-02 checks it. Whether the SDK's own `PreToolUse` callback can share the managed hook's job (M2-05) is M2-05's question.
 - **The bundled binary.** The SDK's optional dependency `@anthropic-ai/claude-agent-sdk-linux-x64` holds a 364 MB copy of Claude Code. The image must leave it out and set `pathToClaudeCodeExecutable` every time, or the SDK runs that copy instead of the pinned one.
 - **Version pairing.** SDK 0.3.330 pairs with Claude Code 2.1.330. The SDK's docs say some options, such as `mcpServersDelivery: "initialize"`, need the bundled CLI version or newer. M1-02 pins the two together.
 - **Managed settings.** `/etc/claude-code/` doesn't exist on this box, so this turn didn't test whether `settingSources: []` still loads root-owned managed settings.
 - **Inside the container.** Running as `aphelion-agent` under the hardening from [decision 0016](0016-one-docker-container.md), deny answers, `resume` after a restart, and Bun's peer dependencies (`@anthropic-ai/sdk`, `@modelcontextprotocol/sdk` and Zod 4) in a plugin folder.
-- **The default mode.** With no `permissionMode`, the SDK starts in `auto` where that mode is available, as M0-01 found for the ACP adapter. The adapter must always pass `default`, and the managed settings must disable `auto` and `bypassPermissions`.
+- **The default mode.** Not known for the bare SDK. M0-01 found that the ACP wrapper started in `auto` where that mode is available, and the direct run here set `default` explicitly. The adapter always passes `default`, and the managed settings disable `auto` and `bypassPermissions`. M1-02 checks what the SDK does with no `permissionMode`.
 
 ## Options
 
@@ -60,7 +60,7 @@ Option 2. The owner decided on 2026-11-22.
 | CLI | Protocol | Adapter |
 | --- | --- | --- |
 | Claude Code | The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`), which speaks stream-json to the CLI | [M1-02](https://github.com/jcore9/Aphelion/issues/20) |
-| Codex | `codex app-server` JSON-RPC over stdio | [M4-10](https://github.com/jcore9/Aphelion/issues/114) |
+| Codex | `codex app-server`: JSON-RPC (requests and replies as JSON messages) over stdio (the process's standard input and output) | [M4-10](https://github.com/jcore9/Aphelion/issues/114) |
 | Grok Build | ACP, as `grok agent stdio` | [M4-01](https://github.com/jcore9/Aphelion/issues/44) |
 
 Rules that follow:
