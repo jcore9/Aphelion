@@ -19,15 +19,16 @@ Two questions came up while building it.
 
 ### The parser
 
-An exploratory measurement, with Bun 1.4.5 and `effect` 4.1.5 on the dev box. Each stub was a one-file program with the same commands (`--headless`, `config check --compose`, `device add NAME --days N`) and no server code. The `effect/cli` stub ran under `BunRuntime.runMain` with `BunServices.layer`. Each was compiled with `bun build --compile stub.ts --outfile stub`, and the time is the mean of 20 runs of `stub --version`. The stubs weren't kept, so treat the numbers as a rough guide.
+The follow-up comparison compiled prototypes of all seven commands with `bun build --compile` on Bun 1.4.5. The sizes below show the approximate increase over a Bun binary that loads Zod. The first comparison used a smaller `parseArgs` prototype that omitted Zod. The follow-up prototypes had no server code, and their source was discarded, so the figures give only a rough sense of size.
 
-| Option | Binary size | `--version` | For | Against |
-| --- | --- | --- | --- | --- |
-| **Node's `parseArgs`**, from `node:util`, with a short table of commands | 109,209,776 bytes | 8 ms | Built into Bun and Node, marked stable, no new package. The plugin runner already uses it (`apps/server/src/plugins/runner-main.ts`). Values are checked with the same Zod schemas that `addDevice` uses | The help text and the command table are written by hand, about 245 lines in `args.ts` and `help.ts` |
-| Effect's CLI module, `effect/cli` | 109,775,024 bytes | 53 ms | Generates help, typed flags and subcommands. Already installed with `effect` | Marked `@stability unstable` in 4.1.5, so its API may change in a minor release. Adds global flags that Aphelion doesn't want: `--wizard` (interactive prompts), `--completions` and `--log-level`. They can be turned off through `CliConfig`. Its value checks are built on Effect `Schema`. Zod can still be called through its mapping hooks, but that is extra glue on every flag |
-| `commander`, or another parser package | not measured | not measured | Widely used | A new dependency for the server binary, and one more package to vet, with nothing that `parseArgs` lacks for five commands |
+| Option | Added size | For | Against |
+| --- | --- | --- | --- |
+| **Node's `parseArgs`**, from `node:util` | 8 KB | Bun provides it without a new dependency. The plugin runner already uses it. Aphelion uses Zod to validate values and controls what goes into usage errors. | Aphelion maintains the command table, help text, and usage checks in `args.ts` and `help.ts`, about 245 lines total. |
+| Effect's CLI module, `effect/cli` 4.1.5 | 582 KB (213 KB over a prototype that already loads Effect) | Already installed. Generates help and lets Aphelion disable extra global options. Its mapping hooks can call Zod. | The prototype echoed invalid input, accepted an empty `--compose` value, and returned exit code 1 for usage errors. It needed code to match Aphelion's behavior. |
+| Optique 1.4.0 | 455 KB | The prototype rejected duplicate and misplaced options and used the existing [Zod schemas directly](https://optique.dev/integrations/zod). | Adds `@optique/core` and `@optique/zod`. Aphelion would still need to filter error messages and preserve its help and exit-code behavior. |
+| Commander 15.1.0 | 74 KB | Generates help and can call Zod through option hooks. | Adds a dependency. The prototype needed Aphelion code for most of its usage rules, including filtering error messages and rejecting repeated options. |
 
-The finished binary, with the server code, is 110,201,008 bytes, and `aphelion --version` takes 67 ms. A difference of tens of milliseconds doesn't matter for commands that run a few times a day, so start time doesn't decide the question. The unstable API and the unwanted flags do.
+Keep `parseArgs` for this command set. The existing command table and tests already cover the behavior Aphelion needs, including usage errors that omit pasted tokens. Optique would remove more of that code than the other alternatives, at the cost of two new packages and a custom error filter.
 
 ### The Compose output
 
@@ -58,4 +59,4 @@ The finished binary, with the server code, is 110,201,008 bytes, and `aphelion -
 - No new package. The help text is written by hand, and a test checks that each command appears in it.
 - M0-12 ([#14](https://github.com/jcore9/Aphelion/issues/14)) puts the Compose check command in its host script, and runs `aphelion` commands as `harness` (`--user harness`) with `-T`, so the database files keep their owner and the token stays alone on standard output.
 - The server exits with code 130 after `docker stop`, so `docker ps -a` shows `Exited (130)` for a normal stop.
-- Revisit if the command grows to many subcommands, or needs interactive prompts or shell completion. `effect/cli` is the first candidate then, once it is marked stable.
+- Revisit if maintaining the command table and help text becomes costly, or if the CLI needs interactive prompts or shell completion. Compare Optique and `effect/cli` against the CLI's usage and error rules at that point.
