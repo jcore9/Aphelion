@@ -33,6 +33,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
 - [Logging and the audit log](reference/logging.md): the log format, the redaction rules and how to add one, and the append-only audit table.
+- [The client protocol](reference/protocol.md): the frames, sequence numbers, replay, resync and command ids.
 
 ## Decision records
 
@@ -64,13 +65,16 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0022](decisions/0022-agent-network-boundary.md) | The host firewall blocks the container from the LAN, with a path to a separate agents container | Accepted |
 | [0023](decisions/0023-scaffold-toolchain.md) | The scaffold lints with ESLint and typescript-eslint on TypeScript 6.0, and formats with Prettier | Accepted |
 | [0024](decisions/0024-codex-third-agent-cli.md) | Codex CLI becomes a third agent CLI, spiked in M0 and built in M4 | Accepted |
-| [0025](decisions/0025-config-schema-and-format.md) | Config files are YAML, parsed with the `yaml` package and validated with Zod 4 | Proposed |
-| [0026](decisions/0026-sqlite-driver.md) | The store uses `bun:sqlite` in an adapter, and migrations are TypeScript modules | Proposed |
-| [0027](decisions/0027-acp-first-adapters.md) | Agent adapters speak ACP first, with stream-json as a fallback per provider | Accepted |
+| [0025](decisions/0025-config-schema-and-format.md) | Config files are YAML, parsed with the `yaml` package and validated with Zod 4 | Accepted |
+| [0026](decisions/0026-sqlite-driver.md) | The store uses `bun:sqlite` in an adapter, and migrations are TypeScript modules | Accepted |
+| [0027](decisions/0027-acp-first-adapters.md) | Agent adapters speak ACP first, with stream-json as a fallback per provider | Accepted, amended by 0034 |
 | [0028](decisions/0028-policy-engine-in-harness.md) | The policy engine runs inside the harness for v1 | Accepted |
 | [0029](decisions/0029-hosted-reviewer-model.md) | The reviewer is a small hosted model, called with an API key | Accepted |
 | [0030](decisions/0030-native-connectors.md) | Connectors are native, starting with GitHub | Accepted |
 | [0031](decisions/0031-unprivileged-agents.md) | Agents run as unprivileged users | Accepted |
 | [0032](decisions/0032-native-app-stack-deferred.md) | The native app stack is chosen in M9 | Accepted |
-| [0033](decisions/0033-docs-site-in-place.md) | The docs site reads the Markdown files where they are, and takes each page title from its first heading | Proposed |
+| [0033](decisions/0033-docs-site-in-place.md) | The docs site reads the Markdown files where they are, and takes each page title from its first heading | Accepted |
+| [0034](decisions/0034-vendor-protocol-per-cli.md) | Each agent CLI is driven over its vendor's own protocol | Accepted |
+| [0035](decisions/0035-codex-login-sandbox-approvals.md) | Codex runs on the owner's ChatGPT login, with its own sandbox in the container and `untrusted` approvals on a pinned version | Accepted |
 | [0036](decisions/0036-logging-library.md) | The server writes its own JSON logs, with no logging library | Proposed |
+| [0037](decisions/0037-protocol-frames-in-zod.md) | Protocol frames are Zod 4 schemas, and the TypeScript types come from them | Accepted |

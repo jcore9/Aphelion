@@ -1,6 +1,6 @@
 # 0033. The docs site reads the Markdown files where they are, and takes each page title from its first heading
 
-- Status: Proposed
+- Status: Accepted (approved by merging #122 on 2026-11-22)
 - Date: 2026-11-21
 - Proposed by: orchestrator, in the M0-16 docs site PR ([#7](https://github.com/jcore9/Aphelion/issues/7))
 - Answers: how M0-16 builds `docs/` into a Starlight site without moving files

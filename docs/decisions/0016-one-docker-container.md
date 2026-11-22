@@ -7,6 +7,7 @@
 - Amended by: [decision 0018](0018-shared-plugin-user.md) (a fourth user, `aphelion-plugins`, and a plugin runner)
 - Amended by: [decision 0017](0017-desktop-remote-only.md) (the desktop app only connects to a server; local mode is dropped)
 - Amends: [0006](0006-shared-agent-user.md) (how agents are started), [0009](0009-electron-desktop-shell.md) (desktop local mode), [0010](0010-agent-folders.md) (per-agent systemd units), [0012](0012-secrets-broker-process.md) (where the broker runs), [0014](0014-filesystem-layout.md) (where the paths live)
+- Amended by: [0035](0035-codex-login-sandbox-approvals.md) (the container's seccomp profile allows user namespaces, so Codex's sandbox runs)
 
 ## Context
 
