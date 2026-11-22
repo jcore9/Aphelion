@@ -4,13 +4,13 @@ Changes reach `dev` and `main` only through approved pull requests. The bot acco
 
 Two kinds of file hold the rules:
 
-- [`.github/rulesets/dev.json`](../.github/rulesets/dev.json) and [`.github/rulesets/main.json`](../.github/rulesets/main.json) are GitHub repository rulesets. The bot can't change repository settings, so the owner applies them. [The rulesets README](../.github/rulesets/README.md) gives the steps.
-- [`.github/CODEOWNERS`](../.github/CODEOWNERS) names the owner, `@jcore9`, as the reviewer for each path.
+- [`.github/rulesets/dev.json`](https://github.com/jcore9/Aphelion/blob/dev/.github/rulesets/dev.json) and [`.github/rulesets/main.json`](https://github.com/jcore9/Aphelion/blob/dev/.github/rulesets/main.json) are GitHub repository rulesets. The bot can't change repository settings, so the owner applies them. [The rulesets README](https://github.com/jcore9/Aphelion/blob/dev/.github/rulesets/README.md) gives the steps.
+- [`.github/CODEOWNERS`](https://github.com/jcore9/Aphelion/blob/dev/.github/CODEOWNERS) names the owner, `@jcore9`, as the reviewer for each path.
 
 ## How a change reaches `dev`
 
 1. The bot pushes a branch for one issue and opens a pull request into `dev`.
-2. CI runs `lint`, `typecheck` and `test` from [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). All three must pass.
+2. CI runs `lint`, `typecheck` and `test` from [`.github/workflows/ci.yml`](https://github.com/jcore9/Aphelion/blob/dev/.github/workflows/ci.yml). All three must pass.
 3. The owner approves the pull request.
 4. The pull request is squash-merged. The squash commit takes the pull request's Conventional Commit title, which feeds the changelog.
 
