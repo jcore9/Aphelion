@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, onTestFinished, test } from "vitest";
-import { maskSecretValue } from "../log";
+import { maskSecretValue, unmaskSecretValue } from "../log";
 import { openStore, type Database } from "../store";
 import { appendAudit, type AuditEntry } from ".";
 
@@ -245,21 +245,64 @@ test("accepts only fixed text as the action, at compile time", () => {
   expect(db.all("SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 3 }]);
 });
 
-test("masks a registered secret value in every text column", () => {
+test("masks a registered secret value in every free-text column, key and number", () => {
   const db = openDatabase();
   maskSecretValue("Audit7rQ-live-value");
+  maskSecretValue("86753090");
   appendAudit(db, {
-    ...approval,
     actor: { kind: "agent", id: "Audit7rQ-live-value" },
+    action: "secret.read Audit7rQ-live-value",
+    outcome: "succeeded",
+    agentId: "a Audit7rQ-live-value",
+    sessionId: "s Audit7rQ-live-value",
     requestId: "r Audit7rQ-live-value",
-    detail: { note: "Audit7rQ-live-value", tool: "git push" },
+    detail: { "Audit7rQ-live-value": 1, pin: 86753090, tool: "git push" },
   });
 
   const [row] = db.all("SELECT * FROM audit_log");
   expect(JSON.stringify(row)).not.toContain("Audit7rQ-live-value");
+  expect(JSON.stringify(row)).not.toContain("86753090");
   expect(row).toMatchObject({
+    actor_kind: "agent",
     actor_id: "[REDACTED]",
+    action: "secret.read [REDACTED]",
+    outcome: "succeeded",
+    agent_id: "a [REDACTED]",
+    session_id: "s [REDACTED]",
     request_id: "r [REDACTED]",
   });
-  expect(row?.["detail"]).toContain('"tool":"git push"');
+  expect(JSON.parse(String(row?.["detail"]))).toEqual({
+    "[REDACTED]": 1,
+    pin: "[REDACTED]",
+    tool: "git push",
+  });
+});
+
+test("keeps the outcome and actor kind even when they are registered as masks", () => {
+  const db = openDatabase();
+  maskSecretValue("succeeded");
+  try {
+    appendAudit(db, { ...approval, outcome: "succeeded" });
+  } finally {
+    unmaskSecretValue("succeeded");
+  }
+
+  expect(db.all("SELECT actor_kind, outcome FROM audit_log")).toEqual([
+    { actor_kind: "device", outcome: "succeeded" },
+  ]);
+});
+
+test("rejects an outcome or actor kind outside its list, and writes no row", () => {
+  const db = openDatabase();
+
+  expect(() =>
+    appendAudit(db, { ...approval, outcome: "maybe" as "allowed" }),
+  ).toThrow(TypeError);
+  expect(() =>
+    appendAudit(db, {
+      ...approval,
+      actor: { kind: "admin" as "server" },
+    }),
+  ).toThrow(TypeError);
+  expect(db.all("SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 0 }]);
 });

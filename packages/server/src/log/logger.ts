@@ -27,7 +27,9 @@ function payloadEntries(payload: unknown): [string, unknown][] {
 
 function messageText(msg: unknown, rules: RedactionRules): string {
   if (typeof msg === "string") return redactText(msg, rules);
-  if (typeof msg === "number" || typeof msg === "boolean") return String(msg);
+  if (typeof msg === "number" || typeof msg === "boolean") {
+    return redactText(String(msg), rules);
+  }
   return UNREADABLE;
 }
 

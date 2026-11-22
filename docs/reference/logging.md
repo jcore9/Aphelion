@@ -7,7 +7,7 @@ The server keeps two records of what it does. The log is for people who debug th
 The owner decided on 2026-11-22 to rely on structure, not on searching free text. There are three layers, and a fourth that is only a backup:
 
 1. **The `Secret` type.** M0-14 adds a wrapper that holds a secret and always hides itself when it is logged. Code that handles a secret keeps it in this wrapper. [Values that redact themselves](#values-that-redact-themselves) explains the hook it uses.
-2. **Fixed messages and named fields.** Every log message is fixed text, written in the code, and the same holds for the audit `action`. The compiler refuses anything else. Data goes only in named fields, and a field whose name says it holds a secret, such as `password` or `token`, is hidden whatever its value is. [Fixed messages](#fixed-messages) explains the rule.
+2. **Fixed messages and named fields.** Every log message is fixed text, written in the code, and the same holds for the audit `action`. The compiler catches ordinary mistakes, such as pasting a value into the message. Data goes only in named fields, and a field whose name says it holds a secret, such as `password` or `token`, is hidden whatever its value is. [Fixed messages](#fixed-messages) explains the rule.
 3. **Masking known secret values.** When the server learns a secret's exact value, it registers it with `maskSecretValue`. From then on, every occurrence of that exact text is replaced with `[REDACTED]`. [Known secret values](#known-secret-values) explains it.
 4. **Pattern scanning, as a backup.** The redactor also searches text for known token formats, such as GitHub tokens and `Bearer` headers. It can't recognize every secret. [What redaction doesn't catch](#what-redaction-doesnt-catch) lists its known gaps, and they are listed rather than chased.
 
@@ -62,7 +62,7 @@ log.info(message); // fails typecheck when message is a string variable
 
 This is why the rule exists. A field has a name, and the redactor hides a field by its name, such as `password` or `token`, whatever is in it. Text built into the message has no name, so only pattern scanning could find a secret in it, and pattern scanning misses secrets it doesn't recognize. Keeping messages fixed means every piece of data reaches the log under a name.
 
-The compiler enforces the rule. The type `FixedText` accepts a string written in the code, a choice between such strings, and a template made only of constants. It rejects a variable of type `string`, a template with a value in it, and a choice in which any branch is one of those. `bun run typecheck` fails on a call that breaks the rule. The tests in `packages/server/src/log/logger.test.ts` and `packages/server/src/audit/audit.test.ts` prove each rejected form with `@ts-expect-error` lines.
+The compiler checks the rule. It is a guard against ordinary mistakes, such as pasting a value into a message, not a guarantee. Code that deliberately works around the types can still pass a variable. That is why exact-value masking and pattern scanning still run on every message. The type `FixedText` accepts a string written in the code, a choice between such strings, and a template made only of constants. It rejects a variable of type `string`, a template with a value in it, and a choice in which any branch is one of those. `bun run typecheck` fails on a call that breaks the rule. The tests in `packages/server/src/log/logger.test.ts` and `packages/server/src/audit/audit.test.ts` prove each rejected form with `@ts-expect-error` lines.
 
 At run time, the message is still redacted as a backup. A string is redacted like any other string. A number or a boolean is written as text. Any other message, such as a `bigint`, bytes or an object, is written as `[Unreadable]`.
 
@@ -116,8 +116,12 @@ So `accessToken`, `ACCESSTOKEN`, `refresh_token`, `x-api-key` and `set-cookie` a
 
 - Values shorter than 8 characters (`minimumMaskLength`) are ignored, so that a short common word is never masked.
 - When registered values contain or overlap each other, the whole run they cover becomes one `[REDACTED]`.
-- The list lives only in the server's memory. It is never written anywhere, and nothing can read it back.
-- M0-14's `Secret` type calls `maskSecretValue` when a secret is resolved.
+- The mask also applies to object keys, and to numbers and `bigint` values through their text form. A number whose text is a registered value is written as `"[REDACTED]"`.
+- When a value is registered, its base64 form, its `encodeURIComponent` form and its JSON-escaped form are registered too, each only when it differs from the value and is 8 or more characters long. This follows the GitHub Actions runner, which registers encoded forms of each mask ([`HostContext.cs`](https://github.com/actions/runner/blob/main/src/Runner.Common/HostContext.cs)).
+- `unmaskSecretValue(value)` removes a value and its encoded forms.
+- The list holds at most 10,000 values (`maskLimit`). Once it is full, `maskSecretValue` refuses new values and returns `"list full"`, and the value is not masked. The caller logs a warning when that happens. The list never drops an old value on its own, because that would quietly stop masking it. `maskSecretValue` returns `"masked"` on success and `"too short"` for a value under 8 characters.
+- The list lives only in the server's memory, from registration until `unmaskSecretValue` or the end of the process. It is never written anywhere, and nothing can read it back.
+- M0-14's `Secret` type will call `maskSecretValue` when a secret is resolved, and `unmaskSecretValue` when it is wiped. That integration arrives with M0-14.
 
 A test registers 1,000 values and checks a 1 MB line in under 1 second. On the development machine on 2026-11-22, it took about 100 ms.
 
@@ -185,7 +189,8 @@ These gaps are known and accepted. The first three layers, not more patterns, ar
 - A secret used as a field name, for example an object keyed by token.
 - A secret in a `name=value` pair whose value is in quotes, as in `password="abc"`.
 - In JSON that doesn't parse, is over 64 KB, or comes after the 16th segment: a field whose value isn't a string, as in `{"password": 1234}`, or whose name is longer than 1,024 characters or contains an escaped quote `\"`.
-- A secret in a message built at run time, if the compiler check was bypassed with a type cast.
+- A secret in a message built at run time, if the code works around the compiler check, unless the value is registered or matches a pattern.
+- A registered value in a different case, a part of a registered value, or the base64 of a registered value inside a longer base64 text, where it starts at a different offset.
 - Two JSON Web Tokens joined by `-`. The second one isn't matched.
 - A secret that has been encoded, such as base64 of a token, or split across two fields.
 - What a `toJSON` or `redactSelf` method returns, beyond the rules above.
@@ -218,7 +223,7 @@ The `audit_log` table in the SQLite store holds one row per audited action. M2's
 | `request_id` | Text or empty | The request that caused it. The same ID can appear in log lines. |
 | `detail` | Text | A JSON object with anything else, after redaction. `{}` when empty. |
 
-`appendAudit` applies the text rules to every text column, and the full redactor to `detail`, before the insert. If the redacted `detail` isn't an object, for example because it couldn't be read, the row is stored with the detail `{"unreadable":true}`, so the write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked by the TypeScript types in `packages/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
+`appendAudit` applies the text rules, including exact-value masks, to the free-text columns `actor_id`, `action`, `agent_id`, `session_id` and `request_id`, and the full redactor to `detail`, before the insert. `actor_kind` and `outcome` aren't masked. They must be one of the values in their lists, `actorKinds` and `outcomes`, so they can't hold a secret, and `appendAudit` throws a `TypeError` and writes no row if one isn't. If the redacted `detail` isn't an object, for example because it couldn't be read, the row is stored with the detail `{"unreadable":true}`, so the write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked in `packages/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
 
 Write a row with `appendAudit`, which returns the new row's `id`:
 

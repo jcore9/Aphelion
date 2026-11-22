@@ -8,11 +8,34 @@ import {
 } from "../log";
 import type { Database } from "../store";
 
+export const actorKinds = [
+  "server",
+  "cli",
+  "device",
+  "agent",
+  "plugin",
+] as const;
+
+export const outcomes = ["allowed", "denied", "succeeded", "failed"] as const;
+
 export type Actor =
   | { readonly kind: "server" | "cli" }
   | { readonly kind: "device" | "agent" | "plugin"; readonly id: string };
 
-export type Outcome = "allowed" | "denied" | "succeeded" | "failed";
+export type Outcome = (typeof outcomes)[number];
+
+function allowed(
+  list: readonly string[],
+  value: string,
+  column: string,
+): string {
+  if (!list.includes(value)) {
+    throw new TypeError(
+      `audit_log ${column} must be one of ${list.join(", ")}.`,
+    );
+  }
+  return value;
+}
 
 export interface AuditEntry<A extends string = string> {
   readonly actor: Actor;
@@ -51,10 +74,10 @@ export function appendAudit<A extends string>(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING id`,
     [
-      text(entry.actor.kind),
+      allowed(actorKinds, entry.actor.kind, "actor_kind"),
       text("id" in entry.actor ? entry.actor.id : undefined),
       text(entry.action),
-      text(entry.outcome),
+      allowed(outcomes, entry.outcome, "outcome"),
       text(entry.agentId),
       text(entry.sessionId),
       text(entry.requestId),

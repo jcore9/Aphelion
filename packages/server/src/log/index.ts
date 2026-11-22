@@ -7,7 +7,13 @@ export {
   type Logger,
   type LoggerOptions,
 } from "./logger";
-export { maskSecretValue, minimumMaskLength } from "./masks";
+export {
+  maskLimit,
+  maskSecretValue,
+  minimumMaskLength,
+  unmaskSecretValue,
+  type MaskResult,
+} from "./masks";
 export {
   CIRCULAR,
   defaultRules,

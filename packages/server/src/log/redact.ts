@@ -186,7 +186,10 @@ function decodedJsonName(name: string): string {
 
 function redactUnstructuredText(text: string, rules: RedactionRules): string {
   return rules.valueRules
-    .reduce((result, rule) => rule.replace(result), text)
+    .reduce(
+      (result, rule) => rule.replace(result),
+      maskKnownValues(text, REDACTED),
+    )
     .replace(
       /([?&])([\w.-]+)=([^&#\s"]*)/g,
       (match, separator: string, name: string) =>
@@ -257,10 +260,9 @@ function redactedJson(
 }
 
 export function redactText(
-  raw: string,
+  text: string,
   rules: RedactionRules = defaultRules,
 ): string {
-  const text = maskKnownValues(raw, REDACTED);
   let result = "";
   let from = 0;
   for (const [start, end] of jsonSegments(text)) {
@@ -296,6 +298,11 @@ function redactAndReport(
     changed = true;
     return text;
   };
+  const masked = (text: string): string => {
+    const result = maskKnownValues(text, REDACTED);
+    if (result !== text) changed = true;
+    return result;
+  };
 
   function field(source: object, key: string | number, depth: number): unknown {
     try {
@@ -329,7 +336,7 @@ function redactAndReport(
         : key === "toJSON"
           ? walk(toJSON, depth)
           : field(value, key, depth);
-      if (result !== undefined) entries.push([key, result]);
+      if (result !== undefined) entries.push([masked(key), result]);
     }
     return Object.fromEntries(entries);
   }
@@ -342,8 +349,11 @@ function redactAndReport(
         return redacted;
       }
       case "bigint":
-        return value.toString();
-      case "number":
+        return masked(value.toString());
+      case "number": {
+        const text = String(value);
+        return masked(text) === text ? value : REDACTED;
+      }
       case "boolean":
         return value;
       case "object":
