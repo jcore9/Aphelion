@@ -9,6 +9,7 @@ export {
 } from "./logger";
 export {
   maskLimit,
+  MaskListFullError,
   maskSecretValue,
   minimumMaskLength,
   unmaskSecretValue,

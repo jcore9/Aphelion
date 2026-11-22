@@ -1,7 +1,16 @@
 export const minimumMaskLength = 8;
 export const maskLimit = 10_000;
 
-export type MaskResult = "masked" | "too short" | "list full";
+export type MaskResult = "masked" | "too short";
+
+export class MaskListFullError extends Error {
+  constructor() {
+    super(
+      `The secret mask list already holds ${String(maskLimit)} values. Unmask a value before masking another.`,
+    );
+    this.name = "MaskListFullError";
+  }
+}
 
 const formsByValue = new Map<string, readonly string[]>();
 const formCounts = new Map<string, number>();
@@ -59,7 +68,7 @@ function removeForm(form: string): void {
 export function maskSecretValue(value: string): MaskResult {
   if (value.length < minimumMaskLength) return "too short";
   if (formsByValue.has(value)) return "masked";
-  if (formsByValue.size >= maskLimit) return "list full";
+  if (formsByValue.size >= maskLimit) throw new MaskListFullError();
   const forms = encodedForms(value);
   formsByValue.set(value, forms);
   forms.forEach(addForm);
