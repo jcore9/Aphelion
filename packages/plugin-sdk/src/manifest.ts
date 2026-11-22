@@ -1,7 +1,7 @@
 import { satisfies, valid, validRange } from "semver";
 import { z } from "zod";
 
-export const pluginApiVersion = "0.1.0";
+export const pluginApiVersion = "0.2.0";
 
 export const pluginManifestFile = "aphelion-plugin.json";
 
@@ -29,7 +29,7 @@ const apiRange = text(256).refine(
   (range) =>
     range.split("||").every((part) => part.trim() !== "") &&
     validRange(range) !== null,
-  { error: "must be an npm semver range, such as ^0.1.0" },
+  { error: "must be an npm semver range, such as ^0.2.0" },
 );
 
 const entry = text(1024).regex(
@@ -68,7 +68,7 @@ const permissions = {
   events: list(dottedName, "Events the plugin receives."),
   secrets: list(
     secretReference,
-    "Secret references the plugin asks the host to resolve.",
+    "Secret references the plugin may ask the host to use for it, such as in an HTTP call. The plugin never receives the values.",
   ),
   network: list(host, "Hostnames the plugin connects to."),
   uiSlots: list(
@@ -80,12 +80,58 @@ const permissions = {
 const contributions = {
   secretSchemes: list(
     scheme,
-    "Secret reference schemes the plugin resolves as a secret backend.",
+    "Secret reference schemes the plugin resolves as a secret backend. The values it returns go only to the secrets broker.",
   ),
 };
 
 export type PermissionKind = keyof typeof permissions;
 export type ContributionKind = keyof typeof contributions;
+
+type PluginSide = "server" | "client";
+
+const pluginSides: readonly PluginSide[] = ["server", "client"];
+
+type Sides =
+  readonly ["server"] | readonly ["client"] | readonly ["server", "client"];
+
+const sidesFor = {
+  permissions: {
+    events: ["server", "client"],
+    secrets: ["server"],
+    network: ["server"],
+    uiSlots: ["client"],
+  },
+  contributes: {
+    secretSchemes: ["server"],
+  },
+} as const satisfies {
+  permissions: Record<PermissionKind, Sides>;
+  contributes: Record<ContributionKind, Sides>;
+};
+
+type OneSideRule = {
+  group: keyof typeof sidesFor;
+  kind: string;
+  side: PluginSide;
+};
+
+const oneSideRules = Object.entries(sidesFor).flatMap(([group, kinds]) =>
+  Object.entries(kinds).flatMap(([kind, sides]: [string, Sides]) =>
+    sides.length === 1
+      ? [{ group: group as OneSideRule["group"], kind, side: sides[0] }]
+      : [],
+  ),
+);
+
+const part = (description: string) =>
+  z
+    .strictObject({
+      entry: entry.describe(
+        "The file the host loads, relative to the manifest.",
+      ),
+    })
+    .optional()
+    .describe(description);
 
 export const pluginManifestSchema = z
   .strictObject({
@@ -99,8 +145,11 @@ export const pluginManifestSchema = z
     api: apiRange.describe(
       "The plugin-API versions the plugin supports, as an npm semver range.",
     ),
-    entry: entry.describe(
-      "The module the host starts, relative to the manifest.",
+    server: part(
+      "The part the plugin runner starts on the server, in its own process.",
+    ),
+    client: part(
+      "The part every client loads from the server and runs in a sandbox.",
     ),
     permissions: z
       .strictObject(permissions)
@@ -111,12 +160,75 @@ export const pluginManifestSchema = z
       .prefault({})
       .describe("What the plugin adds to Aphelion."),
   })
+  .check((context) => {
+    const manifest = context.value;
+    const present = pluginSides.filter((side) => manifest[side] !== undefined);
+    if (present.length === 0) {
+      context.issues.push({
+        code: "custom",
+        path: [],
+        message: "must have a server part, a client part, or both",
+        input: manifest,
+      });
+      return;
+    }
+    for (const { group, kind, side } of oneSideRules) {
+      const lists: Record<string, string[]> = manifest[group];
+      if (lists[kind]?.length && !present.includes(side)) {
+        context.issues.push({
+          code: "custom",
+          path: [group, kind],
+          message: `needs a ${side} part`,
+          input: lists[kind],
+        });
+      }
+    }
+  })
   .meta({
     title: pluginManifestFile,
     description: "An Aphelion plugin's manifest.",
+    anyOf: pluginSides.map((side) => ({ required: [side] })),
+    allOf: oneSideRules.map(({ group, kind, side }) => ({
+      if: {
+        properties: {
+          [group]: {
+            properties: { [kind]: { minItems: 1 } },
+            required: [kind],
+          },
+        },
+        required: [group],
+      },
+      then: { required: [side] },
+    })),
   });
 
-export type PluginManifest = z.output<typeof pluginManifestSchema>;
+type PluginPart = { readonly entry: string };
+
+type ListsFor<
+  Kinds extends Record<string, Sides>,
+  Present extends PluginSide,
+> = {
+  readonly [Kind in keyof Kinds]: [
+    Extract<Kinds[Kind][number], Present>,
+  ] extends [never]
+    ? readonly never[]
+    : readonly string[];
+};
+
+type ManifestWith<Present extends PluginSide> = Readonly<
+  Omit<
+    z.output<typeof pluginManifestSchema>,
+    PluginSide | "permissions" | "contributes"
+  > & { [Side in Present]: PluginPart } & {
+    [Side in Exclude<PluginSide, Present>]?: never;
+  } & {
+    permissions: ListsFor<(typeof sidesFor)["permissions"], Present>;
+    contributes: ListsFor<(typeof sidesFor)["contributes"], Present>;
+  }
+>;
+
+export type PluginManifest =
+  ManifestWith<"server"> | ManifestWith<"client"> | ManifestWith<PluginSide>;
 
 export type ManifestIssue = { field?: string; message: string };
 
@@ -180,7 +292,7 @@ export function parsePluginManifest(data: unknown): ManifestResult {
   if (!parsed.success) {
     return { ok: false, issues: schemaIssues(data, parsed.error) };
   }
-  const manifest = parsed.data;
+  const manifest = parsed.data as PluginManifest;
   if (!satisfies(pluginApiVersion, manifest.api)) {
     return {
       ok: false,

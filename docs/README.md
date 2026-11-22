@@ -83,3 +83,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0038](decisions/0038-plugin-manifest-and-api-range.md) | A plugin's manifest is `aphelion-plugin.json`, checked with Zod 4, and its API range is checked with the `semver` package | Proposed |
 | [0040](decisions/0040-protocol-spec-generator.md) | A test renders the protocol spec and the frame JSON Schemas from the Zod schemas, and fails when the committed files are stale | Proposed |
 | [0041](decisions/0041-effect-in-server-and-cli.md) | The server and the CLI use the Effect library, and nothing else does | Accepted |
+| [0042](decisions/0042-plugin-server-and-client-parts.md) | A plugin has a server part, a client part or both, and its client part is installed on the server, served to every client and always sandboxed | Accepted |
