@@ -35,7 +35,7 @@ Your plugin gets a fresh environment. Nothing from the server's environment is p
 | `APHELION_PLUGIN_ID` | Your plugin's `id` |
 | `APHELION_PLUGIN_DATA` | Your plugin's data folder |
 
-Your plugin gets no network proxy yet. See [Permissions](#permissions).
+Your server part asks the host to make network requests over its JSON-RPC channel. See [Permissions](#permissions).
 
 Your data folder is `/var/lib/aphelion-plugins/<id>/`. The runner creates it with mode `0700`. It is the one place your plugin should write.
 
@@ -68,9 +68,10 @@ The host has a similar limit the other way. If more than about 16 MiB, or more t
 | Method | Params | Result |
 | --- | --- | --- |
 | `events.subscribe` | `{ "event": "<name>" }` | `{}`. The error `-32001 Not granted` if the event isn't in your manifest's `permissions.events` or the owner hasn't granted it. |
-| Any method that starts with `secrets.` | any | Always the error `-32002 The host doesn't offer secret operations yet`. |
+| `network.get` | `{ "url": "https://api.example.com/path" }` | `{ "status": 200, "body": "..." }`. The destination must be in `permissions.network` and granted. |
+| `secrets.use` | `{ "operation": "<name>", "reference": "<secret reference>" }` | `{}` after the host completes the operation. The host checks the grant for the secret reference and the destination it configured for the operation. |
 
-Subscriptions last until the process exits. After a restart, subscribe again.
+Subscriptions last until the process exits. After a restart, subscribe again. Network and secret operations require a running server part. Each plugin can have one such operation in progress at a time.
 
 ### Errors
 
@@ -81,11 +82,13 @@ Subscriptions last until the process exits. After a restart, subscribe again.
 | `-32601` | `Method not found` | The host has no such method. |
 | `-32602` | `Invalid params` | The params don't match the method. |
 | `-32001` | `Not granted` | Your plugin may not do this. |
-| `-32002` | `The host doesn't offer secret operations yet` | Your plugin asked for a secret operation. |
+| `-32002` | `The host doesn't offer secret operations yet` | The host has no secret operations configured. |
+| `-32003` | `Operation failed` | The operation failed. The response omits internal error details. |
+| `-32004` | `Operation in progress` | This plugin already has a network or secret operation in progress. |
 
 ### Secrets
 
-Your plugin never receives a secret's value. Your plugin will ask the host to use a secret for it, for example to sign an HTTP call, and the host will do the work. That operations API doesn't exist yet. Until it does, the host refuses every `secrets.` request.
+Your plugin asks for a named operation with `secrets.use`. The host chooses the destination and keeps both the secret value and the upstream response. The current server registers no operations. The secrets broker belongs to [#104](https://github.com/jcore9/Aphelion/issues/104).
 
 The host also refuses to send any message that holds a [`Secret`](secrets.md), because a `Secret` throws when it is turned into JSON. The event is then sent to no plugin.
 
@@ -131,9 +134,17 @@ A plugin gets an event only if both are true:
 - Its manifest asks for it.
 - The owner granted it.
 
-Grants come from issue [#101](https://github.com/jcore9/Aphelion/issues/101), which isn't built yet. Until then the host grants nothing. Plugins start and run, but they get no events.
+Put the unpacked plugin in its final, read-only location. Run the install command to preview its permission requests.
 
-Plugins get no network proxy, even for hosts in `permissions.network`. One shared proxy address would show any password in it to every plugin, and the proxy can't yet tell one plugin from another. Issue [#101](https://github.com/jcore9/Aphelion/issues/101) brings network access back, with a way for the proxy to know which plugin is asking. This is the safe default until the owner decides.
+```sh
+aphelion plugin install /path/to/plugin
+```
+
+If you accept the listed permissions, repeat the command with the displayed `--approve` argument. This approves the complete list for that folder and manifest. Installing again replaces the previous grant list for that plugin ID. The approval applies to the displayed folder and manifest. The host reads the manifest again on every launch, including automatic restarts. A changed manifest needs a new approval. Use the same `--state-dir` as the server if you changed the default.
+
+The install command records grants in SQLite for an existing folder. The container startup that runs plugins in the deployed server is tracked in [#14](https://github.com/jcore9/Aphelion/issues/14).
+
+The host identifies `network.get` requests by the plugin's own channel. The request takes an HTTPS URL using the default port and an exact granted hostname. The host connects to a public IPv4 address, skips redirects, and limits the response to 64 KiB and the request to five seconds. The container's controls for direct network access are a separate boundary.
 
 ### Isolation between plugins
 

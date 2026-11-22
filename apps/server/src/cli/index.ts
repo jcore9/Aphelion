@@ -8,6 +8,7 @@ import { CliFailure, failed, usage } from "./failure";
 import { headless } from "./headless";
 import { helpText } from "./help";
 import { CliIo } from "./io";
+import { pluginInstall } from "./plugin";
 
 export { CliIo, processIo } from "./io";
 export { CliFailure } from "./failure";
@@ -26,6 +27,8 @@ const run = (command: Command) =>
         return yield* configCheck(command);
       case "device add":
         return yield* deviceAdd(command);
+      case "plugin install":
+        return yield* pluginInstall(command);
       case "device list":
         return yield* deviceList(command);
       case "device revoke":

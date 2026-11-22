@@ -1,18 +1,11 @@
-import { readFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
-import {
-  parsePluginManifest,
-  pluginApiVersion,
-  pluginManifestFile,
-  type ManifestIssue,
-  type PluginManifest,
-} from "@aphelion/plugin-sdk";
+import { pluginApiVersion, type PluginManifest } from "@aphelion/plugin-sdk";
 import {
   Cause,
   Clock,
   Context,
   Data,
   Effect,
+  Fiber,
   Layer,
   Queue,
   Scope,
@@ -39,6 +32,14 @@ import {
   type RestartPolicy,
 } from "./lifecycle";
 import type { Link } from "./link";
+import { readManifest, type PluginRefused } from "./manifest-file";
+import { declaresPermission, PluginGrants, type Permission } from "./grants";
+import {
+  networkRequest,
+  requestParams,
+  requestUrl,
+  type NetworkRequest,
+} from "./network";
 import {
   maxPendingInputBytes,
   maxPluginLineBytes,
@@ -46,34 +47,10 @@ import {
   type RunnerRequest,
 } from "./runner-protocol";
 
-export interface Permission {
-  readonly kind: "event";
-  readonly name: string;
-}
-
-export class PluginGrants extends Context.Service<
-  PluginGrants,
-  {
-    readonly allows: (
-      plugin: string,
-      permission: Permission,
-    ) => Effect.Effect<boolean>;
-  }
->()("aphelion/plugins/PluginGrants") {
-  static readonly refuseAll = Layer.succeed(PluginGrants, {
-    allows: () => Effect.succeed(false),
-  });
-}
-
 export class RunnerLink extends Context.Service<
   RunnerLink,
   Link<RunnerReply, RunnerRequest>
 >()("aphelion/plugins/RunnerLink") {}
-
-export class PluginRefused extends Data.TaggedError("PluginRefused")<{
-  readonly folder: string;
-  readonly issues: readonly ManifestIssue[];
-}> {}
 
 export class MessageNotSent extends Data.TaggedError("MessageNotSent")<{
   readonly reason: "not serializable" | "too long";
@@ -105,6 +82,14 @@ export class PluginHost extends Context.Service<
 export interface HostOptions {
   readonly logger: Logger;
   readonly policy?: RestartPolicy;
+  readonly network?: NetworkRequest;
+  readonly secretOperations?: ReadonlyMap<string, SecretOperation>;
+}
+
+interface SecretOperation {
+  readonly reference: string;
+  readonly host: string;
+  readonly run: (plugin: string) => Effect.Effect<void, unknown>;
 }
 
 type ServerManifest = Extract<PluginManifest, { server: object }>;
@@ -117,6 +102,7 @@ interface Slot {
   readonly id: string;
   readonly mailbox: Queue.Queue<SlotInput>;
   folder: string;
+  digest: string;
   manifest: ServerManifest;
   state: LifecycleState;
   subscriptions: Set<string>;
@@ -124,10 +110,17 @@ interface Slot {
   initializeId: RpcId | undefined;
   pending: { bytes: number; messages: number };
   floodedRun: number | undefined;
+  blockedRun: number | undefined;
+  operation: { fiber?: Fiber.Fiber<void> } | undefined;
 }
 
 const maxPendingInputMessages = 4096;
 const pendingCost = (line: string) => 2 * line.length + 256;
+
+const secretParams = z.strictObject({
+  operation: z.string().max(128),
+  reference: z.string().max(1024),
+});
 
 const subscribeParams = z.strictObject({ event: z.string().max(128) });
 
@@ -143,28 +136,6 @@ function encode(message: unknown): Effect.Effect<string, MessageNotSent> {
   );
 }
 
-const readManifest = (folder: string) =>
-  Effect.gen(function* () {
-    const refuse = (message: string) =>
-      new PluginRefused({ folder, issues: [{ message }] });
-    if (!isAbsolute(folder)) {
-      return yield* refuse("the plugin folder must be an absolute path");
-    }
-    const text = yield* Effect.tryPromise({
-      try: () => readFile(join(folder, pluginManifestFile), "utf8"),
-      catch: () => refuse(`can't read ${pluginManifestFile}`),
-    });
-    const data = yield* Effect.try({
-      try: (): unknown => JSON.parse(text),
-      catch: () => refuse(`${pluginManifestFile} isn't valid JSON`),
-    });
-    const parsed = parsePluginManifest(data);
-    if (!parsed.ok) {
-      return yield* new PluginRefused({ folder, issues: parsed.issues });
-    }
-    return parsed.manifest;
-  });
-
 export const pluginHostLayer = (options: HostOptions) =>
   Layer.effect(
     PluginHost,
@@ -177,54 +148,164 @@ export const pluginHostLayer = (options: HostOptions) =>
       const slots = new Map<string, Slot>();
 
       const mayUse = (slot: Slot, permission: Permission) =>
-        slot.manifest.permissions.events.includes(permission.name)
-          ? grants.allows(slot.id, permission)
+        declaresPermission(slot.manifest, permission)
+          ? grants.allows(slot.id, permission, slot.folder, slot.digest)
           : Effect.succeed(false);
 
       const sendLine = (slot: Slot, run: number, line: string) =>
         link.send({ type: "input", plugin: slot.id, run, line });
 
-      const send = (slot: Slot, message: unknown) =>
+      const send = (slot: Slot, message: unknown, run = slot.state.run) =>
         encode(message).pipe(
-          Effect.flatMap((line) => sendLine(slot, slot.state.run, line)),
+          Effect.flatMap((line) => sendLine(slot, run, line)),
           Effect.orDie,
         );
 
-      const methods = new Map<
+      const requireGrant = (slot: Slot, permission: Permission) =>
+        mayUse(slot, permission).pipe(
+          Effect.filterOrFail(
+            (allowed) => allowed,
+            () => rpcErrors.notGranted,
+          ),
+        );
+
+      const mayOperate = (slot: Slot, run: number) =>
+        slot.state.state === "running" &&
+        slot.state.run === run &&
+        slot.blockedRun !== run;
+
+      const operations = new Map<
         string,
-        (slot: Slot, params: unknown) => Effect.Effect<unknown, RpcError>
+        (
+          slot: Slot,
+          params: unknown,
+          run: number,
+        ) => Effect.Effect<unknown, RpcError>
       >([
         [
-          "events.subscribe",
-          (slot, params) =>
+          "network.get",
+          (slot, params, run) =>
             Effect.gen(function* () {
-              const parsed = subscribeParams.safeParse(params);
+              const parsed = requestParams.safeParse(params);
               if (!parsed.success)
                 return yield* Effect.fail(rpcErrors.invalidParams);
-              const { event } = parsed.data;
-              if (!(yield* mayUse(slot, { kind: "event", name: event }))) {
+              const url = requestUrl(parsed.data.url);
+              if (url === undefined)
+                return yield* Effect.fail(rpcErrors.invalidParams);
+              yield* requireGrant(slot, {
+                kind: "network",
+                name: url.hostname,
+              });
+              if (!mayOperate(slot, run))
                 return yield* Effect.fail(rpcErrors.notGranted);
-              }
-              slot.subscriptions.add(event);
+              return yield* (options.network ?? networkRequest)(url);
+            }),
+        ],
+        [
+          "secrets.use",
+          (slot, params, run) =>
+            Effect.gen(function* () {
+              const parsed = secretParams.safeParse(params);
+              if (!parsed.success)
+                return yield* Effect.fail(rpcErrors.invalidParams);
+              const { reference, operation } = parsed.data;
+              yield* requireGrant(slot, { kind: "secrets", name: reference });
+              if (!options.secretOperations)
+                return yield* Effect.fail(rpcErrors.noSecretOperations);
+              const action = options.secretOperations.get(operation);
+              if (action?.reference !== reference)
+                return yield* Effect.fail(rpcErrors.notGranted);
+              yield* requireGrant(slot, { kind: "network", name: action.host });
+              if (!mayOperate(slot, run))
+                return yield* Effect.fail(rpcErrors.notGranted);
+              yield* action.run(slot.id).pipe(
+                Effect.asVoid,
+                Effect.timeout("5 seconds"),
+                Effect.catchCause(() => Effect.fail(rpcErrors.operationFailed)),
+              );
               return {};
             }),
         ],
       ]);
 
-      const answer = (slot: Slot, method: string, params: unknown) => {
-        if (method.startsWith("secrets.")) {
-          return Effect.fail(rpcErrors.noSecretOperations);
-        }
-        const handler = methods.get(method);
-        return handler
-          ? handler(slot, params)
-          : Effect.fail(rpcErrors.methodNotFound);
-      };
+      const subscribe = (slot: Slot, params: unknown) =>
+        Effect.gen(function* () {
+          const parsed = subscribeParams.safeParse(params);
+          if (!parsed.success)
+            return yield* Effect.fail(rpcErrors.invalidParams);
+          const { event } = parsed.data;
+          yield* requireGrant(slot, { kind: "events", name: event });
+          slot.subscriptions.add(event);
+          return {};
+        });
+
+      const reply = (
+        slot: Slot,
+        id: RpcId,
+        answer: Effect.Effect<unknown, RpcError>,
+      ) =>
+        Effect.gen(function* () {
+          const outcome = yield* Effect.result(answer);
+          yield* send(
+            slot,
+            outcome._tag === "Success"
+              ? success(id, outcome.success)
+              : failure(id, outcome.failure),
+          );
+        });
+
+      const startOperation = (
+        slot: Slot,
+        id: RpcId,
+        run: number,
+        answer: Effect.Effect<unknown, RpcError>,
+      ) =>
+        Effect.gen(function* () {
+          if (!mayOperate(slot, run))
+            return yield* send(slot, failure(id, rpcErrors.notGranted));
+          if (slot.operation)
+            return yield* send(slot, failure(id, rpcErrors.busy));
+          const operation: NonNullable<Slot["operation"]> = {};
+          slot.operation = operation;
+          const release = Effect.sync(() => {
+            if (slot.operation === operation) slot.operation = undefined;
+          });
+          operation.fiber = yield* Effect.gen(function* () {
+            if (!mayOperate(slot, run)) return;
+            const outcome = yield* Effect.result(answer).pipe(
+              Effect.ensuring(release),
+            );
+            if (!mayOperate(slot, run)) return;
+            yield* send(
+              slot,
+              outcome._tag === "Success"
+                ? success(id, outcome.success)
+                : failure(id, outcome.failure),
+              run,
+            );
+          }).pipe(Effect.ensuring(release), Effect.forkIn(scope));
+        });
 
       const run = (slot: Slot, command: LifecycleCommand) =>
         Effect.gen(function* () {
           switch (command.type) {
-            case "spawn":
+            case "spawn": {
+              const loaded = yield* Effect.result(readManifest(slot.folder));
+              if (
+                loaded._tag === "Failure" ||
+                loaded.success.folder !== slot.folder ||
+                loaded.success.manifest.id !== slot.id ||
+                !loaded.success.manifest.server
+              ) {
+                yield* Queue.offer(slot.mailbox, {
+                  type: "spawn-failed",
+                  run: command.run,
+                });
+                return;
+              }
+              const { manifest, digest } = loaded.success;
+              slot.manifest = manifest;
+              slot.digest = digest;
               slot.subscriptions = new Set();
               slot.initializeId = undefined;
               return yield* link.send({
@@ -232,8 +313,9 @@ export const pluginHostLayer = (options: HostOptions) =>
                 plugin: slot.id,
                 run: command.run,
                 folder: slot.folder,
-                entry: slot.manifest.server.entry,
+                entry: manifest.server.entry,
               });
+            }
             case "initialize": {
               const id = slot.nextRequestId++;
               slot.initializeId = id;
@@ -272,6 +354,15 @@ export const pluginHostLayer = (options: HostOptions) =>
           const before = slot.state;
           const next = step(before, event, policy);
           slot.state = next.state;
+          if (
+            before.state === "running" &&
+            next.state.state !== "running" &&
+            slot.operation?.fiber
+          ) {
+            yield* Fiber.interrupt(slot.operation.fiber).pipe(
+              Effect.forkIn(scope),
+            );
+          }
           if (next.state.state !== before.state) {
             logger.info("plugin state changed", {
               plugin: slot.id,
@@ -301,14 +392,20 @@ export const pluginHostLayer = (options: HostOptions) =>
               });
               return yield* send(slot, failure(null, message.error));
             case "request": {
-              const outcome = yield* Effect.result(
-                answer(slot, message.method, message.params),
-              );
-              return yield* send(
+              const operation = operations.get(message.method);
+              if (operation)
+                return yield* startOperation(
+                  slot,
+                  message.id,
+                  run,
+                  operation(slot, message.params, run),
+                );
+              return yield* reply(
                 slot,
-                outcome._tag === "Success"
-                  ? success(message.id, outcome.success)
-                  : failure(message.id, outcome.failure),
+                message.id,
+                message.method === "events.subscribe"
+                  ? subscribe(slot, message.params)
+                  : Effect.fail(rpcErrors.methodNotFound),
               );
             }
             case "result":
@@ -410,7 +507,15 @@ export const pluginHostLayer = (options: HostOptions) =>
           Effect.gen(function* () {
             const slot = slots.get(reply.plugin);
             const input = yield* toSlotInput(reply);
-            if (slot && input) yield* deliver(slot, input);
+            if (slot && input) {
+              if (
+                (reply.type === "exited" || reply.type === "stopped") &&
+                reply.run === slot.state.run
+              ) {
+                slot.blockedRun = reply.run;
+              }
+              yield* deliver(slot, input);
+            }
           }),
         ),
         Effect.forever,
@@ -431,9 +536,9 @@ export const pluginHostLayer = (options: HostOptions) =>
         ),
       );
 
-      const start = (folder: string) =>
+      const start = (path: string) =>
         Effect.gen(function* () {
-          const manifest = yield* readManifest(folder);
+          const { manifest, digest, folder } = yield* readManifest(path);
           if (manifest.server === undefined) {
             return { kind: "client only", id: manifest.id } as const;
           }
@@ -443,6 +548,7 @@ export const pluginHostLayer = (options: HostOptions) =>
               id: manifest.id,
               mailbox: yield* Queue.unbounded<SlotInput>(),
               folder,
+              digest,
               manifest,
               state: installed,
               subscriptions: new Set(),
@@ -450,6 +556,8 @@ export const pluginHostLayer = (options: HostOptions) =>
               initializeId: undefined,
               pending: { bytes: 0, messages: 0 },
               floodedRun: undefined,
+              blockedRun: undefined,
+              operation: undefined,
             };
             slots.set(created.id, created);
             yield* Queue.take(created.mailbox).pipe(
@@ -463,6 +571,7 @@ export const pluginHostLayer = (options: HostOptions) =>
             slot.state.state === "stopped"
           ) {
             slot.folder = folder;
+            slot.digest = digest;
             slot.manifest = manifest;
           }
           yield* Queue.offer(slot.mailbox, { type: "start" });
@@ -482,7 +591,7 @@ export const pluginHostLayer = (options: HostOptions) =>
             const { run } = slot.state;
             if (
               receives(slot, run) &&
-              (yield* mayUse(slot, { kind: "event", name: event.name })) &&
+              (yield* mayUse(slot, { kind: "events", name: event.name })) &&
               receives(slot, run)
             ) {
               yield* sendLine(slot, run, line);
@@ -495,9 +604,11 @@ export const pluginHostLayer = (options: HostOptions) =>
         stop: (id) =>
           Effect.suspend(() => {
             const slot = slots.get(id);
-            return slot
-              ? Queue.offer(slot.mailbox, { type: "stop" }).pipe(Effect.asVoid)
-              : Effect.void;
+            if (!slot) return Effect.void;
+            slot.blockedRun = slot.state.run;
+            return Queue.offer(slot.mailbox, { type: "stop" }).pipe(
+              Effect.asVoid,
+            );
           }),
         publish,
         status: (id) => Effect.sync(() => slots.get(id)?.state),

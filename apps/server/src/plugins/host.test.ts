@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pluginApiVersion } from "@aphelion/plugin-sdk";
@@ -7,13 +7,21 @@ import { Cause, Deferred, Effect, Fiber, Layer, Queue, Stream } from "effect";
 import { afterAll, describe } from "vitest";
 import { createLogger } from "../log";
 import { Secret } from "../secrets";
+import { openStore } from "../store";
+import { readManifest } from "./manifest-file";
 import {
-  PluginGrants,
   PluginHost,
+  type HostOptions,
   pluginHostLayer,
   RunnerLink,
-  type Permission,
 } from "./host";
+import {
+  PluginGrants,
+  recordGrants,
+  sqlitePluginGrants,
+  type Permission,
+} from "./grants";
+import { rpcErrors } from "./json-rpc";
 import type { LifecycleState, RestartPolicy } from "./lifecycle";
 import { memoryLinkPair, type Framing } from "./link";
 import {
@@ -146,6 +154,9 @@ const fastPolicy: RestartPolicy = {
 };
 
 interface HarnessOptions {
+  readonly store?: ReturnType<typeof openStore>;
+  readonly network?: HostOptions["network"];
+  readonly secretOperations?: HostOptions["secretOperations"];
   readonly grants?: (
     plugin: string,
     permission: Permission,
@@ -190,10 +201,16 @@ function harness(
             : allowed;
         },
       })
-    : PluginGrants.refuseAll;
+    : options.store
+      ? sqlitePluginGrants(options.store)
+      : PluginGrants.refuseAll;
   const layer = pluginHostLayer({
     logger,
     policy: options.policy ?? fastPolicy,
+    ...(options.network && { network: options.network }),
+    ...(options.secretOperations && {
+      secretOperations: options.secretOperations,
+    }),
   }).pipe(Layer.provide(runnerLink), Layer.provide(grantsLayer));
   return { layer, record: fake.record, logs };
 }
@@ -587,7 +604,280 @@ describe("the plugin host", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.live("never hands a plugin a secret value", () => {
+  it.live(
+    "checks SQLite grants per plugin before proxying a request or using a secret",
+    () =>
+      Effect.gen(function* () {
+        const folder = yield* serverPlugin("keyring", {
+          network: ["api.example.com", "other.example.com"],
+          events: ["bot.status", "chat.message"],
+          secrets: ["op://vault/item/field"],
+        });
+        const sibling = yield* serverPlugin("sibling", {
+          network: ["api.example.com"],
+        });
+        const installation = yield* readManifest(folder);
+        yield* Effect.acquireUseRelease(
+          Effect.sync(() => openStore(join(folder, "grants.db"))),
+          (db) =>
+            Effect.sync(() => {
+              recordGrants(db, { ...installation, folder }, [
+                { kind: "network", name: "api.example.com" },
+                { kind: "events", name: "bot.status" },
+                { kind: "secrets", name: "op://vault/item/field" },
+              ]);
+            }),
+          (db) =>
+            Effect.sync(() => {
+              db.close();
+            }),
+        );
+        const db = yield* Effect.acquireRelease(
+          Effect.sync(() => openStore(join(folder, "grants.db"))),
+          (db) =>
+            Effect.sync(() => {
+              db.close();
+            }),
+        );
+        const replies: Message[] = [];
+        const siblingReplies: Message[] = [];
+        const urls: string[] = [];
+        const events: Message[] = [];
+        const operations: string[] = [];
+        const url = "https://api.example.com/item";
+        const reference = "op://vault/item/field";
+        const { layer } = harness(
+          {
+            keyring: (io) =>
+              Effect.gen(function* () {
+                yield* handshake(io);
+                for (const event of ["bot.status", "chat.message"]) {
+                  replies.push(yield* io.call("events.subscribe", { event }));
+                }
+                replies.push(yield* io.call("network.get", { url }));
+                replies.push(
+                  yield* io.call("network.get", {
+                    url: "https://other.example.com/item",
+                  }),
+                );
+                replies.push(
+                  yield* io.call("secrets.use", {
+                    reference,
+                    operation: "refresh",
+                  }),
+                );
+                replies.push(
+                  yield* io.call("secrets.use", {
+                    reference: "op://vault/other/field",
+                    operation: "refresh",
+                  }),
+                );
+                replies.push(yield* io.call("secrets.get", { reference }));
+                for (;;) {
+                  const message = yield* io.read;
+                  if (message["method"] === "event") events.push(message);
+                }
+              }),
+            sibling: (io) =>
+              Effect.gen(function* () {
+                yield* handshake(io);
+                siblingReplies.push(yield* io.call("network.get", { url }));
+                return yield* serveUntilShutdown(io);
+              }),
+          },
+          {
+            store: db,
+            network: (target) =>
+              Effect.sync(() => {
+                urls.push(target.href);
+                return { status: 200, body: "ok" };
+              }),
+            secretOperations: new Map([
+              [
+                "refresh",
+                {
+                  reference,
+                  host: "api.example.com",
+                  run: (plugin) =>
+                    Effect.sync(() => {
+                      operations.push(plugin);
+                    }),
+                },
+              ],
+            ]),
+          },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          yield* host.start(folder);
+          yield* host.start(sibling);
+          yield* waitUntil(
+            () => replies.length === 7 && siblingReplies.length === 1,
+          );
+          expect(
+            replies.map((reply) => reply["result"] ?? reply["error"]),
+          ).toEqual([
+            {},
+            rpcErrors.notGranted,
+            { status: 200, body: "ok" },
+            rpcErrors.notGranted,
+            {},
+            rpcErrors.notGranted,
+            rpcErrors.methodNotFound,
+          ]);
+          expect(siblingReplies[0]?.["error"]).toEqual(rpcErrors.notGranted);
+          expect(urls).toEqual([url]);
+          expect(operations).toEqual(["keyring"]);
+          yield* host.publish({ name: "chat.message", data: {} });
+          yield* host.publish({ name: "bot.status", data: {} });
+          yield* waitUntil(() => events.length === 1);
+          expect(events[0]?.["params"]).toEqual({
+            name: "bot.status",
+            data: {},
+          });
+          recordGrants(db, { ...installation, folder }, []);
+          yield* host.publish({ name: "bot.status", data: {} });
+          yield* Effect.sleep("20 millis");
+          expect(events).toHaveLength(1);
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "cancels an in-flight operation on stop and never starts queued work",
+    () => {
+      const calls: string[] = [];
+      const replies: Message[] = [];
+      const cleanupStarted = Deferred.makeUnsafe<undefined>();
+      const releaseCleanup = Deferred.makeUnsafe<undefined>();
+      let canceled = false;
+      const { layer } = harness(
+        {
+          watcher: (io) =>
+            Effect.gen(function* () {
+              yield* io.write({
+                jsonrpc: "2.0",
+                id: 42,
+                method: "network.get",
+                params: {
+                  url: "https://api.example.com/before-initialize",
+                },
+              });
+              yield* handshake(io);
+              replies.push(yield* io.read);
+              yield* io.write({
+                jsonrpc: "2.0",
+                id: 43,
+                method: "network.get",
+                params: {
+                  url: "https://api.example.com/first",
+                },
+              });
+              yield* waitUntil(() => calls.length === 1);
+              replies.push(
+                yield* io.call("network.get", {
+                  url: "https://api.example.com/second",
+                }),
+              );
+              return yield* serveUntilShutdown(io);
+            }),
+        },
+        {
+          grants: allowAll,
+          network: (url) =>
+            Effect.sync(() => {
+              calls.push(url.pathname);
+            }).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(
+                Deferred.succeed(cleanupStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseCleanup)),
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      canceled = true;
+                    }),
+                  ),
+                ),
+              ),
+            ),
+        },
+      );
+
+      return Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.start(
+          yield* serverPlugin("watcher", { network: ["api.example.com"] }),
+        );
+        yield* waitUntil(() => replies.length === 2);
+        expect(replies.map((reply) => reply["error"])).toEqual([
+          rpcErrors.notGranted,
+          rpcErrors.busy,
+        ]);
+        yield* host.stop("watcher");
+        yield* Deferred.await(cleanupStarted);
+        yield* waitFor("watcher", { state: "stopped", reason: "requested" });
+        expect(calls).toEqual(["/first"]);
+        expect(canceled).toBe(false);
+        yield* Deferred.succeed(releaseCleanup, undefined);
+        yield* waitUntil(() => canceled);
+      }).pipe(
+        Effect.ensuring(Deferred.succeed(releaseCleanup, undefined)),
+        Effect.provide(layer),
+      );
+    },
+  );
+
+  it.live(
+    "does not reuse the previous manifest's grants after an automatic restart",
+    () =>
+      Effect.gen(function* () {
+        const folder = yield* serverPlugin("watcher", {
+          events: ["bot.status"],
+        });
+        const file = join(folder, "aphelion-plugin.json");
+        const original = yield* Effect.promise(() => readFile(file, "utf8"));
+        const installation = yield* readManifest(folder);
+        const db = yield* Effect.acquireRelease(
+          Effect.sync(() => openStore(join(folder, "grants.db"))),
+          (store) =>
+            Effect.sync(() => {
+              store.close();
+            }),
+        );
+        recordGrants(db, installation, [
+          { kind: "events", name: "bot.status" },
+        ]);
+        const replies: Message[] = [];
+        const { layer } = harness(
+          {
+            watcher: (io) =>
+              Effect.gen(function* () {
+                yield* handshake(io);
+                replies.push(
+                  yield* io.call("events.subscribe", { event: "bot.status" }),
+                );
+                if (replies.length === 1) {
+                  yield* Effect.promise(() =>
+                    writeFile(file, original.replace("1.0.0", "1.0.1")),
+                  );
+                  return 1;
+                }
+                return yield* serveUntilShutdown(io);
+              }),
+          },
+          { store: db },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          yield* host.start(folder);
+          yield* waitUntil(() => replies.length === 2);
+          expect(replies[0]?.["result"]).toEqual({});
+          expect(replies[1]?.["error"]).toEqual(rpcErrors.notGranted);
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("never serializes a secret value or offers a secret read API", () => {
     const canary = `canary-${crypto.randomUUID()}`;
     const replies: Message[] = [];
     const { layer, record } = harness(
@@ -595,7 +885,10 @@ describe("the plugin host", () => {
         keyring: (io) =>
           Effect.gen(function* () {
             yield* handshake(io);
-            const params = { reference: "op://vault/item/field" };
+            const params = {
+              reference: "op://vault/item/field",
+              operation: "refresh",
+            };
             replies.push(yield* io.call("secrets.use", params));
             replies.push(yield* io.call("secrets.get", params));
             return yield* serveUntilShutdown(io);
@@ -609,17 +902,15 @@ describe("the plugin host", () => {
       yield* host.start(
         yield* serverPlugin("keyring", {
           secrets: ["op://vault/item/field"],
+          network: ["api.example.com"],
           events: ["bot.status"],
         }),
       );
       yield* waitUntil(() => replies.length === 2);
-      for (const reply of replies) {
-        expect(reply).not.toHaveProperty("result");
-        expect(reply["error"]).toEqual({
-          code: -32002,
-          message: "The host doesn't offer secret operations yet",
-        });
-      }
+      expect(replies.map((reply) => reply["error"])).toEqual([
+        rpcErrors.noSecretOperations,
+        rpcErrors.methodNotFound,
+      ]);
       const secret = Secret.make(canary);
       const refused = yield* Effect.flip(
         host.publish({ name: "bot.status", data: { secret } }),

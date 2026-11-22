@@ -23,6 +23,10 @@ Usage:
   aphelion device revoke ID [--state-dir DIR]
       Stop a device's token at once.
 
+  aphelion plugin install FOLDER [--approve DIGEST] [--state-dir DIR]
+      Preview the permissions for an unpacked plugin. Repeat with the displayed
+      digest to save the grants.
+
   aphelion --version
   aphelion --help
 

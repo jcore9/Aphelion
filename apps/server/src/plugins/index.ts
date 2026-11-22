@@ -1,12 +1,9 @@
 export {
   MessageNotSent,
-  PluginGrants,
   PluginHost,
   pluginHostLayer,
-  PluginRefused,
   RunnerLink,
   type HostOptions,
-  type Permission,
   type PluginEvent,
   type StartOutcome,
 } from "./host";
@@ -26,3 +23,5 @@ export {
   type RunnerReply,
   type RunnerRequest,
 } from "./runner-protocol";
+export { PluginGrants, sqlitePluginGrants, type Permission } from "./grants";
+export { PluginRefused } from "./manifest-file";

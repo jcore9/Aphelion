@@ -17,7 +17,8 @@ import { expect, it } from "@effect/vitest";
 import { Context, Effect, Layer, type Scope } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
-import { PluginGrants, PluginHost, pluginHostLayer, RunnerLink } from "./host";
+import { PluginHost, pluginHostLayer, RunnerLink } from "./host";
+import { PluginGrants } from "./grants";
 import { pipeLink } from "./link";
 import {
   maxFrameBytes,
