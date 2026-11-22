@@ -44,3 +44,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0020](decisions/0020-1password-grok-bot-style.md) | 1Password works like Grok Bot's, built on a service account | Accepted |
 | [0021](decisions/0021-container-init-and-secret-handoff.md) | The container's init is tini plus setpriv, and the bootstrap secret arrives on stdin | Accepted |
 | [0022](decisions/0022-agent-network-boundary.md) | The host firewall blocks the container from the LAN, with a path to a separate agents container | Accepted |
+| [0023](decisions/0023-scaffold-toolchain.md) | The scaffold lints with ESLint and typescript-eslint on TypeScript 6.0, and formats with Prettier | Proposed |
