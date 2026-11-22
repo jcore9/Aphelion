@@ -5,7 +5,12 @@ import { format, inspect } from "node:util";
 import { expect, onTestFinished, test } from "vitest";
 import { createLogger, redact, REDACTED, redactText } from "../log";
 import { openStore, type SqlValue } from "../store";
-import { Secret, SecretSerializationError, SecretWipedError } from ".";
+import {
+  Secret,
+  SecretConstructionError,
+  SecretSerializationError,
+  SecretWipedError,
+} from ".";
 
 function logLine(fields: Record<string, unknown>): string {
   const lines: string[] = [];
@@ -46,15 +51,87 @@ test("refuses to be serialized as JSON or cloned", () => {
   expect(() => structuredClone(secret)).toThrow(
     expect.objectContaining({ name: "DataCloneError" }),
   );
+  expect(() => {
+    new MessageChannel().port1.postMessage({ secret });
+  }).toThrow(expect.objectContaining({ name: "DataCloneError" }));
   expect(JSON.stringify({ label: "no secret here" })).toBe(
     '{"label":"no secret here"}',
   );
 });
 
+test("turns into the placeholder when code writes it as text", async () => {
+  const secret = Secret.make("Text-value-0001", { label: "Text" });
+
+  expect(await new Blob([secret as unknown as string]).text()).toBe(
+    "<redacted:Text>",
+  );
+  expect([secret].join(",")).toBe("<redacted:Text>");
+});
+
+test("copies nothing callable and can't be changed", () => {
+  const secret = Secret.make("Spread-value-0001", { label: "Spread" });
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread
+  const copies: object[] = [{ ...secret }, Object.assign({}, secret)];
+
+  for (const copy of copies) {
+    expect(Object.values(copy).some((v) => typeof v === "function")).toBe(
+      false,
+    );
+    expect(JSON.stringify(copy)).toBe('{"label":"Spread"}');
+  }
+  expect(() => {
+    delete (secret as { cloneGuard?: symbol }).cloneGuard;
+  }).toThrow(TypeError);
+  expect(() => structuredClone(secret)).toThrow(
+    expect.objectContaining({ name: "DataCloneError" }),
+  );
+  expect(() => {
+    (Secret.prototype as { reveal: () => string }).reveal = () => "x";
+  }).toThrow(TypeError);
+  expect(secret.reveal()).toBe("Spread-value-0001");
+});
+
+type AnyConstructor = new (...args: unknown[]) => Secret;
+
+test("only Secret.make builds a Secret, so nothing else can unmask a value", () => {
+  const value = "Factory-value-0001";
+  const live = Secret.make(value);
+  const Unchecked = Secret as unknown as AnyConstructor;
+  class Subclass extends Unchecked {
+    constructor() {
+      super(Symbol("Secret.make"), value, undefined);
+    }
+  }
+  const attempts = [
+    () => {
+      new Unchecked(value).wipe();
+    },
+    () => {
+      new Unchecked(undefined, value).wipe();
+    },
+    () => {
+      new Subclass().wipe();
+    },
+    () => {
+      (Object.create(Secret.prototype) as Secret).wipe();
+    },
+    () => {
+      Secret.prototype.wipe.call(Object.assign({}, live));
+    },
+  ];
+
+  for (const attempt of attempts) {
+    expect(attempt).toThrow(TypeError);
+    expect(redactText(`x ${value} y`)).toBe(`x ${REDACTED} y`);
+  }
+  expect(() => new Unchecked(value)).toThrow(SecretConstructionError);
+  expect(live.reveal()).toBe(value);
+});
+
 test("keeps the value out of its own properties", () => {
   const secret = Secret.make("Hidden-value-0001", { label: "API key" });
 
-  expect(Object.keys(secret)).toEqual(["label", "reveal"]);
+  expect(Object.keys(secret)).toEqual(["label", "cloneGuard"]);
   expect(secret.label).toBe("API key");
   expect(
     inspect(secret, { showHidden: true, customInspect: false }),

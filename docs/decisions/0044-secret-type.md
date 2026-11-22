@@ -31,7 +31,7 @@ This was measured on 2026-11-22 with Bun 1.4.5 and `effect` 4.1.5, loaded from B
 | Where the value lives | A table inside the `effect` module, keyed by the wrapper | A `#value` field, which JavaScript hides from all code outside the class |
 | Wipe | `Redacted.wipeUnsafe`. Its own docs say it "does not zero memory". | `wipe()`. It can't zero memory either, because JavaScript strings can't be overwritten. |
 | The logger's `redactSelf` hook, masks and loud serialization | Not there. A class of our own would have to wrap the `Redacted` to add them. | In the class |
-| Cost | Adds `effect` to the server, about 69 MB on disk ([decision 0041](0041-effect-in-server-and-cli.md#what-was-measured)) | About 70 lines, no dependency |
+| Cost | Adds `effect` to the server, about 69 MB on disk ([decision 0041](0041-effect-in-server-and-cli.md#what-was-measured)) | About 90 lines, no dependency |
 
 A `Redacted` can't be extended. `Redacted.make` builds it from a fixed prototype. So building on `Redacted` means our own class holds a `Redacted` and adds every behaviour the owner asked for. The `Redacted` would then only store the value, which a `#value` field already does.
 
@@ -48,20 +48,29 @@ A `Redacted` can't be extended. `Redacted.make` builds it from a fixed prototype
 
 `Secret` is a class of Aphelion's own, in `packages/server/src/secrets/secret.ts`. It copies `Redacted`'s printing: `<redacted>`, or `<redacted:label>` with a label. Its `toJSON` method throws `SecretSerializationError`.
 
+The record separates two things that code can do with a `Secret`:
+
+- **Turning it into text** gives the placeholder. That covers `String()`, template strings, `+` with a string, `console.log`, `util.inspect`, `util.format`, error messages, `new Blob([secret])` and `Bun.write(path, secret)`. Text conversion can't fail loudly, because JavaScript calls `toString` for all of them.
+- **Serializing it** throws. That covers `JSON.stringify` (`SecretSerializationError`), and `structuredClone` and `MessagePort.postMessage` (`DataCloneError`), wherever the `Secret` sits inside the value.
+
 The rules that follow:
 
-- `Secret.make(value, { label })` registers the value with `maskSecretValue` before it builds the object. A `MaskListFullError` stops it, and no `Secret` exists.
+- `Secret.make(value, { label })` is the only way to make a `Secret`. The constructor requires a token that only `Secret.make` holds, so `new Secret(...)` and a subclass throw `SecretConstructionError` at run time. TypeScript's `private constructor` alone doesn't do this, because it disappears when the code runs.
+- The constructor registers the value with `maskSecretValue` before it stores it. A `MaskListFullError` stops it, and no `Secret` exists. So only a `Secret` that registered a value can unmask it, and `wipe()` on any other object throws a `TypeError`.
 - `secret.reveal()` is the one way to read the value. It throws `SecretWipedError` after a wipe.
-- `reveal` is a function stored on each object rather than on the class. `structuredClone` refuses to copy a function, so it throws a `DataCloneError` for a `Secret`. Worker and process channels that copy messages that way refuse it too.
+- Each `Secret` holds a symbol in its `cloneGuard` property. The structured clone algorithm refuses symbols, so `structuredClone` throws a `DataCloneError` for a `Secret`, and so does any channel that copies messages that way.
+- Each `Secret`, the class and its prototype are frozen. Code can't delete `cloneGuard` or replace a method. A spread or `Object.assign` copies only `label` and `cloneGuard`, and neither is a function.
 - `secret.wipe()` calls `unmaskSecretValue` and drops the value.
 - The mask list now counts registrations. A value stays masked until every `maskSecretValue` call for it has a matching `unmaskSecretValue`. Before this, wiping one of two `Secret`s with the same value would have unmasked a value that the other still held.
 - `Secret` lives in `packages/server`. Plugins never see a secret's value ([decision 0042](0042-plugin-server-and-client-parts.md)).
 
 ### Secret references
 
-The same PR adds `parseSecretReference`, which turns text such as `op://vault/item/field` into a scheme and a path. The [secrets reference](../reference/secrets.md#secret-references) lists the full rules. Three of them are choices:
+The same PR adds `parseSecretReference`, which turns text such as `op://vault/item/field` into a scheme and a path. The [secrets reference](../reference/secrets.md#secret-references) lists the full rules. These are choices:
 
-- `op://` names allow only what 1Password documents: ASCII letters, digits, spaces, `-`, `_` and `.`. 1Password says to refer to a name with any other character by its ID ([secret reference syntax](https://www.1password.dev/cli/secret-reference-syntax/), read on 2026-11-22). The parser follows that, so `op://vault/Wetter Zürich/field` is refused, and the item's ID works.
+- `op://` follows 1Password's [secret reference syntax](https://www.1password.dev/cli/secret-reference-syntax), read on 2026-11-22. Names use only the characters 1Password supports: ASCII letters, digits, spaces, `-`, `_` and `.`. 1Password says to refer to a name with any other character by its ID. So `op://vault/Wetter Zürich/field` is refused, and the item's ID works.
+- `op://` is stricter than 1Password in three ways. These are Aphelion's policy, not 1Password's rules. A name can hold only the ordinary space, and not at its start or end, so that two references that look the same are the same. 1Password allows tabs and spaces at the ends. Only three queries are accepted: `attribute=otp`, `attribute=totp` and `ssh-format=openssh`. The other attributes 1Password documents, such as `type` and `id`, don't return a secret's value. The scheme must be lowercase.
+- `?attr=` is accepted as the alias for `?attribute=`, as 1Password allows, and stored as `attribute`. 1Password's SDK docs show only `attribute`, so the broker passes the SDK the documented form.
 - `local://` names are lowercase, so two references can't differ only in case.
 - `bws://` takes a UUID, the form Bitwarden's CLI shows for every secret ID. Bitwarden's docs show the form but don't state it as a rule.
 

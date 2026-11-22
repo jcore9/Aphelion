@@ -17,7 +17,7 @@ export const referenceReasons = {
   scheme: "must start with op://, bws:// or local://",
   op: "must be op://vault/item/field or op://vault/item/section/field, each name made of letters, digits, spaces, hyphens, underscores and dots",
   opQuery:
-    "may end only with ?attribute=otp, ?attribute=totp or ?ssh-format=openssh",
+    "may end only with ?attribute=otp, ?attribute=totp or ?ssh-format=openssh, and attr may stand for attribute",
   bws: "must be bws:// and a Bitwarden secret ID, such as bws://64246aa4-70b3-4332-8587-8b1284ce6d76",
   local:
     "must be local:// and names made of lowercase letters, digits, dots, hyphens and underscores, separated by /, such as local://github/webhook-secret",
@@ -35,7 +35,13 @@ type PathCheck = (
 ) => { readonly path: string } | { readonly reason: ReferenceReason };
 
 const opName = /^[A-Za-z0-9_.-](?:[A-Za-z0-9_. -]*[A-Za-z0-9_.-])?$/;
-const opQueries = ["attribute=otp", "attribute=totp", "ssh-format=openssh"];
+const opQueries = new Map([
+  ["attribute=otp", "attribute=otp"],
+  ["attribute=totp", "attribute=totp"],
+  ["attr=otp", "attribute=otp"],
+  ["attr=totp", "attribute=totp"],
+  ["ssh-format=openssh", "ssh-format=openssh"],
+]);
 const bwsId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const localName = /^[a-z0-9][a-z0-9._-]*$/;
 
@@ -50,13 +56,12 @@ const checkPath: Readonly<Record<SecretScheme, PathCheck>> = {
     ) {
       return { reason: referenceReasons.op };
     }
-    if (
-      extra.length > 0 ||
-      (query !== undefined && !opQueries.includes(query))
-    ) {
+    if (query === undefined) return { path };
+    const canonical = opQueries.get(query);
+    if (extra.length > 0 || canonical === undefined) {
       return { reason: referenceReasons.opQuery };
     }
-    return { path };
+    return { path: `${names}?${canonical}` };
   },
   bws: (path) =>
     bwsId.test(path)

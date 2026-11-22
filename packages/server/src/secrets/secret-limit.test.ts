@@ -16,6 +16,8 @@ test("refuses to make a Secret when its value can't be masked", () => {
   for (const value of values) maskSecretValue(value);
 
   expect(() => Secret.make("Unmaskable-value")).toThrow(MaskListFullError);
+  const Unchecked = Secret as unknown as new (...args: unknown[]) => Secret;
+  expect(() => new Unchecked("Unmaskable-value")).toThrow(TypeError);
   expect(redactText("Unmaskable-value")).toBe("Unmaskable-value");
 
   unmaskSecretValue(values[0] ?? "");

@@ -24,26 +24,44 @@ export interface SecretOptions {
   readonly label?: string;
 }
 
+const madeByMake = Symbol("Secret.make");
+const notCloneable = Symbol("Secret");
+
+export class SecretConstructionError extends TypeError {
+  override name = "SecretConstructionError";
+
+  constructor() {
+    super("Make a Secret with Secret.make().");
+  }
+}
+
 export class Secret {
   readonly label: string | undefined;
+  // structuredClone refuses a symbol value, so it throws a DataCloneError for
+  // a Secret, and a spread or Object.assign copies nothing callable.
+  readonly cloneGuard: symbol = notCloneable;
   #value: string | undefined;
 
-  private constructor(value: string, label: string | undefined) {
+  private constructor(
+    token: typeof madeByMake,
+    value: string,
+    label: string | undefined,
+  ) {
+    if (token !== madeByMake) throw new SecretConstructionError();
+    maskSecretValue(value);
     this.#value = value;
     this.label = label;
+    Object.freeze(this);
   }
 
   static make(value: string, { label }: SecretOptions = {}): Secret {
-    maskSecretValue(value);
-    return new Secret(value, label);
+    return new Secret(madeByMake, value, label);
   }
 
-  // An own function property makes structuredClone throw a DataCloneError,
-  // so a Secret can't cross a worker or process pipe that clones its messages.
-  readonly reveal = (): string => {
+  reveal(): string {
     if (this.#value === undefined) throw new SecretWipedError();
     return this.#value;
-  };
+  }
 
   get wiped(): boolean {
     return this.#value === undefined;
@@ -71,3 +89,6 @@ export class Secret {
     return this.toString();
   }
 }
+
+Object.freeze(Secret.prototype);
+Object.freeze(Secret);

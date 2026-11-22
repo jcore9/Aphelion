@@ -40,6 +40,12 @@ describe("parseSecretReference", () => {
       "bws",
       "be8e0ad8-d545-4017-a55a-b02f014d4158",
     ],
+    [
+      "op://vault/item/one-time password?attr=otp",
+      "op",
+      "vault/item/one-time password?attribute=otp",
+    ],
+    ["op://vault/item/totp?attr=totp", "op", "vault/item/totp?attribute=totp"],
     ["local://github/webhook-secret", "local", "github/webhook-secret"],
     ["local://openai.key", "local", "openai.key"],
     ["local://a/b_c/0", "local", "a/b_c/0"],
@@ -74,6 +80,9 @@ describe("parseSecretReference", () => {
     ["op://vault/item/field?attribute=password", referenceReasons.opQuery],
     ["op://vault/item/field?attribute=otp?x", referenceReasons.opQuery],
     ["op://vault/item/field?", referenceReasons.opQuery],
+    ["op://vault/item/field?attr=password", referenceReasons.opQuery],
+    ["op://vault/item/field?attr", referenceReasons.opQuery],
+    ["op://vault/item/field?constructor", referenceReasons.opQuery],
     [
       "op://vault/item/field?attribute=otp&ssh-format=openssh",
       referenceReasons.opQuery,

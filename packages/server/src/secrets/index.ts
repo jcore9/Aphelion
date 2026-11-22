@@ -10,6 +10,7 @@ export {
 } from "./reference";
 export {
   Secret,
+  SecretConstructionError,
   SecretSerializationError,
   SecretWipedError,
   type SecretOptions,
