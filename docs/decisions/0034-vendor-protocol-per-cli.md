@@ -32,7 +32,7 @@ The options were `pathToClaudeCodeExecutable: "/usr/bin/claude"`, `permissionMod
 - **It runs the binary it's given.** A stand-in script at `pathToClaudeCodeExecutable` recorded its arguments: `--output-format stream-json --verbose --input-format stream-json --permission-prompt-tool=stdio --setting-sources= --permission-mode=default`. That's the same stream-json protocol that T3 Code runs, and the same protocol that M1-03 would have built by hand.
 - **Permission requests reach Aphelion's code.** `canUseTool` ran twice: for `Read`, with `decisionReason: "Path is outside allowed working directories"`, and for `Write`. Each call carried a `toolUseID`. The suggestions offered a session-wide `addRules` grant and a switch to `acceptEdits`, and the harness must never return either.
 - **The hook callback saw both calls** before `canUseTool` did.
-- **The plan windows arrive in the stream.** `rate_limit_event` messages carried `five_hour` and `seven_day` utilization. The seven-day window went from 0.74 to 0.75 during the turn, so the turn drew on the subscription.
+- **Subscription usage arrives in the stream.** `rate_limit_event` messages reported how much of the five-hour and seven-day subscription allowance was used (`five_hour` and `seven_day` utilization). The seven-day window went from 0.74 to 0.75 during the turn, so the turn drew on the subscription.
 
 Still unknown, for M1-02:
 

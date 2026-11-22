@@ -171,7 +171,7 @@ Questions:
 5. Can Codex send a permission request for every tool call, with no bypass, `never`, full-access or Auto-review mode? With the `on-request` policy, commands that the sandbox allows run without asking. M2-04 depends on this.
 6. Can a root-owned `/etc/codex/requirements.toml` pin the approval policy, the sandbox, the login method and a managed hook that fails closed, and can auto-update be turned off? M2-05 depends on this.
 7. Does it run as `aphelion-agent` in the hardened container, with egress only through `HTTPS_PROXY` and `NO_PROXY` ([decision 0022](../../decisions/0022-agent-network-boundary.md))? Does Codex's own sandbox start there, and which hosts does Codex need?
-8. Does session resume work after a restart, and does the stream carry the plan's usage windows for M7?
+8. Does session resume work after a restart, and does the stream report how much of the subscription's usage allowance is used, for M7?
 
 What changes depending on the answer:
 
@@ -202,7 +202,7 @@ What changes depending on the answer:
 
 | Finding | Consequence |
 | --- | --- |
-| Per-agent isolation works for all three CLIs, and the profile adds only what `bwrap` needs | A decision record amends 0006. M1-04 starts agents in their own namespaces. M0-12 ships the profile and any AppArmor change, in place of M4-10. |
+| Per-agent isolation works for all three CLIs, and the profile adds only what `bwrap` needs | The owner is asked in a new decision record, which amends 0006 once approved. Only then does M1-04 start agents in their own namespaces. M0-12 ships the profile and any AppArmor change, in place of M4-10. |
 | Codex's sandbox starts, but isolation fails for some CLI | 0006 stands. The profile serves Codex only, and the finding names the CLI that fails. |
 | Codex's sandbox fails inside an agent's namespace | The finding says whether the namespace can stand in for Codex's sandbox. A change to decision 0035 becomes a decision record. |
 | The profile needs more than the namespace and mount calls | Stop. The owner decides whether decision 0035's profile stands. |
@@ -291,7 +291,7 @@ M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (
 | The spikes need real Claude Pro or Max, SuperGrok and ChatGPT logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
 | Codex asks only for what its sandbox blocks, or OpenAI's terms don't cover a self-hosted harness | M4-10 changes shape, or Codex stays out | M0-17 answers both before M4-10 starts; a "no" or an unclear answer stops for the owner ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)). |
 | The seccomp profile that lets Codex's sandbox run also exposes more kernel code to every process in the container | A kernel bug becomes reachable from a prompt-injected agent | M0-18 measures the profile before anything ships it: M4-10 with Codex, or M0-12 if M0-18 recommends namespaces for every bot. The profile stays as small as `bwrap` allows ([decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md)). |
-| Six security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
+| Seven security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
 
 ## Open questions
 

@@ -11,7 +11,7 @@
 The [M0-17 finding](../spikes/M0-17-codex-headless.md) showed that `codex app-server` runs a turn with tool calls on the owner's ChatGPT Plus login, and that the `untrusted` approval policy makes every shell command and file change ask. It stopped on three questions:
 
 1. **Terms.** OpenAI's terms don't address one person driving their own Codex from a self-hosted program. The [auth docs](https://learn.chatgpt.com/docs/auth) say "API keys are still the recommended default for automation."
-2. **Sandbox.** Codex's Linux sandbox uses `bwrap`, which needs a user namespace. Docker's default seccomp profile blocks that, so in the hardened container from [decision 0016](0016-one-docker-container.md) every sandboxed command fails. With `--security-opt seccomp=unconfined`, the sandbox started and blocked a write outside the workspace.
+2. **Sandbox.** Codex's Linux sandbox uses `bwrap`, which needs a user namespace. Docker's default seccomp profile blocks that. In the hardened container from [decision 0016](0016-one-docker-container.md), every approved command that needed the sandbox failed, and only approved escalated commands (run outside the sandbox) worked. The spike got the sandbox running only with `--security-opt seccomp=unconfined`, which turns seccomp off. With it off, the sandbox started and blocked a write outside the workspace. A narrower profile is proposed below and is not yet verified.
 3. **`untrusted` is being retired.** The [approvals docs](https://learn.chatgpt.com/docs/agent-approvals-security) say Codex "no longer support[s]" it. Codex 0.169.0 refuses it in `config.toml`, but still honors it from `thread/start` and from a root-owned `requirements.toml`.
 
 [Decision 0034](0034-vendor-protocol-per-cli.md) settles the protocol: the Codex adapter speaks `codex app-server` JSON-RPC.
@@ -45,13 +45,13 @@ The owner chose option 1 for all three on 2026-11-22. The same day, the owner ad
 - One person's own subscription, never routed for other people.
 - An API key per agent stays possible through the secrets broker.
 
-**The sandbox.** The container gets a custom seccomp profile that allows user namespaces, so Codex's own sandbox runs inside it. `requirements.toml` allows only `read-only` and `workspace-write`, so Codex can't be switched to `danger-full-access`. The sandbox is a layer, not a guarantee. M0-17 saw Codex ask to run a command outside the sandbox, and the approved command ran there.
+**The sandbox.** The container gets a custom seccomp profile that allows user namespaces, so Codex's own sandbox runs inside it. `requirements.toml` allows only `read-only` and `workspace-write`, so Codex can't be switched to `danger-full-access`. The narrow profile is unverified. M0-18 or M4-10 must show that Codex's sandbox starts with it before anything relies on it. The sandbox is a layer, not a guarantee. M0-17 saw Codex ask to run a command outside the sandbox, and the approved command ran there.
 
-**Escalation requests always go to the owner.** When Codex asks to run a command outside its sandbox, Aphelion sends the request to the owner every time, with the exact command. No policy rule and no reviewer model may approve it. The owner decided this on 2026-11-22.
+**Escalation requests always go to the owner.** When Codex asks to run a command outside its sandbox (an escalation request), Aphelion sends the request to the owner every time, with the exact command. Only the owner can approve it. No policy rule and no reviewer model may approve it, and the hook's policy check below is a separate step that can't approve it either. The owner decided this on 2026-11-22.
 
 **Two separate checks.** An approval prompt and a policy check are different things:
 
-- **The approval prompt** is Codex asking the adapter. `untrusted` makes shell commands and file changes ask. The adapter sends each one to the policy engine.
+- **The approval prompt** is Codex asking the adapter. `untrusted` makes shell commands and file changes ask. The adapter sends each one to the policy engine, except escalation requests, which go only to the owner.
 - **The policy check** is the managed `PreToolUse` hook. It runs before a tool call and asks the policy engine over a local socket, whether or not Codex would have asked.
 
 The adapter rests on a pinned Codex version that still honors `untrusted`, plus the hook. Neither one covers everything, as M0-17 measured:
@@ -59,7 +59,7 @@ The adapter rests on a pinned Codex version that still honors `untrusted`, plus 
 - The hook ran on local tool calls only. Web search skipped it, so `allowed_web_search_modes = []` turns web search off.
 - Read-only MCP tools (tools that only read data, marked `readOnlyHint`) skip the approval prompt. Only the hook sees them.
 - Codex runs the tool anyway when the hook crashes, times out or prints something that isn't valid JSON.
-- A hook written to fail closed blocked every call when the policy service was down.
+- A hook written to fail closed blocked all eight local calls tested when the policy service was down.
 
 So the hook must never crash. It catches every error, keeps its own deadline shorter than Codex's `timeout`, and exits 2 on any failure. This is revisited when OpenAI ships a supported replacement for `untrusted`.
 
@@ -87,7 +87,7 @@ The mitigations:
 
 - **The smallest profile.** Start from Docker's default profile and add only the system calls that `bwrap` needs. Never `seccomp=unconfined`.
 - **The rest of the hardening stays.** `cap_drop: ALL`, `no-new-privileges` and the read-only root stay as they are. Capabilities inside a user namespace give no rights outside it.
-- **No full access.** `requirements.toml` keeps `danger-full-access` out. Codex commands run in the sandbox unless Codex asks to leave it, and the owner then approves each such request by hand (see "Escalation requests always go to the owner").
+- **No full access.** `requirements.toml` keeps `danger-full-access` out. Codex commands run in the sandbox unless Codex asks to leave it, and the owner decides whether to approve each such request (see "Escalation requests always go to the owner").
 - **A patched host kernel.** The install guide requires the host's kernel security updates. On Ubuntu, AppArmor's `kernel.apparmor_restrict_unprivileged_userns` may need a profile for the container, and the guide says exactly which change.
 - **Later, a smaller scope.** If agents move to their own container ([0022](0022-agent-network-boundary.md) option 2), the profile applies to that container only, not to the server or the broker.
 
@@ -99,7 +99,7 @@ The [M0-18 spike](https://github.com/jcore9/Aphelion/issues/124) measures these:
 - A pinned version can miss Codex security fixes, and OpenAI's servers may stop accepting an old client. Either one stops Codex until OpenAI ships a replacement, or until the owner revisits this record.
 - The managed hook is the check that doesn't depend on `untrusted`. M2-05 writes it, and M4-10 ships it with Codex.
 
-**Terms.** OpenAI's auth docs recommend API keys for automation. The owner accepts that, as for Claude and Grok in 0019. If OpenAI publishes wording that rules this case out, Codex switches to an API key.
+**Terms.** OpenAI's auth docs recommend API keys for automation. The owner accepts that, as for Claude and Grok in 0019. If OpenAI publishes wording that rules this case out, Codex switches to an API key, as [0019](0019-cli-subscription-use.md) provides for every provider.
 
 **Egress.** If agents move to their own container ([0022](0022-agent-network-boundary.md) option 2), that container's allowlist adds `api.openai.com`, `chatgpt.com` and `auth.openai.com`. Login, token refresh and the ChatGPT WebSocket through the proxy are still untested.
 
@@ -107,8 +107,8 @@ The [M0-18 spike](https://github.com/jcore9/Aphelion/issues/124) measures these:
 
 | Issue | Change |
 | --- | --- |
-| [M4-10](https://github.com/jcore9/Aphelion/issues/114) | No longer waits on the owner. Uses the settings above, sends every escalation request to the owner, and ships the managed hook and the seccomp profile with Codex. |
-| [M2-04](https://github.com/jcore9/Aphelion/issues/30) | Codex sends `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` and `mcpServer/elicitation/request` to the policy engine. MCP tools marked `readOnlyHint` never ask, so the engine sees them only through the hook. Escalation requests always go to the owner. |
+| [M4-10](https://github.com/jcore9/Aphelion/issues/114) | No longer waits on the owner. Uses the settings above, sends every escalation request to the owner, and ships the managed hook with Codex. It ships the seccomp profile too, unless M0-18 recommends namespaces for every bot, in which case M0-12 ships the profile. |
+| [M2-04](https://github.com/jcore9/Aphelion/issues/30) | Codex sends `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` and `mcpServer/elicitation/request` to the policy engine. MCP tools marked `readOnlyHint` never ask, so the engine sees them only through the hook. Escalation requests go only to the owner. They never reach rules or the reviewer, and the hook's policy check is a separate step. |
 | [M2-05](https://github.com/jcore9/Aphelion/issues/31) | Writes the Codex managed hook, built so it never crashes, and `requirements.toml` above. The agent can't write `$CODEX_HOME/rules`. M4-10 ships them. |
 | [M0-12](https://github.com/jcore9/Aphelion/issues/14) | Unchanged by default. M4-10 adds the pinned `codex` binary, the `/etc/codex` files and the seccomp profile, in the shape M0-18 measures. M0-12 ships the profile instead only if M0-18 recommends namespaces for every bot. |
 | [M0-18](https://github.com/jcore9/Aphelion/issues/124) | New spike on user namespaces in the container. It blocks M0-12 and M1-04, because its answer decides when the profile ships. |

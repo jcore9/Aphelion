@@ -279,6 +279,8 @@ flowchart TB
 ```
 Every decision goes to the audit log with the exact tool, arguments and who decided. By default, only a rule, the reviewer or the user can release a call.
 
+> Amended by [decision 0035](../decisions/0035-codex-login-sandbox-approvals.md). A Codex escalation request (a request to run a command outside Codex's sandbox) skips this flow. Only the user can approve it, every time, with the exact command shown. No rule and no reviewer may release it. The managed hook's policy check is a separate step and can't approve it either.
+
 The reviewer can only release low-risk calls. Make destructive actions (deletes, sends, merges, permission changes) static rules that always reach you or are always denied.
 
 **Configurable approvals**
@@ -697,7 +699,7 @@ Issue-sized tasks for every milestone, each with acceptance criteria and depende
 | M0-09 | Protocol package v0 | Command and event types, sequence numbers, replay from a cursor, idempotent command ids, `v: 1` on every frame; replay test; protocol spec generated into the docs | M0-04, M0-16 |
 | M0-10 | API server skeleton | HTTP and WebSocket bound to a configured interface; `/health`; per-device tokens; unauthenticated sockets rejected | M0-09 |
 | M0-11 | CLI and headless mode | `aphelion --headless`, `--version` and `config check`, following M0-03's finding | M0-03, M0-10 |
-| M0-12 | Linux install script and systemd unit | Creates the ~~harness user and agent users~~ `harness` and `aphelion-agent` users ([0006](../decisions/0006-shared-agent-user.md)) without sudo, sets directory permissions, installs a hardened unit; service survives a reboot; install guide written | M0-11 |
+| M0-12 | Linux install script and systemd unit | Creates the ~~harness user and agent users~~ `harness` and `aphelion-agent` users ([0006](../decisions/0006-shared-agent-user.md)) without sudo, sets directory permissions, installs a hardened unit; service survives a reboot; install guide written | ~~M0-11~~ M0-11, M0-18 ([0035](../decisions/0035-codex-login-sandbox-approvals.md)) |
 | M0-13 | Plugin host v0 | Manifest schema, API-range check, one process per plugin over JSON-RPC, permission grants stored and enforced; a sample plugin passes and an out-of-range plugin is refused; API reference generated into the docs | M0-04, M0-07, M0-16 |
 | M0-14 | Secrets broker v0 | Secret wrapper, reference syntax, local age-encrypted store, bootstrap secret via systemd-creds; test proves values never land in logs or the database | M0-08 |
 | M0-15 | 1Password backend plugin | Resolves op:// references with a read-only service account through the official SDK | M0-13, M0-14 |
