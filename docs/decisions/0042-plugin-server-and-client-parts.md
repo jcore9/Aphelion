@@ -5,6 +5,7 @@
 - Decided by: project owner
 - Proposed by: the M0-13a follow-up PR ([#135](https://github.com/jcore9/Aphelion/issues/135))
 - Answers: [#135](https://github.com/jcore9/Aphelion/issues/135), the plan's open decision "UI plugin isolation", and the design gap the security review of [#136](https://github.com/jcore9/Aphelion/pull/136) found
+- Amended by: [its own amendment](#amendment-plugin-screens) from [#138](https://github.com/jcore9/Aphelion/issues/138) (plugins can add screens, with no grant)
 - Amends: [0038](0038-plugin-manifest-and-api-range.md) (the single `entry` field, and the plugin API version), [0020](0020-1password-grok-bot-style.md) (how a plugin uses a secret), the plan's [Plugin types](../plan/aphelion-plan.md#plugins-and-themes) table and its "UI plugin isolation" default
 
 ## Context
@@ -134,3 +135,28 @@ A check that a served file is inside the plugin's folder doesn't prove that its 
 - The install flow ([#65](https://github.com/jcore9/Aphelion/issues/65), M5-13) installs and grants a plugin once, on the server, and hashes the client part's files at install time. Clients install nothing.
 - The phone app needs a WebView that speaks the same message API as the iframe and blocks network access the same way, so a client part runs there unchanged. [Decision 0032](0032-native-app-stack-deferred.md) leaves the phone app's stack to M9, and that choice must support this.
 - Revisit per-part permission lists when a plugin with both parts needs chat content on the server and only status on the client.
+
+## Amendment: plugin screens
+
+- Date: 2026-11-22
+- Decided by: project owner
+- Answers: [#138](https://github.com/jcore9/Aphelion/issues/138)
+
+The owner decided two more things:
+
+1. **A plugin can add whole screens.** A screen is a full page with an entry in the app's menu, in the web app, the desktop app and the phone app. The plugin's client part draws it, in the sandbox this record describes. The owner's example is a GitHub plugin with a screen of your issues and pull requests. Its server part fetches them from `api.github.com`, with a granted `network` permission, and asks the host to make each call with the GitHub token. It sends the results to the screen through the app's messages.
+2. **A screen appears when its plugin is installed, with no separate grant**, unlike a UI slot. A UI slot needs a grant because it sits inside the chat and can show what is in it. A screen is a page of its own, and it can only show what its plugin can already reach. That still goes through the plugin's granted permissions: its server part, its network hosts and its secret operations. The owner can turn a screen off later.
+
+### The manifest
+
+- **`contributes.screens` lists the screens.** Each has an `id`, with the same rules as a plugin id and unique within the plugin, and a `title` of at most 64 visible characters. An `icon`, a name from the app's icon set, and a `menuOrder` from 0 to 999 are optional.
+- **Screens need a client part.** The side table that drives the parser, the `PluginManifest` type and the JSON Schema gains `contributes.screens: client`, so a plugin with screens and no client part is refused with `needs a client part`.
+- **Screens are a contribution, not a permission.** They say what the plugin adds, and grant it nothing.
+- **The plugin API goes to 0.2.1.** The field is optional, so every 0.2.0 manifest stays valid and means the same, and the change isn't breaking. Before 1.0.0 an addition raises the patch version ([0038](0038-plugin-manifest-and-api-range.md)). A plugin with screens declares `^0.2.1`, so a 0.2.0 host refuses it by its range.
+
+### Consequences
+
+- The client shell ([#53](https://github.com/jcore9/Aphelion/issues/53)) builds the app's menu, which lists the screens that plugins add. It decides how screens from different plugins are told apart and how a screen is turned off.
+- UI slots and the plugin sandbox ([#63](https://github.com/jcore9/Aphelion/issues/63), M5-11) run a screen's client part in the same sandbox as a UI slot, with the whole page as its area.
+- The planned GitHub Work view (M5-06) is a natural first plugin screen, because the plan says first-party features are plugins on the same public API.
+- The app's icon set, and the list that `icon` is checked against, belong to the client shell. Until then, any well-formed icon name is accepted.
