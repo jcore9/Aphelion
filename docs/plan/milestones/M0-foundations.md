@@ -6,7 +6,7 @@
 - Status: Approved and merged in [#92](https://github.com/jcore9/Aphelion/pull/92) on 2026-11-21. Decisions 0005 to 0018 settle every open question. In progress.
 - Last updated: 2026-11-21
 
-M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
+M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers four questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
 
 ## Exit criterion
 
@@ -24,6 +24,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-01] | Spike: Claude over ACP on a subscription login | spike, server | M0-00 |
 | [M0-02] | Spike: Grok headless billing | spike, server | M0-00 |
 | [M0-03] | Spike: headless without Electron | spike, desktop | M0-00 |
+| [M0-17] | Spike: Codex headless on a ChatGPT login | spike, server | M0-00 |
 | [M0-04] | Monorepo scaffold | chore | M0-03 |
 | [M0-05] | Repo hygiene and MIT license | chore, security, **risk/security** | M0-04 |
 | [M0-16] | Docs site and decision records | docs | M0-04 |
@@ -38,11 +39,11 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-14] | Secrets broker v0 | feature, security, **risk/security** | M0-08 |
 | [M0-15] | 1Password backend plugin | feature, plugins, security, **risk/security** | M0-13, M0-14 |
 
-Six of the sixteen work issues carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
+Six of the seventeen work issues carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
 
 ### Out of scope
 
-- Agents, adapters and sessions (M1). M0-01 and M0-02 only answer questions; they don't build adapters.
+- Agents, adapters and sessions (M1). M0-01, M0-02 and M0-17 only answer questions; they don't build adapters.
 - Policy rules and approvals (M2). M0 builds the audit table that M2 writes to, not the policy engine.
 - The gateway host (M3). The secrets broker is built so it can move there, but in M0 it runs on the same machine (see [Q4](#q4-where-the-secrets-broker-runs-before-the-gateway-exists)).
 - Any client UI beyond `curl` and the test client in M1.
@@ -55,6 +56,7 @@ flowchart LR
   m00["M0-00 plan"] --> s1["M0-01 spike: Claude"]
   m00 --> s2["M0-02 spike: Grok"]
   m00 --> s3["M0-03 spike: headless"]
+  m00 --> s4["M0-17 spike: Codex"]
   s3 --> m04["M0-04 scaffold"]
   m04 --> m05["M0-05 hygiene"]
   m04 --> m16["M0-16 docs site"]
@@ -76,7 +78,7 @@ flowchart LR
 
 | Wave | Starts when | Issues, all in parallel |
 | --- | --- | --- |
-| 1 | This plan is approved | M0-01, M0-02, M0-03 |
+| 1 | This plan is approved | M0-01, M0-02, M0-03, M0-17 |
 | 2 | M0-03's finding is approved | M0-04 |
 | 3 | M0-04 merges | M0-05, M0-16, M0-06, M0-07 |
 | 4 | Its dependencies merge | M0-08, M0-09, M0-13 |
@@ -88,9 +90,11 @@ The critical path is M0-03, M0-04, M0-16, M0-09, M0-10, M0-11, M0-12. M0-04 wait
 
 M0-01 and M0-02 block nothing inside M0. They block [M1-02] and [M4-01], and their answers can change the shape of M1, M4 and M7, which is why they run first instead of at the start of M1.
 
-## The three spikes
+M0-17 blocks nothing inside M0 either. It blocks [M4-10], the Codex adapter ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)).
 
-Each spike is a set of questions answered in writing before anything builds on them. A spike ends with a finding at `docs/spikes/M0-0N-<slug>.md` that answers every question below, cites its sources with the date they were checked, and states what changes downstream. Prototype code stays on the `spike/` branch and isn't merged. If a finding needs a decision, it becomes a decision record that the owner approves.
+## The four spikes
+
+Each spike is a set of questions answered in writing before anything builds on them. A spike ends with a finding at `docs/spikes/M0-NN-<slug>.md` that answers every question below, cites its sources with the date they were checked, and states what changes downstream. Prototype code stays on the `spike/` branch and isn't merged. If a finding needs a decision, it becomes a decision record that the owner approves.
 
 The spikes don't assume their answers. Where an answer is "no", or the terms are unclear, the spike stops and asks the owner instead of choosing a workaround.
 
@@ -144,6 +148,33 @@ Questions:
 5. How does a host `aphelion.service` start the Compose project on boot and pass it the bootstrap secret from `LoadCredentialEncrypted=` as a Compose secret?
 
 If a dependency fails on Bun, or the hardening can't hold with three users in one container, the spike says so and the owner decides.
+
+### M0-17: Codex headless on a ChatGPT login
+
+[Decision 0024](../../decisions/0024-codex-third-agent-cli.md) makes OpenAI's Codex CLI a third agent CLI, on the owner's own ChatGPT login. The adapter is built later, in [M4-10]. This spike answers first whether Codex can run here at all. The issue lists what was found on 2026-11-21 under each question, as a starting point.
+
+Questions:
+
+1. Which headless or ACP path exists today, at which version: [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp), `codex app-server`, `codex exec --json` or `codex mcp-server`? Does the chosen path run on Bun?
+2. With `OPENAI_API_KEY` and `CODEX_API_KEY` unset, on a fresh Unix user signed in with a ChatGPT plan, does a turn with a tool call complete? Does the usage count against the plan and not against API billing?
+3. Which ChatGPT plans include the CLI and app-server?
+4. Do OpenAI's current terms allow driving it from a self-hosted harness for one person's own use? Quote them with dates, and stop if they're unclear.
+5. Can Codex send a permission request for every tool call, with no bypass, `never`, full-access or Auto-review mode? With the `on-request` policy, commands that the sandbox allows run without asking. M2-04 depends on this.
+6. Can a root-owned `/etc/codex/requirements.toml` pin the approval policy, the sandbox, the login method and a managed hook that fails closed, and can auto-update be turned off? M2-05 depends on this.
+7. Does it run as `aphelion-agent` in the hardened container, with egress only through `HTTPS_PROXY` and `NO_PROXY` ([decision 0022](../../decisions/0022-agent-network-boundary.md))? Does Codex's own sandbox start there, and which hosts does Codex need?
+8. Does session resume work after a restart, and does the stream carry the plan's usage windows for M7?
+
+What changes depending on the answer:
+
+| Finding | Consequence |
+| --- | --- |
+| `codex-acp` works on a ChatGPT login, every tool call can be made to ask, and the terms allow it | M4-10 goes ahead on `codex-acp`. |
+| `codex-acp` falls short but `codex app-server` works | M4-10 speaks app-server JSON-RPC directly, and a decision record amends "ACP first" for Codex. |
+| Only `codex exec --json` works | Stop. `exec` can't answer approvals mid-turn, so the owner decides whether Codex stays in scope. |
+| Not every tool call can be made to ask, or root-owned config can't block the bypass modes | Stop. The owner decides between a sandbox-based policy for Codex and leaving Codex out. |
+| It needs an API key, or the owner's plan doesn't include the CLI | Stop. The owner decides between API billing for Codex and leaving Codex out. |
+| The terms don't allow it, or are unclear | Stop. The owner decides, and decision 0024 is revisited. |
+| Codex's own sandbox can't start in the container | The finding says whether to run Codex with its sandbox off, with the container as the boundary and approvals still on. If that changes the security model, it becomes a decision record. |
 
 ## Design notes
 
@@ -224,7 +255,8 @@ M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (
 | M0-16 moves docs into the Starlight content folder | The plan links in every issue body break | M0-16 keeps `docs/plan/aphelion-plan.md` resolving, or updates the issue bodies in the same PR. |
 | Docker's daemon runs as root, so a container escape reaches the host | Weaker than rootless Podman would be | Hardened Compose file, no Docker socket mount, no one in the `docker` group, the plan's LAN firewall on the hypervisor ([decision 0016](../../decisions/0016-one-docker-container.md)). |
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
-| The spikes need real Claude Pro or Max and SuperGrok logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
+| The spikes need real Claude Pro or Max, SuperGrok and ChatGPT logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
+| Codex asks only for what its sandbox blocks, or OpenAI's terms don't cover a self-hosted harness | M4-10 changes shape, or Codex stays out | M0-17 answers both before M4-10 starts; a "no" or an unclear answer stops for the owner ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)). |
 | Six security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
 
 ## Open questions
@@ -271,7 +303,8 @@ All eight are settled; each answer links to its decision record.
 
 1. A review and approval of this plan, including the proposed splits.
 2. For M0-01 and M0-02: a Linux VM where you sign in to Claude Code with your Pro or Max account and to Grok Build with your SuperGrok account, on a fresh Unix user. The sign-ins are yours to do; the spikes don't need your credentials passed to them.
-3. For the exit test: an Ubuntu LTS VM on your tailnet with Docker Engine and the Compose plugin.
+3. For M0-17: on the same VM, a fresh Unix user where you sign in to Codex with your ChatGPT account (`codex login --device-auth`, which needs device code login turned on in your ChatGPT security settings), and the name of your ChatGPT plan. The sign-in is yours to do.
+4. For the exit test: an Ubuntu LTS VM on your tailnet with Docker Engine and the Compose plugin.
 
 ## Exit test
 
@@ -293,7 +326,7 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 | CONTRIBUTING, SECURITY.md, issue and PR templates | M0-05 |
 | Decision records and template | This PR (0001 to 0004), M0-16, and each DR above |
 | Docs site and the plan in `docs/plan` | This PR, M0-16 |
-| Spike findings | M0-01, M0-02, M0-03 |
+| Spike findings | M0-01, M0-02, M0-03, M0-17 |
 | Config reference | M0-06 |
 | Protocol spec (generated) | M0-09 |
 | Plugin API reference (generated) | M0-13d |
@@ -324,9 +357,11 @@ Written when M0 closes.
 [M0-13]: https://github.com/jcore9/Aphelion/issues/15
 [M0-14]: https://github.com/jcore9/Aphelion/issues/16
 [M0-15]: https://github.com/jcore9/Aphelion/issues/17
+[M0-17]: https://github.com/jcore9/Aphelion/issues/113
 [M1-02]: https://github.com/jcore9/Aphelion/issues/20
 [M1-03]: https://github.com/jcore9/Aphelion/issues/21
 [M4-01]: https://github.com/jcore9/Aphelion/issues/44
+[M4-10]: https://github.com/jcore9/Aphelion/issues/114
 [M0-05a]: https://github.com/jcore9/Aphelion/issues/93
 [M0-05b]: https://github.com/jcore9/Aphelion/issues/94
 [M0-09a]: https://github.com/jcore9/Aphelion/issues/95
