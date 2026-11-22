@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-21
 - Decided by: project owner
+- Amended by: [decision 0042](0042-plugin-server-and-client-parts.md) (a plugin never receives a value; the host injects it only into the operation it makes for the plugin)
 - Amends: the plan's "Secure entry, like Grok Bot's secure forms" (first-use approval per connector), and M0-15
 
 ## Context

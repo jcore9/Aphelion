@@ -408,8 +408,10 @@ The harness is plugin-first. Core features ship as first-party plugins on the sa
 | Type | What it adds | Runs where | Isolation |
 | --- | --- | --- | --- |
 | Theme | Colors, type, spacing, motion, icons, chat backgrounds, declarative animations | Client | Data only, no code |
-| UI plugin | Panels, message renderers, chat-panel effects and animations, commands | Client | Sandboxed iframe, talks to the app through a message API |
+| UI plugin | Panels, message renderers, chat-panel effects and animations, commands | ~~Client~~ Client, installed on the server and downloaded by every client ([0042](../decisions/0042-plugin-server-and-client-parts.md)) | ~~Sandboxed iframe, talks to the app through a message API~~ Always sandboxed: an iframe on web and desktop, a WebView on the phone, talking to the app only through messages ([0042](../decisions/0042-plugin-server-and-client-parts.md)) |
 | Server plugin | Agent adapters, connectors, secret backends, notifiers, triggers, reviewers | Harness or gateway host | Separate process ~~under its own Unix user~~ under the shared `aphelion-plugins` user, started by the plugin runner ([0018](../decisions/0018-shared-plugin-user.md)), JSON-RPC to the host |
+
+> Amended by [decision 0042](../decisions/0042-plugin-server-and-client-parts.md). One plugin can have a server part, a client part, or both. The server part runs like a server plugin, and the client part runs like a UI plugin. The original table treated them as separate plugin types.
 
 **Manifest and permissions**
 
@@ -445,7 +447,7 @@ The web client exposes named slots that themes and UI plugins can fill: chat bac
 
 | Decision | Options | Recommended default |
 | --- | --- | --- |
-| UI plugin isolation | Sandboxed iframes, Web Components in the main page | Sandboxed iframes; in-page only for first-party plugins |
+| UI plugin isolation | Sandboxed iframes, Web Components in the main page | ~~Sandboxed iframes; in-page only for first-party plugins~~ Sandboxed iframes for every plugin, first-party included, and a WebView on the phone ([0042](../decisions/0042-plugin-server-and-client-parts.md)) |
 | Animation formats | CSS keyframes, Lottie, Rive, video | CSS keyframes and Lottie first; Rive later for interactive state machines |
 | Server plugin isolation | Process per plugin, worker threads, in-process | Process per plugin ~~under its own Unix user~~ under the shared `aphelion-plugins` user ([0018](../decisions/0018-shared-plugin-user.md)) |
 | Plugin distribution | npm, git, own registry | npm and git first |
