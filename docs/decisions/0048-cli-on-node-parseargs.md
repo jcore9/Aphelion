@@ -23,7 +23,7 @@ An exploratory measurement, with Bun 1.4.5 and `effect` 4.1.5 on the dev box. Ea
 
 | Option | Binary size | `--version` | For | Against |
 | --- | --- | --- | --- | --- |
-| **Node's `parseArgs`**, from `node:util`, with a short table of commands | 109,209,776 bytes | 8 ms | Built into Bun and Node, marked stable, no new package. The plugin runner already uses it (`apps/server/src/plugins/runner-main.ts`). Values are checked with the same Zod schemas that `addDevice` uses | The help text and the command table are written by hand, about 215 lines in `args.ts` and `help.ts` |
+| **Node's `parseArgs`**, from `node:util`, with a short table of commands | 109,209,776 bytes | 8 ms | Built into Bun and Node, marked stable, no new package. The plugin runner already uses it (`apps/server/src/plugins/runner-main.ts`). Values are checked with the same Zod schemas that `addDevice` uses | The help text and the command table are written by hand, about 245 lines in `args.ts` and `help.ts` |
 | Effect's CLI module, `effect/cli` | 109,775,024 bytes | 53 ms | Generates help, typed flags and subcommands. Already installed with `effect` | Marked `@stability unstable` in 4.1.5, so its API may change in a minor release. Adds global flags that Aphelion doesn't want: `--wizard` (interactive prompts), `--completions` and `--log-level`. They can be turned off through `CliConfig`. Its value checks are built on Effect `Schema`. Zod can still be called through its mapping hooks, but that is extra glue on every flag |
 | `commander`, or another parser package | not measured | not measured | Widely used | A new dependency for the server binary, and one more package to vet, with nothing that `parseArgs` lacks for five commands |
 
