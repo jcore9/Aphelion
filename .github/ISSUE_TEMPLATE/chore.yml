@@ -1,0 +1,67 @@
+name: Chore or docs
+description: Tooling, tests, CI, repo maintenance or docs-only work.
+title: "[M#] "
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - type/chore
+        - type/docs
+    validations:
+      required: true
+  - type: input
+    id: id
+    attributes:
+      label: ID and milestone
+      placeholder: "M0-05a · M0 · Foundations"
+    validations:
+      required: true
+  - type: input
+    id: plan
+    attributes:
+      label: Plan or decision record
+      description: A link to the milestone plan section or the decision record that covers this work.
+    validations:
+      required: true
+  - type: input
+    id: linked
+    attributes:
+      label: Linked issues
+      description: The parent issue and the issues this depends on.
+  - type: textarea
+    id: changes
+    attributes:
+      label: What changes
+      description: The acceptance criteria, as a checklist that a reviewer can tick off.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: How it will be tested
+      description: The checks or commands that show the change works.
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs it touches
+      description: The docs that the PR must update, or "None".
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk label
+      description: Pick every risk label that applies. CONTRIBUTING.md lists the security-sensitive paths.
+      multiple: true
+      options:
+        - None
+        - risk/security
+        - risk/breaking
+    validations:
+      required: true
