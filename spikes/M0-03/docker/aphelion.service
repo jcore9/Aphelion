@@ -1,0 +1,20 @@
+# Throwaway spike host unit for M0-03. Never merged.
+[Unit]
+Description=Aphelion server (Docker Compose)
+Requires=docker.service
+After=docker.service tailscaled.service network-online.target
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=exec
+LoadCredentialEncrypted=bootstrap:/etc/aphelion-host/bootstrap.cred
+Environment=APHELION_BOOTSTRAP=%d/bootstrap
+# Docker refuses to publish on an address that doesn't exist yet, so wait for the tailnet address.
+ExecStartPre=/bin/sh -c 'until tailscale ip -4 >/dev/null 2>&1; do sleep 1; done'
+ExecStart=/usr/bin/docker compose -p aphelion -f /opt/aphelion/compose.yaml up --no-log-prefix
+ExecStop=/usr/bin/docker compose -p aphelion -f /opt/aphelion/compose.yaml down
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,33 @@
+# Throwaway spike Compose file for M0-03. Never merged.
+x-hardening: &hardening
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  cap_add: [SETUID, SETGID]
+  pids_limit: 256
+  mem_limit: 1g
+  tmpfs: ["/tmp", "/run"]
+  volumes:
+    - config:/etc/aphelion
+    - state:/var/lib/aphelion
+    - agents:/var/lib/aphelion-agents
+    - secrets-store:/var/lib/aphelion-secrets
+    - plugins:/var/lib/aphelion-plugins
+  secrets:
+    - source: bootstrap
+      target: bootstrap
+services:
+  variant-a:
+    <<: *hardening
+    image: aphelion-spike
+    entrypoint: ["/usr/bin/tini", "--", "/usr/local/bin/launch.sh"]
+    ports: ["100.71.226.67:7400:7400"]
+  variant-b:
+    <<: *hardening
+    image: aphelion-spike
+    entrypoint: ["/usr/bin/tini", "--", "/usr/local/bin/aphelion-stub", "launch"]
+    ports: ["100.71.226.67:7401:7400"]
+volumes: {config: {}, state: {}, agents: {}, secrets-store: {}, plugins: {}}
+secrets:
+  bootstrap:
+    file: ./sec/bootstrap
