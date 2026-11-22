@@ -18,6 +18,7 @@ const files = [
   "policy.yaml",
   "routines.yaml",
   "connectors.yaml",
+  "server.yaml",
 ];
 const me: Owner = {
   uid: process.getuid?.() ?? -1,

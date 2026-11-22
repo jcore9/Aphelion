@@ -39,7 +39,7 @@ function valueAt(data: unknown, path: Path): unknown {
   );
 }
 
-function issueAt(
+export function issueAt(
   file: string,
   document: Document,
   lines: LineCounter,
@@ -62,7 +62,7 @@ function issueAt(
   };
 }
 
-function schemaIssues(
+export function schemaIssues(
   file: string,
   document: Document,
   lines: LineCounter,
