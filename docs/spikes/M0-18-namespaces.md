@@ -77,20 +77,20 @@ There are three ways to give a bot a `/proc`. All three were measured:
 - `ls /var/lib/aphelion-agents` showed only `a`. Reading bot `b`'s file failed: "No such file or directory".
 - The bot had no capabilities outside its namespace (`CapEff` 0, `NoNewPrivs` 1), and its uid stayed `aphelion-agent`.
 - `/proc` held 4 process entries: the bot's own.
-- A nested user and mount namespace inside the bot, followed by an unmount, showed only the bot's own tree. Nothing outside it came back.
+- A nested user and mount namespace started inside the bot and listed only the bot's own tree. The unmount in that test failed ("not mounted"), so the log doesn't show that an unmount can't bring the outside tree back. That is not tested.
 
 ### 2. Do the three CLIs run inside it
 
-Each binary starts inside a bot's namespaces (measured): `claude --version` printed "2.1.330 (Claude Code)", `codex --version` printed "codex-cli 0.171.0", and `grok version` printed "grok 1.0.92". `codex login status` said "Not logged in", and `claude auth status` said `"loggedIn": false`.
+Each binary starts inside a bot's namespaces (measured): `claude --version` printed "2.1.330 (Claude Code)", `codex --version` printed "codex-cli 0.171.0", and `grok version` printed "grok 1.0.92", with `GROK_SANDBOX=off`. Grok's sandbox itself didn't start (below). `codex login status` said "Not logged in", and `claude auth status` said `"loggedIn": false`.
 
-**Their own sandboxes**, measured with a command that writes in the working folder, writes in the bot's home, and opens a connection:
+**Their own sandboxes.** Codex was measured with a command that writes in the working folder, writes in the bot's home, and opens a connection. Claude Code was measured with writes only. Its connections were not tested.
 
 | CLI | Directly in the container | Inside a bot, fresh `/proc` | Inside a bot, container's `/proc` |
 | --- | --- | --- | --- |
 | Codex 0.171.0, `codex sandbox -c sandbox_mode=workspace-write` | Starts. Cwd write works, home write "Read-only file system", network "Operation not permitted" | Same | Same |
-| Claude Code 2.1.330, `sandbox.enabled`, one Bash call from the mock | Fails: "Can't mount proc on /newroot/proc" | Starts. Cwd write works, home write "Read-only file system" | Fails: "open /proc/34/ns/ns failed" |
-| Claude Code, plus `sandbox.enableWeakerNestedSandbox` | Starts, with the container's `/proc` | not run | Starts only when the bot has no PID namespace |
-| Grok 1.0.92, `GROK_SANDBOX=strict` | Refuses to start: "Landlock not available ... Refusing to start with its protections missing" | Same | Same |
+| Claude Code 2.1.330, `sandbox.enabled`, one Bash call from the mock | Fails: "Can't mount proc on /newroot/proc" | Starts. Cwd write works, home write "Read-only file system". Network not tested | Fails, with the weaker mode on: "open /proc/34/ns/ns failed". Without it: not run |
+| Claude Code, plus `sandbox.enableWeakerNestedSandbox` | Starts, with the container's `/proc` | Not run | Starts when the bot has no PID namespace. Fails with one (the row above) |
+| Grok 1.0.92, strict sandbox (the log shows the strict profile refused) | Refuses to start: "Landlock not available ... Refusing to start with its protections missing". Under Docker's default profile it failed earlier, in `bwrap` | Same | Not run |
 
 - **Codex falls back.** It tries to mount a fresh `/proc` first, and when that fails it reuses the caller's (documented: `run_bwrap_with_proc_fallback` and `preflight_proc_mount_support` in [`linux-sandbox/src/linux_run_main.rs`](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/linux-sandbox/src/linux_run_main.rs) at tag `rust-v0.171.0`).
 - **Claude Code fails closed.** When its sandbox couldn't start, the Bash call failed and the command never ran outside the sandbox (measured, with `sandbox.failIfUnavailable` set).
@@ -108,7 +108,7 @@ Each binary starts inside a bot's namespaces (measured): `claude --version` prin
 | Mounted as | Read | Overwrite in place | Replace by rename | Delete |
 | --- | --- | --- | --- | --- |
 | One file (`--bind auth.json`) | works | works | "Device or resource busy" | "Device or resource busy" |
-| The folder that holds it | works | works | works | works |
+| The folder that holds it | works | works | works | Not tested |
 
 - **Codex replaces its login by renaming** (documented: `storage_file.rs` in [`login/src/auth`](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/login/src/auth/storage_file.rs), "Atomic credential-file replacement"). It writes a temporary file beside the target and renames it over `auth.json`. It follows a link first, and takes a lock file, `auth.json.lock`, beside the real file.
 - **Measured with Codex.** `codex login --with-api-key`, given a dummy key, failed on a single-file mount: "Error logging in: Resource busy (os error 16)". It worked when `$CODEX_HOME/auth.json` was a link into a shared login folder that the bot had mounted. The shared file then held the new value, plus `auth.json.lock`.
@@ -202,11 +202,11 @@ For files, yes (measured, `runs/q5-isolation.txt`, fresh `/proc`):
 | List `/var/lib/aphelion-agents` | Only `a` |
 | Read `b`'s file by path | "No such file or directory" |
 | Read `b`'s file through `/proc/<b's pid>/root` | "No such file or directory": `b`'s processes aren't in `a`'s `/proc` |
-| Signal `b`'s process by pid, or through a process file descriptor | "No such process", and "No such file or directory" |
+| Signal `b`'s process by pid | `kill` said "No such process". A probe that passed a `/proc/<pid>` directory descriptor to `pidfd_send_signal` failed with "No such file or directory". That descriptor isn't a real pidfd, so only `kill` is a valid result. |
 | A manager bot granted `b`'s folder | Listed `b` and its own folder, read `b`'s file, and wrote one |
 | The same manager bot, reading `a`'s folder | "No such file or directory" |
 
-With the container's `/proc` shared instead, bot `a` could list every process in the container and read their command lines. It still couldn't read `b`'s files through `/proc/<pid>/root` or its environment ("Permission denied"), or signal it. Plain `kill` said "No such process", and a process file descriptor gave "Invalid argument" (measured). Codex's source names the same protection: a separate user namespace "blocks host procfs root/cwd/fd links through ptrace permission checks" ([`bwrap.rs`](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/linux-sandbox/src/bwrap.rs) at `rust-v0.171.0`).
+With the container's `/proc` shared instead, bot `a` could list every process in the container and read their command lines. It still couldn't read `b`'s files through `/proc/<pid>/root` or its environment ("Permission denied"), or signal it. `kill` said "No such process" (measured). The probe with a `/proc/<pid>` directory descriptor gave "Invalid argument", but it wasn't a real pidfd, so it proves nothing about signaling. Codex's source names the same protection: a separate user namespace "blocks host procfs root/cwd/fd links through ptrace permission checks" ([`bwrap.rs`](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/linux-sandbox/src/bwrap.rs) at `rust-v0.171.0`).
 
 **A manager bot.** The runner bind-mounts each folder that the manager's config grants, as in `checks/botwrap.sh mgr b`. Config is owned by `harness` and unreadable to bots (decision 0010), so a bot can't grant itself another folder.
 
@@ -269,7 +269,9 @@ Killing the bot's first process inside its PID namespace kills every process in 
 2. **Network namespaces.** Should the profile allow them? Codex's and Claude Code's own sandboxes need them. They also bring the netfilter code into reach of every process in the container. Three bugs in the list above are in that code, one of them used in ransomware attacks.
 3. **Per-bot isolation.** If you choose to go ahead, a new decision record would amend 0006. Each bot would see only its own folder, plus folders its config grants. M0-12 would ship the profile, and M1-04 would start bots this way.
 
-What the exit-test VM must provide before M0-12 ships anything:
+**Historical.** These were the checks the exit-test VM would have needed before M0-12 shipped the per-bot design. The owner rejected that design ([decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md)), so they are no longer prerequisites for M0-12. Only the Landlock check still matters, for Grok in M4-01.
+
+What the exit-test VM would have had to provide:
 
 - An Ubuntu 26.04 host with Docker 29.10.0, to measure the AppArmor answers in question 3 and what uid 0 can write under `systempaths=unconfined`.
 - A kernel with Landlock, to see whether Grok's sandbox starts inside a bot.

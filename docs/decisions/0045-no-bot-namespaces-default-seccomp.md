@@ -82,20 +82,28 @@ Codex's commands are protected by these layers instead:
 
 **This record amends [0035](0035-codex-login-sandbox-approvals.md).** Two of its parts change:
 
-- **The container no longer allows user namespaces.** 0035 gave the container a custom seccomp profile for them. The container now runs Docker's default profile. M0-12 ships no seccomp file. There's no host AppArmor change either, because nothing in the container calls `mount` or creates a namespace.
+- **The container no longer allows user namespaces.** 0035 gave the container a custom seccomp profile for them. The container now runs Docker's default profile. M0-12 ships no seccomp file. There's no host AppArmor change either, because neither the rejected bot design nor the chosen Codex setup needs `mount` or a new namespace. One open item remains: Grok's strict sandbox failed under Docker's default profile (`bwrap: No permissions to create a new namespace`), and on this box also for lack of Landlock. [M4-01](https://github.com/jcore9/Aphelion/issues/44), the Grok adapter, must decide how Grok runs here, for example with its sandbox off.
 - **Codex runs with its own sandbox off.** 0035 said `requirements.toml` allowed only `read-only` and `workspace-write`, and kept `danger-full-access` out. That is reversed. In Codex's settings, `sandbox_mode` is the sandbox choice, and `danger-full-access` means no sandbox. The M0-17 finding showed that `allowed_sandbox_modes` holds: a value outside the list fell back to an allowed mode when it came from `config.toml` or `thread/start`, and was rejected when it came from `turn/start`. So:
   - `/etc/codex/requirements.toml` sets `allowed_sandbox_modes = ["danger-full-access"]`. The other mode lists from 0035 stay the same.
   - Each thread starts with `sandbox: "danger-full-access"`. With `danger-full-access` the only allowed value, nothing can switch the sandbox on or to another mode.
-  - M0-17 measured the list with `read-only` and `workspace-write` as the allowed values. It didn't measure a list with `danger-full-access` alone. M4-10 must measure that before it ships, and must confirm that `untrusted` still asks for every command with the sandbox off.
+  - M0-17 measured the list only with `read-only` and `workspace-write` as the allowed values. It didn't measure a list with `danger-full-access` alone.
 
-**What still makes every Codex command ask.** Turning the sandbox off doesn't turn approvals off. Two checks stay as 0035 wrote them:
+**Two things M4-10 must measure before it ships.** Nothing below is promised until these tests pass:
 
-- **The `untrusted` policy.** Every shell command and file change asks the adapter. The adapter sends each one to the policy engine. Approvals are answered with `accept`, `decline` or `cancel` only.
-- **The managed hook.** It runs before every local tool call and fails closed, with a deadline shorter than Codex's own timeout.
+1. `allowed_sandbox_modes = ["danger-full-access"]` holds as a single-item list, in the same way M0-17 measured for the two-item list.
+2. `untrusted` still asks for every shell command and file change with the sandbox off. M0-17's table said "`untrusted`, any sandbox", but it covered only `read-only` and `workspace-write`.
 
-**Escalation requests.** An escalation request is Codex asking to run a command outside its sandbox. With no sandbox there is nothing to leave, so Codex should not send many of them. The owner's rule from 0035 stands unchanged. If Codex sends one, the adapter sends it to the owner, with the exact command. No policy rule and no reviewer model may approve it. M4-10's tests keep covering this.
+If either test fails, M4-10 stops and the owner decides again. 0045 doesn't claim that every command asks.
 
-**What the owner gives up.** In 0035, a sandbox stood between a Codex command and the container's files. Now an approved command can write anywhere the `aphelion-agent` user can, including other bots' folders and its own login files. The owner approves each command, so the owner's attention is now the main limit on Codex. A prompt-injected Codex that asks for a harmful command is stopped only if the owner declines it.
+**What is meant to make every Codex command ask.** Turning the sandbox off doesn't turn approvals off, if M4-10's tests confirm it. Three things stay as 0035 wrote them:
+
+- **The `untrusted` policy.** Shell commands and file changes ask the adapter. The adapter sends ordinary approval requests to the policy engine. Approvals are answered with `accept`, `decline` or `cancel` only.
+- **The managed hook.** It makes a separate policy check before each local tool call, whether or not Codex would have asked. It fails closed, with a deadline shorter than Codex's own timeout.
+- **A protected rules folder.** M0-17 found that a user `allow` rule in `$CODEX_HOME/rules` silences the prompts, including for an escalated command. So the agent can't write `$CODEX_HOME/rules`, as in 0035. With the sandbox off, nothing but file permissions and the runner's setup stops it, so M4-10 tests this too.
+
+**Escalation requests.** An escalation request is Codex asking to run a command outside its sandbox. With no sandbox there is nothing to leave, so Codex should rarely send one. The rule from 0035 stands unchanged: escalation requests always go to the owner, with the exact command, and only the owner can approve one. No policy rule and no reviewer model may approve it. M4-10's tests keep covering this. Other requests go to the policy engine, as the owner's rules decide.
+
+**What the owner gives up.** In 0035, a sandbox stood between a Codex command and the container's files. Now a command that gets approved can write anywhere the `aphelion-agent` user can, including other bots' folders and its own login files. If the approvals work as intended, what reaches the owner is each escalation request and whatever the policy engine passes on. A prompt-injected Codex that asks for a harmful command is stopped only if the policy engine or the owner declines it.
 
 **This record keeps [0006](0006-shared-agent-user.md).** All bots share the `aphelion-agent` user. 0006 needs no "Amended by" line.
 
@@ -104,18 +112,18 @@ Codex's commands are protected by these layers instead:
 | Issue | Change |
 | --- | --- |
 | [M0-12](https://github.com/jcore9/Aphelion/issues/14) | No seccomp profile to ship. The Compose file keeps Docker's default and never sets `seccomp=unconfined`. No `systempaths` option. No AppArmor profile or host AppArmor step. `bubblewrap` isn't needed in the image. |
-| [M4-10](https://github.com/jcore9/Aphelion/issues/114) | No profile to ship. Ships the pinned `codex` binary and the `/etc/codex` files, with the sandbox settings above. Measures the two open points above. |
+| [M4-10](https://github.com/jcore9/Aphelion/issues/114) | No profile to ship. Ships the pinned `codex` binary, the `/etc/codex` files with the sandbox settings above, the fail-closed hook and the protected rules folder. Passes the two measurements above first. |
 | [M1-04](https://github.com/jcore9/Aphelion/issues/22) | Bots start as plain child processes of the runner, with no `bwrap`. Cancel uses what the spike measured, and has an open problem below. |
 
 **An open risk for cancel (M1-04).** The spike measured that killing a bot's process group left 2 of 5 processes running. A process that calls `setsid` leaves the group, and a daemon can outlive the cancel. Killing only the bot's main process left 4 of 5. The fix the spike measured, a PID namespace with `--die-with-parent`, is now ruled out. M1-04 must find another way to stop every process a bot started. The finding names these starting points:
 
-- **A cgroup per bot.** A cgroup is a Linux group of processes with shared limits. Killing the cgroup kills every process in it, wherever it went. Whether the container can create cgroups under Docker's default profile and the hardened settings is not measured.
-- **`bwrap --die-with-parent` without a new PID namespace.** The spike measured 4 of 5 left running in that setup, but it also needs the namespace calls, so it is unlikely to work without the extra profile. Treat it as unproven.
-- **Tracking descendants.** The runner walks the bot's child processes and kills each one. This is racy, because a process can fork between the walk and the kill.
+- **A cgroup per bot, if cgroup delegation works under the shipped settings.** A cgroup is a Linux group of processes with shared limits. Killing the cgroup kills every process in it, wherever it went. Whether the runner can create and kill cgroups in the hardened container with Docker's default profile is not measured. It is a candidate, not a plan.
+- **`bwrap --die-with-parent` without a PID namespace.** It left 4 of 5 processes alive in the spike's `q6-kill.txt`. It also needs the namespace calls the default profile blocks. Rejected.
+- **Walking the bot's child processes.** The runner finds each descendant and kills it. A process can fork between the walk and the kill, so this can miss processes.
 
-M1-04 measures these and picks one. If none reaches every process, the owner decides whether the residual risk is acceptable. [Decision 0016](0016-one-docker-container.md)'s line, "cancel kills the agent's whole process group", stays wrong until then.
+M1-04 measures these and picks one. Its cancel test must start a process that leaves its process group, and no process may stay alive after cancel. If no option meets that, the owner decides in a decision record whether to accept the leftover risk. [Decision 0016](0016-one-docker-container.md)'s line, "cancel kills the agent's whole process group", is amended by this record and stays wrong until then.
 
-**Costs the spike measured that no longer apply.** No AppArmor profile on Ubuntu hosts, no uid 0 process rule for `systempaths`, and no single-file login mount problem. Codex's rename-based login saves keep working on `$CODEX_HOME` as today.
+**Costs of the rejected design that no longer apply.** The AppArmor profile on Ubuntu hosts and the uid 0 rule for `systempaths` were documented or inferred, not measured, so they were never confirmed costs. The single-file login mount problem was measured, and it no longer applies. Codex's rename-based login saves keep working on `$CODEX_HOME` as today.
 
 **Not decided here.** Whether Grok's sandbox starts is still not determined. Grok needs a kernel with Landlock, and it doesn't need this record's choices.
 
