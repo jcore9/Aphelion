@@ -27,6 +27,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
 - [M0-17: Codex headless on a ChatGPT login](spikes/M0-17-codex-headless.md)
+- [M0-18: per-bot isolation with user namespaces](spikes/M0-18-namespaces.md)
 
 ## Reference
 
