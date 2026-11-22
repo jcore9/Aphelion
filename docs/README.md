@@ -27,13 +27,15 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
 - [M0-17: Codex headless on a ChatGPT login](spikes/M0-17-codex-headless.md)
+- [M0-10b: Tailscale `whois` from inside the container](spikes/M0-10b-tailscale-whois.md)
 
 ## Reference
 
 - [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
 - [Logging and the audit log](reference/logging.md): the log format, the redaction rules and how to add one, and the append-only audit table.
-- [The HTTP and WebSocket server](reference/server.md): where the server listens, what `/health` returns, what it refuses until device tokens exist, and the Compose port rule.
+- [The HTTP and WebSocket server](reference/server.md): where the server listens, what `/health` returns, what each request gets with and without a device token, the WebSocket limits, and the Compose port rule.
+- [Device tokens](reference/devices.md): how a device token is made, stored, checked, expired and revoked, and what is audited.
 - [The client protocol](reference/protocol.md): how frames, sequence numbers, replay, resync and command ids work.
 - [Protocol spec](reference/protocol-spec.md): every frame, command, event and error code, generated from the protocol schemas.
 - [Plugin manifest](reference/plugin-manifest.md): the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.

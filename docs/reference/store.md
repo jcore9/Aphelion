@@ -63,6 +63,7 @@ Bun opens a `file:` name as an ordinary file today, so the last rule is a precau
 | Version | Name | Creates |
 | --- | --- | --- |
 | 1 | `audit-log` | The append-only `audit_log` table ([logging and the audit log](logging.md#the-audit-log)) |
+| 2 | `devices` | The `devices` table of device tokens ([device tokens](devices.md#how-the-server-stores-a-token)) |
 
 ## Rules
 

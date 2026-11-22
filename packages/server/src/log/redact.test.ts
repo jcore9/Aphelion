@@ -177,6 +177,14 @@ const byValuePattern: Case[] = [
     kept: REDACTED,
   },
   {
+    name: "an Aphelion device token, next to a short aph_dev_ word",
+    fields: {
+      note: "aph_dev_0123456789abcdef_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG aph_dev_short",
+    },
+    secret: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    kept: "aph_dev_short",
+  },
+  {
     name: "a Slack token",
     fields: { note: "xoxb-1234567890-abcdefghij" },
     secret: "1234567890-abcdefghij",
@@ -486,6 +494,7 @@ describe("large hostile strings", () => {
     "JSON keys with no value": '"k": '.repeat(size / 5),
     "an open JSON value": `"password":"${"x".repeat(size)}`,
     "ghp_ repeated": "ghp_".repeat(size / 4),
+    "aph_dev_ repeated": "aph_dev_".repeat(size / 8),
     "JWT starts after hyphens": "key-eyJaaaaaaaa".repeat(size / 15),
     "JWT headers with no payload": "eyJaaaaaaaa.".repeat(size / 12) + "x",
     "sk-proj- after hyphens": "-sk-proj-a".repeat(size / 10),
@@ -551,6 +560,11 @@ describe("token boundaries", () => {
     "1Password": {
       token: "ops_eyJzaWduSW5BZGRyZXNzIjoibXkuMXBhc3N3b3JkLmNvbSJ9",
       secret: "eyJzaWduSW5BZGRyZXNzIjoibXkuMXBhc3N3b3JkLmNvbSJ9",
+    },
+    "Aphelion device": {
+      token:
+        "aph_dev_0123456789abcdef_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+      secret: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
     },
     Slack: {
       token: "xoxb-1234567890-abcdefghij",
