@@ -61,10 +61,14 @@ const scheme = text(32).regex(/^[a-z][a-z0-9+.-]*$/, {
   error: "must be a reference scheme without ://, such as op",
 });
 
-const visible = "\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}";
+const visible = "\\p{L}\\p{N}\\p{P}\\p{S}";
+const visibleOrMark = `${visible}\\p{M}`;
 
 const title = text(64).regex(
-  new RegExp(`^[${visible}]([${visible} ]*[${visible}])?$`, "u"),
+  new RegExp(
+    `^\\p{M}*[${visible}]([${visibleOrMark} ]*[${visibleOrMark}])?$`,
+    "u",
+  ),
   {
     error:
       "must be visible text that doesn't start or end with a space, such as Issues and PRs",

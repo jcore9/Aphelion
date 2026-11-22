@@ -49,7 +49,7 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
 | `contributes.secretSchemes` | list of strings | no | Secret reference schemes the plugin resolves as a secret backend, such as `op`, at most 32 characters. The values it returns go only to the secrets broker. Needs a server part. See [Secret backends](#secret-backends). |
 | `contributes.screens` | list of objects | no | Full pages the plugin adds to the app, each with an entry in the app's menu. Needs a client part. See [Screens](#screens). |
 | `contributes.screens[].id` | string | yes, in a screen | The screen's id, with the same rules as the plugin `id`. Two screens in one plugin can't share an id. |
-| `contributes.screens[].title` | string | yes, in a screen | The screen's name in the menu, such as `Issues and PRs`, at most 64 characters. Visible text only, with the same characters as a secret reference, and no space at the start or end. |
+| `contributes.screens[].title` | string | yes, in a screen | The screen's name in the menu, such as `Issues and PRs`, at most 64 characters. Visible text only, with the same characters as a secret reference, and no space at the start or end. It needs at least one letter, digit, punctuation mark or symbol, so a title made only of combining marks, such as `U+FE0F`, is refused. |
 | `contributes.screens[].icon` | string | no | The icon next to the title, from the app's icon set, such as `git-pull-request`, at most 64 characters. Lowercase letters and digits in words joined by single hyphens, starting with a letter. |
 | `contributes.screens[].menuOrder` | whole number | no | Where the screen goes in the menu, from 0 to 999. Lower numbers come first, and screens without one come last. |
 
@@ -93,7 +93,7 @@ A screen is a full page that a plugin adds to the app, with its own entry in the
 - **The server part fetches its data.** In the GitHub example, the server part has a granted `network` permission for `api.github.com` and asks the host to make each call with the GitHub token, so the plugin never sees the token. It sends the results to the screen through the app's messages.
 - **A screen needs no grant.** It appears when the plugin is installed, unlike a UI slot, which the owner grants one by one. A screen can only show what its plugin can already reach, and that still goes through the plugin's granted permissions. The owner can turn a screen off later.
 
-The app's menu lists every screen from every installed plugin, sorted by `menuOrder`. The menu itself, and how screens from different plugins are told apart, belong to the client shell (M5).
+The app's menu lists every screen from every installed plugin, sorted by `menuOrder`. Screens without one come last. The menu itself, how screens from different plugins are told apart, and how the owner turns a screen off belong to the client shell (M5). So does the app's icon set: until it exists, any well-formed `icon` name is accepted.
 
 ## Secrets
 
@@ -174,7 +174,10 @@ The parser checks a value already read from JSON. The plugin runner (M0-13b) own
 
 ### 0.2.1
 
-Adds `contributes.screens` ([decision 0042, amendment](../decisions/0042-plugin-server-and-client-parts.md#amendment-plugin-screens)). It is not a breaking change: the field is optional, so every 0.2.0 manifest is still valid and means the same. A plugin that adds screens sets `api` to `^0.2.1`, so a 0.2.0 host, which doesn't know screens, refuses it by its range instead of with `has an unknown field`.
+Adds `contributes.screens` ([decision 0042, amendment](../decisions/0042-plugin-server-and-client-parts.md#amendment-plugin-screens)). The field is optional, so it adds to the API, and by the rule in [The API range](#the-api-range) the patch version goes up. A 0.2.0 manifest is still valid and means the same. Two cases to know:
+
+- A plugin with screens should set `api` to `^0.2.1`. A 0.2.0 host still refuses it, but not by the range: the host checks the manifest's fields first, so the reason is `contributes: has an unknown field`.
+- A manifest whose `api` is exactly `0.2.0`, with no `^` or `~`, includes only 0.2.0, so a 0.2.1 host refuses it by its range. Use `^0.2.0` to accept every 0.2.x.
 
 ### 0.2.0
 

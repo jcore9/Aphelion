@@ -133,7 +133,7 @@
               "title": {
                 "type": "string",
                 "maxLength": 64,
-                "pattern": "^[\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}]([\\p{L}\\p{M}\\p{N}\\p{P}\\p{S} ]*[\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}])?$",
+                "pattern": "^\\p{M}*[\\p{L}\\p{N}\\p{P}\\p{S}]([\\p{L}\\p{N}\\p{P}\\p{S}\\p{M} ]*[\\p{L}\\p{N}\\p{P}\\p{S}\\p{M}])?$",
                 "description": "The screen's name in the app's menu."
               },
               "icon": {

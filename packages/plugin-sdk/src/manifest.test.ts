@@ -136,6 +136,11 @@ const titleCases = {
     "\u202eIssues",
     "Issues\u00a0PRs",
     "Issues\u2028",
+    "\u034f",
+    "\ufe0f",
+    "\u0301\u0301",
+    "\u034f \u034f",
+    "\ufe0f ",
   ],
 };
 
@@ -683,6 +688,7 @@ function jsonSchema() {
 
 type JsonSchema = {
   pattern?: string;
+  maxLength?: number;
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
 };
@@ -728,6 +734,51 @@ test.each([
     expect(cases.refused.filter((value) => pattern.test(value))).toEqual([]);
   },
 );
+
+describe("length limits count characters the way JSON Schema does", () => {
+  const emoji = (count: number) => "\u{1F4CB}".repeat(count);
+  test.each([
+    [
+      "$schema",
+      2048,
+      (schema: JsonSchema) => schema.properties?.["$schema"],
+      emoji,
+      (value: string) => ({ ...minimal, $schema: value }),
+    ],
+    [
+      "permissions.secrets[0]",
+      1024,
+      (schema: JsonSchema) =>
+        schema.properties?.["permissions"]?.properties?.["secrets"]?.items,
+      (count: number) => `op://${emoji(count - 5)}`,
+      (value: string) => ({ ...minimal, permissions: { secrets: [value] } }),
+    ],
+    [
+      "contributes.screens[0].title",
+      64,
+      screenField("title"),
+      emoji,
+      (value: string) => ({
+        ...clientOnly,
+        contributes: { screens: [{ id: "issues", title: value }] },
+      }),
+    ],
+  ] as const)(
+    "%s allows %i characters of any width",
+    (field, max, select, make, build) => {
+      const fits = make(max);
+      const tooLong = make(max + 1);
+      const schemaMax = select(jsonSchema() as JsonSchema)?.maxLength;
+      expect(schemaMax).toBe(max);
+      expect(Array.from(fits)).toHaveLength(max);
+      expect(fits.length).toBeGreaterThan(max);
+      expect(parsePluginManifest(build(fits)).ok).toBe(true);
+      expect(issuesOf(build(tooLong))).toEqual([
+        { field, message: `must be at most ${String(max)} characters` },
+      ]);
+    },
+  );
+});
 
 test("plugin-manifest.schema.json matches the schema", async () => {
   const schema = jsonSchema();
