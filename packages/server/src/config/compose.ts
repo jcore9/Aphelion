@@ -11,12 +11,26 @@ const portEntry = z.union([
 
 const composeFile = z.looseObject(
   {
+    include: z.unknown().optional(),
+    networks: z
+      .record(
+        z.string(),
+        z
+          .looseObject({
+            name: z.unknown().optional(),
+            driver: z.unknown().optional(),
+          })
+          .nullable(),
+      )
+      .optional(),
     services: z
       .record(
         z.string(),
         z.looseObject({
+          extends: z.unknown().optional(),
           ports: z.array(portEntry).optional(),
           network_mode: z.string().optional(),
+          networks: z.unknown().optional(),
         }),
       )
       .optional(),
@@ -24,8 +38,21 @@ const composeFile = z.looseObject(
   { error: "must be a YAML mapping" },
 );
 
+const notResolved =
+  "is not resolved. Run the check on the output of `docker compose config`, which fills in variables and merges include, extends and override files.";
 const howToFix =
   'Publish it only on the host\'s tailnet address, such as "100.71.226.67:7400:7400" (decision 0022).';
+const otherContainer =
+  "shares the network of a container outside this file, so the check can't see which ports it publishes.";
+const everyPort = `which publishes every port on every host address. ${howToFix}`;
+
+function hasVariable(value: unknown): boolean {
+  if (typeof value === "string") return value.includes("$");
+  if (typeof value !== "object" || value === null) return false;
+  return Object.entries(value).some(
+    ([key, item]) => key.includes("$") || hasVariable(item),
+  );
+}
 
 function isTailnet(address: string): boolean {
   if (!z.ipv4().safeParse(address).success) return false;
@@ -54,6 +81,13 @@ export function checkComposePorts(file: string, text: string): ConfigIssue[] {
       message: error.message,
     }));
   }
+  if (document.warnings.length > 0) {
+    return document.warnings.map((warning) => ({
+      file,
+      position: lines.linePos(warning.pos[0]),
+      message: `A YAML tag ${notResolved}`,
+    }));
+  }
 
   let data: unknown;
   try {
@@ -68,29 +102,62 @@ export function checkComposePorts(file: string, text: string): ConfigIssue[] {
 
   const at = (path: PropertyKey[], message: string) =>
     issueAt(file, document, lines, path, message);
-  return Object.entries(parsed.data.services ?? {}).flatMap(
-    ([name, service]) => [
-      ...(service.network_mode === "host"
+  const { include, networks = {}, services = {} } = parsed.data;
+
+  const networkIssues = Object.entries(networks).flatMap(([name, network]) => {
+    const path = ["networks", name];
+    if (hasVariable(name) || hasVariable(network))
+      return [at(path, notResolved)];
+    return network?.name === "host" || network?.driver === "host"
+      ? [at(path, `is the host's network, ${everyPort}`)]
+      : [];
+  });
+
+  const serviceIssues = Object.entries(services).flatMap(([name, service]) => {
+    const path = ["services", name];
+    const unresolved = [
+      ...(service.extends === undefined ? [] : ["extends"]),
+      ...(["network_mode", "networks"] as const).filter((key) =>
+        hasVariable(service[key]),
+      ),
+    ].map((key) => at([...path, key], notResolved));
+    const mode = hasVariable(service.network_mode)
+      ? undefined
+      : service.network_mode;
+    const sharesNetwork =
+      mode === "host"
         ? [
             at(
-              ["services", name, "network_mode"],
-              `shares the host's network, which publishes every port on every host address. ${howToFix}`,
+              [...path, "network_mode"],
+              `shares the host's network, ${everyPort}`,
             ),
           ]
-        : []),
-      ...(service.ports ?? []).flatMap((entry, index) => {
-        const address = hostAddress(entry);
-        if (address !== undefined && isTailnet(address)) return [];
-        const path = ["services", name, "ports", index];
-        return [
-          address === undefined
-            ? at(path, `publishes the port on every host address. ${howToFix}`)
-            : at(
-                typeof entry === "object" ? [...path, "host_ip"] : path,
-                `publishes the port on ${address}, which isn't a tailnet address (100.64.0.0/10). ${howToFix}`,
-              ),
-        ];
-      }),
-    ],
-  );
+        : mode?.startsWith("container:")
+          ? [at([...path, "network_mode"], otherContainer)]
+          : [];
+    const ports = (service.ports ?? []).flatMap((entry, index) => {
+      const entryPath = [...path, "ports", index];
+      if (hasVariable(entry)) return [at(entryPath, notResolved)];
+      const address = hostAddress(entry);
+      if (address !== undefined && isTailnet(address)) return [];
+      return [
+        address === undefined
+          ? at(
+              entryPath,
+              `publishes the port on every host address. ${howToFix}`,
+            )
+          : at(
+              typeof entry === "object" ? [...entryPath, "host_ip"] : entryPath,
+              `publishes the port on ${address}, which isn't a tailnet address (100.64.0.0/10). ${howToFix}`,
+            ),
+      ];
+    });
+    return [...unresolved, ...sharesNetwork, ...ports];
+  });
+
+  return [
+    ...(include === undefined ? [] : [at(["include"], notResolved)]),
+    ...networkIssues,
+    ...serviceIssues,
+  ];
 }

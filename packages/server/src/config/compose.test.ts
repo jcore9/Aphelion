@@ -44,6 +44,27 @@ describe("accepts", () => {
     expect(check(text)).toEqual([]);
   });
 
+  test("the resolved output of docker compose config", () => {
+    const text = [
+      "name: aphelion",
+      "services:",
+      "  aphelion:",
+      "    image: aphelion",
+      "    networks:",
+      "      default: null",
+      "    ports:",
+      "      - mode: ingress",
+      "        host_ip: 100.71.226.67",
+      "        target: 7400",
+      '        published: "7400"',
+      "        protocol: tcp",
+      "networks:",
+      "  default:",
+      "    name: aphelion_default",
+    ].join("\n");
+    expect(check(text)).toEqual([]);
+  });
+
   test("tailnet ports shared through a YAML merge key", () => {
     const text = [
       "x-ports: &ports",
@@ -66,7 +87,6 @@ describe("refuses", () => {
     ['"10.0.0.133:7400:7400"', "10.0.0.133"],
     ['"100.63.255.255:7400:7400"', "100.63.255.255"],
     ['"100.128.0.1:7400:7400"', "100.128.0.1"],
-    ['"${TAILNET_IP}:7400:7400"', "${TAILNET_IP}"],
   ])("a port published on another address: %s", (entry, address) => {
     expect(check(withPorts(entry))).toEqual([
       `compose.yaml:5:9: services.aphelion.ports[0]: publishes the port on ${address}, which isn't a tailnet address (100.64.0.0/10). ${fix}`,
@@ -108,12 +128,95 @@ describe("refuses", () => {
     ]);
   });
 
+  test("a network named or driven by host", () => {
+    const text = [
+      withPorts('"100.71.226.67:7400:7400"'),
+      "    networks: [outside]",
+      "networks:",
+      "  outside:",
+      "    external: true",
+      "    name: host",
+      "  other:",
+      "    driver: host",
+    ].join("\n");
+    expect(check(text)).toEqual([
+      `compose.yaml:9:5: networks.outside: is the host's network, which publishes every port on every host address. ${fix}`,
+      `compose.yaml:12:5: networks.other: is the host's network, which publishes every port on every host address. ${fix}`,
+    ]);
+  });
+
+  test("another container's network", () => {
+    const text = withPorts('"100.71.226.67:7400:7400"').replace(
+      "    ports:",
+      "    network_mode: container:proxy\n    ports:",
+    );
+    expect(check(text)).toEqual([
+      "compose.yaml:4:19: services.aphelion.network_mode: shares the network of a container outside this file, so the check can't see which ports it publishes.",
+    ]);
+  });
+
   test("a file it can't read as Compose", () => {
     expect(check("services:\n  - name: a\n   image: b\n")).toEqual([
       "compose.yaml:3:1: Sequence item without - indicator",
     ]);
     expect(check(withPorts().replace("ports:", "ports: 7400"))).toEqual([
       "compose.yaml:4:12: services.aphelion.ports: Invalid input: expected array, received number",
+    ]);
+  });
+});
+
+describe("refuses a file that isn't resolved yet", () => {
+  const unresolved =
+    "is not resolved. Run the check on the output of `docker compose config`, which fills in variables and merges include, extends and override files.";
+
+  test("an interpolated network_mode, which could resolve to host", () => {
+    const text = withPorts('"100.71.226.67:7400:7400"').replace(
+      "    ports:",
+      "    network_mode: ${MODE:-bridge}\n    ports:",
+    );
+    expect(check(text)).toEqual([
+      `compose.yaml:4:19: services.aphelion.network_mode: ${unresolved}`,
+    ]);
+  });
+
+  test.each([
+    '"${TAILNET_IP}:7400:7400"',
+    '"$TAILNET_IP:7400:7400"',
+    '{ target: 7400, host_ip: "${TAILNET_IP}" }',
+  ])("an interpolated port: %s", (entry) => {
+    expect(check(withPorts(entry))).toEqual([
+      `compose.yaml:5:9: services.aphelion.ports[0]: ${unresolved}`,
+    ]);
+  });
+
+  test("interpolated service networks", () => {
+    const text = withPorts('"100.71.226.67:7400:7400"').replace(
+      "    ports:",
+      "    networks: [$NETWORK]\n    ports:",
+    );
+    expect(check(text)).toEqual([
+      `compose.yaml:4:15: services.aphelion.networks: ${unresolved}`,
+    ]);
+  });
+
+  test("extends and include, which pull in other files", () => {
+    const text = [
+      "include: [other.yaml]",
+      withPorts('"100.71.226.67:7400:7400"').replace(
+        "    image: aphelion",
+        "    extends: { file: base.yaml, service: aphelion }",
+      ),
+    ].join("\n");
+    expect(check(text)).toEqual([
+      `compose.yaml:1:10: include: ${unresolved}`,
+      `compose.yaml:4:14: services.aphelion.extends: ${unresolved}`,
+    ]);
+  });
+
+  test("a Compose YAML tag such as !reset", () => {
+    const text = withPorts().replace("    ports:", "    ports: !reset []");
+    expect(check(text)).toEqual([
+      `compose.yaml:4:12: A YAML tag ${unresolved}`,
     ]);
   });
 });
