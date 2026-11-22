@@ -1,23 +1,60 @@
 export const REDACTED = "[REDACTED]";
+export const UNREADABLE = "[Unreadable]";
+export const TOO_DEEP = "[Too deep]";
+export const CIRCULAR = "[Circular]";
+export const maxDepth = 32;
 
 export const redactSelf = Symbol.for("aphelion.redactSelf");
 
 export interface SelfRedacting {
-  [redactSelf](): unknown;
+  [redactSelf](): string;
 }
 
-export interface ValuePattern {
+export interface ValueRule {
   readonly name: string;
-  readonly pattern: RegExp;
+  readonly replace: (text: string) => string;
 }
 
 export interface RedactionRules {
-  readonly fieldNames: readonly string[];
-  readonly valuePatterns: readonly ValuePattern[];
+  readonly fieldNameEndings: readonly string[];
+  readonly exactFieldNames: readonly string[];
+  readonly valueRules: readonly ValueRule[];
+}
+
+export function pattern(
+  name: string,
+  regex: RegExp,
+  replacement = REDACTED,
+): ValueRule {
+  return { name, replace: (text) => text.replace(regex, replacement) };
+}
+
+function redactPemPrivateKeys(text: string): string {
+  const begin = "-----BEGIN ";
+  let result = "";
+  let from = 0;
+  for (;;) {
+    const start = text.indexOf(begin, from);
+    if (start < 0) break;
+    const labelEnd = text.indexOf("-----", start + begin.length);
+    if (labelEnd < 0) break;
+    const label = text.slice(start + begin.length, labelEnd);
+    if (!/^[A-Z ]*PRIVATE KEY$/.test(label)) {
+      result += text.slice(from, labelEnd);
+      from = labelEnd;
+      continue;
+    }
+    const footer = `-----END ${label}-----`;
+    const end = text.indexOf(footer, labelEnd);
+    result += text.slice(from, start) + REDACTED;
+    if (end < 0) return result;
+    from = end + footer.length;
+  }
+  return result + text.slice(from);
 }
 
 export const defaultRules: RedactionRules = {
-  fieldNames: [
+  fieldNameEndings: [
     "token",
     "password",
     "passwd",
@@ -28,117 +65,150 @@ export const defaultRules: RedactionRules = {
     "cookie",
     "credential",
     "credentials",
-    "api key",
     "apikey",
-    "access key",
-    "secret key",
-    "private key",
+    "accesskey",
+    "secretkey",
+    "privatekey",
   ],
-  valuePatterns: [
-    {
-      name: "Bearer or Basic credentials",
-      pattern: /(?<=\b(?:Bearer|Basic)\s+)[\w.~+/=-]{8,}/gi,
-    },
-    {
-      name: "Password in a URL",
-      pattern: /(?<=\/\/[^\s/@:]+:)[^\s/@]+(?=@)/g,
-    },
-    { name: "Anthropic or OpenAI API key", pattern: /\bsk-[\w-]{20,}/g },
-    { name: "xAI API key", pattern: /\bxai-[A-Za-z0-9]{20,}/g },
-    {
-      name: "GitHub token",
-      pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_\w{30,})/g,
-    },
-    { name: "1Password service account token", pattern: /\bops_[\w-]{20,}/g },
-    { name: "Slack token", pattern: /\bxox[abeposr]-[\w-]{10,}/g },
-    { name: "AWS access key ID", pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
-    { name: "age secret key", pattern: /\bAGE-SECRET-KEY-1[0-9A-Z]{58}\b/g },
-    {
-      name: "JSON Web Token",
-      pattern: /\beyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{8,}/g,
-    },
-    {
-      name: "PEM private key",
-      pattern:
-        /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-    },
+  exactFieldNames: ["pass", "pwd"],
+  valueRules: [
+    pattern(
+      "Bearer or Basic credentials",
+      /\b(Bearer|Basic)(\s+)[\w.~+/=-]{8,}/gi,
+      `$1$2${REDACTED}`,
+    ),
+    pattern(
+      "Password in a URL",
+      /(\/\/[^\s/@:]+:)[^\s/@]+@/g,
+      `$1${REDACTED}@`,
+    ),
+    pattern("Anthropic API key", /(?<![\w-])sk-ant-[a-z]+\d*-[\w-]{20,}/g),
+    pattern(
+      "OpenAI API key",
+      /(?<![\w-])sk-(?:(?:proj|svcacct|admin)-[\w-]{20,}|[A-Za-z0-9]{32,})/g,
+    ),
+    pattern("xAI API key", /(?<![\w-])xai-[A-Za-z0-9]{20,}/g),
+    pattern(
+      "GitHub token",
+      /(?<![\w-])(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_\w{30,})/g,
+    ),
+    pattern("1Password service account token", /(?<![\w-])ops_[\w-]{20,}/g),
+    pattern("Slack token", /(?<![\w-])xox[abeposr]-[\w-]{10,}/g),
+    pattern(
+      "AWS access key ID",
+      /(?<![\w-])(?:AKIA|ASIA)[0-9A-Z]{16}(?![\w-])/g,
+    ),
+    pattern("age secret key", /(?<![\w-])AGE-SECRET-KEY-1[0-9A-Z]{58}/g),
+    pattern(
+      "JSON Web Token",
+      /(?<![\w.-])eyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{8,}/g,
+    ),
+    { name: "PEM private key", replace: redactPemPrivateKeys },
   ],
 };
 
-function words(fieldName: string): string[] {
-  return fieldName
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+export function isSensitiveName(
+  name: string,
+  rules: RedactionRules = defaultRules,
+): boolean {
+  const joined = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return (
+    rules.exactFieldNames.includes(joined) ||
+    rules.fieldNameEndings.some((ending) => joined.endsWith(ending))
+  );
 }
 
-function isSelfRedacting(value: object): value is SelfRedacting {
-  return typeof (value as Partial<SelfRedacting>)[redactSelf] === "function";
+export function redactText(
+  text: string,
+  rules: RedactionRules = defaultRules,
+): string {
+  const named = text
+    .replace(/(?<![\w.-])([\w.-]+)=([^\s&#"',;]+)/g, (match, name: string) =>
+      isSensitiveName(name, rules) ? `${name}=${REDACTED}` : match,
+    )
+    .replace(
+      /"([^"\\]{1,100})"(\s*:\s*)"[^"\\]*(?:\\.[^"\\]*)*"/g,
+      (match, name: string, colon: string) =>
+        isSensitiveName(name, rules) ? `"${name}"${colon}"${REDACTED}"` : match,
+    );
+  return rules.valueRules.reduce((result, rule) => rule.replace(result), named);
 }
 
-function hasToJSON(value: object): value is { toJSON(): unknown } {
-  return typeof (value as { toJSON?: unknown }).toJSON === "function";
-}
-
-function errorFields(error: Error): Record<string, unknown> {
-  return {
-    name: error.name,
-    message: error.message,
-    stack: error.stack,
-    ...("cause" in error ? { cause: error.cause } : {}),
-    ...(error instanceof AggregateError ? { errors: error.errors } : {}),
-    ...Object.fromEntries(Object.entries(error)),
-  };
+function errorKeys(error: Error): string[] {
+  return [
+    ...new Set([
+      "name",
+      "message",
+      "stack",
+      ...("cause" in error ? ["cause"] : []),
+      ...(error instanceof AggregateError ? ["errors"] : []),
+      ...Object.keys(error),
+    ]),
+  ];
 }
 
 export function redact(
   value: unknown,
   rules: RedactionRules = defaultRules,
 ): unknown {
-  const sensitive = rules.fieldNames.map((name) => name.split(" "));
   const ancestors = new WeakSet<object>();
 
-  function isSensitive(fieldName: string): boolean {
-    const parts = words(fieldName);
-    return sensitive.some(
-      (rule) =>
-        rule.length <= parts.length &&
-        rule.every((word, i) => parts[parts.length - rule.length + i] === word),
-    );
+  function field(source: object, key: string | number, depth: number): unknown {
+    try {
+      return walk((source as Record<string | number, unknown>)[key], depth);
+    } catch {
+      return UNREADABLE;
+    }
   }
 
-  function redactText(text: string): string {
-    return rules.valuePatterns.reduce(
-      (result, { pattern }) => result.replace(pattern, REDACTED),
-      text,
-    );
+  function walkObject(value: object, depth: number): unknown {
+    const hook = (value as { [redactSelf]?: unknown })[redactSelf];
+    if (typeof hook === "function") return walk(hook.call(value), depth);
+    if (ArrayBuffer.isView(value)) return `[${String(value.byteLength)} bytes]`;
+    const toJSON = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") return walk(toJSON.call(value), depth);
+    if (Array.isArray(value)) {
+      return Array.from({ length: value.length }, (_, index) =>
+        field(value, index, depth),
+      );
+    }
+    const keys = value instanceof Error ? errorKeys(value) : Object.keys(value);
+    const entries: [string, unknown][] = [];
+    for (const key of keys) {
+      const result = isSensitiveName(key, rules)
+        ? REDACTED
+        : field(value, key, depth);
+      if (result !== undefined) entries.push([key, result]);
+    }
+    return Object.fromEntries(entries);
   }
 
-  function walk(value: unknown): unknown {
-    if (typeof value === "string") return redactText(value);
-    if (typeof value === "bigint") return value.toString();
-    if (typeof value !== "object" || value === null) return value;
-    if (ancestors.has(value)) return "[Circular]";
+  function walk(value: unknown, depth: number): unknown {
+    switch (typeof value) {
+      case "string":
+        return redactText(value, rules);
+      case "bigint":
+        return value.toString();
+      case "number":
+      case "boolean":
+        return value;
+      case "object":
+        break;
+      default:
+        return undefined;
+    }
+    if (value === null) return null;
+    if (depth >= maxDepth) return TOO_DEEP;
+    if (ancestors.has(value)) return CIRCULAR;
     ancestors.add(value);
     try {
-      if (isSelfRedacting(value)) return walk(value[redactSelf]());
-      if (ArrayBuffer.isView(value))
-        return `[${String(value.byteLength)} bytes]`;
-      if (hasToJSON(value)) return walk(value.toJSON());
-      if (Array.isArray(value)) return value.map(walk);
-      const fields = value instanceof Error ? errorFields(value) : value;
-      return Object.fromEntries(
-        Object.entries(fields).map(([name, field]) => [
-          name,
-          isSensitive(name) ? REDACTED : walk(field),
-        ]),
-      );
+      return walkObject(value, depth + 1);
+    } catch {
+      return UNREADABLE;
     } finally {
       ancestors.delete(value);
     }
   }
 
-  return walk(value);
+  return walk(value, 0);
 }

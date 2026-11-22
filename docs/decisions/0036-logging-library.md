@@ -19,7 +19,7 @@ M0-14 adds a `Secret` type that must never reach a log. Plugins may hold secrets
 
 ## Options
 
-Each candidate logged the same record on 2026-11-22. The record holds five secrets: an `authorization` header in a nested object, a `password` inside an array, a GitHub token inside a sentence, an OpenAI-style key in an error message, and a `Bearer` token in that error's cause. It also holds six ordinary values that must survive. Each candidate used the redaction it offers out of the box, configured for these fields. The built-in writer is the one in this PR.
+This was a one-off measurement on 2026-11-22, with Bun 1.4.5, Vitest 5.1.1 and the package versions in the table header. The comparison script isn't checked in, because it needs all four libraries installed. Each candidate logged the same record. The record holds five secrets: an `authorization` header in a nested object, a `password` inside an array, a GitHub token inside a sentence, an OpenAI-style key in an error message, and a `Bearer` token in that error's cause. It also holds six ordinary values that must survive. Each candidate used the redaction it offers out of the box, configured for these fields. The built-in writer is the one in this PR.
 
 | | Built-in writer | LogTape 2.4.2 with `@logtape/redaction` | pino 10.4.0 | consola 3.4.2 |
 | --- | --- | --- | --- | --- |
@@ -33,7 +33,7 @@ Each candidate logged the same record on 2026-11-22. The record holds five secre
 | Async log transport in the compiled binary | Not needed | Not needed | Fails: "Cannot find module `.../thread-stream/lib/worker.js`" | Not needed |
 | Runtime dependencies | None | None | 11 packages | None |
 | Size added to the compiled binary | 0 | 107 KB | 135 KB | 94 KB |
-| Code in this repository | 140 lines of redactor, 42 lines of logger | About 40 lines of setup and patterns | About 20 lines of setup | A reporter plus our own redactor |
+| Code in this repository | About 210 lines of redactor, 65 lines of logger | About 40 lines of setup and patterns | About 20 lines of setup | A reporter plus our own redactor |
 
 LogTape's default field list matches any field name that contains `token`, `key`, `auth`, `address` or `email`. It would remove `inputTokens`, `cacheKey` and `ipAddress`, which Aphelion needs in its logs, so it would run with our list instead of its own. pino and consola would need our redactor in front of them to pass the test, and then the library adds only the line writer.
 
@@ -44,10 +44,12 @@ The built-in writer, in `packages/server/src/log/`. The redactor is the part tha
 The rules that follow:
 
 - Code logs through the `Logger` interface from `packages/server/src/log/logger.ts`. It never imports a logging library, so a later move to LogTape changes one file.
-- Every record goes through `redact` before it is written. There is no way to write an unredacted line.
+- `createLogger` passes every record through `redact` before it writes the line, and adds `time`, `level` and `msg` afterwards. Redaction catches the field names and the secret formats in its rules. It doesn't catch every secret, and [the logging reference](../reference/logging.md#what-redaction-doesnt-catch) lists what it misses.
 - The redaction rules are data, in `defaultRules` in `packages/server/src/log/redact.ts`. Adding a rule is a one-line change with a paired test.
+- The redactor's output is plain data. It reads each value once, so a getter can't return one thing when it is checked and another when it is copied. A value that throws becomes `[Unreadable]`, and nesting beyond 32 levels becomes `[Too deep]`, so a log call doesn't throw because of what it is given.
+- Each value rule runs in time proportional to the length of the string. A test runs each one on a hostile 1 MB string.
 - A value that has a method under `Symbol.for("aphelion.redactSelf")` is replaced by what that method returns. `Symbol.for` reads a registry that every module shares, so `plugin-sdk` can define `Secret` without importing the server. M0-14 builds `Secret` on this.
-- The audit writer runs the same redactor over each entry's detail before it reaches the database.
+- The audit writer applies the same rules to every text column and to the detail before the insert.
 
 LogTape is the fallback. It is the only library that passed the test, and it has no dependencies.
 
@@ -55,6 +57,6 @@ LogTape is the fallback. It is the only library that passed the test, and it has
 
 - M0-14 gives `Secret` a `[Symbol.for("aphelion.redactSelf")]` method and adds its case to `packages/server/src/log/redact.test.ts`.
 - M0-10b's device tokens need a fixed prefix, so a value-pattern rule can catch a device token that ends up in a string.
-- A secret with no known prefix, in a field whose name isn't on the list, still reaches the log. The field list and the patterns reduce leaks. They can't prevent every one, so code that handles a secret uses the `Secret` type.
+- A secret with no known format, in a field whose name isn't on the list, still reaches the log. The field list and the patterns reduce leaks. They can't prevent every one, so code that handles a secret uses the `Secret` type, whose `redactSelf` method returns a placeholder.
 - The logger writes each record as one line to standard output when the call is made. If logging ever shows up as a cost in a profile, revisit this record.
 - Revisit when the server needs log categories, several outputs or log shipping. LogTape is the first candidate then.

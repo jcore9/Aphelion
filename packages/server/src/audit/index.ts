@@ -1,4 +1,10 @@
-import { defaultRules, redact, type Fields, type RedactionRules } from "../log";
+import {
+  defaultRules,
+  redact,
+  redactText,
+  type Fields,
+  type RedactionRules,
+} from "../log";
 import type { Database } from "../store";
 
 export type Actor =
@@ -22,19 +28,21 @@ export function appendAudit(
   entry: AuditEntry,
   rules: RedactionRules = defaultRules,
 ): number {
+  const text = (value: string | undefined) =>
+    value === undefined ? null : redactText(value, rules);
   const [row] = db.all(
     `INSERT INTO audit_log
       (actor_kind, actor_id, action, outcome, agent_id, session_id, request_id, detail)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING id`,
     [
-      entry.actor.kind,
-      "id" in entry.actor ? entry.actor.id : null,
-      entry.action,
-      entry.outcome,
-      entry.agentId ?? null,
-      entry.sessionId ?? null,
-      entry.requestId ?? null,
+      text(entry.actor.kind),
+      text("id" in entry.actor ? entry.actor.id : undefined),
+      text(entry.action),
+      text(entry.outcome),
+      text(entry.agentId),
+      text(entry.sessionId),
+      text(entry.requestId),
       JSON.stringify(redact(entry.detail ?? {}, rules)),
     ],
   );

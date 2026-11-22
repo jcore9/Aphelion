@@ -5,7 +5,7 @@ export const auditLog: Migration = {
   name: "audit-log",
   sql: `
     CREATE TABLE audit_log (
-      id INTEGER PRIMARY KEY,
+      id INTEGER PRIMARY KEY CHECK (id > 0),
       at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       actor_kind TEXT NOT NULL CHECK (actor_kind <> ''),
       actor_id TEXT,
@@ -24,7 +24,7 @@ export const auditLog: Migration = {
     BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
 
     CREATE TRIGGER audit_log_no_replace BEFORE INSERT ON audit_log
-    WHEN EXISTS (SELECT 1 FROM audit_log WHERE id = NEW.id)
+    WHEN NEW.id > 0 AND EXISTS (SELECT 1 FROM audit_log WHERE id = NEW.id)
     BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
   `,
 };

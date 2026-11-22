@@ -1,10 +1,28 @@
-import { defaultRules, redact, type RedactionRules } from "./redact";
+import {
+  defaultRules,
+  redact,
+  redactText,
+  type RedactionRules,
+} from "./redact";
 
 export const levels = ["debug", "info", "warn", "error"] as const;
 
 export type Level = (typeof levels)[number];
 
 export type Fields = Readonly<Record<string, unknown>>;
+
+const envelope = new Set(["time", "level", "msg"]);
+
+function payloadEntries(payload: unknown): [string, unknown][] {
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    Array.isArray(payload)
+  ) {
+    return [["fields", payload]];
+  }
+  return Object.entries(payload).filter(([name]) => !envelope.has(name));
+}
 
 export interface Logger {
   debug(msg: string, fields?: Fields): void;
@@ -30,8 +48,13 @@ export function createLogger({
     (level: Level) =>
     (msg: string, fields: Fields = {}): void => {
       if (levels.indexOf(level) < levels.indexOf(minimum)) return;
-      const head = { time: now().toISOString(), level, msg };
-      write(JSON.stringify(redact({ ...head, ...fields, ...head }, rules)));
+      const record = Object.fromEntries([
+        ["time", now().toISOString()],
+        ["level", level],
+        ["msg", redactText(msg, rules)],
+        ...payloadEntries(redact(fields, rules)),
+      ]);
+      write(JSON.stringify(record));
     };
   return {
     debug: log("debug"),

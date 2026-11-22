@@ -125,3 +125,52 @@ test("rejects an empty action and a detail that is not a JSON object", () => {
   }).toThrow();
   expect(db.all("SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 0 }]);
 });
+
+test("redacts secrets in every text column, and keeps ordinary ids", () => {
+  const db = openDatabase();
+  const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+  appendAudit(db, {
+    actor: { kind: "agent", id: token },
+    action: `secret.read ${token}`,
+    outcome: "denied",
+    agentId: token,
+    sessionId: token,
+    requestId: `Bearer abc123def456ghi`,
+  });
+  appendAudit(db, approval);
+
+  const rows = db.all("SELECT * FROM audit_log ORDER BY id");
+  expect(JSON.stringify(rows)).not.toContain(
+    "abcdefghijklmnopqrstuvwxyz0123456789",
+  );
+  expect(JSON.stringify(rows)).not.toContain("abc123def456ghi");
+  expect(rows[0]).toMatchObject({
+    actor_id: "[REDACTED]",
+    action: "secret.read [REDACTED]",
+    agent_id: "[REDACTED]",
+    request_id: "Bearer [REDACTED]",
+  });
+  expect(rows[1]).toMatchObject({
+    actor_id: "laptop",
+    agent_id: "triage",
+    session_id: "s-1",
+    request_id: "r-1",
+  });
+});
+
+test("rejects an explicit id of -1 or 0, and later appends still work", () => {
+  const db = openDatabase();
+
+  for (const id of [-1, 0]) {
+    expect(() => {
+      db.run(
+        `INSERT INTO audit_log (id, actor_kind, action, outcome) VALUES (${String(id)}, 'server', 'x', 'failed')`,
+      );
+    }).toThrow();
+  }
+  const first = appendAudit(db, approval);
+  const second = appendAudit(db, approval);
+
+  expect(second).toBeGreaterThan(first);
+  expect(db.all("SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 2 }]);
+});

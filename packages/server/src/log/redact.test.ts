@@ -1,10 +1,19 @@
 import { describe, expect, test } from "vitest";
 import { createLogger, type Fields } from "./logger";
-import { REDACTED, redactSelf } from "./redact";
+import {
+  REDACTED,
+  redactSelf,
+  redactText,
+  TOO_DEEP,
+  UNREADABLE,
+} from "./redact";
 
 function logLine(fields: Fields, msg = "event"): string {
   const lines: string[] = [];
-  createLogger({ write: (line) => lines.push(line) }).info(msg, fields);
+  createLogger({
+    write: (line) => lines.push(line),
+    now: () => new Date("2026-11-22T10:00:00.000Z"),
+  }).info(msg, fields);
   expect(lines).toHaveLength(1);
   return lines[0] ?? "";
 }
@@ -57,12 +66,16 @@ const byFieldName: Case[] = [
       APIKey: "plain-value-4d",
       secretAccessKey: "plain-value-4e",
       "set-cookie": "plain-value-4f",
+      ACCESSTOKEN: "plain-value-4g",
+      pass: "plain-value-4h",
+      pwd: "plain-value-4i",
       inputTokens: 1200,
       secretRef: "op://vault/item",
       cacheKey: "agents:list",
+      bypass: true,
     },
     secret: "plain-value-4",
-    kept: '"inputTokens":1200,"secretRef":"op://vault/item","cacheKey":"agents:list"',
+    kept: '"inputTokens":1200,"secretRef":"op://vault/item","cacheKey":"agents:list","bypass":true',
   },
   {
     name: "a whole object under a sensitive name",
@@ -101,10 +114,42 @@ const byValuePattern: Case[] = [
     kept: "using [REDACTED] now",
   },
   {
-    name: "an OpenAI key, next to a short sk- word",
-    fields: { note: "sk-proj-abcdefghijklmnopqrstuvwx sk-learn" },
+    name: "a secret query parameter, next to an ordinary one",
+    fields: { url: "https://example.com/cb?access_token=plain-query-1&page=2" },
+    secret: "plain-query-1",
+    kept: "access_token=[REDACTED]&page=2",
+  },
+  {
+    name: "a secret assignment, next to an ordinary one",
+    fields: { command: "GITHUB_TOKEN=plain-env-1 PORT=8080 bun start" },
+    secret: "plain-env-1",
+    kept: "PORT=8080 bun start",
+  },
+  {
+    name: "a secret field inside a JSON-encoded string",
+    fields: { body: '{"user":"ada","password":"plain-json-1"}' },
+    secret: "plain-json-1",
+    kept: '\\"user\\":\\"ada\\"',
+  },
+  {
+    name: "an OpenAI key, next to a hyphenated slug",
+    fields: {
+      note: "sk-proj-abcdefghijklmnopqrstuvwx sk-learn sk-this-is-an-ordinary-slug",
+    },
     secret: "abcdefghijklmnopqrstuvwx",
-    kept: "sk-learn",
+    kept: "sk-learn sk-this-is-an-ordinary-slug",
+  },
+  {
+    name: "a legacy OpenAI key",
+    fields: { note: "sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD" },
+    secret: "abcdefghijklmnopqrstuvwxyz0123456789ABCD",
+    kept: REDACTED,
+  },
+  {
+    name: "an unterminated PEM private key",
+    fields: { key: "-----BEGIN RSA PRIVATE KEY-----\nMIIEplainpemtail" },
+    secret: "MIIEplainpemtail",
+    kept: REDACTED,
   },
   {
     name: "an xAI key",
@@ -306,5 +351,145 @@ describe("other values", () => {
       cyclic: { name: "loop", shared: { name: "shared" }, self: "[Circular]" },
       again: { name: "shared" },
     });
+  });
+});
+
+describe("hostile values", () => {
+  test("reads toJSON once, so a getter can't swap in a function afterwards", () => {
+    let reads = 0;
+    const tricky = {
+      get toJSON() {
+        reads += 1;
+        return reads === 1
+          ? undefined
+          : () => "ghp_abcdefghijklmnopqrstuvwxyz0123456789-unredacted";
+      },
+      label: "kept-label",
+    };
+    const line = logLine({ tricky });
+
+    expect(line).not.toContain("unredacted");
+    expect(line).toContain("kept-label");
+  });
+
+  test("writes only plain data, dropping functions", () => {
+    const line = logLine({
+      handler: () => "plain-function-output",
+      nested: { toJSON: "a string, not a function", kept: 1 },
+    });
+
+    expect(line).not.toContain("plain-function-output");
+    expect(JSON.parse(line)).toMatchObject({
+      nested: { toJSON: "a string, not a function", kept: 1 },
+    });
+    expect(line).not.toContain('"handler"');
+  });
+
+  test("keeps the envelope when the fields object has its own toJSON", () => {
+    const fields = { toJSON: () => "replaced everything" };
+    const logged = JSON.parse(logLine(fields, "real message")) as Record<
+      string,
+      unknown
+    >;
+
+    expect(logged).toMatchObject({
+      level: "info",
+      msg: "real message",
+      fields: "replaced everything",
+    });
+    expect(logged["time"]).toBe("2026-11-22T10:00:00.000Z");
+  });
+
+  test("masks a throwing getter with a secret name without calling it", () => {
+    let called = false;
+    const fields = {
+      get password(): string {
+        called = true;
+        throw new Error("plain-getter-secret");
+      },
+      user: "ada",
+    };
+    const line = logLine(fields);
+
+    expect(called).toBe(false);
+    expect(JSON.parse(line)).toMatchObject({ password: REDACTED, user: "ada" });
+  });
+
+  test("marks values that throw when read, converted or redacted", () => {
+    const line = logLine({
+      getter: Object.defineProperty({}, "value", {
+        enumerable: true,
+        get() {
+          throw new Error("plain-getter-error");
+        },
+      }),
+      json: {
+        toJSON() {
+          throw new Error("plain-tojson-error");
+        },
+      },
+      self: {
+        [redactSelf]() {
+          throw new Error("plain-hook-error");
+        },
+      },
+      proxy: new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw new Error("plain-proxy-error");
+          },
+        },
+      ),
+      kept: "ada",
+    });
+
+    expect(line).not.toContain("plain-");
+    expect(JSON.parse(line)).toEqual({
+      time: "2026-11-22T10:00:00.000Z",
+      level: "info",
+      msg: "event",
+      getter: { value: UNREADABLE },
+      json: UNREADABLE,
+      self: UNREADABLE,
+      proxy: UNREADABLE,
+      kept: "ada",
+    });
+  });
+
+  test("cuts off very deep objects instead of throwing", () => {
+    let deep: Record<string, unknown> = { bottom: "plain-bottom" };
+    for (let i = 0; i < 10_000; i += 1) deep = { next: deep };
+    const line = logLine({ deep, kept: "ada" });
+
+    expect(line).toContain(TOO_DEEP);
+    expect(line).not.toContain("plain-bottom");
+    expect(line).toContain('"kept":"ada"');
+  });
+});
+
+describe("large hostile strings", () => {
+  const size = 1_000_000;
+  const inputs: Record<string, string> = {
+    "PEM openings with no end": "-----BEGIN ".repeat(size / 11),
+    "PEM private key openings with no end":
+      "-----BEGIN PRIVATE KEY-----".repeat(size / 27),
+    "sk- repeated": "sk-".repeat(size / 3),
+    "sk-proj- with no key": "sk-proj-".repeat(size / 8),
+    "JWT starts joined by hyphens": "eyJ-".repeat(size / 4),
+    "JWT segments with no third part": "eyJaaaaaaaa.".repeat(size / 12),
+    "a long word": "a".repeat(size),
+    "Bearer then spaces": `Bearer ${" ".repeat(size)}`,
+    "URL starts with no @": "//a:b".repeat(size / 5),
+    assignments: "a=".repeat(size / 2),
+    "JSON keys with no value": '"k": '.repeat(size / 5),
+    "an open JSON value": `"password":"${"x".repeat(size)}`,
+    "ghp_ repeated": "ghp_".repeat(size / 4),
+  };
+
+  test.each(Object.entries(inputs))("%s finishes quickly", (_name, input) => {
+    const started = performance.now();
+    redactText(input);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 });
