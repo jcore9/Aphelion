@@ -15,7 +15,7 @@ Nothing is built without a written plan.
 1. Pick an issue whose milestone plan is approved and whose dependencies have merged.
 2. Create a branch from `dev` for that issue alone. Name it `<type>/<issue-id>-<slug>`, for example `chore/M0-04-monorepo-scaffold` or `feat/M3-04-github-app`. The prefix is `feat/`, `fix/`, `docs/`, `spike/` or `chore/`.
 3. Open one small PR into `dev`. Aim for under about 400 changed lines, not counting tests and generated files. A PR never mixes a refactor with a feature, or two features.
-4. Fill in the PR template. Write `Closes #<issue>` and add the labels that apply.
+4. Fill in the PR template. Write `Closes #<issue>` and add the labels that apply. GitHub closes issues on its own only for PRs into `main`, so close the issue by hand once the PR merges into `dev`.
 5. Give the PR a Conventional Commit title, such as `feat(server): ...` or `docs: ...`. The owner squash-merges it into `dev`, and the title becomes the commit on `dev`.
 
 Spikes end in a written finding under `docs/spikes/`. Their prototype code stays on the `spike/` branch and never merges.
@@ -44,7 +44,7 @@ bun run test
 
 ## Labels
 
-Every issue gets one type label and the area labels that fit. A PR carries the risk labels that apply. [Decision 0002](docs/decisions/0002-type-docs-label.md) sets this list.
+Every issue gets one type label and the area labels that fit. An issue that touches a security-sensitive path also gets `risk/security`, so its PR gets a full review from the start. A PR carries the risk labels that apply. [Decision 0002](docs/decisions/0002-type-docs-label.md) sets this list.
 
 | Label | Use it for |
 | --- | --- |
@@ -56,7 +56,7 @@ Every issue gets one type label and the area labels that fit. A PR carries the r
 | `area/client` | The web client, protocol consumers and test clients |
 | `area/gateway` | The connector gateway and connectors |
 | `area/plugins` | The plugin host, the SDK and first-party plugins |
-| `area/desktop` | The Electron shell and packaging |
+| `area/desktop` | The Electron shell, packaging and headless mode |
 | `area/security` | Isolation, policy, secrets and auth |
 | `risk/security` | A change to a security-sensitive path. It gets a full line-by-line review. |
 | `risk/breaking` | A breaking change. The changelog needs migration notes. |

@@ -2,9 +2,11 @@
 
 Aphelion is a self-hosted bot application. Its bots, called agents, are persistent managers and orchestrators. They plan work, track it across connected services such as GitHub, message each other and hand off tasks, and delegate hands-on coding to dedicated tools such as T3 Code over MCP. Aphelion is not a coding app. It has no code editor, diff viewer or terminal UI.
 
-Agents drive the official, unmodified Claude Code, Grok Build and Codex CLIs, on the owner's own subscription logins ([decision 0019](docs/decisions/0019-cli-subscription-use.md), [decision 0024](docs/decisions/0024-codex-third-agent-cli.md)). Every risky tool call goes through an approval layer that the owner configures. A call is allowed by a rule, released by a reviewer model, or sent to the owner to decide.
+This section describes the design. Most of it isn't built yet.
 
-The agents are untrusted, so the rules that gate them live outside their reach. The server runs as one hardened Docker container with a read-only root filesystem and no added privileges. Inside it, the server, the agents and the secrets broker run as separate Unix users ([decision 0016](docs/decisions/0016-one-docker-container.md)). The server is reached only on a Tailscale address.
+Agents drive the official, unmodified Claude Code and Grok Build CLIs on the owner's own subscription logins ([decision 0019](docs/decisions/0019-cli-subscription-use.md)). Codex is planned as a third CLI, pending the M0-17 spike ([decision 0024](docs/decisions/0024-codex-third-agent-cli.md)). Every risky tool call goes through an approval layer that the owner configures. A call is allowed by a rule, released by a reviewer model, or sent to the owner to decide.
+
+The agents are untrusted, so the rules that gate them live outside their reach. The server runs as one hardened Docker container with a read-only root filesystem. Every capability is dropped except the two the init needs to start processes as other users. Inside the container, the server, the agents, the secrets broker and the plugins run as separate Unix users ([decision 0016](docs/decisions/0016-one-docker-container.md)). The server's port is published only on the host's Tailscale address, and every API call except `/health` needs a device token, even from inside the container ([decision 0022](docs/decisions/0022-agent-network-boundary.md)).
 
 The clients only connect to a server. They never run one ([decision 0017](docs/decisions/0017-desktop-remote-only.md)). The clients are a web app that installs as a PWA and an Electron desktop app.
 
