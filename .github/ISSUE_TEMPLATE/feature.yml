@@ -1,0 +1,69 @@
+name: Feature
+description: A new capability, planned in a milestone.
+title: "[M#] "
+labels: ["type/feature"]
+body:
+  - type: input
+    id: id
+    attributes:
+      label: ID and milestone
+      description: The issue ID from the milestone plan.
+      placeholder: "M3-04 · M3 · Connectors and GitHub"
+    validations:
+      required: true
+  - type: input
+    id: plan
+    attributes:
+      label: Plan or decision record
+      description: A link to the milestone plan section or the decision record that covers this work.
+      placeholder: https://github.com/jcore9/Aphelion/blob/dev/docs/plan/milestones/M0-foundations.md
+    validations:
+      required: true
+  - type: input
+    id: linked
+    attributes:
+      label: Linked issues
+      description: The parent issue and the issues this depends on.
+      placeholder: "Parent #6. Depends on #5 (M0-04)."
+  - type: textarea
+    id: changes
+    attributes:
+      label: What changes
+      description: The acceptance criteria, as a checklist that a reviewer can tick off.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: How it will be tested
+      description: The unit tests, plus the contract or end-to-end test that applies.
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs it touches
+      description: The docs that the PR must update, or "None".
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk label
+      description: Pick every risk label that applies. CONTRIBUTING.md lists the security-sensitive paths.
+      multiple: true
+      options:
+        - None
+        - risk/security
+        - risk/breaking
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This adds no code editor, diff review or terminal UI. Aphelion is a bot application, not a coding app.
+          required: true
