@@ -1,6 +1,6 @@
 # 0037. Protocol frames are Zod 4 schemas, and the TypeScript types come from them
 
-- Status: Proposed
+- Status: Accepted (approved by merging #126 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: the M0-09a protocol frames PR ([#95](https://github.com/jcore9/Aphelion/issues/95))
 - Answers: how `@aphelion/protocol` describes and validates frames, which sets the input for the spec generator that M0-09b chooses

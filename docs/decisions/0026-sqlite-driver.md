@@ -1,6 +1,6 @@
 # 0026. The store uses `bun:sqlite` in an adapter, and migrations are TypeScript modules
 
-- Status: Proposed
+- Status: Accepted (approved by merging #119 on 2026-11-22)
 - Date: 2026-11-21
 - Proposed by: orchestrator, in the M0-07 store PR ([#9](https://github.com/jcore9/Aphelion/issues/9))
 - Answers: the driver **DR** in the M0 plan's M0-07 design note

@@ -1,6 +1,6 @@
 # 0025. Config files are YAML, parsed with the `yaml` package and validated with Zod 4
 
-- Status: Proposed
+- Status: Accepted (approved by merging #121 on 2026-11-22)
 - Date: 2026-11-21
 - Proposed by: the M0-06 config PR ([#8](https://github.com/jcore9/Aphelion/issues/8))
 - Answers: the schema library **DR** in the M0 plan's M0-06 design note, and the file format

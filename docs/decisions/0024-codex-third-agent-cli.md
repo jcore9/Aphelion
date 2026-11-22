@@ -4,6 +4,8 @@
 - Date: 2026-11-21
 - Decided by: project owner
 - Amends: the plan's goal "starting with Claude Code and Grok Build" and its architecture diagram (provider APIs), [0019](0019-cli-subscription-use.md) (adds Codex on a ChatGPT login), [0022](0022-agent-network-boundary.md) (the egress allowlist in option 2), and the [M0 plan](../plan/milestones/M0-foundations.md) (adds M0-17)
+- Amended by: [0034](0034-vendor-protocol-per-cli.md) (Codex is driven through `codex app-server`, not an ACP adapter)
+- Amended by: [0035](0035-codex-login-sandbox-approvals.md) (the login, sandbox and approval questions are answered)
 
 ## Context
 

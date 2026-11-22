@@ -4,6 +4,8 @@
 - Date: 2026-11-21
 - Decided by: project owner
 - Answers: M0-01 question 3 and M0-02 question 4
+- Amended by: [0034](0034-vendor-protocol-per-cli.md) (the first guardrail names no ACP adapter; each CLI runs through its vendor's own protocol)
+- Amended by: [0035](0035-codex-login-sandbox-approvals.md) (Codex joins on a ChatGPT login under these guardrails)
 
 ## Context
 

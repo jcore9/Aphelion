@@ -4,6 +4,7 @@
 - Date: 2026-11-21
 - Decided by: plan of record (imported in [0004](0004-import-plan-with-m0-plan.md))
 - Answers: the plan's Open decisions, "Where the policy engine runs"
+- Amended by: [0034](0034-vendor-protocol-per-cli.md) (the policy engine's inputs are each adapter's permission requests and the hook callbacks, not only ACP requests)
 
 ## Context
 

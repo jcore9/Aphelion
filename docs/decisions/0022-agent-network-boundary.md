@@ -4,6 +4,7 @@
 - Date: 2026-11-21
 - Decided by: project owner (option 1 now, ready for option 2)
 - Amends: [0016](0016-one-docker-container.md) (network boundary, API exposure inside the container, runner channels), [0010](0010-agent-folders.md) (how the server reads agent files), [0018](0018-shared-plugin-user.md) (the plugin runner channel)
+- Amended by: [0035](0035-codex-login-sandbox-approvals.md) (the option 2 egress allowlist adds `api.openai.com`, `chatgpt.com` and `auth.openai.com`)
 
 ## Context
 
