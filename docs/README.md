@@ -15,6 +15,10 @@ These Markdown files read the same on GitHub and on the docs site. `bun run docs
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
 
+## Working on the repository
+
+- [Branch protection](branch-protection.md): how changes reach `dev` and `main`, and why.
+
 ## Spike findings
 
 Each spike answers its questions in writing before anything builds on it. Prototype code stays on its `spike/` branch and is never merged.
@@ -22,6 +26,11 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [M0-01: Claude over ACP on a subscription login](spikes/M0-01-claude-over-acp.md)
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
+- [M0-17: Codex headless on a ChatGPT login](spikes/M0-17-codex-headless.md)
+
+## Reference
+
+- [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
 
 ## Decision records
 
@@ -53,6 +62,7 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0022](decisions/0022-agent-network-boundary.md) | The host firewall blocks the container from the LAN, with a path to a separate agents container | Accepted |
 | [0023](decisions/0023-scaffold-toolchain.md) | The scaffold lints with ESLint and typescript-eslint on TypeScript 6.0, and formats with Prettier | Accepted |
 | [0024](decisions/0024-codex-third-agent-cli.md) | Codex CLI becomes a third agent CLI, spiked in M0 and built in M4 | Accepted |
+| [0026](decisions/0026-sqlite-driver.md) | The store uses `bun:sqlite` in an adapter, and migrations are TypeScript modules | Proposed |
 | [0027](decisions/0027-acp-first-adapters.md) | Agent adapters speak ACP first, with stream-json as a fallback per provider | Accepted |
 | [0028](decisions/0028-policy-engine-in-harness.md) | The policy engine runs inside the harness for v1 | Accepted |
 | [0029](decisions/0029-hosted-reviewer-model.md) | The reviewer is a small hosted model, called with an API key | Accepted |
