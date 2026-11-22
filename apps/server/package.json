@@ -14,12 +14,14 @@
   },
   "scripts": {
     "build": "bun build --compile src/cli/main.ts --outfile dist/aphelion",
+    "build:broker": "bun build --compile src/secrets/broker-main.ts --outfile dist/aphelion-secrets",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aphelion/plugin-sdk": "workspace:*",
     "@aphelion/protocol": "workspace:*",
     "@effect/platform-bun": "4.1.5",
+    "age-encryption": "0.3.1",
     "effect": "4.1.5",
     "yaml": "2.9.1",
     "zod": "4.6.7"
