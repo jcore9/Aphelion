@@ -1,8 +1,10 @@
-import type { CommandId } from "./frames";
+import type { CommandId } from "./frames.ts";
+
+type Entry<Outcome> = { outcome: Promise<Outcome>; settled: boolean };
 
 export class CommandLedger<Outcome> {
   readonly #capacity: number;
-  readonly #outcomes = new Map<CommandId, Promise<Outcome>>();
+  readonly #entries = new Map<CommandId, Entry<Outcome>>();
 
   constructor({ capacity }: { capacity: number }) {
     if (!Number.isInteger(capacity) || capacity < 1) {
@@ -12,14 +14,26 @@ export class CommandLedger<Outcome> {
   }
 
   run(id: CommandId, apply: () => Promise<Outcome>): Promise<Outcome> {
-    const known = this.#outcomes.get(id);
-    if (known) return known;
-    const outcome = apply();
-    this.#outcomes.set(id, outcome);
-    if (this.#outcomes.size > this.#capacity) {
-      const [oldest] = this.#outcomes.keys();
-      if (oldest !== undefined) this.#outcomes.delete(oldest);
-    }
+    const known = this.#entries.get(id);
+    if (known) return known.outcome;
+    const outcome = new Promise<Outcome>((resolve) => {
+      resolve(apply());
+    });
+    const entry: Entry<Outcome> = { outcome, settled: false };
+    this.#entries.set(id, entry);
+    this.#trim();
+    const settle = () => {
+      entry.settled = true;
+      this.#trim();
+    };
+    outcome.then(settle, settle);
     return outcome;
+  }
+
+  #trim(): void {
+    for (const [id, entry] of this.#entries) {
+      if (this.#entries.size <= this.#capacity) return;
+      if (entry.settled) this.#entries.delete(id);
+    }
   }
 }

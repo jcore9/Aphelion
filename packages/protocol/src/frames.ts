@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { commands, events } from "./registry";
+import { commands, events } from "./registry.ts";
 
 export const version = 1;
 
@@ -125,6 +125,16 @@ export function encodeFrame(frame: ClientFrame | ServerFrame): string {
   return JSON.stringify(frame);
 }
 
+const reasons: Partial<Record<z.core.$ZodIssue["code"], string>> = {
+  invalid_type: "wrong type or missing",
+  invalid_value: "not an allowed value",
+  invalid_union: "not an allowed value",
+  unrecognized_keys: "unknown field",
+  too_small: "out of range",
+  too_big: "out of range",
+  invalid_format: "wrong format",
+};
+
 function parseFrame<Frame>(
   schema: z.ZodType<Frame>,
   text: string,
@@ -147,9 +157,10 @@ function parseFrame<Frame>(
   const result = schema.safeParse(raw);
   if (result.success) return { ok: true, frame: result.data };
   const message = result.error.issues
-    .map(({ path, message }) =>
-      path.length ? `${path.join(".")}: ${message}` : message,
-    )
+    .map(({ path, code }) => {
+      const reason = reasons[code] ?? "invalid";
+      return path.length ? `${path.join(".")}: ${reason}` : reason;
+    })
     .join("; ");
   return failure("malformed", message, id);
 }

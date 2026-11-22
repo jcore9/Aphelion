@@ -7,7 +7,7 @@ import {
   streamId,
   type ClientFrame,
   type ServerFrame,
-} from "./index";
+} from "./index.ts";
 
 const id = commandId.parse("0b6f4c2e-7d1a-4a57-9a0c-3f5e8d2b1c90");
 const cursor = { stream: streamId.parse("s1"), seq: 4 };
@@ -71,6 +71,26 @@ describe("parsing frames", () => {
     expect(parsed).toMatchObject({
       ok: false,
       error: { code: "malformed", id },
+    });
+  });
+
+  test("never repeats field names or values the sender chose in an error", () => {
+    const parsed = parseClientFrame(
+      `{"v":1,"type":"resume","cursor":null,"exampleField":"exampleValue"}`,
+    );
+    expect(parsed).toEqual({
+      ok: false,
+      error: { code: "malformed", message: "unknown field" },
+    });
+  });
+
+  test("names the path of a bad field in an error", () => {
+    const parsed = parseClientFrame(
+      `{"v":1,"type":"resume","cursor":{"stream":"s1","seq":-1}}`,
+    );
+    expect(parsed).toEqual({
+      ok: false,
+      error: { code: "malformed", message: "cursor.seq: out of range" },
     });
   });
 

@@ -5,7 +5,7 @@ import {
   type EventFrame,
   type ResyncFrame,
   type StreamId,
-} from "./frames";
+} from "./frames.ts";
 
 export class EventLog {
   readonly #stream: StreamId;
@@ -27,12 +27,12 @@ export class EventLog {
 
   append(event: EventBody): EventFrame {
     this.#head += 1;
-    const frame: EventFrame = {
+    const frame = frozenCopy<EventFrame>({
       v: version,
       type: "event",
       seq: this.#head,
       ...event,
-    };
+    });
     this.#kept.push(frame);
     if (this.#kept.length > this.#capacity) this.#kept.shift();
     return frame;
@@ -52,4 +52,16 @@ export class EventLog {
     }
     return this.#kept.slice(cursor.seq - oldest);
   }
+}
+
+function frozenCopy<Value>(value: Value): Value {
+  return deepFreeze(JSON.parse(JSON.stringify(value)) as Value);
+}
+
+function deepFreeze<Value>(value: Value): Value {
+  if (typeof value === "object" && value !== null) {
+    Object.values(value).forEach(deepFreeze);
+    Object.freeze(value);
+  }
+  return value;
 }

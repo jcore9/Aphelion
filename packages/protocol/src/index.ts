@@ -1,4 +1,4 @@
-export * from "./frames";
-export { commands, events } from "./registry";
-export { EventLog } from "./event-log";
-export { CommandLedger } from "./command-ledger";
+export * from "./frames.ts";
+export { commands, events } from "./registry.ts";
+export { EventLog } from "./event-log.ts";
+export { CommandLedger } from "./command-ledger.ts";

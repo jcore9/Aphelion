@@ -42,6 +42,6 @@ Zod 4, with the same `zod` version as the server. The frame schemas are the sour
 
 - `@aphelion/protocol` gains its first runtime dependency, `zod`. The whole package bundles to 93 KB minified, 26 KB gzipped, almost all of it Zod.
 - `z.toJSONSchema` exports `clientFrame` and `serverFrame` as JSON Schema 2020-12, with the command id pattern and `additionalProperties: false` kept.
-- The frame types are mapped from the tables, and the two unions are cast to them once in `frames.ts`. A test parses one frame of every type, so a schema that disagrees with its type fails the tests.
+- The frame types are mapped from the tables, and the two unions are cast to them once in `frames.ts`. The compiler doesn't check that cast. A test parses one sample frame of every type, which catches a field that one side has and the other lacks. It doesn't prove that the two agree on every value. The types are looser in places: `seq` is a `number` in `EventFrame`, which allows 0, while the parser accepts only positive integers. Only `EventLog` builds event frames, and it numbers them from 1.
 - An older client rejects an event name that only a newer server knows. Server and clients ship together for now. A version handshake waits until they don't.
 - M0-09b still chooses the generator and the format of the spec. Its input is the Zod schemas.

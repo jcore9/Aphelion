@@ -1,6 +1,6 @@
 # The client protocol
 
-The server and every client, such as the web app or the desktop app, talk over one connection. Each message on it is a *frame*, a small JSON object. A client sends *commands*, which ask the server to do something. The server sends back *results*, and it also sends *events*, which tell every client that something happened. `@aphelion/protocol` defines the frames and the logic that both sides share. It uses only web-standard APIs, so the same code runs in Bun, Node and the browser. [Decision 0037](../decisions/0037-protocol-frames-in-zod.md) explains how the frames are described and validated.
+The server and every client, such as the web app or the desktop app, talk over one connection. Each message on it is a *frame*, a small JSON object. A client sends *commands*, which ask the server to do something. The server sends back *results*, and it also sends *events*, which tell every client that something happened. `@aphelion/protocol` defines the frames and the logic that both sides share. It uses only web-standard APIs, so the same code runs in Bun, Node and the browser. Relative imports end in `.ts`, so Node 24 loads the source files directly. `protocol-on-node.test.ts` checks that in a real Node process. [Decision 0037](../decisions/0037-protocol-frames-in-zod.md) explains how the frames are described and validated.
 
 M0-09b replaces this page with a spec generated from the schemas.
 
@@ -35,6 +35,8 @@ The server sends these frames:
 
 The error codes are `malformed` and `unsupported-version`. `malformed` covers text that isn't JSON, an unknown frame type, an unknown command or event name, and a payload that doesn't match its schema. `unsupported-version` means that `v` isn't 1. When a rejected frame has a valid command `id`, the error carries it, so the client knows which command failed.
 
+An error `message` holds only the path of each bad field and a fixed reason, such as `cursor.seq: out of range` or `unknown field`. It never repeats a field name or a value that the sender chose, so it is safe to log.
+
 ## Commands and events in M0
 
 | Kind | Name | Payload | Result |
@@ -55,7 +57,11 @@ The server keeps one event stream. A stream has an id, and `EventLog` numbers it
 The server keeps the last `capacity` events. When a client reconnects, it sends `resume` with its cursor. The server answers with one of these:
 
 - The events after the cursor, in order, when the server still has all of them. A client that is up to date gets no events.
-- One `resync` frame with the server's current cursor. The server sends it when the cursor is `null`, names another stream, is ahead of the server, or is older than the oldest event the server kept. The server never replays part of the history.
+- One `resync` frame with the server's current cursor. The server sends it when the cursor is `null`, names another stream, or is ahead of the server. It also sends it when the cursor is more than one behind the oldest event the server kept. The server never replays part of the history.
+
+For example, when the server keeps events 2 and 3, a cursor at 1 gets events 2 and 3, and a cursor at 0 gets `resync`.
+
+Kept events can't be changed. `EventLog` stores a frozen copy of each event, so neither the caller of `append` nor the receiver of a replayed frame can alter the history.
 
 A server that restarts with an in-memory log starts a new stream with a new id, so a cursor from before the restart gets `resync`.
 
@@ -63,4 +69,6 @@ A server that restarts with an in-memory log starts a new stream with a new id, 
 
 A client gives every command an `id` of 1 to 64 letters, digits, hyphens or underscores. A UUID from `crypto.randomUUID()` fits. When a client gets no answer, it sends the same command again with the same `id`.
 
-`CommandLedger` applies each id once. A retry gets the first run's outcome, whether that was a result or a failure. A retry that arrives while the first run is still going waits for that run. The ledger remembers the last `capacity` ids, and an id older than that is applied again. A client that wants a command to run twice sends two ids.
+`CommandLedger` applies each id once. A retry gets the first run's outcome, whether that was a result or a failure. A command that throws before it returns counts as a failure too. A retry that arrives while the first run is still going waits for that run.
+
+The ledger remembers the last `capacity` ids. It never forgets a command that is still running, so it can hold more than `capacity` ids while more than `capacity` commands run at once. When they finish, it forgets the oldest finished ids until it is back to `capacity`. A forgotten id runs again if a client sends it. A client that wants a command to run twice sends two ids.

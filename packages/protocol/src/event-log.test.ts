@@ -7,7 +7,7 @@ import {
   streamId,
   type Cursor,
   type EventFrame,
-} from "./index";
+} from "./index.ts";
 
 const stream = streamId.parse("s1");
 
@@ -60,6 +60,30 @@ describe("replay from a cursor", () => {
   ])("tells a client whose cursor is %s to resync", (_, cursor) => {
     expect(logWith(10, 4).resume(cursor)).toEqual([
       { v: 1, type: "resync", cursor: { stream, seq: 10 } },
+    ]);
+  });
+});
+
+describe("retained history", () => {
+  test("can't be changed through a replayed frame", () => {
+    const log = logWith(3);
+    const [last] = log.resume({ stream, seq: 2 });
+    expect(() => {
+      Object.assign(last, { seq: 99 });
+    }).toThrow(TypeError);
+    expect(seqs(log.resume({ stream, seq: 2 }))).toEqual([3]);
+  });
+
+  test("can't be changed through a payload", () => {
+    const log = new EventLog({ stream, capacity: 10 });
+    const payload = { message: "original" };
+    const frame = log.append({ name: "notice", payload });
+    payload.message = "changed by the caller";
+    expect(() => {
+      Object.assign(frame.payload, { message: "changed through the frame" });
+    }).toThrow(TypeError);
+    expect(log.resume({ stream, seq: 0 })).toMatchObject([
+      { payload: { message: "original" } },
     ]);
   });
 });
