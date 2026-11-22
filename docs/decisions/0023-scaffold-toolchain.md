@@ -1,6 +1,6 @@
 # 0023. The scaffold lints with ESLint and typescript-eslint on TypeScript 6.0, and formats with Prettier
 
-- Status: Proposed
+- Status: Accepted (approved by merging #116 on 2026-11-22)
 - Date: 2026-11-21
 - Proposed by: orchestrator, in the M0-04 scaffold PR ([#5](https://github.com/jcore9/Aphelion/issues/5))
 - Answers: the linter **DR** in the M0 plan's M0-04 design note
