@@ -27,12 +27,17 @@ const code = {
   processGlobal: "export const env = process.env;\n",
   serverImport:
     'import * as server from "@aphelion/server";\nexport const host = server;\n',
-  documentGlobal: "export const title = document.title;\n",
+  dynamicBunImport: 'export const load = () => import("bun:sqlite");\n',
+  requireBun: 'export const bun: unknown = require("bun");\n',
+  dynamicNodeImport: 'export const load = () => import("fs/promises");\n',
+  dynamicServerImport:
+    'export const load = () => import("@aphelion/server/store");\n',
 };
 
 const imports = "no-restricted-imports";
 const globals = "no-restricted-globals";
 const properties = "no-restricted-properties";
+const syntax = "no-restricted-syntax";
 
 test.each([
   ["packages/server/src/store.ts", "bunImport", [imports]],
@@ -53,8 +58,16 @@ test.each([
   ["packages/client/src/main.ts", "processGlobal", [globals]],
   ["packages/plugin-sdk/src/index.ts", "serverImport", [imports]],
   ["packages/client/src/main.ts", "serverImport", [imports]],
-  ["packages/client/src/main.ts", "documentGlobal", []],
-  ["packages/protocol/src/frame.ts", "documentGlobal", [globals]],
+  ["packages/server/src/store.ts", "dynamicBunImport", [syntax]],
+  [
+    "packages/server/src/store.ts",
+    "requireBun",
+    ["@typescript-eslint/no-require-imports"],
+  ],
+  ["packages/server/src/adapters/store.ts", "dynamicBunImport", []],
+  ["packages/server/src/config.ts", "dynamicNodeImport", []],
+  ["packages/protocol/src/frame.ts", "dynamicNodeImport", [syntax]],
+  ["packages/client/src/main.ts", "dynamicServerImport", [syntax]],
 ] as const)("%s with %s reports %j", async (filePath, snippet, expected) => {
   expect(await lint(filePath, code[snippet])).toEqual(expected);
 });

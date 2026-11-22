@@ -54,9 +54,15 @@ The boundary rules:
 | --- | --- |
 | Every package, outside an adapter module | `bun`, `bun:*`, `Bun`, `globalThis.Bun` |
 | `protocol`, `plugin-sdk` and `client` | The above, plus Node built-in modules, `node:*`, Node globals such as `process` and `Buffer`, and imports of `@aphelion/server`, `@aphelion/cli` or `@aphelion/client` |
-| `protocol` and `plugin-sdk` | The above, plus `window` and `document` |
 
-Adapter modules live in `packages/server/src/adapters/` and `packages/cli/src/adapters/`. The `tsconfig.json` files of `protocol`, `plugin-sdk` and `client` don't load Bun or Node types, so typecheck also rejects the Bun and Node globals there.
+Adapter modules live in `packages/server/src/adapters/` and `packages/cli/src/adapters/`. The import bans cover `import` and `export ... from` statements and `import()` expressions. typescript-eslint's `no-require-imports` already bans `require()` everywhere.
+
+Typecheck holds two more lines:
+
+- Each package's `tsconfig.json` sets `rootDir` to `src`, so a relative import into another package, such as `../../client/src/title`, fails typecheck. Packages import each other only by their `@aphelion/` names.
+- `protocol` and `plugin-sdk` load only the ES library, with no DOM, Bun or Node types. Browser-only globals such as `document` and `localStorage` fail typecheck there. When one of them first needs a web API such as `URL` or `TextEncoder`, that PR adds its types on purpose. `client` loads the DOM types.
+
+JavaScript files are linted without type information. A TypeScript file that no `tsconfig.json` includes fails lint, so typecheck can't skip a file without anyone noticing.
 
 `lint-boundaries.test.ts` runs ESLint with the real config and checks each rule. It pairs each banned case with a case where the same code is allowed.
 

@@ -13,7 +13,6 @@ const webPackages = [
   "packages/plugin-sdk/**",
   "packages/client/**",
 ];
-const sharedPackages = ["packages/protocol/**", "packages/plugin-sdk/**"];
 
 const bunOnly =
   "Bun-only APIs belong in an adapter module under src/adapters/ in server or cli (decision 0007).";
@@ -42,17 +41,18 @@ const nodeGlobals = [
   "__dirname",
   "__filename",
 ].map((name) => ({ name, message: webOnly }));
-const browserGlobals = ["window", "document"].map((name) => ({
-  name,
-  message: "protocol and plugin-sdk also run in Bun and Node (decision 0007).",
-}));
 
 function restrict(
   imports: { regex: string; message: string }[],
   globals: { name: string; message: string }[],
 ): Linter.RulesRecord {
+  const calls = imports.map(({ regex, message }) => ({
+    selector: `ImportExpression > Literal[value=/${regex.replaceAll("/", "\\u002F")}/]`,
+    message,
+  }));
   return {
     "no-restricted-imports": ["error", { patterns: imports }],
+    "no-restricted-syntax": ["error", ...calls],
     "no-restricted-globals": ["error", ...globals],
   };
 }
@@ -68,6 +68,10 @@ export default defineConfig(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+  },
+  {
+    files: ["**/*.{js,mjs,cjs}"],
+    extends: [tseslint.configs.disableTypeChecked],
   },
   {
     files: ["**/*.{ts,tsx}"],
@@ -87,16 +91,10 @@ export default defineConfig(
     ),
   },
   {
-    files: sharedPackages,
-    rules: restrict(
-      [bunImports, nodeImports, hostImports],
-      [...bunGlobals, ...nodeGlobals, ...browserGlobals],
-    ),
-  },
-  {
     files: adapterModules,
     rules: {
       "no-restricted-imports": "off",
+      "no-restricted-syntax": "off",
       "no-restricted-globals": "off",
       "no-restricted-properties": "off",
     },
