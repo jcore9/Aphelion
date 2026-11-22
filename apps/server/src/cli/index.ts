@@ -53,7 +53,7 @@ export const cli = (argv: readonly string[]) =>
         Cause.squash(cause) instanceof CliFailure
           ? Effect.failCause(cause)
           : Effect.andThen(
-              io.err(`aphelion: ${describe(cause)}`),
+              Effect.ignore(io.err(`aphelion: ${describe(cause)}`)),
               Effect.fail(failed),
             ),
       ),

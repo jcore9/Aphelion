@@ -32,13 +32,28 @@ export const deviceAdd = (options: {
         name: options.name,
         ...(options.days === undefined ? {} : { lifetimeDays: options.days }),
       });
-      yield* io.err(
-        `Added device "${device.name}" with id ${device.id}. Its token expires at ${device.expiresAt}.`,
+      yield* io.out(device.token).pipe(
+        Effect.catch((error) =>
+          Effect.andThen(
+            Effect.sync(() => revokeDevice(db, device.id)),
+            Effect.fail(
+              new Error(
+                `couldn't print the token (${error.message}), so device ${device.id} was revoked`,
+              ),
+            ),
+          ),
+        ),
       );
-      yield* io.err(
-        "The token is printed below, once. Copy it to the device now: it can't be shown again.",
-      );
-      yield* io.out(device.token);
+      yield* io
+        .err(
+          `Added device "${device.name}" with id ${device.id}. Its token expires at ${device.expiresAt}.`,
+        )
+        .pipe(Effect.ignore);
+      yield* io
+        .err(
+          "The token is shown once. Copy it to the device now: it can't be shown again.",
+        )
+        .pipe(Effect.ignore);
     }),
   );
 

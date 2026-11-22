@@ -112,16 +112,29 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
       options,
       allowPositionals: true,
       strict: true,
+      tokens: true,
     });
   } catch (error) {
     return fail((error as Error).message);
   }
-  const { values, positionals } = parsed;
+  const { values, positionals, tokens } = parsed;
 
   if (values.help === true) return { ok: true, command: { kind: "help" } };
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    if (token.kind !== "option") continue;
+    if (seen.has(token.name)) return fail(`--${token.name} is given twice`);
+    seen.add(token.name);
+    if (token.value === "") return fail(`--${token.name} can't be empty`);
+  }
   const kind = kindOf(positionals, values);
   if (kind === undefined) {
-    return fail(`unknown command "${positionals.slice(0, 2).join(" ")}"`);
+    const words = positionals.slice(0, 2).join(" ");
+    return fail(
+      /^[a-z -]+$/.test(words)
+        ? `unknown command "${words}"`
+        : "unknown command",
+    );
   }
   const rule = grammar[kind];
 
@@ -141,7 +154,7 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
     return fail(
       rule.operand !== undefined && operands.length === 0
         ? `"${kind}" needs a ${rule.operand}`
-        : `"${kind}" takes ${rule.operand === undefined ? "no arguments" : `one ${rule.operand}`}, but got: ${operands.join(" ")}`,
+        : `"${kind}" takes ${rule.operand === undefined ? "no arguments" : `one ${rule.operand}`}, but got ${String(operands.length)}`,
     );
   }
 

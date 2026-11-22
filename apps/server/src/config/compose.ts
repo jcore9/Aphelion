@@ -109,6 +109,14 @@ export function checkComposePorts(file: string, text: string): ConfigIssue[] {
   const at = (path: PropertyKey[], message: string) =>
     issueAt(file, document, lines, path, message);
   const { include, networks = {}, services = {} } = parsed.data;
+  if (Object.keys(services).length === 0) {
+    return [
+      at(
+        ["services"],
+        "has no services, so this isn't the output of `docker compose config` for Aphelion's Compose file.",
+      ),
+    ];
+  }
 
   const networkIssues = Object.entries(networks).flatMap(([name, network]) => {
     const path = ["networks", name];

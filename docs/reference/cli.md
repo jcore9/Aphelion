@@ -23,7 +23,7 @@
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
 
-The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. An option that a command doesn't use is an error, so a mistyped command never runs with an option silently ignored.
+The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
 
 ### Exit codes
 
@@ -55,11 +55,13 @@ Headless mode never loads Electron or any GUI library. The plugin host doesn't s
 
 ## `aphelion config check`
 
-The check reads three things and prints one line for each problem it finds:
+The check prints one line for each problem it finds. It looks at:
 
-- the five config files, as `loadConfig` reads them ([config errors](config.md#errors));
 - the owner and mode of the config folder and each file ([owners and modes](config.md#owners-and-modes));
-- the owner and mode of the state folder. It must be a folder owned by the server's user and group, with a mode no looser than `0700`.
+- the owner and mode of the state folder. It must be a folder owned by the server's user and group, with a mode no looser than `0700`;
+- the five config files, as `loadConfig` reads them ([config errors](config.md#errors)).
+
+It reads the config files only when every owner and mode is right. A path that isn't a regular file, such as a named pipe, could make the read wait forever, so the check stops before reading it.
 
 The server's user and group are the ones that run the command. Run it as the server's user, `harness` in the container, or the owner check fails.
 
@@ -72,7 +74,7 @@ Config OK. The Compose file wasn't checked: pass --compose to check it.
 A run with problems prints each one, then the count on standard error, and exits with code 1:
 
 ```
-/etc/aphelion/server.yaml:2:10: address: must be an IPv4 or IPv6 address, such as 0.0.0.0
+/etc/aphelion: has mode 0755, which is looser than 0750
 /var/lib/aphelion: has mode 0750, which is looser than 0700
 2 problems found.
 ```
@@ -86,27 +88,40 @@ The check reads the output of `docker compose config`, not the Compose file itse
 The container can't run Docker, because it never gets the Docker socket ([decision 0016](../decisions/0016-one-docker-container.md)). So Docker runs on the host, and its output goes to the check in the container through standard input:
 
 ```sh
+set -o pipefail
 docker compose --profile '*' config \
   | docker compose run --rm -T --user harness aphelion aphelion config check --compose -
 ```
 
-The service name and the way the image starts `aphelion` come from the Compose file and image that [#14](https://github.com/jcore9/Aphelion/issues/14) builds, so this line may change there. `--compose FILE` reads a file that holds the same output instead. Empty input fails the check, because an empty file isn't a Compose file.
+`set -o pipefail` makes the whole line fail when `docker compose config` fails, for example on a syntax error, instead of reporting only the check's result.
+
+The service name and the way the image starts `aphelion` come from the Compose file and image that [#14](https://github.com/jcore9/Aphelion/issues/14) builds, so this line may change there. `--compose FILE` reads a file that holds the same output instead. The check refuses input with no services, such as an empty file or `{}`, because that can't be the output for Aphelion's Compose file.
 
 ## `aphelion device add NAME`
 
 Adds a device, and prints its [device token](devices.md) once. The server keeps only a fingerprint of the token, so it can't be shown again. Run it as the server's user, so the database files keep their owner:
 
 ```sh
-docker compose exec --user harness aphelion aphelion device add "my laptop"
+docker compose exec -T --user harness aphelion aphelion device add "my laptop"
 ```
 
-The token is the only text on standard output. The other lines go to standard error, so `aphelion device add laptop > token.txt` writes only the token to the file:
+`-T` keeps standard output and standard error apart. Without it, Docker joins them into one terminal stream.
+
+The token is the only text on standard output. The other lines go to standard error:
 
 ```
-Added device "my laptop" with id b9e491d2e2e20b59. Its token expires at 2027-02-20T22:29:30.928Z.
-The token is printed below, once. Copy it to the device now: it can't be shown again.
 aph_dev_b9e491d2e2e20b59_…
+Added device "my laptop" with id b9e491d2e2e20b59. Its token expires at 2027-02-20T22:29:30.928Z.
+The token is shown once. Copy it to the device now: it can't be shown again.
 ```
+
+To save the token to a file, create the file so that only you can read it:
+
+```sh
+(umask 077 && docker compose exec -T --user harness aphelion aphelion device add laptop > token.txt)
+```
+
+If the token can't be printed, for example because the disk is full, the command revokes the new device at once and exits with code 1, so no working token is left that nobody saw.
 
 The name is 1 to 64 characters, with no control characters and no spaces at either end. Two devices may share a name.
 

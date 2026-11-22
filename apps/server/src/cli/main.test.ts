@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 import {
   chmod,
   cp,
@@ -147,4 +148,47 @@ test("aphelion --headless refuses to start when the config check fails", async (
   } finally {
     await chmod(stateDir, 0o700);
   }
+}, 20_000);
+
+test("device add revokes the device when the token can't be printed", async () => {
+  const full = openSync("/dev/full", "w");
+  const child = spawn(
+    process.execPath,
+    [main, "device", "add", "lost", "--state-dir", stateDir],
+    { stdio: ["ignore", full, "pipe"] },
+  );
+  closeSync(full);
+  let stderr = "";
+  child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+  const code = await new Promise((resolve) => {
+    child.on("close", resolve);
+  });
+  expect(code).toBe(1);
+  expect(stderr).toMatch(
+    /^aphelion: couldn't print the token \(.*\), so device [0-9a-f]{16} was revoked\n$/,
+  );
+
+  const listed = start(["device", "list", "--state-dir", stateDir]);
+  expect(await listed.exited).toBe(0);
+  expect(listed.stdout()).toMatch(/\trevoked\t[^\n]*\t"lost"\n/);
+}, 20_000);
+
+test("config check --compose - reads a pipe", async () => {
+  const child = spawn(
+    process.execPath,
+    [main, "config", "check", ...dirs(), "--compose", "-"],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+  child.stdin.end(
+    "services:\n  aphelion:\n    ports: ['100.71.226.67:7400:7400']\n",
+  );
+  const code = await new Promise((resolve) => {
+    child.on("close", resolve);
+  });
+  expect(code).toBe(0);
+  expect(stdout).toBe(
+    "Config OK, and the Compose file publishes ports only on the tailnet.\n",
+  );
 }, 20_000);

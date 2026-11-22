@@ -29,17 +29,13 @@ export function currentOwner(): Owner {
 export const checkDirs = (configDir: string, stateDir: string) =>
   Effect.promise(async (): Promise<Checked> => {
     const owner = currentOwner();
-    const [loaded, configModes, stateModes] = await Promise.all([
-      loadConfig(configDir),
-      checkConfigPermissions(configDir, owner),
-      checkStatePermissions(stateDir, owner),
-    ]);
-    const issues = [
-      ...(loaded.ok ? [] : loaded.issues),
-      ...configModes,
-      ...stateModes,
+    const modes = [
+      ...(await checkConfigPermissions(configDir, owner)),
+      ...(await checkStatePermissions(stateDir, owner)),
     ];
-    if (!loaded.ok || issues.length > 0) return { ok: false, issues };
+    if (modes.length > 0) return { ok: false, issues: modes };
+    const loaded = await loadConfig(configDir);
+    if (!loaded.ok) return { ok: false, issues: loaded.issues };
     return { ok: true, config: loaded.config, migrated: loaded.migrated };
   });
 

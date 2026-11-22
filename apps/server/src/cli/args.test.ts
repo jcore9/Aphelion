@@ -90,7 +90,7 @@ describe("refused command lines", () => {
     [["device", "remove", "x"], 'unknown command "device remove"'],
     [
       ["--headless", "config", "check"],
-      '"headless" takes no arguments, but got: config check',
+      '"headless" takes no arguments, but got 2',
     ],
     [["--version", "--headless"], '--headless isn\'t an option of "version"'],
     [["--headless", "--days", "3"], '--days isn\'t an option of "headless"'],
@@ -103,7 +103,23 @@ describe("refused command lines", () => {
       '--config-dir isn\'t an option of "device list"',
     ],
     [["device", "add"], '"device add" needs a name'],
-    [["device", "add", "a", "b"], '"device add" takes one name, but got: a b'],
+    [["device", "add", "a", "b"], '"device add" takes one name, but got 2'],
+    [
+      [
+        "device",
+        "revoke",
+        "0123456789abcdef",
+        "aph_dev_0123456789abcdef_secret",
+      ],
+      '"device revoke" takes one id, but got 2',
+    ],
+    [["aph_dev_0123456789abcdef_secret"], "unknown command"],
+    [
+      ["device", "add", "x", "--days", "0", "--days", "30"],
+      "--days is given twice",
+    ],
+    [["device", "list", "--state-dir="], "--state-dir can't be empty"],
+    [["config", "check", "--config-dir", ""], "--config-dir can't be empty"],
     [
       ["device", "add", " laptop"],
       "the device name must be 1 to 64 characters",
@@ -128,5 +144,6 @@ describe("refused command lines", () => {
     ],
   ])("%j", (argv, message) => {
     expect(refused(argv)).toContain(message);
+    expect(refused(argv)).not.toContain("aph_dev_");
   });
 });

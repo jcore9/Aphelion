@@ -113,21 +113,39 @@ test("config check passes a good config", async () => {
   ]);
 });
 
-test("config check lists config, mode and state folder problems, and exits 1", async () => {
-  await writeFile(
-    join(configDir, "server.yaml"),
-    "version: 1\naddress: x\nport: 7400\n",
-  );
+test("config check lists folder mode problems first, and exits 1", async () => {
   await chmod(configDir, 0o755);
   await chmod(stateDir, 0o750);
   const { code, out, err } = await run(["config", "check", ...dirs()]);
   expect(code).toBe(1);
   expect(out).toEqual([
-    `${configDir}/server.yaml:2:10: address: must be an IPv4 or IPv6 address, such as 0.0.0.0`,
     `${configDir}: has mode 0755, which is looser than 0750`,
     `${stateDir}: has mode 0750, which is looser than 0700`,
   ]);
-  expect(err).toEqual(["3 problems found."]);
+  expect(err).toEqual(["2 problems found."]);
+});
+
+test("config check reads the config files once the modes pass", async () => {
+  await writeFile(
+    join(configDir, "server.yaml"),
+    "version: 1\naddress: x\nport: 7400\n",
+  );
+  const { code, out } = await run(["config", "check", ...dirs()]);
+  expect(code).toBe(1);
+  expect(out).toEqual([
+    `${configDir}/server.yaml:2:10: address: must be an IPv4 or IPv6 address, such as 0.0.0.0`,
+  ]);
+});
+
+test("config check --compose - refuses output with no services", async () => {
+  const { code, out } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    "{}",
+  );
+  expect(code).toBe(1);
+  expect(out).toEqual([
+    `${stdinLabel}: services: has no services, so this isn't the output of \`docker compose config\` for Aphelion's Compose file.`,
+  ]);
 });
 
 test("config check reports a missing state folder", async () => {
