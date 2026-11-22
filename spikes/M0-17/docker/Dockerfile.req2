@@ -1,0 +1,8 @@
+# Throwaway spike image for M0-17: root-owned managed config. Never merged.
+ARG BASE=aphelion-m017:nobwrap
+FROM ${BASE}
+USER root
+COPY etc-codex-req2/ /etc/codex/
+COPY opt-spike/ /opt/spike/
+RUN chown -R root:root /etc/codex /opt/spike && chmod 755 /etc/codex && chmod 644 /etc/codex/* && chmod -R a+rX /opt/spike && chmod 755 /opt/spike/*.sh
+USER 10001

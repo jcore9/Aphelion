@@ -1,0 +1,38 @@
+{"t":"2026-11-22T05:05:08.396Z","event":"initialize","data":{"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.7.0"},"protocolVersion":1,"loadSession":true,"sessionCapabilities":{"resume":{},"list":{},"close":{},"delete":{},"fork":{},"title":{},"additionalDirectories":{},"systemPrompt":{}},"authMethods":[{"id":"api-key","name":"API Key"},{"id":"chat-gpt","name":"ChatGPT"}]}}
+{"t":"2026-11-22T05:05:08.451Z","event":"session_new","data":{"sessionId":"01a201a4-d14a-7bb2-b73f-6000f6d14e8b","modes":["read-only","workspace-write","agent","agent-full-access"],"currentMode":"agent"}}
+{"t":"2026-11-22T05:05:08.480Z","event":"mode_set","data":{"mode":"workspace-write"}}
+{"t":"2026-11-22T05:05:08.630Z","event":"tool_call","data":{"title":"Read file '/tmp/claude-1000/-home-t3agent--t3-worktrees-Aphelion-t3-ded59b59-801e162208887fb1/30b3444e-cef5-4d7e-bbd7-14a43bd38948/scratchpad/ws-a/hello.txt'","kind":"read","status":"in_progress"}}
+{"t":"2026-11-22T05:05:08.630Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:08.635Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:08.725Z","event":"tool_call","data":{"title":"List files","kind":"read","status":"in_progress"}}
+{"t":"2026-11-22T05:05:08.736Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:08.752Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:08.871Z","event":"tool_call","data":{"title":"echo hi > out.txt","kind":"execute","status":"in_progress"}}
+{"t":"2026-11-22T05:05:08.873Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:08.882Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:08.993Z","event":"tool_call","data":{"title":"curl -sI https://example.com","kind":"execute","status":"in_progress"}}
+{"t":"2026-11-22T05:05:08.995Z","event":"tool_call_update","data":{"status":"failed"}}
+{"t":"2026-11-22T05:05:09.001Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.027Z","event":"tool_call","data":{"title":"Read file '/etc/hostname'","kind":"read","status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.030Z","event":"permission_request","data":{"tool":"Read file '/etc/hostname'","kind":"execute","options":["allow_once:allow_once","allow_always:accept_execpolicy_amendment","reject_once:cancel"]}}
+{"t":"2026-11-22T05:05:09.030Z","event":"permission_answer","data":{"optionId":"allow_once","kind":"allow_once"}}
+{"t":"2026-11-22T05:05:09.067Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:09.070Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.094Z","event":"tool_call","data":{"title":"Editing files","kind":"edit","status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.138Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:09.142Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.169Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.192Z","event":"tool_call","data":{"title":"mcp.probe.echo","kind":"execute","status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.194Z","event":"permission_request","data":{"kind":"execute","options":["allow_once:allow_once","allow_always:allow_session","allow_always:allow_always","reject_once:cancel"]}}
+{"t":"2026-11-22T05:05:09.194Z","event":"permission_answer","data":{"optionId":"allow_once","kind":"allow_once"}}
+{"t":"2026-11-22T05:05:09.195Z","event":"tool_call_update","data":{"status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.199Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:09.203Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.225Z","event":"tool_call","data":{"title":"mcp.probe.peek","kind":"execute","status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.227Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:09.230Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.247Z","event":"tool_call","data":{"title":"Web search: probe web search","kind":"search","status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.249Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:09.251Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.257Z","event":"prompt_done","data":{"stopReason":"end_turn","usage":{"totalTokens":150,"inputTokens":100,"cachedReadTokens":0,"cachedWriteTokens":0,"outputTokens":50,"thoughtTokens":0},"ms":1052}}
+{"t":"2026-11-22T05:05:09.257Z","event":"update_counts","data":{"config_option_update":1,"available_commands_update":1,"session_info_update":7,"tool_call":9,"tool_call_update":10,"usage_update":10}}

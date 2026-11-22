@@ -1,0 +1,20 @@
+=== mode none
+  session_new {"sessionId": "01a201a7-71ad-75e3-bf42-ca545f8c5df3", "modes": ["read-only", "workspace-write", "agent", "agent-full-access", "permission-profile:aphelion"], "currentMode": "permission-profile:aphelion"}
+  error {"message": "Internal error", "data": {"details": "invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)"}}
+[SYSTEM_ERROR] Prompt for session 01a201a7-71ad-75e3-bf42-ca545f8c5df3 failed: Error: invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+Error: invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+  web_search tool offered: False
+=== mode permission-profile:aphelion
+  session_new {"sessionId": "01a201a7-72c7-7083-989c-d01ad1017089", "modes": ["read-only", "workspace-write", "agent", "agent-full-access", "permission-profile:aphelion"], "currentMode": "permission-profile:aphelion"}
+  mode_set {"mode": "permission-profile:aphelion"}
+  error {"message": "Internal error", "data": {"details": "invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)"}}
+[SYSTEM_ERROR] Prompt for session 01a201a7-72c7-7083-989c-d01ad1017089 failed: Error: invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+Error: invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+  web_search tool offered: False
+=== mode agent-full-access
+  session_new {"sessionId": "01a201a7-73e6-7bb2-99d8-dbde8fc3781a", "modes": ["read-only", "workspace-write", "agent", "agent-full-access", "permission-profile:aphelion"], "currentMode": "permission-profile:aphelion"}
+  mode_set {"mode": "agent-full-access"}
+  error {"message": "Internal error", "data": {"details": "invalid thread settings override: invalid value for `approval_policy`: `Never` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)"}}
+[SYSTEM_ERROR] Prompt for session 01a201a7-73e6-7bb2-99d8-dbde8fc3781a failed: Error: invalid thread settings override: invalid value for `approval_policy`: `Never` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+Error: invalid thread settings override: invalid value for `approval_policy`: `Never` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+  web_search tool offered: False

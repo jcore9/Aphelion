@@ -1,0 +1,16 @@
+allowed_approval_policies = ["untrusted"]
+allowed_approvals_reviewers = ["user"]
+default_permissions = "aphelion"
+allowed_web_search_modes = []
+allow_managed_hooks_only = true
+check_for_update_on_startup = false
+
+[allowed_permission_profiles]
+"aphelion" = true
+
+[permissions.aphelion]
+description = "Aphelion agent: workspace writes, no network"
+extends = ":workspace"
+
+[features]
+hooks = true

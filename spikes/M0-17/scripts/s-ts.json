@@ -1,0 +1,1 @@
+[{"raw":{"type":"tool_search_call","id":"tsc_1","call_id":"call_ts1","execution":"client","status":"completed","arguments":{"query":"probe echo peek"}}},{"say":"done"}]

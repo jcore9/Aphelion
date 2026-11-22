@@ -1,0 +1,8 @@
+allowed_approval_policies = ["untrusted"]
+allowed_approvals_reviewers = ["user"]
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+allow_managed_hooks_only = true
+check_for_update_on_startup = false
+
+[features]
+hooks = true

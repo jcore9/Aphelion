@@ -1,0 +1,31 @@
+{"t":"2026-11-22T05:05:09.575Z","event":"initialize","data":{"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.7.0"},"protocolVersion":1,"loadSession":true,"sessionCapabilities":{"resume":{},"list":{},"close":{},"delete":{},"fork":{},"title":{},"additionalDirectories":{},"systemPrompt":{}},"authMethods":[{"id":"api-key","name":"API Key"},{"id":"chat-gpt","name":"ChatGPT"}]}}
+{"t":"2026-11-22T05:05:09.635Z","event":"session_new","data":{"sessionId":"01a201a4-d5dd-7d51-b44b-47029067b6ce","modes":["read-only","workspace-write","agent","agent-full-access"],"currentMode":"agent"}}
+{"t":"2026-11-22T05:05:09.670Z","event":"mode_set","data":{"mode":"agent-full-access"}}
+{"t":"2026-11-22T05:05:09.779Z","event":"tool_call","data":{"title":"Read file '/tmp/claude-1000/-home-t3agent--t3-worktrees-Aphelion-t3-ded59b59-801e162208887fb1/30b3444e-cef5-4d7e-bbd7-14a43bd38948/scratchpad/ws-a/hello.txt'","kind":"read","status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.779Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:09.783Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.839Z","event":"tool_call","data":{"title":"List files","kind":"read","status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.840Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:09.844Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:09.897Z","event":"tool_call","data":{"title":"echo hi > out.txt","kind":"execute","status":"in_progress"}}
+{"t":"2026-11-22T05:05:09.897Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:09.902Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:10.008Z","event":"tool_call","data":{"title":"curl -sI https://example.com","kind":"execute","status":"in_progress"}}
+{"t":"2026-11-22T05:05:10.013Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:10.032Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:10.110Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:10.147Z","event":"tool_call","data":{"title":"Editing files","kind":"edit","status":"in_progress"}}
+{"t":"2026-11-22T05:05:10.149Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:10.154Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:10.188Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:10.215Z","event":"tool_call","data":{"title":"mcp.probe.echo","kind":"execute","status":"in_progress"}}
+{"t":"2026-11-22T05:05:10.217Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:10.223Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:10.251Z","event":"tool_call","data":{"title":"mcp.probe.peek","kind":"execute","status":"in_progress"}}
+{"t":"2026-11-22T05:05:10.253Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:10.258Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:10.285Z","event":"tool_call","data":{"title":"Web search: probe web search","kind":"search","status":"in_progress"}}
+{"t":"2026-11-22T05:05:10.286Z","event":"tool_call_update","data":{"status":"completed"}}
+{"t":"2026-11-22T05:05:10.290Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:05:10.299Z","event":"prompt_done","data":{"stopReason":"end_turn","usage":{"totalTokens":150,"inputTokens":100,"cachedReadTokens":0,"cachedWriteTokens":0,"outputTokens":50,"thoughtTokens":0},"ms":937}}
+{"t":"2026-11-22T05:05:10.299Z","event":"update_counts","data":{"config_option_update":1,"available_commands_update":1,"session_info_update":3,"tool_call":8,"tool_call_update":8,"usage_update":10}}

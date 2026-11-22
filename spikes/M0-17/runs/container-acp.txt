@@ -1,0 +1,17 @@
+=== mode none
+Z","event":"session_new","data":{"sessionId":"01a201a5-39ee-7300-8ca8-536244cc423e","modes":["read-only","workspace-write","agent","agent-full-access"],"currentMode":"agent"}}
+Z","event":"error","data":{"message":"Internal error","data":{"details":"invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.t
+[SYSTEM_ERROR] Prompt for session 01a201a5-39ee-7300-8ca8-536244cc423e failed: Error: invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+Error: invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+=== mode read-only
+Z","event":"session_new","data":{"sessionId":"01a201a5-3aec-7b12-9bf4-333462e50137","modes":["read-only","workspace-write","agent","agent-full-access"],"currentMode":"agent"}}
+Z","event":"mode_set","data":{"mode":"read-only"}}
+Z","event":"error","data":{"message":"Internal error","data":{"details":"invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.t
+[SYSTEM_ERROR] Prompt for session 01a201a5-3aec-7b12-9bf4-333462e50137 failed: Error: invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+Error: invalid thread settings override: invalid value for `approval_policy`: `OnRequest` is not in the allowed set [UnlessTrusted] (set by /etc/codex/requirements.toml)
+=== mode agent-full-access
+Z","event":"session_new","data":{"sessionId":"01a201a5-3bf0-7c50-961d-28191a7b9dd6","modes":["read-only","workspace-write","agent","agent-full-access"],"currentMode":"agent"}}
+Z","event":"mode_set","data":{"mode":"agent-full-access"}}
+Z","event":"error","data":{"message":"Internal error","data":{"details":"invalid thread settings override: invalid value for `sandbox_mode`: `DangerFullAccess` is not in the allowed set [ReadOnly, WorkspaceWrite] (set by /etc/codex
+[SYSTEM_ERROR] Prompt for session 01a201a5-3bf0-7c50-961d-28191a7b9dd6 failed: Error: invalid thread settings override: invalid value for `sandbox_mode`: `DangerFullAccess` is not in the allowed set [ReadOnly, WorkspaceWrite] (set by /etc/codex/requirements.toml)
+Error: invalid thread settings override: invalid value for `sandbox_mode`: `DangerFullAccess` is not in the allowed set [ReadOnly, WorkspaceWrite] (set by /etc/codex/requirements.toml)

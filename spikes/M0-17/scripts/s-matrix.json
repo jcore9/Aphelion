@@ -1,0 +1,13 @@
+[
+ {"call":"exec_command","args":{"cmd":"cat hello.txt"}},
+ {"call":"exec_command","args":{"cmd":"ls -la"}},
+ {"call":"exec_command","args":{"cmd":"echo hi > out.txt"}},
+ {"call":"exec_command","args":{"cmd":"curl -sI https://example.com"}},
+ {"call":"exec_command","args":{"cmd":"cat /etc/hostname","sandbox_permissions":"require_escalated","justification":"probe escalation"}},
+ {"call":"apply_patch","args":"*** Begin Patch\n*** Add File: patched.txt\n+patched\n*** End Patch\n"},
+ {"raw":{"type":"tool_search_call","id":"tsc_1","call_id":"call_ts1","execution":"client","status":"completed","arguments":{"query":"probe echo peek"}}},
+ {"raw":{"type":"function_call","id":"fc_m1","call_id":"call_m1","namespace":"mcp__probe","name":"echo","arguments":"{\"text\":\"x\"}","status":"completed"}},
+ {"raw":{"type":"function_call","id":"fc_m2","call_id":"call_m2","namespace":"mcp__probe","name":"peek","arguments":"{}","status":"completed"}},
+ {"raw":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"probe web search"}}},
+ {"say":"done"}
+]

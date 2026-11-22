@@ -1,0 +1,1 @@
+[codex stderr] [2m2026-11-22T04:57:18.484226Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapproval policy is Never; reject command — you cannot ask for escalated permissions if the approval policy is Never

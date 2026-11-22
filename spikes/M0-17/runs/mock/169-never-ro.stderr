@@ -1,0 +1,2 @@
+[codex stderr] [2m2026-11-22T04:57:19.656947Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapproval policy is Never; reject command — you cannot ask for escalated permissions if the approval policy is Never
+[codex stderr] [2m2026-11-22T04:57:19.678736Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mpatch rejected: writing is blocked by read-only sandbox; rejected by user approval settings

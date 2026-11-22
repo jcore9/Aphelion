@@ -1,0 +1,10 @@
+approval_policy = "untrusted"
+model = "gpt-5.5"
+=== mode none
+  error {"message": "Codex process has exited with code 1:\nError: approval_policy = \"untrusted\" is no longer supported; remove this setting", "data": {"exitCode": 1, "signal": null, "restartable": true}}
+[SYSTEM_ERROR] [APP-SERVER EXIT] The Codex app-server exited with code 1: {"generation":1,"pid":40,"code":1,"signal":null,"uptimeMs":24,"intentional":false,"likelyOutOfMemory":false,"stderrTail":"Error: approval_policy = \"untrusted\" is no longer su
+  web_search tool offered: False
+=== mode workspace-write
+  error {"message": "Codex process has exited with code 1:\nError: approval_policy = \"untrusted\" is no longer supported; remove this setting", "data": {"exitCode": 1, "signal": null, "restartable": true}}
+[SYSTEM_ERROR] [APP-SERVER EXIT] The Codex app-server exited with code 1: {"generation":1,"pid":84,"code":1,"signal":null,"uptimeMs":26,"intentional":false,"likelyOutOfMemory":false,"stderrTail":"Error: approval_policy = \"untrusted\" is no longer su
+  web_search tool offered: False

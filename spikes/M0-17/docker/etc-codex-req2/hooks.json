@@ -1,0 +1,1 @@
+{"hooks": {"PreToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "python3 -I /opt/spike/hook-strict.py", "timeout": 5}]}]}}

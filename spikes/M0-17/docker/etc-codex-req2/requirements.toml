@@ -1,0 +1,14 @@
+allowed_approval_policies = ["untrusted"]
+allowed_approvals_reviewers = ["user"]
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+allowed_login_methods = ["chatgpt"]
+allow_managed_hooks_only = true
+check_for_update_on_startup = false
+
+[features]
+hooks = true
+
+[rules]
+prefix_rules = [
+  { pattern = [{ token = "cat" }], decision = "prompt", justification = "every command asks" },
+]

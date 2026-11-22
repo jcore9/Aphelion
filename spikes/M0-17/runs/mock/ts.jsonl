@@ -1,0 +1,14 @@
+{"ms":90,"event":"initialize","data":{"userAgent":"aphelion_spike/0.169.0 (Debian 13.0.0; x86_64) unknown (aphelion_spike; 0.0.0)","platformOs":"linux"}}
+{"ms":133,"event":"thread/start","data":{"threadId":"01a2019d-3a15-7bf2-9584-50293732fab3","approvalPolicy":"untrusted","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"model":"gpt-5.5","turns":0}}
+{"ms":165,"event":"item/started","data":{"type":"userMessage"}}
+{"ms":167,"event":"item/completed","data":{"type":"userMessage"}}
+{"ms":194,"event":"thread/tokenUsage/updated","data":{"threadId":"01a2019d-3a15-7bf2-9584-50293732fab3","turnId":"01a2019d-3a33-7f63-8bb3-484a795a6540","tokenUsage":{"total":{"totalTokens":15,"inputTokens":10,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0},"last":{"totalTokens":15,"inputTokens":10,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0},"modelContextWindow":258400}}}
+{"ms":194,"event":"account/rateLimits/updated","data":{"rateLimits":{"limitId":"codex","limitName":null,"normalModelSlug":null,"primary":null,"secondary":null,"credits":null,"individualLimit":null,"spendControlReached":null,"planType":null,"rateLimitReachedType":null}}}
+{"ms":212,"event":"item/started","data":{"type":"agentMessage","text":"done"}}
+{"ms":213,"event":"item/completed","data":{"type":"agentMessage","text":"done"}}
+{"ms":215,"event":"thread/tokenUsage/updated","data":{"threadId":"01a2019d-3a15-7bf2-9584-50293732fab3","turnId":"01a2019d-3a33-7f63-8bb3-484a795a6540","tokenUsage":{"total":{"totalTokens":30,"inputTokens":20,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":10,"reasoningOutputTokens":0},"last":{"totalTokens":15,"inputTokens":10,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0},"modelContextWindow":258400}}}
+{"ms":215,"event":"account/rateLimits/updated","data":{"rateLimits":{"limitId":"codex","limitName":null,"normalModelSlug":null,"primary":null,"secondary":null,"credits":null,"individualLimit":null,"spendControlReached":null,"planType":null,"rateLimitReachedType":null}}}
+{"ms":220,"event":"turn/completed","data":{"status":"completed","error":null}}
+{"ms":220,"event":"notification_counts","data":{"remoteControl/status/changed":1,"mcpServer/startupStatus/updated":2,"thread/started":1,"thread/status/changed":2,"turn/started":1,"item/started":2,"item/completed":2,"thread/tokenUsage/updated":2,"account/rateLimits/updated":2,"thread/readState/changed":1,"turn/completed":1}}
+{"ms":220,"event":"approval_requests_total","data":0}
+{"ms":247,"event":"child_exit","data":{"code":0,"sig":null}}

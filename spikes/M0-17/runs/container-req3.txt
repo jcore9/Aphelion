@@ -1,0 +1,24 @@
+### requirements as read
+"allowedLoginMethods":["chatgpt"]
+{"ms":36,"event":"configRequirements/read","data":{"supportsIndependentSpeedModes":true,"requirements":{"modelProvider":null,"modelProviders":null,"allowedLoginMethods":["chatgpt"],"cliAuthCredentials
+### strict hook, harness down
+== strict-down
+  webSearch         probe web search                                               asked=NO                     None
+  files: ['hello.txt']
+  hooked: 8
+### strict hook, harness answers allow
+== strict-allow
+  commandExecution  /bin/bash -lc 'cat hello.txt'                                  asked=commandExecution       failed exit=1
+  commandExecution  /bin/bash -lc 'ls -la'                                         asked=commandExecution       failed exit=1
+  commandExecution  /bin/bash -lc 'echo hi > out.txt'                              asked=commandExecution       failed exit=1
+  commandExecution  /bin/bash -lc 'curl -sI https://example.com'                   asked=commandExecution       failed exit=1
+  commandExecution  /bin/bash -lc 'cat /etc/hostname'                              asked=commandExecution       completed exit=0
+  fileChange        [{'path': '/home/aphelion-agent/ws/patched.txt', 'kind': {'t   asked=fileChange             completed
+  mcpToolCall       echo                                                           asked=elicitation            completed
+  mcpToolCall       peek                                                           asked=NO                     completed
+  webSearch         probe web search                                               asked=NO                     None
+  files: ['hello.txt', 'patched.txt']
+  hooked: 8
+{"ms":85,"event":"item/started","data":{"type":"userMessage"}}
+{"ms":173,"event":"item/started","data":{"type":"commandExecution","status":"inProgress","command":"/bin/bash -lc 'cat hello.txt'","exitCode":null}}
+{"ms":173,"event":"server_request","data":{"method":"item/commandExecution/requestApproval","kind":"command","command":"/bin/bash -lc 'cat hello.txt'","reason":

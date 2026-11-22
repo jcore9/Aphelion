@@ -1,0 +1,5 @@
+{"t":"2026-11-22T05:04:54.089Z","event":"initialize","data":{"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.7.0"},"protocolVersion":1,"loadSession":true,"sessionCapabilities":{"resume":{},"list":{},"close":{},"delete":{},"fork":{},"title":{},"additionalDirectories":{},"systemPrompt":{}},"authMethods":[{"id":"api-key","name":"API Key"},{"id":"chat-gpt","name":"ChatGPT"}]}}
+{"t":"2026-11-22T05:04:54.149Z","event":"session_new","data":{"sessionId":"01a201a4-9966-7401-8c71-bb417eb0ce0f","modes":["read-only","workspace-write","agent","agent-full-access"],"currentMode":"agent"}}
+{"t":"2026-11-22T05:04:54.240Z","event":"usage_update","data":{"used":15,"size":258400,"sessionUpdate":"usage_update"}}
+{"t":"2026-11-22T05:04:54.247Z","event":"prompt_done","data":{"stopReason":"end_turn","usage":{"totalTokens":15,"inputTokens":10,"cachedReadTokens":0,"cachedWriteTokens":0,"outputTokens":5,"thoughtTokens":0},"ms":366}}
+{"t":"2026-11-22T05:04:54.247Z","event":"update_counts","data":{"available_commands_update":1,"session_info_update":3,"agent_message_chunk":1,"usage_update":1}}
