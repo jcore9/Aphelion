@@ -3,7 +3,7 @@
 - Issue: [M0-00]
 - Milestone: [M0 · Foundations](https://github.com/jcore9/Aphelion/milestone/1)
 - Release: v0.1.0-alpha.1 ([decision 0003](../../decisions/0003-release-versioning.md))
-- Status: Draft, waiting for review. Q1 to Q8 are answered (decisions 0005 to 0015); the headless server is now one Docker container ([decision 0016](../../decisions/0016-one-docker-container.md)); Q9 is answered ([0018](../../decisions/0018-shared-plugin-user.md)), so every open question is settled. The desktop app only connects to a server ([decision 0017](../../decisions/0017-desktop-remote-only.md)).
+- Status: Approved and merged in [#92](https://github.com/jcore9/Aphelion/pull/92) on 2026-11-21. Decisions 0005 to 0018 settle every open question. In progress.
 - Last updated: 2026-11-21
 
 M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers three questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
@@ -180,19 +180,35 @@ A minimal init starts the four processes as their users. A fifth volume holds `/
 
 **M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), and a local store encrypted with the `age-encryption` package. The broker runs inside the container as `aphelion-secrets`, behind a Unix socket that only `harness` can open ([decisions 0012 and 0016](../../decisions/0016-one-docker-container.md)). The bootstrap secret comes from the host's `LoadCredentialEncrypted=` as a Compose secret readable only by `aphelion-secrets`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file.
 
-**M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
+**M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. It works like Grok Bot's 1Password integration: per-item approval, 30-day grants, revocation, and values never shown to agents ([decision 0020](../../decisions/0020-1password-grok-bot-style.md)). The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
 
-## Proposed splits
+## Keeping it extensible
 
-The workflow says an issue a coding tool can't finish in one focused session, or that touches more than one package, gets split during milestone planning. These five are too large for one PR. Once this plan is approved, each one becomes sub-issues under the original issue, and the original closes when its sub-issues do.
+The isolation in this milestone (users, runners, the container) must not leak into what a plugin author sees. These rules apply to every M0 issue, and reviews check them.
 
-| Issue | Split into | Why |
+1. **Plugin authors write against `plugin-sdk` only.** The SDK exposes typed APIs for events, settings, storage and secrets. Unix users, runner sockets, Docker, the database and Bun-only APIs are host concerns, and nothing in the SDK mentions them. A plugin that works in the test host works in the container unchanged.
+2. **Plugins are testable without Aphelion running.** `plugin-sdk` ships a test host with fake events, grants and secrets ([M0-13e]), so a plugin's Vitest suite runs in seconds with no container and no server.
+3. **First-party features are plugins on the same public API.** The 1Password backend ([M0-15]) is the first, built from the starter template. If it needs something the SDK doesn't offer, the SDK gets it; there's no private back door. M1's Claude adapter is the second.
+4. **One manifest declares everything.** What a plugin contributes and what it needs (events, secrets, network hosts, UI slots) lives in its manifest. The host reads permissions from there, and there's no other registration step.
+5. **Versioned from day one.** The plugin API follows semver, each plugin declares the API range it supports, the reference is generated from the types ([M0-13d]), and a breaking change gets `risk/breaking` and a migration note.
+6. **Named extension points.** Each kind of plugin (agent adapter, connector, secret backend, notifier, trigger, reviewer, usage collector) gets one interface in `plugin-sdk` when its milestone starts; M0 defines the secret backend interface. Inside the server, the swappable edges (store, process spawner, HTTP server) sit behind interfaces too ([decision 0007](../../decisions/0007-bun-runtime.md)).
+7. **A fast inner loop.** Dev mode mounts a local plugin folder into the container and reloads it on change ([M0-13e]).
+
+The PR template ([M0-05a]) asks every PR that touches `plugin-sdk` or the plugin host: can a plugin author still do this without knowing about users, sockets or Docker?
+
+## Splits
+
+The workflow says an issue a coding tool can't finish in one focused session, or that touches more than one package, gets split during milestone planning. These five were split when the plan was approved. Each part is a GitHub sub-issue of the original, and the original closes when its sub-issues do.
+
+| Issue | Sub-issues | Why |
 | --- | --- | --- |
-| [M0-05] | (a) LICENSE, README, CONTRIBUTING, SECURITY.md, issue and PR templates. (b) CODEOWNERS and branch protection on `main` and `dev`, **risk/security**. | (b) changes who can merge, so it gets its own review. |
-| [M0-09] | (a) Frame and message types, sequence numbers, replay and idempotent ids, with the replay test. (b) Spec generated into the docs. | (b) touches the docs workspace and build tooling. |
-| [M0-10] | (a) HTTP and WebSocket server bound to the configured address, and `/health`. (b) Per-device tokens and rejecting unauthenticated sockets, **risk/security**. | Auth gets its own line-by-line review. |
-| [M0-13] | (a) Manifest schema and API-range check in `plugin-sdk`, with the out-of-range refusal. (b) Process-per-plugin JSON-RPC host and the sample plugin. (c) Permission grants stored and enforced, **risk/security**. (d) API reference generated into the docs. | Four concerns across three packages. |
-| [M0-14] | (a) `Secret` wrapper, reference syntax and the "never in logs or the database" test. (b) Local age-encrypted store. (c) Bootstrap secret from the host's `systemd-creds` through a Compose secret. | Three separate security-sensitive pieces. |
+| [M0-05] | [M0-05a] LICENSE, README, CONTRIBUTING, SECURITY.md, issue and PR templates. [M0-05b] CODEOWNERS and branch protection, **risk/security**. | M0-05b changes who can merge, so it gets its own review. |
+| [M0-09] | [M0-09a] Frames, sequence numbers, replay and idempotent ids. [M0-09b] Spec generated into the docs. | M0-09b touches the docs workspace and build tooling. |
+| [M0-10] | [M0-10a] HTTP and WebSocket server and `/health`. [M0-10b] Device tokens and socket authentication, **risk/security**. | Auth gets its own line-by-line review. |
+| [M0-13] | [M0-13a] Manifest schema and API-range check. [M0-13b] Plugin runner and JSON-RPC host. [M0-13c] Permission grants, **risk/security**. [M0-13d] API reference generated into the docs. [M0-13e] Plugin dev kit: template, test host and dev mode (added after approval, see [Keeping it extensible](#keeping-it-extensible)). | Five concerns across three packages. |
+| [M0-14] | [M0-14a] `Secret` wrapper and reference syntax. [M0-14b] Broker process and local encrypted store. [M0-14c] Bootstrap secret from the host. | Three separate security-sensitive pieces. |
+
+M0-14b also carries the broker process and its socket ([decision 0012](../../decisions/0012-secrets-broker-process.md)), which the plan placed under M0-14 as a whole.
 
 M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (b) the Compose file and its hardening, (c) the host unit and the install guide. M0-03 shows how big each piece is, and the split is proposed then.
 
@@ -280,7 +296,8 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 | Spike findings | M0-01, M0-02, M0-03 |
 | Config reference | M0-06 |
 | Protocol spec (generated) | M0-09 |
-| Plugin API reference (generated) | M0-13 |
+| Plugin API reference (generated) | M0-13d |
+| Plugin guide: "Write your first server plugin" | M0-13e |
 | Install guide for the headless server (Docker, Compose, `aphelion.service`) | M0-12 |
 | Security and threat model (first draft: users, shared agent workspaces, secrets, bind address) | M0-12, M0-14 |
 | Architecture overview, kept current | Every PR that changes it |
@@ -310,3 +327,17 @@ Written when M0 closes.
 [M1-02]: https://github.com/jcore9/Aphelion/issues/20
 [M1-03]: https://github.com/jcore9/Aphelion/issues/21
 [M4-01]: https://github.com/jcore9/Aphelion/issues/44
+[M0-05a]: https://github.com/jcore9/Aphelion/issues/93
+[M0-05b]: https://github.com/jcore9/Aphelion/issues/94
+[M0-09a]: https://github.com/jcore9/Aphelion/issues/95
+[M0-09b]: https://github.com/jcore9/Aphelion/issues/96
+[M0-10a]: https://github.com/jcore9/Aphelion/issues/97
+[M0-10b]: https://github.com/jcore9/Aphelion/issues/98
+[M0-13a]: https://github.com/jcore9/Aphelion/issues/99
+[M0-13b]: https://github.com/jcore9/Aphelion/issues/100
+[M0-13c]: https://github.com/jcore9/Aphelion/issues/101
+[M0-13d]: https://github.com/jcore9/Aphelion/issues/102
+[M0-13e]: https://github.com/jcore9/Aphelion/issues/106
+[M0-14a]: https://github.com/jcore9/Aphelion/issues/103
+[M0-14b]: https://github.com/jcore9/Aphelion/issues/104
+[M0-14c]: https://github.com/jcore9/Aphelion/issues/105

@@ -12,6 +12,8 @@ These are plain Markdown files until M0-16 builds them into a Starlight site.
 
 Each spike answers its questions in writing before anything builds on it. Prototype code stays on its `spike/` branch and is never merged.
 
+- [M0-01: Claude over ACP on a subscription login](spikes/M0-01-claude-over-acp.md)
+- [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
 
 ## Decision records
@@ -38,5 +40,7 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0016](decisions/0016-one-docker-container.md) | The headless server ships as one Docker container, with separate users inside | Accepted |
 | [0017](decisions/0017-desktop-remote-only.md) | The desktop app only connects to a server; it never runs one | Accepted |
 | [0018](decisions/0018-shared-plugin-user.md) | Server plugins share one user and are started by a plugin runner | Accepted |
+| [0019](decisions/0019-cli-subscription-use.md) | Agents run the Claude and Grok CLIs on the owner's own subscription logins | Accepted |
+| [0020](decisions/0020-1password-grok-bot-style.md) | 1Password works like Grok Bot's, built on a service account | Accepted |
 | [0021](decisions/0021-container-init-and-secret-handoff.md) | The container's init is tini plus setpriv, and the bootstrap secret arrives on stdin | Proposed |
 | [0022](decisions/0022-agent-network-boundary.md) | The host firewall blocks the container from the LAN, with a path to a separate agents container | Proposed |
