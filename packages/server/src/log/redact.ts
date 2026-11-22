@@ -153,6 +153,7 @@ export const defaultRules: RedactionRules = {
       /(?<![A-Za-z0-9_])ops_[\w-]{20,}/g,
     ),
     pattern("Slack token", /(?<![A-Za-z0-9_])xox[abeposr]-[\w-]{10,}/g),
+    pattern("Aphelion device token", /(?<![A-Za-z0-9_])aph_dev_[\w-]{20,}/g),
     pattern(
       "AWS access key ID",
       /(?<![A-Za-z0-9_])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9_])/g,
