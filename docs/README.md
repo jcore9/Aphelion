@@ -80,3 +80,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0036](decisions/0036-logging-library.md) | The server writes its own JSON logs, with no logging library | Proposed |
 | [0037](decisions/0037-protocol-frames-in-zod.md) | Protocol frames are Zod 4 schemas, and the TypeScript types come from them | Accepted |
 | [0038](decisions/0038-plugin-manifest-and-api-range.md) | A plugin's manifest is `aphelion-plugin.json`, checked with Zod 4, and its API range is checked with the `semver` package | Proposed |
+| [0041](decisions/0041-effect-in-server-and-cli.md) | The server and the CLI use the Effect library, and nothing else does | Accepted |
