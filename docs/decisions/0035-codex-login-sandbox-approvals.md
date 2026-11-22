@@ -4,7 +4,10 @@
 - Date: 2026-11-22
 - Decided by: project owner
 - Answers: the three owner questions in the [M0-17 finding](../spikes/M0-17-codex-headless.md#questions-for-the-owner)
+- Amended by: [0045](0045-no-bot-namespaces-default-seccomp.md) (the container keeps Docker's default seccomp profile, and Codex runs with its own sandbox off)
 - Amends: [0016](0016-one-docker-container.md) (the container's seccomp profile), [0024](0024-codex-third-agent-cli.md) (what it left undecided), [0022](0022-agent-network-boundary.md) (the option 2 egress allowlist)
+
+> Amended by [0045](0045-no-bot-namespaces-default-seccomp.md) on 2026-11-22. The sandbox and seccomp parts below no longer hold: the container keeps Docker's default seccomp profile, and Codex runs with `danger-full-access` and its own sandbox off. The login, the approvals, the hook and the escalation rule stand.
 
 ## Context
 

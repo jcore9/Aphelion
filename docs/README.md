@@ -87,3 +87,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0041](decisions/0041-effect-in-server-and-cli.md) | The server and the CLI use the Effect library, and nothing else does | Accepted |
 | [0042](decisions/0042-plugin-server-and-client-parts.md) | A plugin has a server part, a client part or both, and its client part is installed on the server, served to every client and always sandboxed | Accepted |
 | [0043](decisions/0043-http-server-on-effect-platform-bun.md) | The server listens through `@effect/platform-bun`'s HTTP server, in an adapter | Proposed |
+| [0045](decisions/0045-no-bot-namespaces-default-seccomp.md) | Bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox | Accepted |

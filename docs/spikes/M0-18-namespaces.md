@@ -4,7 +4,7 @@
 - Date: 2026-11-22. Sources were read and every test ran on this date (UTC).
 - Tested with: Docker 29.10.0, the `ubuntu:26.04` image (26.04.1), `bubblewrap` 0.11.1 (`0.11.1-1ubuntu0.3`), `unshare` from util-linux 2.41.3, Claude Code 2.1.330, Codex CLI 0.171.0 and Grok Build 1.0.92. The host was Debian 13 on kernel 6.5.13-3-pve, inside an unprivileged LXC container on Proxmox.
 - Prototype: `spikes/M0-18/` on the [`spike/M0-18-namespaces-prototype`](https://github.com/jcore9/Aphelion/tree/spike/M0-18-namespaces-prototype/spikes/M0-18) branch, with the run logs in `runs/`. That branch is never merged.
-- Decisions: [0006](../decisions/0006-shared-agent-user.md), [0016](../decisions/0016-one-docker-container.md), [0022](../decisions/0022-agent-network-boundary.md), [0035](../decisions/0035-codex-login-sandbox-approvals.md). This finding settles nothing. It stops for the owner on three questions, listed at the end.
+- Decisions: [0006](../decisions/0006-shared-agent-user.md), [0016](../decisions/0016-one-docker-container.md), [0022](../decisions/0022-agent-network-boundary.md), [0035](../decisions/0035-codex-login-sandbox-approvals.md). This finding settles nothing itself. The owner answered its questions on 2026-11-22, and [decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md) records the answers.
 
 Each answer is labeled **measured** (run on this box), **documented** (read in a source, which is linked), or **inferred** (reasoned from the two).
 
@@ -263,6 +263,8 @@ Killing the bot's first process inside its PID namespace kills every process in 
 
 ## Questions for the owner
 
+**Answered on 2026-11-22.** The owner chose no per-bot isolation (question 3), no `systempaths=unconfined` (question 1) and no network namespaces (question 2). Codex then runs without its own sandbox, and the container goes back to Docker's default seccomp profile. [Decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md) records this. The questions stay below as they were asked.
+
 1. **A private `/proc` for each bot.** Should the container run with `systempaths=unconfined`, which unhides parts of `/proc` and `/sys` for every process in it? It gives each bot a private process list, and Claude Code's own sandbox can then run inside a bot. The other way, bots share the container's `/proc`. They then see every process's command line, but not its files or environment. Claude Code then runs without its own sandbox inside a bot, or with its weaker mode and no PID namespace for that bot.
 2. **Network namespaces.** Should the profile allow them? Codex's and Claude Code's own sandboxes need them. They also bring the netfilter code into reach of every process in the container. Three bugs in the list above are in that code, one of them used in ransomware attacks.
 3. **Per-bot isolation.** If you choose to go ahead, a new decision record would amend 0006. Each bot would see only its own folder, plus folders its config grants. M0-12 would ship the profile, and M1-04 would start bots this way.
@@ -274,6 +276,8 @@ What the exit-test VM must provide before M0-12 ships anything:
 - A login for each CLI, to see whether a token refresh writes through the shared login folder.
 
 ## Downstream changes
+
+**Superseded by the owner's answers.** The table below is what the finding proposed if the owner said yes. [Decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md) lists the changes that apply: no seccomp profile to ship, 0006 stays, and cancel uses the measured result, with the process-group gap open for M1-04.
 
 | Issue or decision | Change |
 | --- | --- |

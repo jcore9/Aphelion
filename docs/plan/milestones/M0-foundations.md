@@ -97,7 +97,7 @@ M0-17 blocks nothing inside M0 either. It blocks [M4-10], the Codex adapter ([de
 
 M0-18 was added on 2026-11-22 by [decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md). It depends only on M0-00, so it belongs to wave 1 and can start now. It blocks [M0-12], the container image, because the image's seccomp profile (the list of system calls the container may make) and its host setup depend on what the spike finds. It also blocks [M1-04], the session manager, because the answer decides how each agent is started. An unfinished M0-18 can therefore delay the exit test.
 
-The seccomp profile ships once. By default [M4-10] ships it with Codex. M0-12 ships it instead only if M0-18 recommends namespaces for every bot.
+M0-18 is settled. The owner answered its questions on 2026-11-22, and [decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md) records the answers: bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox. No seccomp profile ships, so M0-12 and [M4-10] have none to carry. How [M1-04] cancels a bot is still open, because a process group misses processes that leave it. Decision 0045 lists the options.
 
 ## The spikes
 
@@ -187,7 +187,7 @@ What changes depending on the answer:
 
 ### M0-18: per-agent isolation with user namespaces
 
-[Decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md) lets the container create user namespaces. A user namespace is a Linux feature that changes how the kernel treats user IDs and privileges: a process can look like root inside it and stay an ordinary user outside. Codex's sandbox needs one. Other kinds of namespace give a process a private view of the file system (mount namespace) or of the process list (PID namespace). Isolating an agent would combine these. The owner asked whether the same feature could isolate each agent from the others, in place of one Unix user per agent ([decision 0006](../../decisions/0006-shared-agent-user.md)). The full question list is in [issue #124][M0-18]. The answers are in the [M0-18 finding](../../spikes/M0-18-namespaces.md).
+[Decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md) lets the container create user namespaces. A user namespace is a Linux feature that changes how the kernel treats user IDs and privileges: a process can look like root inside it and stay an ordinary user outside. Codex's sandbox needs one. Other kinds of namespace give a process a private view of the file system (mount namespace) or of the process list (PID namespace). Isolating an agent would combine these. The owner asked whether the same feature could isolate each agent from the others, in place of one Unix user per agent ([decision 0006](../../decisions/0006-shared-agent-user.md)). The full question list is in [issue #124][M0-18]. The answers are in the [M0-18 finding](../../spikes/M0-18-namespaces.md). The owner's choices are in [decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md): the isolation works, but the owner declined it, and the plan stays with shared bots and Docker's default seccomp profile.
 
 Questions:
 
@@ -291,7 +291,7 @@ M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
 | The spikes need real Claude Pro or Max, SuperGrok and ChatGPT logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
 | Codex asks only for what its sandbox blocks, or OpenAI's terms don't cover a self-hosted harness | M4-10 changes shape, or Codex stays out | M0-17 answers both before M4-10 starts; a "no" or an unclear answer stops for the owner ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)). |
-| The seccomp profile that lets Codex's sandbox run also exposes more kernel code to every process in the container | A kernel bug becomes reachable from a prompt-injected agent | M0-18 measures the profile before anything ships it: M4-10 with Codex, or M0-12 if M0-18 recommends namespaces for every bot. The profile stays as small as `bwrap` allows ([decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md)). |
+| A custom seccomp profile would expose more kernel code to every process in the container | A kernel bug becomes reachable from a prompt-injected agent | Not taken. The owner kept Docker's default profile and ran Codex without its own sandbox ([decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md)). Codex is held by the hardened container, shared bots, `untrusted` approvals with escalations to the owner, the fail-closed hook, the proxy and the host firewall. |
 | Seven security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
 
 ## Open questions
