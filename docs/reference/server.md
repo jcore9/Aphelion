@@ -29,6 +29,8 @@ The reply never carries a version or any other detail, so it tells an attacker n
 
 Only the method `GET` with the request target `/health` is public. The request target is the path plus any query string. A request with a query string, such as `/health?verbose=1`, goes through the token check like every other request, so today it gets `401`.
 
+One known limit: a request may name the full URL instead of the path, as in `GET http://example.com/health HTTP/1.1`. The listener removes the scheme and host before Aphelion's handler sees the request, so the handler can't tell this request from `GET /health`. It gets the same `200` and the same body, and nothing else. Aphelion accepts this.
+
 ```sh
 curl http://127.0.0.1:7400/health
 ```
@@ -59,7 +61,7 @@ In code, each request that isn't `GET /health` goes through one authentication c
 
 The Compose file must publish the server's port only on the host's tailnet address. The tailnet is the private network that Tailscale builds between the owner's devices. Its IPv4 addresses are in the range `100.64.0.0/10`, which runs from `100.64.0.0` to `100.127.255.255`.
 
-`checkComposePorts(file, text)` reads the output of `docker compose config` and lists every port that breaks the rule. That command prints the Compose model that Docker will run. It fills in variables such as `${TAILNET_IP}`, and merges `include`, `extends` and override files such as `compose.override.yaml` into one file. `aphelion config check` will run the command and pass its output to the check (M0-11, [#13](https://github.com/jcore9/Aphelion/issues/13)).
+`checkComposePorts(file, text)` reads the output of `docker compose config`, as YAML or as the JSON that `--format json` prints, and lists every port that breaks the rule. That command prints the Compose model that Docker will run. It fills in variables such as `${TAILNET_IP}`, and merges `include`, `extends` and override files such as `compose.override.yaml` into one file. `aphelion config check` will run the command and pass its output to the check (M0-11, [#13](https://github.com/jcore9/Aphelion/issues/13)).
 
 The check looks at every published port of every service, not only the server's port, because nothing else in the container should be published ([decision 0022](../decisions/0022-agent-network-boundary.md)). The owner confirmed this rule on 2026-11-22.
 
@@ -78,6 +80,9 @@ These are refused too:
 - A service with `network_mode: host`. It shares the host's network, so the host publishes every port that the service listens on, on every host address.
 - A network whose `name` or `driver` is `host`, for the same reason.
 - A service with `network_mode: container:<name>`. It shares the network of a container outside the file, so the check can't see which ports that container publishes.
+- A network with any `driver` other than `bridge`, such as `macvlan`, `ipvlan` or `overlay`.
+- A bridge network whose `driver_opts` set `com.docker.network.bridge.gateway_mode_ipv4` or `com.docker.network.bridge.gateway_mode_ipv6` to anything but `nat`, the default. In `routed` or `nat-unprotected` mode, Docker lets other machines reach the container's own address directly, whatever host address a port names ([Docker's port publishing guide](https://docs.docker.com/engine/network/port-publishing/)).
+- A network with `external: true`. It is defined outside the file, so the check can't see its driver or options.
 
 The check fails closed. It refuses anything that it can't judge, because a value that isn't resolved could hide one of the cases above. For example, `network_mode: ${MODE}` could resolve to `host`. These are refused as "not resolved", with a reminder to run the check on the output of `docker compose config`:
 
@@ -90,6 +95,10 @@ Each refusal names the file, line, column and entry, then says how to fix it:
 ```
 compose.yaml:5:9: services.aphelion.ports[0]: publishes the port on every host address. Publish it only on the host's tailnet address, such as "100.71.226.67:7400:7400" (decision 0022).
 ```
+
+### What the check guarantees
+
+When the check passes, every port the file publishes is bound only to a tailnet address, on bridge networks in NAT mode. It says nothing about the host itself. The host firewall from [decision 0022](../decisions/0022-agent-network-boundary.md) is the second layer, and it blocks the container from the LAN whatever the Compose file says.
 
 The check parses the YAML with the `yaml` package and checks its shape with Zod. The server's own validation uses Zod, not Effect's `Schema` module. The owner decided this on 2026-11-22 ([decision 0041](../decisions/0041-effect-in-server-and-cli.md#owner-decision-2026-11-22)).
 

@@ -92,7 +92,9 @@ One more fact from the probe. `effect` 4 ships its HTTP router and its CLI parse
 
 ## Open question for the owner
 
-**Effect `Schema` or Zod for the server's own validation.** The server's config is validated with Zod today ([decision 0025](0025-config-schema-and-format.md)). Effect has its own schema library. Using it would give one library for the server's checks and errors. Keeping Zod would give one style across the server and the packages that share it. T3 carries both. This record does not choose. A config PR can move to Effect and keep its Zod validation, so nothing forces the choice now. The owner decides when a PR needs to validate something new in the server.
+**Closed: see the owner decision below.**
+
+~~**Effect `Schema` or Zod for the server's own validation.** The server's config is validated with Zod today ([decision 0025](0025-config-schema-and-format.md)). Effect has its own schema library. Using it would give one library for the server's checks and errors. Keeping Zod would give one style across the server and the packages that share it. T3 carries both. This record does not choose. A config PR can move to Effect and keep its Zod validation, so nothing forces the choice now. The owner decides when a PR needs to validate something new in the server.~~
 
 ### Owner decision, 2026-11-22
 
