@@ -16,6 +16,10 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
 
+## Reference
+
+- [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
+
 ## Decision records
 
 One numbered record per significant decision: context, options, choice, consequences.
@@ -46,3 +50,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0022](decisions/0022-agent-network-boundary.md) | The host firewall blocks the container from the LAN, with a path to a separate agents container | Accepted |
 | [0023](decisions/0023-scaffold-toolchain.md) | The scaffold lints with ESLint and typescript-eslint on TypeScript 6.0, and formats with Prettier | Accepted |
 | [0024](decisions/0024-codex-third-agent-cli.md) | Codex CLI becomes a third agent CLI, spiked in M0 and built in M4 | Accepted |
+| [0026](decisions/0026-sqlite-driver.md) | The store uses `bun:sqlite` in an adapter, and migrations are TypeScript modules | Proposed |
