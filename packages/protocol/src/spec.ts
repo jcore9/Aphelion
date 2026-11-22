@@ -48,18 +48,25 @@ export function schemaFiles(): Record<string, string> {
 
 const code = (value: unknown) => `\`${JSON.stringify(value)}\``;
 
+function bound(value: number): string {
+  const text = value.toLocaleString("en-US");
+  return value === Number.MAX_SAFE_INTEGER
+    ? `${text} (the largest safe integer)`
+    : text;
+}
+
 function integer(schema: JsonSchema): string {
   const min =
     schema.exclusiveMinimum === undefined
       ? schema.minimum
       : schema.exclusiveMinimum + 1;
-  const bounds = [
-    min === undefined ? "" : `at least ${String(min)}`,
-    schema.maximum === undefined || schema.maximum === Number.MAX_SAFE_INTEGER
-      ? ""
-      : `at most ${String(schema.maximum)}`,
-  ].filter(Boolean);
-  return ["integer", ...bounds].join(", ");
+  const max = schema.maximum;
+  if (min !== undefined && max !== undefined) {
+    return `integer from ${bound(min)} to ${bound(max)}`;
+  }
+  if (min !== undefined) return `integer, at least ${bound(min)}`;
+  if (max !== undefined) return `integer, at most ${bound(max)}`;
+  return "integer";
 }
 
 function typeOf(schema: JsonSchema): string {

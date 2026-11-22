@@ -30,10 +30,12 @@ Each measurement was run on Bun 1.4.5 and Node 24 on 2026-11-22.
 | Rendering code | One module that turns the JSON Schema and the registry into Markdown | The same module | None to write |
 | Stale check | The existing `test` job. Under `CI=true`, a changed page failed the test, and a deleted page failed without being rewritten. | A new CI step that runs the script and then `git diff --exit-code` | Needs the script and the CI step as well |
 | How to regenerate | `bun --bun vitest run -u packages/protocol`, the same command as the config reference | `bun run` plus the script's name | The tool's command line |
-| Runs on Bun | Yes | Yes | No. It crashed on Bun 1.4.5 while it built its index page. It ran on Node. |
-| Output for the client frames alone | One section per frame type on one page | One page | 17 Markdown files and 631 lines for two frame types, one page per property, titled "Untitled object in ClientFrame Schema" |
+| Runs on Bun | Yes | Yes | No. It exited with an error on Bun 1.4.5 while it built its index page. It ran on Node 24 only after an `$id` was added to the schema. |
+| Output for `client-frame.schema.json` alone | One section per frame type on one page | One page | 22 Markdown files and 805 lines for two frame types, one page per property. 20 of the 22 pages have a title that starts with "Untitled". |
 | Fits the docs site | Yes. Links to the JSON Schema files are full GitHub URLs. | Yes | No. It links to the schema files by relative path, which the site's link check refuses. |
 | New dependencies | None | None | 102 packages, 8.9 MB |
+
+The tool was installed in an empty folder with `bun add @adobe/jsonschema2md@8.0.11`, which installed 102 packages. It read a copy of `client-frame.schema.json` from `schema/`, with `"$id": "https://example.com/client-frame.schema.json"` added, and it ran as `node node_modules/.bin/jsonschema2md -d ../schema -o ../out -x -` from the install folder. Without the `$id`, Node exited with `ERR_INVALID_ARG_TYPE`. The same command with `bun` in place of `node` exited with code 1, with or without the `$id`. The counts come from `ls out/*.md | wc -l`, `cat out/*.md | wc -l` and `grep -l "^# Untitled" out/*.md | wc -l`, and the size from `du -sh node_modules`. The folder was deleted afterwards.
 
 The off-the-shelf tool reads only the JSON Schema, so it can't use the registry to group fields by command. Its pages would need a rewrite step to fit the site, which costs more than the renderer itself.
 
@@ -47,14 +49,14 @@ A test in `@aphelion/protocol` renders the spec, and Vitest's `toMatchFileSnapsh
 
 - `packages/protocol/src/spec.ts` holds `renderSpec` and `schemaFiles`. Both are pure functions that return text. They read `clientFrame`, `serverFrame`, `version` and `errorCodes` from `frames.ts`, and `commands` and `events` from `registry.ts`.
 - `packages/protocol/src/spec.test.ts` writes nothing in CI. It compares the output with `docs/reference/protocol-spec.md`, `packages/protocol/client-frame.schema.json` and `packages/protocol/server-frame.schema.json`, and fails when any of them differs.
-- `bun --bun vitest run -u packages/protocol` rewrites the three files.
+- `bun --bun vitest run -u packages/protocol` rewrites the files that are out of date.
 - The meaning of each field comes from its `.describe()` text in the Zod schema, so the description is in the JSON Schema too. `CommandId`, `StreamId` and `Cursor` carry a `.meta({ id })`, so the JSON Schema names them under `definitions` and the spec links to one entry for each.
 - The JSON Schema files are draft-07, the version that editors support best, as with the config and manifest schemas. The package exports them, so another-language client can check frames or generate types from them.
 - `docs/reference/protocol.md` stays hand-written. It explains frames, errors, replay, resync and command ids, and links to the spec for the field tables.
 
 ## Consequences
 
-- Adding a command or an event now has one more step. The author runs the regenerate command and commits three changed files. CI names the stale file when they forget.
+- Adding a command or an event now has one more step. The author runs the regenerate command and commits the changed files. A new command changes the spec page and both JSON Schema files, because a client sends its `command` frame and the server sends its `result` frame. A new event changes the spec page and `server-frame.schema.json` only. CI names the stale file when the author forgets.
 - A field without a `.describe()` text shows an empty description in the spec. Review catches it, not a check.
 - The renderer understands the JSON Schema features that the frames use today: constants, enums, patterns, integer bounds, nullable values, named definitions and nested objects. A new Zod feature in a payload, such as a record or a tuple, renders without its details, as `object` or `list of any`, until `spec.ts` learns it. Revisit the renderer when a payload needs one.
 - `client-frame.schema.json` and `server-frame.schema.json` are part of the protocol's public shape from now on. A change to a frame shows up as a diff in them, which makes protocol changes easy to spot in review.

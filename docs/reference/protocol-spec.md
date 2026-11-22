@@ -51,7 +51,7 @@ Tells every client that something happened.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `seq` | integer, at least 1 | yes | The event's number in the stream. |
+| `seq` | integer from 1 to 9,007,199,254,740,991 (the largest safe integer) | yes | The event's number in the stream. |
 | `name` | `"notice"` | yes | The kind of event. |
 | `payload` | object | yes | What happened. |
 
@@ -112,7 +112,7 @@ A position in an event stream.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `stream` | [`StreamId`](#streamid) | yes | The stream that the position is in. |
-| `seq` | integer, at least 0 | yes | The last sequence number the client has seen. |
+| `seq` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | The last sequence number the client has seen. |
 
 ### `StreamId`
 
