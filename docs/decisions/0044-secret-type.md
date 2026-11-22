@@ -1,6 +1,6 @@
 # 0044. `Secret` is a small class of Aphelion's own, modelled on Effect's `Redacted`, and it throws when serialized
 
-- Status: Proposed
+- Status: Accepted (approved by merging #139 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: the M0-14a PR ([#103](https://github.com/jcore9/Aphelion/issues/103))
 - Answers: [decision 0041](0041-effect-in-server-and-cli.md)'s "M0-14a may build `Secret` on `Redacted`. That PR decides.", and the owner's question of 2026-11-22: should serializing a `Secret` throw, or return a marker that the store and the pipes refuse?

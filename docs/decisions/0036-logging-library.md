@@ -1,6 +1,6 @@
 # 0036. The server writes its own JSON logs, with no logging library
 
-- Status: Proposed
+- Status: Accepted (approved by merging #129 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: orchestrator, in the M0-08 logging and audit PR ([#10](https://github.com/jcore9/Aphelion/issues/10))
 - Answers: the logging library **DR** in the M0 plan's M0-08 design note
