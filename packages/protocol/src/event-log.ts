@@ -1,4 +1,5 @@
 import {
+  eventFrame,
   version,
   type Cursor,
   type EventBody,
@@ -26,13 +27,16 @@ export class EventLog {
   }
 
   append(event: EventBody): EventFrame {
-    this.#head += 1;
-    const frame = frozenCopy<EventFrame>({
-      v: version,
-      type: "event",
-      seq: this.#head,
-      ...event,
-    });
+    const frame = deepFreeze(
+      eventFrame.parse({
+        v: version,
+        type: "event",
+        seq: this.#head + 1,
+        name: event.name,
+        payload: event.payload,
+      }),
+    );
+    this.#head = frame.seq;
     this.#kept.push(frame);
     if (this.#kept.length > this.#capacity) this.#kept.shift();
     return frame;
@@ -52,10 +56,6 @@ export class EventLog {
     }
     return this.#kept.slice(cursor.seq - oldest);
   }
-}
-
-function frozenCopy<Value>(value: Value): Value {
-  return deepFreeze(JSON.parse(JSON.stringify(value)) as Value);
 }
 
 function deepFreeze<Value>(value: Value): Value {

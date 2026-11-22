@@ -105,7 +105,46 @@ describe("command ids", () => {
     ]);
   });
 
-  test("once running commands finish, the ledger forgets the oldest down to its capacity", async () => {
+  test("a command that retries its own id while it starts runs once", async () => {
+    const ledger = new CommandLedger<string>({ capacity: 10 });
+    let inner: Promise<string> | undefined;
+    let secondRuns = 0;
+    const outcome = await ledger.run(a, () => {
+      inner = ledger.run(a, () => {
+        secondRuns += 1;
+        return Promise.resolve("second");
+      });
+      return Promise.resolve("first");
+    });
+    expect(outcome).toBe("first");
+    expect(await inner).toBe("first");
+    expect(secondRuns).toBe(0);
+  });
+
+  test("keeps every running id and forgets a finished one, even a newer one", async () => {
+    const ledger = new CommandLedger<string>({ capacity: 1 });
+    const older = pending();
+    const runA = ledger.run(a, older.apply);
+    await ledger.run(b, () => Promise.resolve("b done"));
+    const command = counter();
+    const retryA = ledger.run(a, command.apply);
+    expect(await ledger.run(b, command.apply)).toBe("applied 1");
+    older.resolve("a done");
+    expect(await Promise.all([runA, retryA])).toEqual(["a done", "a done"]);
+  });
+
+  test("forgets a finished id as soon as a new command takes its place", async () => {
+    const ledger = new CommandLedger<string>({ capacity: 1 });
+    await ledger.run(a, () => Promise.resolve("a done"));
+    const running = pending();
+    const runB = ledger.run(b, running.apply);
+    const command = counter();
+    expect(await ledger.run(a, command.apply)).toBe("applied 1");
+    running.resolve("b done");
+    await runB;
+  });
+
+  test("once running commands finish, the ledger keeps the most recently finished, up to its capacity", async () => {
     const ledger = new CommandLedger<string>({ capacity: 1 });
     const first = pending();
     const second = pending();

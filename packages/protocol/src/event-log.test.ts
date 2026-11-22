@@ -6,6 +6,7 @@ import {
   parseServerFrame,
   streamId,
   type Cursor,
+  type EventBody,
   type EventFrame,
 } from "./index.ts";
 
@@ -61,6 +62,32 @@ describe("replay from a cursor", () => {
     expect(logWith(10, 4).resume(cursor)).toEqual([
       { v: 1, type: "resync", cursor: { stream, seq: 10 } },
     ]);
+  });
+});
+
+describe("appending an event", () => {
+  test("rejects an event that doesn't match its schema and changes nothing", () => {
+    const log = logWith(1);
+    const bad = {
+      name: "notice",
+      payload: { message: "x", size: 1n },
+    } as unknown as EventBody;
+    expect(() => log.append(bad)).toThrow();
+    expect(log.head).toEqual({ stream, seq: 1 });
+    log.append({ name: "notice", payload: { message: "next" } });
+    expect(seqs(log.resume({ stream, seq: 0 }))).toEqual([1, 2]);
+  });
+
+  test("stores the value of a field that a getter provides", () => {
+    const log = new EventLog({ stream, capacity: 10 });
+    class Notice {
+      get message() {
+        return "from a getter";
+      }
+    }
+    const frame = log.append({ name: "notice", payload: new Notice() });
+    expect(frame.payload).toEqual({ message: "from a getter" });
+    expect(parseServerFrame(encodeFrame(frame))).toEqual({ ok: true, frame });
   });
 });
 

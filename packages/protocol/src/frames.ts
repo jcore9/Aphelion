@@ -95,9 +95,11 @@ const resultFrame = byName(commands, (name, spec) =>
   }),
 );
 
-const eventFrame = byName(events, (name, payload) =>
+const eventFrames = byName(events, (name, payload) =>
   envelope("event", { seq: seq.positive(), name: z.literal(name), payload }),
 );
+
+export const eventFrame = eventFrames as unknown as z.ZodType<EventFrame>;
 
 export const clientFrame = z.discriminatedUnion("type", [
   commandFrame,
@@ -106,7 +108,7 @@ export const clientFrame = z.discriminatedUnion("type", [
 
 export const serverFrame = z.discriminatedUnion("type", [
   resultFrame,
-  eventFrame,
+  eventFrames,
   envelope("resync", { cursor }),
   envelope("error", {
     code: z.enum(errorCodes),
