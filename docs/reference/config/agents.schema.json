@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1,
+      "description": "The file's format version. Aphelion migrates older ones."
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "description": "Unique agent name. Also the name of the agent's folder (decision 0010)."
+          },
+          "provider": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "description": "The agent CLI that runs the agent."
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The model the provider runs."
+          },
+          "connectors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            },
+            "description": "Ids of the connectors the agent may use. Can be empty."
+          },
+          "policyProfile": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "description": "The approval profile the agent's actions pass."
+          },
+          "folder": {
+            "type": "string",
+            "pattern": "^\\/",
+            "description": "Absolute path of the agent's folder. Normally the agent's name under /var/lib/aphelion-agents."
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "model",
+          "connectors",
+          "policyProfile",
+          "folder"
+        ],
+        "additionalProperties": false
+      },
+      "description": "One entry per agent. Names must be unique."
+    }
+  },
+  "required": [
+    "version",
+    "agents"
+  ],
+  "additionalProperties": false,
+  "title": "agents.yaml",
+  "description": "What each agent is allowed to do. Instructions live in the agent's folder, not here (decision 0010)."
+}
