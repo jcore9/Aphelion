@@ -26,6 +26,8 @@ test("throws once the list is full, adds nothing, and keeps earlier values maske
   expect(maskSecretValue("Short7x")).toBe("too short");
 
   unmaskSecretValue(values[0] ?? "");
+  expect(() => maskSecretValue("Limit-overflow")).toThrow(MaskListFullError);
+  unmaskSecretValue(values[0] ?? "");
   expect(maskSecretValue("Limit-overflow")).toBe("masked");
   expect(redactText("Limit-overflow")).toBe(REDACTED);
 });

@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./config": "./src/config/index.ts",
     "./http": "./src/http/index.ts",
-    "./log": "./src/log/index.ts"
+    "./log": "./src/log/index.ts",
+    "./secrets": "./src/secrets/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
