@@ -8,9 +8,9 @@ These are plain Markdown files until M0-16 builds them into a Starlight site.
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
 
-## Reference
+## Working on the repository
 
-- [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
+- [Branch protection](branch-protection.md): how changes reach `dev` and `main`, and why.
 
 ## Spike findings
 
@@ -19,6 +19,12 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [M0-01: Claude over ACP on a subscription login](spikes/M0-01-claude-over-acp.md)
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
+- [M0-17: Codex headless on a ChatGPT login](spikes/M0-17-codex-headless.md)
+
+## Reference
+
+- [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
+- [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
 
 ## Decision records
 
@@ -51,3 +57,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0023](decisions/0023-scaffold-toolchain.md) | The scaffold lints with ESLint and typescript-eslint on TypeScript 6.0, and formats with Prettier | Accepted |
 | [0024](decisions/0024-codex-third-agent-cli.md) | Codex CLI becomes a third agent CLI, spiked in M0 and built in M4 | Accepted |
 | [0025](decisions/0025-config-schema-and-format.md) | Config files are YAML, parsed with the `yaml` package and validated with Zod 4 | Proposed |
+| [0026](decisions/0026-sqlite-driver.md) | The store uses `bun:sqlite` in an adapter, and migrations are TypeScript modules | Proposed |

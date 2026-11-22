@@ -1,0 +1,61 @@
+name: Bug
+description: Something that doesn't work as the docs say it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Report a security vulnerability through [private vulnerability reporting](https://github.com/jcore9/Aphelion/security/advisories/new), never here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The steps to reproduce, what you expected and what you saw. Redact tokens and secrets from any logs.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "dev at 776e812"
+    validations:
+      required: true
+  - type: input
+    id: plan
+    attributes:
+      label: Plan or decision record
+      description: A link to the doc or decision record that describes the expected behavior, if there is one.
+  - type: input
+    id: linked
+    attributes:
+      label: Linked issues
+      description: The issue or PR that introduced the bug, if you know it.
+  - type: textarea
+    id: changes
+    attributes:
+      label: What the fix changes
+      description: The acceptance criteria for the fix. Leave this empty if you don't know yet.
+      value: |
+        - [ ]
+  - type: textarea
+    id: testing
+    attributes:
+      label: How it will be tested
+      description: The test that fails before the fix and passes after it.
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs it touches
+      description: The docs that are wrong or that the fix must update, or "None".
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk label
+      description: Pick every risk label that applies. CONTRIBUTING.md lists the security-sensitive paths.
+      multiple: true
+      options:
+        - None
+        - risk/security
+        - risk/breaking
+        - Not sure
+    validations:
+      required: true

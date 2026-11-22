@@ -1,0 +1,76 @@
+name: Spike
+description: A timeboxed question, answered in writing before anything builds on it.
+title: "[M#] Spike: "
+labels: ["type/spike"]
+body:
+  - type: input
+    id: id
+    attributes:
+      label: ID and milestone
+      placeholder: "M0-17 · M0 · Foundations"
+    validations:
+      required: true
+  - type: input
+    id: plan
+    attributes:
+      label: Plan or decision record
+      description: A link to the milestone plan section or the decision record that asks for this spike.
+    validations:
+      required: true
+  - type: input
+    id: linked
+    attributes:
+      label: Linked issues
+      description: The issues this depends on, and the issues that wait for its answer.
+  - type: textarea
+    id: questions
+    attributes:
+      label: Questions
+      description: A numbered list of the questions that the finding answers.
+      value: |
+        1.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Deliverable
+      description: What the finding must contain, and what each answer changes downstream.
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: How it will be tested
+      description: What the spike runs to answer each question, and on what machine.
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs it touches
+      description: The finding goes under `docs/spikes/`. Name any decision record or plan that it changes.
+      value: docs/spikes/
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk label
+      description: Pick every risk label that applies. CONTRIBUTING.md lists the security-sensitive paths.
+      multiple: true
+      options:
+        - None
+        - risk/security
+        - risk/breaking
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Spike rules
+      options:
+        - label: The finding answers each question in writing, with sources and dates checked.
+          required: true
+        - label: Prototype code stays on the `spike/` branch and is never merged.
+          required: true
