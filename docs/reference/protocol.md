@@ -1,6 +1,6 @@
 # The client protocol
 
-The server and every client, such as the web app or the desktop app, talk over one connection. Each message on it is a *frame*, a small JSON object. A client sends *commands*, which ask the server to do something. The server sends back *results*, and it also sends *events*, which tell every client that something happened. `@aphelion/protocol` defines the frames and the logic that both sides share. It uses only web-standard APIs, so the same code runs in Bun, Node and the browser. Relative imports end in `.ts`, so Node 24 loads the source files directly. `protocol-on-node.test.ts` checks that in a real Node process. [Decision 0037](../decisions/0037-protocol-frames-in-zod.md) explains how the frames are described and validated.
+The server and every client, such as the web app or the desktop app, talk over one connection. Each message on it is a *frame*, a small JSON object. A client sends *commands*, which ask the server to do something. The server sends back *results*, and it also sends *events*, which tell every client that something happened. `@aphelion/protocol` defines the frames and the logic that both sides share. It uses only web-standard APIs, so the same code runs in Bun, Node and the browser. Relative imports end in `.ts`, so Node 24 loads the source files directly. `web-packages-on-node.test.ts` checks that in a real Node process. [Decision 0037](../decisions/0037-protocol-frames-in-zod.md) explains how the frames are described and validated.
 
 M0-09b replaces this page with a spec generated from the schemas.
 
