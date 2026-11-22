@@ -115,10 +115,10 @@ Added device "my laptop" with id b9e491d2e2e20b59. Its token expires at 2027-02-
 The token is shown once. Copy it to the device now: it can't be shown again.
 ```
 
-To save the token to a file, create the file so that only you can read it:
+To save the token to a file, create a new file that only you can read. `umask 077` gives a new file mode `0600`, and `noclobber` refuses to write into a file that already exists, which could keep a looser mode:
 
 ```sh
-(umask 077 && docker compose exec -T --user harness aphelion aphelion device add laptop > token.txt)
+(umask 077 && set -o noclobber && docker compose exec -T --user harness aphelion aphelion device add laptop > token.txt)
 ```
 
 If the token can't be printed, for example because the disk is full, the command revokes the new device at once and exits with code 1, so no working token is left that nobody saw.

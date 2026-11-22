@@ -20,6 +20,7 @@ describe("accepted command lines", () => {
     [["--help"], { kind: "help" }],
     [["-h"], { kind: "help" }],
     [["device", "add", "--help"], { kind: "help" }],
+    [["--help", "--unknown"], { kind: "help" }],
     [["--version"], { kind: "version" }],
     [
       ["--headless"],
@@ -137,11 +138,9 @@ describe("refused command lines", () => {
       "--days must be a whole number of days",
     ],
     [["device", "revoke", "laptop"], "the device id must be 16 hex digits"],
-    [["--nope"], "Unknown option '--nope'"],
-    [
-      ["config", "check", "--compose"],
-      "Option '--compose <value>' argument missing",
-    ],
+    [["--nope"], "unknown option --nope"],
+    [["device", "revoke", "--aph_dev_0123456789abcdef_x"], "unknown option"],
+    [["config", "check", "--compose"], "--compose needs a value"],
   ])("%j", (argv, message) => {
     expect(refused(argv)).toContain(message);
     expect(refused(argv)).not.toContain("aph_dev_");

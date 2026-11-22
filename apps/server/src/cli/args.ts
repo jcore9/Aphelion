@@ -104,7 +104,25 @@ function kindOf(
   );
 }
 
+const plainOption = /^--?[a-z-]+$/;
+
+function parserMessage(error: unknown): string {
+  const code = (error as { code?: unknown }).code;
+  const option = /'(-[^'\s]*)/.exec((error as Error).message)?.[1];
+  const named = option !== undefined && plainOption.test(option);
+  if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
+    return named ? `unknown option ${option}` : "unknown option";
+  }
+  if (code === "ERR_PARSE_ARGS_INVALID_OPTION_VALUE") {
+    return named ? `${option} needs a value` : "an option needs a value";
+  }
+  return "the command line can't be read";
+}
+
 export function parseCommandLine(argv: readonly string[]): ParseResult {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    return { ok: true, command: { kind: "help" } };
+  }
   let parsed;
   try {
     parsed = parseArgs({
@@ -115,7 +133,7 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
       tokens: true,
     });
   } catch (error) {
-    return fail((error as Error).message);
+    return fail(parserMessage(error));
   }
   const { values, positionals, tokens } = parsed;
 

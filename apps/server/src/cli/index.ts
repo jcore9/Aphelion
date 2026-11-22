@@ -43,8 +43,8 @@ export const cli = (argv: readonly string[]) =>
     const io = yield* CliIo;
     const parsed = parseCommandLine(argv);
     if (!parsed.ok) {
-      yield* io.err(`aphelion: ${parsed.message}`);
-      yield* io.err("Run aphelion --help to see the commands.");
+      yield* Effect.ignore(io.err(`aphelion: ${parsed.message}`));
+      yield* Effect.ignore(io.err("Run aphelion --help to see the commands."));
       return yield* usage;
     }
     return yield* run(parsed.command).pipe(
