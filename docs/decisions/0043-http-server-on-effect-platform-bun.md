@@ -31,7 +31,7 @@ What was measured, with Bun 1.4.5 and `effect`, `@effect/platform-bun` and `@eff
 
 - The M0-10a server, started from the example `server.yaml`, answered `curl` on `127.0.0.1:7400`. `/health` returned `200` and `{"status":"ok"}`. `/api` and `/ws` returned `401` with an empty body. A WebSocket to `/ws` failed with "Expected 101 status code: 401". The host's LAN address got no connection, because the server listened on `127.0.0.1` only.
 - A probe that upgraded a WebSocket through `@effect/platform-bun` echoed a message back to the client. The probe lived outside the repo and was deleted. M0-10b can rely on the upgrade.
-- The six tests in `packages/server/src/http/server.test.ts` start the real listener twice and finish in about 0.3 seconds.
+- The eight tests in `packages/server/src/http/server.test.ts` start the real listener twice and finish in about 0.3 seconds.
 - Decision 0041 measured the size. The HTTP server adds about 0.35 MB to the compiled binary.
 
 ## Decision
@@ -39,7 +39,9 @@ What was measured, with Bun 1.4.5 and `effect`, `@effect/platform-bun` and `@eff
 Use `@effect/platform-bun`'s HTTP server, behind an adapter.
 
 - `packages/server/src/adapters/http-server.ts` is the only file that imports `@effect/platform-bun`. It turns `server.yaml`'s `address` and `port` into the listener's Layer. A different listener would replace this one file.
-- The handler in `packages/server/src/http/app.ts` uses only plain `effect` modules. It answers `GET /health` itself, and passes every other request to one `Authenticator` service. M0-10a provides `refuseEveryone`, which refuses every request with `401`. M0-10b provides the device-token check in its place, and adds the WebSocket route behind it.
+- The handler in `packages/server/src/http/app.ts` uses only plain `effect` modules. It answers a `GET` for exactly `/health` itself, with no query string, and passes every other request to one `Authenticator` service. M0-10a provides `refuseEveryone`, which refuses every request with `401`. M0-10b provides the device-token check in its place, and adds the WebSocket route behind it.
+- The listener refuses a request body over 64 KiB with `413`. Bun's default is 128 MiB, far more than a server that only answers `/health` needs. M0-10b raises the limit if the API needs more.
+- The listener answers `CONNECT`, a request to open a tunnel to another host, with an empty `501` before the handler runs. Aphelion doesn't override this. It is the one refusal that isn't `401`, and it opens no tunnel. A test checks both.
 - The listener closes a connection after 10 seconds with no traffic. The library default is no limit at all, and its documentation warns against that for a server that clients reach directly. Ten seconds is Bun's own default.
 - No request is logged. The listener's own "Listening on" log line is not turned on.
 
