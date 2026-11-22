@@ -94,3 +94,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0044](decisions/0044-secret-type.md) | `Secret` is a small class of Aphelion's own, modelled on Effect's `Redacted`, and it throws when serialized | Proposed |
 | [0045](decisions/0045-no-bot-namespaces-default-seccomp.md) | Bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox | Accepted |
 | [0046](decisions/0046-plugin-runner-kills-process-trees.md) | The plugin runner adopts every process its plugins leave behind, and freezes then kills a plugin's whole process tree | Proposed |
+| [0047](decisions/0047-repo-layout.md) | The code is split into apps and shared packages, and the server and its CLI are one package in `apps/server` | Proposed |

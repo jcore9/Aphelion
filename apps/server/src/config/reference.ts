@@ -11,7 +11,7 @@ type JsonSchema = {
 };
 
 export const referenceBegin =
-  "<!-- Generated from packages/server/src/config/areas.ts. Regenerate: bun --bun vitest run -u packages/server/src/config -->";
+  "<!-- Generated from apps/server/src/config/areas.ts. Regenerate: bun --bun vitest run -u apps/server/src/config -->";
 export const referenceEnd = "<!-- End of generated section -->";
 
 export function jsonSchemaFiles(): Record<string, string> {

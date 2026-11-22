@@ -2,15 +2,15 @@
 
 The server holds every secret value, such as an API key or a password, inside a `Secret`. Config files, logs and the database hold only a secret reference, such as `op://AI Agents/GitHub App/private key`, which names where the value lives. [Decision 0044](../decisions/0044-secret-type.md) explains why `Secret` is built the way it is.
 
-Only the server holds `Secret` values. Plugins never see a secret's value ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)), so `Secret` lives in `packages/server`, not in `plugin-sdk`.
+Only the server holds `Secret` values. Plugins never see a secret's value ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)), so `Secret` lives in `apps/server`, not in `plugin-sdk`.
 
 ## Code
 
 | File | Holds |
 | --- | --- |
-| `packages/server/src/secrets/secret.ts` | The `Secret` class and its errors |
-| `packages/server/src/secrets/reference.ts` | `parseSecretReference` and the reasons it gives |
-| `packages/server/src/secrets/canary.test.ts` | The test that a canary value never reaches the logs or the database files |
+| `apps/server/src/secrets/secret.ts` | The `Secret` class and its errors |
+| `apps/server/src/secrets/reference.ts` | `parseSecretReference` and the reasons it gives |
+| `apps/server/src/secrets/canary.test.ts` | The test that a canary value never reaches the logs or the database files |
 
 Server code imports both from `@aphelion/server/secrets`.
 

@@ -74,9 +74,9 @@ A test adds a device, logs the token and the result in several shapes, tries it 
 
 | File | Holds |
 | --- | --- |
-| [`packages/server/src/devices/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/devices/index.ts) | `addDevice`, `revokeDevice`, `checkAuthorization`, `isDeviceActive` and the failed-attempt audit limit |
-| [`packages/server/src/devices/token.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/devices/token.ts) | The token format, the SHA-256 fingerprint and the constant-time comparison |
-| [`packages/server/src/store/migrations/0002-devices.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/store/migrations/0002-devices.ts) | The `devices` table |
+| [`apps/server/src/devices/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/devices/index.ts) | `addDevice`, `revokeDevice`, `checkAuthorization`, `isDeviceActive` and the failed-attempt audit limit |
+| [`apps/server/src/devices/token.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/devices/token.ts) | The token format, the SHA-256 fingerprint and the constant-time comparison |
+| [`apps/server/src/store/migrations/0002-devices.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/store/migrations/0002-devices.ts) | The `devices` table |
 
 M0-11 calls them from `@aphelion/server/devices`:
 

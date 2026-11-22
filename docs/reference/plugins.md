@@ -9,7 +9,7 @@ The host and the runner talk over a pipe that the container's init creates befor
 
 A plugin with only a client part has no process. The host starts nothing for it ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
 
-The code is in [`packages/server/src/plugins/`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/plugins/). The runner's process handling is in [`packages/server/src/adapters/plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/adapters/plugin-processes.ts).
+The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/plugins/). The runner's process handling is in [`apps/server/src/adapters/plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/plugin-processes.ts).
 
 ## For plugin authors
 
@@ -159,7 +159,7 @@ Issue [#14](https://github.com/jcore9/Aphelion/issues/14), the container image, 
 The container's init starts the runner as `aphelion-plugins`, with the pipe to the server on its standard input and output:
 
 ```sh
-bun packages/server/src/plugins/runner-main.ts --bun /usr/local/bin/bun --data /var/lib/aphelion-plugins
+bun apps/server/src/plugins/runner-main.ts --bun /usr/local/bin/bun --data /var/lib/aphelion-plugins
 ```
 
 | Option | Default | Meaning |

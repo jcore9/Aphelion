@@ -6,6 +6,7 @@
 - Proposed by: the docs PR that records this decision
 - Answers: which library structures the server's errors, retries, services and secrets, before M0-10a writes the first long-running code
 - Amends: the plan's "Keeping it extensible", item 6, which now points here
+- Amended by: [decision 0047](0047-repo-layout.md), which merges the CLI into the server package in `apps/server`
 
 ## Context
 

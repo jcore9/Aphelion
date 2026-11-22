@@ -70,7 +70,7 @@ Some of those paths exist today:
 - `CODEOWNERS`, the rulesets, and the workflows
 - every `package.json`, `bun.lock` and `bunfig.toml`, because they set the scripts that CI runs, the dependencies, and the package registry
 - `eslint.config.ts`, `lint-boundaries.test.ts`, `vitest.config.ts` and every `tsconfig*.json`, which enforce the boundaries in [decision 0023](decisions/0023-scaffold-toolchain.md)
-- the Bun-only adapter folders, `packages/server/src/adapters/` and `packages/cli/src/adapters/`, which decision 0023 names before they hold any file
+- the Bun-only adapter folder, `apps/server/src/adapters/`, which decision 0023 names
 - the decision records, the plan, `SECURITY.md` and `LICENSE`
 
 The other paths are guesses at where future code will live. Most match a folder name in any package, so the code is covered wherever it lands:
@@ -80,13 +80,13 @@ The other paths are guesses at where future code will live. Most match a folder 
 | `secrets/`, `broker/` | The secrets broker (M0-14) and the secret backends (M0-15) |
 | `plugin-host/`, `grants/`, `/packages/plugin-sdk/src/manifest*` | The plugin host, permission grants, and the manifest schema (M0-13) |
 | `auth/`, `devices/` | Device tokens (M0-10) and later sign-in |
-| `policy/`, `/packages/server/**/hooks/` | The policy engine and its hooks (M2) |
+| `policy/`, `/apps/server/**/hooks/` | The policy engine and its hooks (M2) |
 | `gateway/` | The gateway |
 | `Dockerfile*`, `/.dockerignore`, `compose*.yaml`, `docker-compose*.yml` and similar | The image and the Compose file (M0-12) |
 | `*.service`, `install*.sh`, `/deploy/` | The host unit and the install script (M0-12) |
 | `managed-settings.json`, `requirements.toml` | The managed settings for the Claude Code, Grok and Codex CLIs (M0-12, M2-05) |
 
-The `hooks/` pattern is limited to `packages/server`, because React code in `packages/client` often has a `hooks/` folder. The PR that creates one of these paths checks that a pattern covers it, and fixes `CODEOWNERS` if not.
+The `hooks/` pattern is limited to `apps/server`, because React code in `packages/ui` often has a `hooks/` folder. The PR that creates one of these paths checks that a pattern covers it, and fixes `CODEOWNERS` if not.
 
 ## What the rules don't stop
 

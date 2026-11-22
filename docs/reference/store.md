@@ -6,11 +6,11 @@ The server keeps its state in one SQLite database, at `/var/lib/aphelion/` in th
 
 | File | Holds |
 | --- | --- |
-| `packages/server/src/store/database.ts` | The `Database` interface that the rest of the server uses |
-| `packages/server/src/store/index.ts` | `openStore(path)`, which opens the database and applies the migrations |
-| `packages/server/src/store/migrate.ts` | The `Migration` type and the runner |
-| `packages/server/src/store/migrations/` | The migrations, listed in order in `index.ts` |
-| `packages/server/src/adapters/sqlite.ts` | The `bun:sqlite` driver, the only file that imports it |
+| `apps/server/src/store/database.ts` | The `Database` interface that the rest of the server uses |
+| `apps/server/src/store/index.ts` | `openStore(path)`, which opens the database and applies the migrations |
+| `apps/server/src/store/migrate.ts` | The `Migration` type and the runner |
+| `apps/server/src/store/migrations/` | The migrations, listed in order in `index.ts` |
+| `apps/server/src/adapters/sqlite.ts` | The `bun:sqlite` driver, the only file that imports it |
 
 ## The `Database` interface
 
@@ -37,7 +37,7 @@ Bun opens a `file:` name as an ordinary file today, so the last rule is a precau
 
 ## Add a migration
 
-1. Create `packages/server/src/store/migrations/NNNN-<name>.ts`, with `NNNN` the next version number:
+1. Create `apps/server/src/store/migrations/NNNN-<name>.ts`, with `NNNN` the next version number:
 
    ```ts
    import type { Migration } from "../migrate";
@@ -54,7 +54,7 @@ Bun opens a `file:` name as an ordinary file today, so the last rule is a precau
    };
    ```
 
-2. Add it to the end of the list in `packages/server/src/store/migrations/index.ts`.
+2. Add it to the end of the list in `apps/server/src/store/migrations/index.ts`.
 3. Run `bun run test`. The store test applies every listed migration to a fresh database.
 4. Add a test for the tables that the migration creates, next to the code that uses them.
 

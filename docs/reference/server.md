@@ -73,7 +73,7 @@ The server closes the WebSocket in these cases. The close code and reason are fi
 
 The server checks the token again every 5 seconds while the WebSocket is open, so a revoked or expired token closes it within 5 seconds.
 
-These limits are set in [`packages/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/adapters/http-server.ts):
+These limits are set in [`apps/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/http-server.ts):
 
 | Limit | Value | Why |
 | --- | --- | --- |
@@ -133,9 +133,9 @@ The check parses the YAML with the `yaml` package and checks its shape with Zod.
 
 | File | Holds |
 | --- | --- |
-| [`packages/server/src/http/app.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/app.ts) | The request handler and the `Authenticator` service |
-| [`packages/server/src/http/authenticator.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/authenticator.ts) | `deviceTokens(db)`, the `Authenticator` that checks device tokens |
-| [`packages/server/src/http/socket.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/socket.ts) | One WebSocket: reads frames and closes it when a frame is bad or the token ends |
-| [`packages/server/src/http/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/index.ts) | `serveHttp({ address, port }, db)`, which starts the server |
-| [`packages/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/adapters/http-server.ts) | The Bun listener and its WebSocket limits, the only file that imports `@effect/platform-bun` |
-| [`packages/server/src/config/compose.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/config/compose.ts) | `checkComposePorts` |
+| [`apps/server/src/http/app.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/http/app.ts) | The request handler and the `Authenticator` service |
+| [`apps/server/src/http/authenticator.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/http/authenticator.ts) | `deviceTokens(db)`, the `Authenticator` that checks device tokens |
+| [`apps/server/src/http/socket.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/http/socket.ts) | One WebSocket: reads frames and closes it when a frame is bad or the token ends |
+| [`apps/server/src/http/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/http/index.ts) | `serveHttp({ address, port }, db)`, which starts the server |
+| [`apps/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/http-server.ts) | The Bun listener and its WebSocket limits, the only file that imports `@effect/platform-bun` |
+| [`apps/server/src/config/compose.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/config/compose.ts) | `checkComposePorts` |

@@ -14,6 +14,21 @@
         "vitest": "5.1.1",
       },
     },
+    "apps/server": {
+      "name": "@aphelion/server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aphelion/plugin-sdk": "workspace:*",
+        "@aphelion/protocol": "workspace:*",
+        "@effect/platform-bun": "4.1.5",
+        "effect": "4.1.5",
+        "yaml": "2.9.1",
+        "zod": "4.6.7",
+      },
+      "devDependencies": {
+        "@effect/vitest": "4.1.5",
+      },
+    },
     "docs": {
       "name": "@aphelion/docs",
       "version": "0.0.0",
@@ -25,14 +40,6 @@
         "satteri": "0.11.7",
         "starlight-links-validator": "0.27.0",
       },
-    },
-    "packages/cli": {
-      "name": "@aphelion/cli",
-      "version": "0.0.0",
-    },
-    "packages/client": {
-      "name": "@aphelion/client",
-      "version": "0.0.0",
     },
     "packages/plugin-sdk": {
       "name": "@aphelion/plugin-sdk",
@@ -52,34 +59,21 @@
         "zod": "4.6.7",
       },
     },
-    "packages/server": {
-      "name": "@aphelion/server",
+    "packages/ui": {
+      "name": "@aphelion/ui",
       "version": "0.0.0",
-      "dependencies": {
-        "@aphelion/plugin-sdk": "workspace:*",
-        "@aphelion/protocol": "workspace:*",
-        "@effect/platform-bun": "4.1.5",
-        "effect": "4.1.5",
-        "yaml": "2.9.1",
-        "zod": "4.6.7",
-      },
-      "devDependencies": {
-        "@effect/vitest": "4.1.5",
-      },
     },
   },
   "packages": {
-    "@aphelion/cli": ["@aphelion/cli@workspace:packages/cli"],
-
-    "@aphelion/client": ["@aphelion/client@workspace:packages/client"],
-
     "@aphelion/docs": ["@aphelion/docs@workspace:docs"],
 
     "@aphelion/plugin-sdk": ["@aphelion/plugin-sdk@workspace:packages/plugin-sdk"],
 
     "@aphelion/protocol": ["@aphelion/protocol@workspace:packages/protocol"],
 
-    "@aphelion/server": ["@aphelion/server@workspace:packages/server"],
+    "@aphelion/server": ["@aphelion/server@workspace:apps/server"],
+
+    "@aphelion/ui": ["@aphelion/ui@workspace:packages/ui"],
 
     "@astrojs/compiler-binding": ["@astrojs/compiler-binding@0.5.3", "", { "optionalDependencies": { "@astrojs/compiler-binding-android-arm64": "0.5.3", "@astrojs/compiler-binding-darwin-arm64": "0.5.3", "@astrojs/compiler-binding-darwin-x64": "0.5.3", "@astrojs/compiler-binding-linux-arm64-gnu": "0.5.3", "@astrojs/compiler-binding-linux-arm64-musl": "0.5.3", "@astrojs/compiler-binding-linux-x64-gnu": "0.5.3", "@astrojs/compiler-binding-linux-x64-musl": "0.5.3", "@astrojs/compiler-binding-wasm32-wasi": "0.5.3", "@astrojs/compiler-binding-win32-arm64-msvc": "0.5.3", "@astrojs/compiler-binding-win32-x64-msvc": "0.5.3" } }, "sha512-fHG6eWKvnSlV11dUMZSi4AynOGjVbNBgZZc704Hi9DW8WeKtbsS7fJQT3omz1Nba+5mccLQQGAWOQ65cnuNLtg=="],
 

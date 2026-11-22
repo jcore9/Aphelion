@@ -9,6 +9,7 @@ export default defineConfig({
     pool: "threads",
     include: [
       "*.test.ts",
+      "apps/*/src/**/*.test.{ts,tsx}",
       "packages/*/src/**/*.test.{ts,tsx}",
       "docs/src/**/*.test.ts",
     ],

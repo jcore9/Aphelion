@@ -86,13 +86,13 @@ JSON Schema can't express one rule: agent names must be unique within `agents.ya
 
 ## Fields
 
-The tables below and the JSON Schema files are generated from `packages/server/src/config/areas.ts`. A test fails when they're out of date. To regenerate them, run:
+The tables below and the JSON Schema files are generated from `apps/server/src/config/areas.ts`. A test fails when they're out of date. To regenerate them, run:
 
 ```sh
-bun --bun vitest run -u packages/server/src/config
+bun --bun vitest run -u apps/server/src/config
 ```
 
-<!-- Generated from packages/server/src/config/areas.ts. Regenerate: bun --bun vitest run -u packages/server/src/config -->
+<!-- Generated from apps/server/src/config/areas.ts. Regenerate: bun --bun vitest run -u apps/server/src/config -->
 
 ### `agents.yaml`, version 1
 
