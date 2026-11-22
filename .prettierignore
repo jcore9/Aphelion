@@ -2,3 +2,4 @@
 bun.lock
 spikes/
 docs/reference/config/*.schema.json
+packages/plugin-sdk/plugin-manifest.schema.json

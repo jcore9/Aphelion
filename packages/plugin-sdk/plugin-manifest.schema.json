@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "The manifest's JSON Schema, for editors. The host ignores it.",
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$",
+      "description": "Unique plugin id."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$",
+      "description": "The plugin's own version."
+    },
+    "api": {
+      "type": "string",
+      "description": "The plugin-API versions the plugin supports, as an npm semver range."
+    },
+    "entry": {
+      "type": "string",
+      "pattern": "^(?!\\/)(?!.*\\\\)(?!(.*\\/)?\\.\\.(\\/|$)).+$",
+      "description": "The module the host starts, relative to the manifest."
+    },
+    "permissions": {
+      "description": "What the plugin needs. The host grants nothing else.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "events": {
+          "default": [],
+          "description": "Events the plugin receives.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
+          }
+        },
+        "secrets": {
+          "default": [],
+          "description": "Secret references the plugin asks the host to resolve.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9+.-]*:\\/\\/[\\s\\S]{1,}$"
+          }
+        },
+        "network": {
+          "default": [],
+          "description": "Hostnames the plugin connects to.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "contributes": {
+      "description": "What the plugin adds to Aphelion.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "uiSlots": {
+          "default": [],
+          "description": "UI slots the plugin renders into.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
+          }
+        },
+        "secretSchemes": {
+          "default": [],
+          "description": "Secret reference schemes the plugin resolves as a secret backend.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9+.-]*$"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "api",
+    "entry"
+  ],
+  "additionalProperties": false,
+  "title": "aphelion-plugin.json",
+  "description": "An Aphelion plugin's manifest."
+}

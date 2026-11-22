@@ -32,6 +32,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 
 - [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
+- [Plugin manifest](reference/plugin-manifest.md): the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
 
 ## Decision records
 
@@ -72,3 +73,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0031](decisions/0031-unprivileged-agents.md) | Agents run as unprivileged users | Accepted |
 | [0032](decisions/0032-native-app-stack-deferred.md) | The native app stack is chosen in M9 | Accepted |
 | [0033](decisions/0033-docs-site-in-place.md) | The docs site reads the Markdown files where they are, and takes each page title from its first heading | Proposed |
+| [0038](decisions/0038-plugin-manifest-and-api-range.md) | A plugin's manifest is `aphelion-plugin.json`, checked with Zod 4, and its API range is checked with the `semver` package | Proposed |

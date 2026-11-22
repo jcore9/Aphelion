@@ -4,9 +4,17 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./plugin-manifest.schema.json": "./plugin-manifest.schema.json"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "semver": "7.8.6",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/semver": "7.8.0"
   }
 }
