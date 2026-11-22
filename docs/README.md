@@ -1,10 +1,17 @@
 # Aphelion docs
 
-These are plain Markdown files until M0-16 builds them into a Starlight site.
+These Markdown files read the same on GitHub and on the docs site. `bun run docs` builds the site with [Starlight](https://starlight.astro.build/) and checks every internal link ([decision 0033](decisions/0033-docs-site-in-place.md)).
+
+## Writing a page
+
+- Start the file with a `# Title` line. The site uses it as the page title, so pages need no frontmatter.
+- Link to another page by its relative path, such as `[decision 0007](decisions/0007-bun-runtime.md)`. The site turns the link into the page's URL, and the build fails on a link to a missing page or heading.
+- Link to code or anything else outside `docs/` with a full GitHub URL. A relative link to such a file fails the build.
+- A new folder at the top of `docs/` needs a symbolic link in `src/content/docs/`, or its pages don't appear on the site. For example, run `ln -s ../../../guides src/content/docs/guides` from `docs/`.
 
 ## Plan
 
-- [Architecture and development plan](plan/aphelion-plan.md): the plan of record, imported unchanged ([decision 0004](decisions/0004-import-plan-with-m0-plan.md)).
+- [Architecture and development plan](plan/aphelion-plan.md): the plan of record, imported unchanged ([decision 0004](decisions/0004-import-plan-with-m0-plan.md)). Later records amend it, and each amendment is marked in the text.
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
 
@@ -18,7 +25,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 
 ## Decision records
 
-One numbered record per significant decision: context, options, choice, consequences.
+One numbered record per significant decision: context, options, choice, consequences. Start a new record from [the template](decisions/template.md).
 
 | # | Decision | Status |
 | --- | --- | --- |
@@ -46,3 +53,10 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0022](decisions/0022-agent-network-boundary.md) | The host firewall blocks the container from the LAN, with a path to a separate agents container | Accepted |
 | [0023](decisions/0023-scaffold-toolchain.md) | The scaffold lints with ESLint and typescript-eslint on TypeScript 6.0, and formats with Prettier | Accepted |
 | [0024](decisions/0024-codex-third-agent-cli.md) | Codex CLI becomes a third agent CLI, spiked in M0 and built in M4 | Accepted |
+| [0027](decisions/0027-acp-first-adapters.md) | Agent adapters speak ACP first, with stream-json as a fallback per provider | Accepted |
+| [0028](decisions/0028-policy-engine-in-harness.md) | The policy engine runs inside the harness for v1 | Accepted |
+| [0029](decisions/0029-hosted-reviewer-model.md) | The reviewer is a small hosted model, called with an API key | Accepted |
+| [0030](decisions/0030-native-connectors.md) | Connectors are native, starting with GitHub | Accepted |
+| [0031](decisions/0031-unprivileged-agents.md) | Agents run as unprivileged users | Accepted |
+| [0032](decisions/0032-native-app-stack-deferred.md) | The native app stack is chosen in M9 | Accepted |
+| [0033](decisions/0033-docs-site-in-place.md) | The docs site reads the Markdown files where they are, and takes each page title from its first heading | Proposed |

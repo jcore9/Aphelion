@@ -7,6 +7,10 @@ if (!("bun" in process.versions)) {
 export default defineConfig({
   test: {
     pool: "threads",
-    include: ["*.test.ts", "packages/*/src/**/*.test.{ts,tsx}"],
+    include: [
+      "*.test.ts",
+      "packages/*/src/**/*.test.{ts,tsx}",
+      "docs/src/**/*.test.ts",
+    ],
   },
 });

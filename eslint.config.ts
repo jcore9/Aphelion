@@ -58,7 +58,15 @@ function restrict(
 }
 
 export default defineConfig(
-  { ignores: ["**/node_modules/", "**/dist/", "coverage/", "spikes/"] },
+  {
+    ignores: [
+      "**/node_modules/",
+      "**/dist/",
+      "**/.astro/",
+      "coverage/",
+      "spikes/",
+    ],
+  },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   {
