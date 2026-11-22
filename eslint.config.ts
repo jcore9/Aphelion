@@ -4,20 +4,17 @@ import { defineConfig } from "eslint/config";
 import { builtinModules } from "node:module";
 import tseslint from "typescript-eslint";
 
-const adapterModules = [
-  "packages/server/src/adapters/**",
-  "packages/cli/src/adapters/**",
-];
+const adapterModules = ["apps/server/src/adapters/**"];
 const webPackages = [
   "packages/protocol/**",
   "packages/plugin-sdk/**",
-  "packages/client/**",
+  "packages/ui/**",
 ];
 
 const bunOnly =
-  "Bun-only APIs belong in an adapter module under src/adapters/ in server or cli (decision 0007).";
+  "Bun-only APIs belong in an adapter module under apps/server/src/adapters/ (decisions 0007 and 0047).";
 const webOnly =
-  "protocol, plugin-sdk and client use web-standard APIs only (decision 0007).";
+  "protocol, plugin-sdk and ui use web-standard APIs only (decisions 0007 and 0047).";
 
 const nodeModules = builtinModules.filter((name) => !name.startsWith("bun"));
 
@@ -25,20 +22,20 @@ const bunImports = { regex: "^bun(:|$)", message: bunOnly };
 const effectBunImports = {
   regex: "^@effect/(platform-bun|sql-sqlite-bun)(/|$)",
   message:
-    "@effect/platform-bun and @effect/sql-sqlite-bun use Bun-only APIs. Import them from an adapter module under src/adapters/ in server or cli (decisions 0007 and 0041).",
+    "@effect/platform-bun and @effect/sql-sqlite-bun use Bun-only APIs. Import them from an adapter module under apps/server/src/adapters/ (decisions 0007, 0041 and 0047).",
 };
 const effectImports = {
   regex: "^(effect|@effect/.+)(/|$)",
   message:
-    "Only server and cli use the Effect library. protocol, plugin-sdk and client stay plain TypeScript (decision 0041).",
+    "Only apps/server uses the Effect library. protocol, plugin-sdk and ui stay plain TypeScript (decision 0041).",
 };
 const nodeImports = {
   regex: `^(node:|(${nodeModules.join("|")})(/|$))`,
   message: webOnly,
 };
 const hostImports = {
-  regex: "^@aphelion/(server|cli|client)(/|$)",
-  message: "Web packages never import server, cli or client code.",
+  regex: "^@aphelion/(server|ui)(/|$)",
+  message: "Web packages never import the server or ui packages.",
 };
 
 const bunGlobals = [{ name: "Bun", message: bunOnly }];

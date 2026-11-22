@@ -20,8 +20,7 @@ package.json @jcore9
 tsconfig*.json @jcore9
 
 # Bun-only adapters (decision 0007).
-/packages/server/src/adapters/ @jcore9
-/packages/cli/src/adapters/ @jcore9
+/apps/server/src/adapters/ @jcore9
 
 # Guessed future homes. Most match a folder name in any package.
 secrets/ @jcore9
@@ -31,7 +30,7 @@ grants/ @jcore9
 auth/ @jcore9
 devices/ @jcore9
 policy/ @jcore9
-/packages/server/**/hooks/ @jcore9
+/apps/server/**/hooks/ @jcore9
 gateway/ @jcore9
 /packages/plugin-sdk/src/manifest* @jcore9
 

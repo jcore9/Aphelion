@@ -44,7 +44,19 @@ You need [Bun](https://bun.sh) 1.4.5, the version pinned in `package.json`.
 
 `bun run docs` builds the docs site into `docs/dist/` and fails on a broken internal link. `bun run --filter @aphelion/docs dev` serves it with live reload. [The docs index](docs/README.md) says how the site reads the files.
 
-The workspaces are `packages/server`, `packages/client`, `packages/protocol`, `packages/plugin-sdk`, `packages/cli` and `docs`. Bun-only APIs are allowed only in `src/adapters/` in `server` and `cli`. `protocol`, `plugin-sdk` and `client` use web-standard APIs only. [Decision 0023](docs/decisions/0023-scaffold-toolchain.md) lists the rules, and lint enforces them.
+The code is split into apps, which are programs you run, and packages, which the apps share ([decision 0047](docs/decisions/0047-repo-layout.md)):
+
+| Folder | What it holds |
+| --- | --- |
+| `apps/server` | The server and its command line, one program |
+| `apps/desktop` | The desktop app (M5), empty for now |
+| `apps/mobile` | The phone app (M9), empty for now |
+| `packages/protocol` | The messages the server and the apps exchange |
+| `packages/plugin-sdk` | What plugin authors use |
+| `packages/ui` | The shared screens, for the desktop app, the phone app and the web app the server serves |
+| `docs` | This documentation |
+
+Bun-only APIs are allowed only in `apps/server/src/adapters/`. `protocol`, `plugin-sdk` and `ui` use web-standard APIs only. [Decision 0023](docs/decisions/0023-scaffold-toolchain.md) lists the rules, and lint enforces them.
 
 ## License
 

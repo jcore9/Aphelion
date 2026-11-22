@@ -28,7 +28,7 @@ Some words used below:
 | Put each plugin in its own cgroup and write `cgroup.kill` | Not tried | No. In a default container `/sys/fs/cgroup` is read-only, and `mkdir` there fails with `Read-only file system` (measured, Docker 29.10.0) | Needs a writable cgroup from the host |
 | Runner is a child subreaper, and freezes then kills the tree | Yes, 5 of 5 (measured, see below) | Yes | Detached processes can't be told apart, see below |
 
-The measurement is the test `runs a real plugin, keeps its folder read-only and its environment clean, and kills its whole tree` in [`runner-process.test.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/plugins/runner-process.test.ts). It runs the real runner and a real plugin under Bun 1.4.5. The plugin starts the same five `sleep` processes as M0-18: a plain child, a `setsid` daemon with its own child, a double-forked `setsid` child, and one under `nohup`. All five are alive while the plugin runs, and none is alive after the host stops the plugin.
+The measurement is the test `runs a real plugin, keeps its folder read-only and its environment clean, and kills its whole tree` in [`runner-process.test.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/plugins/runner-process.test.ts). It runs the real runner and a real plugin under Bun 1.4.5. The plugin starts the same five `sleep` processes as M0-18: a plain child, a `setsid` daemon with its own child, a double-forked `setsid` child, and one under `nohup`. All five are alive while the plugin runs, and none is alive after the host stops the plugin.
 
 ## Decision
 
@@ -51,7 +51,7 @@ An orphan carries no mark of the plugin it came from. So the runner treats every
 
 A plugin can still start child processes that stay attached to it. It can't run a detached daemon.
 
-Only the runner reads `/proc` and sends signals. The server still goes through the runner, as [decision 0022](0022-agent-network-boundary.md) requires. The `prctl` and `waitpid` calls go through `bun:ffi`, in [`plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/adapters/plugin-processes.ts), the one file where Bun-only code is allowed ([decision 0023](0023-scaffold-toolchain.md)).
+Only the runner reads `/proc` and sends signals. The server still goes through the runner, as [decision 0022](0022-agent-network-boundary.md) requires. The `prctl` and `waitpid` calls go through `bun:ffi`, in [`plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/plugin-processes.ts), the one file where Bun-only code is allowed ([decision 0023](0023-scaffold-toolchain.md)).
 
 ## Consequences
 

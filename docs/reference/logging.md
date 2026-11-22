@@ -25,11 +25,11 @@ Both the log and the audit log pass through the same redactor.
 
 | File | Holds |
 | --- | --- |
-| `packages/server/src/log/logger.ts` | The `Logger` interface and `createLogger` |
-| `packages/server/src/log/redact.ts` | The redaction rules, `redact`, and the `redactSelf` symbol |
-| `packages/server/src/log/masks.ts` | `maskSecretValue` and the list of known secret values |
-| `packages/server/src/audit/index.ts` | The audit entry type and `appendAudit` |
-| `packages/server/src/store/migrations/0001-audit-log.ts` | The `audit_log` table and its triggers |
+| `apps/server/src/log/logger.ts` | The `Logger` interface and `createLogger` |
+| `apps/server/src/log/redact.ts` | The redaction rules, `redact`, and the `redactSelf` symbol |
+| `apps/server/src/log/masks.ts` | `maskSecretValue` and the list of known secret values |
+| `apps/server/src/audit/index.ts` | The audit entry type and `appendAudit` |
+| `apps/server/src/store/migrations/0001-audit-log.ts` | The `audit_log` table and its triggers |
 
 ## Log format
 
@@ -62,7 +62,7 @@ log.info(message); // fails typecheck when message is a string variable
 
 This is why the rule exists. A field has a name, and the redactor hides a field by its name, such as `password` or `token`, whatever is in it. Text built into the message has no name, so only pattern scanning could find a secret in it, and pattern scanning misses secrets it doesn't recognize. Keeping messages fixed means every piece of data reaches the log under a name.
 
-The compiler checks the rule. It is a guard against ordinary mistakes, such as pasting a value into a message, not a guarantee. Code that deliberately works around the types can still pass a variable. That is why exact-value masking and pattern scanning still run on every message. The type `FixedText` accepts a string written in the code, a choice between such strings, and a template made only of constants. It rejects a variable of type `string`, a template with a value in it, and a choice in which any branch is one of those. `bun run typecheck` fails on a call that breaks the rule. The tests in `packages/server/src/log/logger.test.ts` and `packages/server/src/audit/audit.test.ts` prove each rejected form with `@ts-expect-error` lines.
+The compiler checks the rule. It is a guard against ordinary mistakes, such as pasting a value into a message, not a guarantee. Code that deliberately works around the types can still pass a variable. That is why exact-value masking and pattern scanning still run on every message. The type `FixedText` accepts a string written in the code, a choice between such strings, and a template made only of constants. It rejects a variable of type `string`, a template with a value in it, and a choice in which any branch is one of those. `bun run typecheck` fails on a call that breaks the rule. The tests in `apps/server/src/log/logger.test.ts` and `apps/server/src/audit/audit.test.ts` prove each rejected form with `@ts-expect-error` lines.
 
 At run time, the message is still redacted as a backup. A string is redacted like any other string. A number or a boolean is written as text. Any other message, such as a `bigint`, bytes or an object, is written as `[Unreadable]`.
 
@@ -98,7 +98,7 @@ How the redactor writes other values:
 
 ## Redaction rules
 
-The rules live in `defaultRules` in `packages/server/src/log/redact.ts`. There are two kinds. The output is plain data: objects, arrays, strings, numbers, booleans and `null`.
+The rules live in `defaultRules` in `apps/server/src/log/redact.ts`. There are two kinds. The output is plain data: objects, arrays, strings, numbers, booleans and `null`.
 
 ### By field name
 
@@ -203,8 +203,8 @@ Code that handles a secret wraps it in the `Secret` type, instead of relying on 
 
 ## Add a redaction rule
 
-1. Add the field name to `fieldNameEndings` or `exactFieldNames`, or add a value rule to `valueRules`, in `defaultRules` in `packages/server/src/log/redact.ts`. Write a field name in lower case with no separators. Build a value rule with `pattern(name, regex)`, and give the regex the `g` flag, or it replaces only the first match in a string. Start a token pattern with the one-character lookbehind `(?<![A-Za-z0-9_])`, and don't put anything after an unbounded part such as `[\w-]{20,}`. A pattern that can fail after a long scan, and start again inside the same run, slows down on long strings. A name rule stops at `"`, and outside URLs at `'` and a backtick too.
-2. Add a case to `byFieldName` or `byValuePattern` in `packages/server/src/log/redact.test.ts`. Set `secret` to the part that must disappear, and set `kept` to a similar ordinary value that must stay. For a value rule, add a long hostile string to `large hostile strings` in the same file.
+1. Add the field name to `fieldNameEndings` or `exactFieldNames`, or add a value rule to `valueRules`, in `defaultRules` in `apps/server/src/log/redact.ts`. Write a field name in lower case with no separators. Build a value rule with `pattern(name, regex)`, and give the regex the `g` flag, or it replaces only the first match in a string. Start a token pattern with the one-character lookbehind `(?<![A-Za-z0-9_])`, and don't put anything after an unbounded part such as `[\w-]{20,}`. A pattern that can fail after a long scan, and start again inside the same run, slows down on long strings. A name rule stops at `"`, and outside URLs at `'` and a backtick too.
+2. Add a case to `byFieldName` or `byValuePattern` in `apps/server/src/log/redact.test.ts`. Set `secret` to the part that must disappear, and set `kept` to a similar ordinary value that must stay. For a value rule, add a long hostile string to `large hostile strings` in the same file.
 3. Add the rule to the lists on this page.
 4. Run `bun run test`.
 
@@ -225,7 +225,7 @@ The `audit_log` table in the SQLite store holds one row per audited action. M2's
 | `request_id` | Text or empty | The request that caused it. The same ID can appear in log lines. |
 | `detail` | Text | A JSON object with anything else, after redaction. `{}` when empty. |
 
-`appendAudit` applies the text rules, including exact-value masks, to the free-text columns `actor_id`, `action`, `agent_id`, `session_id` and `request_id`, and the full redactor to `detail`, before the insert. `actor_kind` and `outcome` aren't masked. They must be one of the values in their lists, `actorKinds` and `outcomes`, so they can't hold a secret, and `appendAudit` throws a `TypeError` and writes no row if one isn't. If the redacted `detail` isn't an object, for example because it couldn't be read, the row is stored with the detail `{"unreadable":true}`, so the write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked in `packages/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
+`appendAudit` applies the text rules, including exact-value masks, to the free-text columns `actor_id`, `action`, `agent_id`, `session_id` and `request_id`, and the full redactor to `detail`, before the insert. `actor_kind` and `outcome` aren't masked. They must be one of the values in their lists, `actorKinds` and `outcomes`, so they can't hold a secret, and `appendAudit` throws a `TypeError` and writes no row if one isn't. If the redacted `detail` isn't an object, for example because it couldn't be read, the row is stored with the detail `{"unreadable":true}`, so the write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked in `apps/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
 
 Write a row with `appendAudit`, which returns the new row's `id`:
 
