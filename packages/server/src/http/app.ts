@@ -24,8 +24,7 @@ const notFound = HttpServerResponse.empty({ status: 404 });
 
 export const app = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const path = request.url.split("?", 1)[0];
-  if (request.method === "GET" && path === "/health") return healthy;
+  if (request.method === "GET" && request.url === "/health") return healthy;
 
   const { authenticate } = yield* Authenticator;
   return yield* authenticate(request).pipe(

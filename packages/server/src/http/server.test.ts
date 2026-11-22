@@ -1,4 +1,5 @@
 import { expect, layer } from "@effect/vitest";
+import { connect } from "node:net";
 import { Effect, Layer } from "effect";
 import { HttpServer } from "effect/http";
 import { bunHttpServer } from "../adapters/http-server";
@@ -38,7 +39,36 @@ const openWebSocket = (path: string) =>
     ),
   );
 
-const paths = ["/", "/ws", "/api/status", "/health/", "/healthz", "/HEALTH"];
+const rawRequest = (head: string) =>
+  Effect.flatMap(baseUrl, (url) =>
+    Effect.promise(
+      () =>
+        new Promise<string>((resolve) => {
+          const { hostname, port } = new URL(url);
+          const socket = connect(Number(port), hostname, () => {
+            socket.end(head);
+          });
+          let reply = "";
+          socket.on("data", (chunk) => {
+            reply += chunk.toString();
+          });
+          socket.on("close", () => {
+            resolve(reply);
+          });
+        }),
+    ),
+  );
+
+const paths = [
+  "/",
+  "/ws",
+  "/api/status",
+  "/health/",
+  "/healthz",
+  "/HEALTH",
+  "/health?",
+  "/health?verbose=1",
+];
 
 layer(serveHttp({ address: "127.0.0.1", port: 0 }), live)(
   "the server as M0-10a ships it",
@@ -56,9 +86,6 @@ layer(serveHttp({ address: "127.0.0.1", port: 0 }), live)(
           type: "application/json",
           body: '{"status":"ok"}',
         });
-        expect((yield* request("/health?verbose=1")).body).toBe(
-          '{"status":"ok"}',
-        );
       }),
     );
 
@@ -75,6 +102,33 @@ layer(serveHttp({ address: "127.0.0.1", port: 0 }), live)(
         expect(
           yield* request("/health", { method: "POST", body: "{}" }),
         ).toMatchObject({ status: 401, body: "" });
+      }),
+    );
+
+    it.effect("refuses a request body over 64 KiB with 413", () =>
+      Effect.gen(function* () {
+        const limit = 64 * 1024;
+        expect(
+          yield* request("/api", { method: "POST", body: "x".repeat(limit) }),
+        ).toMatchObject({ status: 401, body: "" });
+        expect(
+          (yield* request("/api", {
+            method: "POST",
+            body: "x".repeat(limit + 1),
+          })).status,
+        ).toBe(413);
+      }),
+    );
+
+    it.effect("answers CONNECT with an empty 501 and opens no tunnel", () =>
+      Effect.gen(function* () {
+        const reply = yield* rawRequest(
+          "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n",
+        );
+        const [head = "", body] = reply.split("\r\n\r\n");
+        expect(head.split("\r\n")[0]).toBe("HTTP/1.1 501 Not Implemented");
+        expect(head).toMatch(/\r\ncontent-length: 0(\r\n|$)/i);
+        expect(body).toBe("");
       }),
     );
 
