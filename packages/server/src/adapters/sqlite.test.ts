@@ -1,15 +1,21 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, onTestFinished, test } from "vitest";
-import { openSqlite } from "./sqlite";
+import { openSqlite, SqlitePathError } from "./sqlite";
 
-function databasePath(): string {
+function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "aphelion-sqlite-"));
   onTestFinished(() => {
     rmSync(dir, { recursive: true });
   });
-  return join(dir, "aphelion.db");
+  return dir;
+}
+
+function databasePath(): string {
+  return join(tempDir(), "aphelion.db");
 }
 
 function mode(path: string): number {
@@ -78,5 +84,55 @@ test("enforces foreign keys", () => {
   expect(() => {
     db.run("INSERT INTO child (parent_id) VALUES (?)", [2]);
   }).toThrow(/FOREIGN KEY/);
+  db.close();
+});
+
+const adapter = fileURLToPath(new URL("./sqlite.ts", import.meta.url));
+
+function openInFreshDir(name: string): { error: string; files: string[] } {
+  const dir = tempDir();
+  const script = `
+    import { openSqlite } from ${JSON.stringify(adapter)};
+    try { openSqlite(${JSON.stringify(name)}).close(); console.log("opened"); }
+    catch (error) { console.log(error.name); }
+  `;
+  const result = spawnSync(process.execPath, ["-e", script], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  return { error: result.stdout.trim(), files: readdirSync(dir) };
+}
+
+test.each([
+  "",
+  "   ",
+  ":memory:",
+  " :memory: ",
+  "aphelion.db ",
+  "file:aphelion.db",
+  "file::memory:?cache=shared",
+])("rejects %j without creating a file", (name) => {
+  expect(openInFreshDir(name)).toEqual({
+    error: SqlitePathError.name,
+    files: [],
+  });
+});
+
+test.each(["aphelion.db", "./file:aphelion.db"])(
+  "opens the relative name %j as a file",
+  (name) => {
+    const { error, files } = openInFreshDir(name);
+
+    expect(error).toBe("opened");
+    expect(files).toContain(name.replace("./", ""));
+  },
+);
+
+test("accepts a file name that contains a colon", () => {
+  const path = join(tempDir(), "aphelion:memory:.db");
+  const db = openSqlite(path);
+
+  expect(mode(path)).toBe(0o600);
+  expect(db.all("PRAGMA journal_mode")).toEqual([{ journal_mode: "wal" }]);
   db.close();
 });

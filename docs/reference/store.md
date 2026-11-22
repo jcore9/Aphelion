@@ -26,6 +26,15 @@ To get an ID or a count back from a write, use `RETURNING` with `all`.
 
 Every connection uses WAL mode, enforces foreign keys and waits up to 5 seconds for a write lock. The adapter creates the database file with mode 0600, and SQLite gives the `-wal` and `-shm` files the same mode.
 
+`openSqlite` takes the path of a database file and nothing else. It throws `SqlitePathError`, before it creates anything on disk, for:
+
+- the empty string, or a name made only of spaces, which SQLite opens as a temporary database;
+- a name with spaces at the start or end, because Bun trims them, so `" :memory: "` would become `:memory:`;
+- `:memory:`, SQLite's name for a database held in memory;
+- any name that starts with `file:`.
+
+Bun opens a `file:` name as an ordinary file today, so the last rule is a precaution. SQLite can also read such a name as a URI, a web-address-style name that carries options such as "keep this in memory", and refusing the prefix means that reading can never apply. A file whose name starts with `file:` still opens when you write it as `./file:aphelion.db` or as a full path. The server always stores its data in a file, and an in-memory database can't use WAL mode.
+
 ## Add a migration
 
 1. Create `packages/server/src/store/migrations/NNNN-<name>.ts`, with `NNNN` the next version number:
@@ -33,14 +42,13 @@ Every connection uses WAL mode, enforces foreign keys and waits up to 5 seconds 
    ```ts
    import type { Migration } from "../migrate";
 
-   export const auditLog: Migration = {
-   	version: 1,
-   	name: "audit-log",
+   export const devices: Migration = {
+   	version: 2,
+   	name: "devices",
    	sql: `
-   		CREATE TABLE audit_log (
+   		CREATE TABLE devices (
    			id INTEGER PRIMARY KEY,
-   			at TEXT NOT NULL,
-   			event TEXT NOT NULL
+   			name TEXT NOT NULL
    		) STRICT;
    	`,
    };
@@ -49,6 +57,12 @@ Every connection uses WAL mode, enforces foreign keys and waits up to 5 seconds 
 2. Add it to the end of the list in `packages/server/src/store/migrations/index.ts`.
 3. Run `bun run test`. The store test applies every listed migration to a fresh database.
 4. Add a test for the tables that the migration creates, next to the code that uses them.
+
+## Migrations
+
+| Version | Name | Creates |
+| --- | --- | --- |
+| 1 | `audit-log` | The append-only `audit_log` table ([logging and the audit log](logging.md#the-audit-log)) |
 
 ## Rules
 
