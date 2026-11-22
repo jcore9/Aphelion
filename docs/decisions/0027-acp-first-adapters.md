@@ -1,9 +1,10 @@
 # 0027. Agent adapters speak ACP first, with stream-json as a fallback per provider
 
-- Status: Accepted
+- Status: Accepted, amended by 0034
 - Date: 2026-11-21
 - Decided by: plan of record (imported in [0004](0004-import-plan-with-m0-plan.md))
 - Answers: the plan's Open decisions, "Adapter protocol"
+- Amended by: [0034](0034-vendor-protocol-per-cli.md) (Claude Code and Codex use their vendor's own protocol; ACP stays for Grok Build)
 
 ## Context
 

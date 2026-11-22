@@ -6,7 +6,7 @@
 - Status: Approved and merged in [#92](https://github.com/jcore9/Aphelion/pull/92) on 2026-11-21. Decisions 0005 to 0018 settle every open question. In progress.
 - Last updated: 2026-11-21
 
-M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers four questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
+M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers five questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
 
 ## Exit criterion
 
@@ -25,6 +25,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-02] | Spike: Grok headless billing | spike, server | M0-00 |
 | [M0-03] | Spike: headless without Electron | spike, desktop | M0-00 |
 | [M0-17] | Spike: Codex headless on a ChatGPT login | spike, server | M0-00 |
+| [M0-18] | Spike: per-agent isolation with user namespaces | spike, server, **risk/security** | M0-00 |
 | [M0-04] | Monorepo scaffold | chore | M0-03 |
 | [M0-05] | Repo hygiene and MIT license | chore, security, **risk/security** | M0-04 |
 | [M0-16] | Docs site and decision records | docs | M0-04 |
@@ -43,7 +44,7 @@ Six of the seventeen work issues carry `risk/security`, so their PRs get a full 
 
 ### Out of scope
 
-- Agents, adapters and sessions (M1). M0-01, M0-02 and M0-17 only answer questions; they don't build adapters.
+- Agents, adapters and sessions (M1). M0-01, M0-02, M0-17 and M0-18 only answer questions; they don't build adapters.
 - Policy rules and approvals (M2). M0 builds the audit table that M2 writes to, not the policy engine.
 - The gateway host (M3). The secrets broker is built so it can move there, but in M0 it runs on the same machine (see [Q4](#q4-where-the-secrets-broker-runs-before-the-gateway-exists)).
 - Any client UI beyond `curl` and the test client in M1.
@@ -57,6 +58,8 @@ flowchart LR
   m00 --> s2["M0-02 spike: Grok"]
   m00 --> s3["M0-03 spike: headless"]
   m00 --> s4["M0-17 spike: Codex"]
+  m00 --> s5["M0-18 spike: namespaces"]
+  s5 --> m12
   s3 --> m04["M0-04 scaffold"]
   m04 --> m05["M0-05 hygiene"]
   m04 --> m16["M0-16 docs site"]
@@ -78,7 +81,7 @@ flowchart LR
 
 | Wave | Starts when | Issues, all in parallel |
 | --- | --- | --- |
-| 1 | This plan is approved | M0-01, M0-02, M0-03, M0-17 |
+| 1 | This plan is approved | M0-01, M0-02, M0-03, M0-17, M0-18 |
 | 2 | M0-03's finding is approved | M0-04 |
 | 3 | M0-04 merges | M0-05, M0-16, M0-06, M0-07 |
 | 4 | Its dependencies merge | M0-08, M0-09, M0-13 |
@@ -92,7 +95,9 @@ M0-01 and M0-02 block nothing inside M0. They block [M1-02] and [M4-01], and the
 
 M0-17 blocks nothing inside M0 either. It blocks [M4-10], the Codex adapter ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)).
 
-## The four spikes
+M0-18 was added on 2026-11-22 by [decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md). It depends only on M0-00, so it belongs to wave 1 and can start now. It blocks [M0-12], the container image, because the image carries the seccomp profile (a list of system calls the container may make) that the spike measures. It also blocks [M1-04], the session manager, because the answer decides how each agent is started.
+
+## The spikes
 
 Each spike is a set of questions answered in writing before anything builds on them. A spike ends with a finding at `docs/spikes/M0-NN-<slug>.md` that answers every question below, cites its sources with the date they were checked, and states what changes downstream. Prototype code stays on the `spike/` branch and isn't merged. If a finding needs a decision, it becomes a decision record that the owner approves.
 
@@ -178,6 +183,30 @@ What changes depending on the answer:
 | The terms don't allow it, or are unclear | Stop. The owner decides, and decision 0024 is revisited. |
 | Codex's own sandbox can't start in the container | The finding says whether to run Codex with its sandbox off, with the container as the boundary and approvals still on. If that changes the security model, it becomes a decision record. |
 
+### M0-18: per-agent isolation with user namespaces
+
+[Decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md) lets the container create user namespaces. A user namespace is a Linux feature that gives a process its own private view of users, files or processes. Codex's sandbox needs one. The owner asked whether the same feature could isolate each agent from the others, in place of one Unix user per agent ([decision 0006](../../decisions/0006-shared-agent-user.md)). The full question list is in [issue #124][M0-18]. The finding goes to `docs/spikes/M0-18-per-agent-isolation-with-user-namespaces.md`.
+
+Questions:
+
+1. Can the agent runner start each agent in its own user and mount namespace, inside the hardened container from [decision 0016](../../decisions/0016-one-docker-container.md)?
+2. Do Claude Code, Grok Build and Codex run in such a namespace, with their logins and egress only through `HTTPS_PROXY` and `NO_PROXY`? Does Codex's own sandbox still start inside it?
+3. Does AppArmor on Ubuntu 26.04 block it, and is the fix scoped to the container or to the whole host?
+4. What does the seccomp profile add to Docker's default, and what kernel attack surface comes with it?
+5. Could namespaces end the shared-folder risk that decision 0006 accepted, without one Unix user per agent?
+6. Do the "ready for option 2" rules from [decision 0022](../../decisions/0022-agent-network-boundary.md) still hold, including cancel and kill reaching the agent's whole process tree?
+
+What changes depending on the answer:
+
+| Finding | Consequence |
+| --- | --- |
+| Per-agent isolation works for all three CLIs, and the profile adds only what `bwrap` needs | A decision record amends 0006. M1-04 starts agents in their own namespaces. M0-12 ships the profile and any AppArmor change. |
+| Codex's sandbox starts, but isolation fails for some CLI | 0006 stands. The profile serves Codex only, and the finding names the CLI that fails. |
+| Codex's sandbox fails inside an agent's namespace | The finding says whether the namespace can stand in for Codex's sandbox. A change to decision 0035 becomes a decision record. |
+| The profile needs more than the namespace and mount calls | Stop. The owner decides whether decision 0035's profile stands. |
+| AppArmor blocks it, and only a host-wide change fixes it | Stop. The owner decides whether the install guide makes that change. |
+| It breaks a "ready for option 2" rule | The finding proposes a runner design that keeps the rule, or the owner decides. |
+
 ## Design notes
 
 These are starting points for each issue's PR, not final designs. Where an issue has to choose a tool or library, its PR includes a decision record that weighs the options, and the owner approves it with the PR. Expected records are marked **DR**.
@@ -259,6 +288,7 @@ M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
 | The spikes need real Claude Pro or Max, SuperGrok and ChatGPT logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
 | Codex asks only for what its sandbox blocks, or OpenAI's terms don't cover a self-hosted harness | M4-10 changes shape, or Codex stays out | M0-17 answers both before M4-10 starts; a "no" or an unclear answer stops for the owner ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)). |
+| The seccomp profile that lets Codex's sandbox run also exposes more kernel code to every process in the container | A kernel bug becomes reachable from a prompt-injected agent | M0-18 measures the profile before M0-12 ships it. The profile stays as small as `bwrap` allows ([decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md)). |
 | Six security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
 
 ## Open questions
@@ -328,7 +358,7 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 | CONTRIBUTING, SECURITY.md, issue and PR templates | M0-05 |
 | Decision records and template | This PR (0001 to 0004), M0-16, and each DR above |
 | Docs site and the plan in `docs/plan` | This PR, M0-16 |
-| Spike findings | M0-01, M0-02, M0-03, M0-17 |
+| Spike findings | M0-01, M0-02, M0-03, M0-17, M0-18 |
 | Config reference | M0-06 |
 | Protocol spec (generated) | M0-09 |
 | Plugin API reference (generated) | M0-13d |
@@ -360,9 +390,11 @@ Written when M0 closes.
 [M0-14]: https://github.com/jcore9/Aphelion/issues/16
 [M0-15]: https://github.com/jcore9/Aphelion/issues/17
 [M0-17]: https://github.com/jcore9/Aphelion/issues/113
+[M0-18]: https://github.com/jcore9/Aphelion/issues/124
 [M1-02]: https://github.com/jcore9/Aphelion/issues/20
 [M1-03]: https://github.com/jcore9/Aphelion/issues/21
 [M4-01]: https://github.com/jcore9/Aphelion/issues/44
+[M1-04]: https://github.com/jcore9/Aphelion/issues/22
 [M4-10]: https://github.com/jcore9/Aphelion/issues/114
 [M0-05a]: https://github.com/jcore9/Aphelion/issues/93
 [M0-05b]: https://github.com/jcore9/Aphelion/issues/94
