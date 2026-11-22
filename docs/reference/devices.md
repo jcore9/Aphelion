@@ -1,6 +1,6 @@
 # Device tokens
 
-A device token is a long random password that one of the owner's devices, such as a laptop or a phone, sends with every request to the server. The server answers nothing but `GET /health` without one ([decision 0022](../decisions/0022-agent-network-boundary.md)). [The server reference](server.md) shows what each request gets.
+A device token is a long random password that one of the owner's devices, such as a laptop or a phone, sends with every request to the server. The server answers nothing but `GET /health` without one ([decision 0022](../decisions/0022-bot-network-boundary.md)). [The server reference](server.md) shows what each request gets.
 
 ## The life of a token
 

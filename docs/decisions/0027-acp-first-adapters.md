@@ -1,4 +1,4 @@
-# 0027. Agent adapters speak ACP first, with stream-json as a fallback per provider
+# 0027. Bot adapters speak ACP first, with stream-json as a fallback per provider
 
 - Status: Accepted, amended by 0034
 - Date: 2026-11-21
@@ -26,7 +26,7 @@ ACP first. Each provider can switch to its native streaming output as a fallback
 
 ## Consequences
 
-- M1-02 builds the Claude adapter on ACP, and M1-03 builds the stream-json fallback, switchable per agent.
+- M1-02 builds the Claude adapter on ACP, and M1-03 builds the stream-json fallback, switchable per bot.
 - M4-01 builds the Grok adapter on `grok agent stdio`.
 - The M0-01 and M0-02 spikes found that both CLIs run a full ACP turn with tool calls on a subscription login ([M0-01 finding](../spikes/M0-01-claude-over-acp.md), [M0-02 finding](../spikes/M0-02-grok-headless-billing.md)).
-- [Decision 0024](0024-codex-third-agent-cli.md) leaves the Codex transport to its spike: ACP through `codex-acp`, or app-server JSON-RPC directly.
+- [Decision 0024](0024-codex-third-bot-cli.md) leaves the Codex transport to its spike: ACP through `codex-acp`, or app-server JSON-RPC directly.

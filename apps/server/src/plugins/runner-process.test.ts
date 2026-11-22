@@ -53,7 +53,7 @@ for await (const line of createInterface({ input: process.stdin })) {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
     send({ jsonrpc: "2.0", id: message.id, result: {} });
-    send({ jsonrpc: "2.0", id: "sub", method: "events.subscribe", params: { event: "agent.status" } });
+    send({ jsonrpc: "2.0", id: "sub", method: "events.subscribe", params: { event: "bot.status" } });
   } else if (message.id === "sub") {
     appendFileSync(data + "/received.jsonl", line + "\\n");
   } else if (message.method === "event") {
@@ -116,7 +116,7 @@ async function installPlugin(folder: string, id: string) {
       version: "1.0.0",
       api: "^0.2.0",
       server: { entry: "index.js" },
-      permissions: { events: ["agent.status"] },
+      permissions: { events: ["bot.status"] },
     }),
   );
 }
@@ -285,12 +285,12 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
 
           const received = join(dataRoot, "sampler", "received.jsonl");
           yield* poll(textOf(received), (text) => text.includes('"id":"sub"'));
-          yield* host.publish({ name: "agent.status", data: { busy: true } });
+          yield* host.publish({ name: "bot.status", data: { busy: true } });
           const lines = yield* poll(textOf(received), (text) =>
             text.includes('"event"'),
           );
           expect(lines).toContain(
-            '"params":{"name":"agent.status","data":{"busy":true}}',
+            '"params":{"name":"bot.status","data":{"busy":true}}',
           );
 
           const report = JSON.parse(

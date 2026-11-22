@@ -6,7 +6,7 @@ Every plugin has one manifest, a JSON file named `aphelion-plugin.json` in the p
 
 ## Example
 
-This manifest is for a made-up plugin that posts weather alerts. Its server part reads a weather service with an API key. Its client part shows the alerts in the agent sidebar, and adds a Forecast screen to the app's menu. A test loads it, so it stays valid.
+This manifest is for a made-up plugin that posts weather alerts. Its server part reads a weather service with an API key. Its client part shows the alerts in the bot sidebar, and adds a Forecast screen to the app's menu. A test loads it, so it stays valid.
 
 ```json
 {
@@ -20,7 +20,7 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
     "events": ["approval.requested"],
     "secrets": ["op://AI Agents/Weather API/credential"],
     "network": ["api.weather.example"],
-    "uiSlots": ["agent.sidebar"]
+    "uiSlots": ["bot.sidebar"]
   },
   "contributes": {
     "screens": [
@@ -45,7 +45,7 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
 | `permissions.events` | list of strings | no | Events the plugin receives, in either part. Each is words joined by dots, such as `approval.requested`, at most 128 characters. |
 | `permissions.secrets` | list of strings | no | Secret references the plugin may ask the host to use for it, such as `op://vault/item/field`, at most 1024 characters. The host uses the secret in an operation for the plugin, such as an HTTP call, and the plugin never receives the value. See [Secrets](#secrets). Needs a server part. After `://`, a reference may hold letters in any script, accents, digits, punctuation, symbols such as emoji, and the ordinary space. Invisible characters, such as control, format, zero-width and direction characters, line and paragraph separators, and every other kind of space, are refused. The plugin never reads a secret store itself. |
 | `permissions.network` | list of strings | no | Lowercase hostnames the plugin connects to, such as `api.github.com`, at most 253 characters. No scheme, port or path. Needs a server part. |
-| `permissions.uiSlots` | list of strings | no | UI slots the plugin shows content in. Each is words joined by dots, such as `agent.sidebar`, at most 128 characters. Needs a client part. |
+| `permissions.uiSlots` | list of strings | no | UI slots the plugin shows content in. Each is words joined by dots, such as `bot.sidebar`, at most 128 characters. Needs a client part. |
 | `contributes.secretSchemes` | list of strings | no | Secret reference schemes the plugin resolves as a secret backend, such as `op`, at most 32 characters. The values it returns go only to the secrets broker. Needs a server part. See [Secret backends](#secret-backends). |
 | `contributes.screens` | list of objects | no | Full pages the plugin adds to the app, each with an entry in the app's menu. Needs a client part. See [Screens](#screens). |
 | `contributes.screens[].id` | string | yes, in a screen | The screen's id, with the same rules as the plugin `id`. Two screens in one plugin can't share an id. |

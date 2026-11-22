@@ -12,13 +12,13 @@ const example = resolve(
   "../../../../docs/reference/config/example",
 );
 
-const agent = [
+const bot = [
   "  - name: triage",
   "    provider: grok",
   "    model: grok-4.7",
   "    connectors: []",
   "    policyProfile: default",
-  "    folder: /var/lib/aphelion-agents/triage",
+  "    folder: /var/lib/aphelion-bots/triage",
 ].join("\n");
 
 let dir: string;
@@ -38,8 +38,8 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-async function loadAgents(text: string): Promise<LoadResult> {
-  await writeFile(join(dir, "agents.yaml"), text);
+async function loadBots(text: string): Promise<LoadResult> {
+  await writeFile(join(dir, "bots.yaml"), text);
   return loadConfig(dir);
 }
 
@@ -50,7 +50,7 @@ function messages(result: LoadResult): string[] {
 test("loads the example config from the docs into typed config", async () => {
   const result = await loadConfig(example);
   if (!result.ok) throw new Error(messages(result).join("\n"));
-  expect(result.config.agents.agents.map((entry) => entry.name)).toEqual([
+  expect(result.config.bots.bots.map((entry) => entry.name)).toEqual([
     "chief-of-staff",
     "triage",
   ]);
@@ -63,51 +63,51 @@ test("loads the example config from the docs into typed config", async () => {
   expect(result.migrated).toEqual([]);
 });
 
-describe("agents.yaml", () => {
-  test("accepts a valid agent", async () => {
-    const result = await loadAgents(`version: 1\nagents:\n${agent}\n`);
+describe("bots.yaml", () => {
+  test("accepts a valid bot", async () => {
+    const result = await loadBots(`version: 1\nbots:\n${bot}\n`);
     expect(messages(result)).toEqual([]);
   });
 
   test("names the file, line, column and field of a missing field", async () => {
-    const text = `version: 1\nagents:\n${agent.replace("    model: grok-4.7\n", "")}\n`;
-    expect(messages(await loadAgents(text))).toEqual([
-      `${join(dir, "agents.yaml")}:3:5: agents[0].model: is required`,
+    const text = `version: 1\nbots:\n${bot.replace("    model: grok-4.7\n", "")}\n`;
+    expect(messages(await loadBots(text))).toEqual([
+      `${join(dir, "bots.yaml")}:3:5: bots[0].model: is required`,
     ]);
   });
 
   test("rejects a field with the wrong type at its own line", async () => {
-    const text = `version: 1\nagents:\n${agent.replace("model: grok-4.7", "model: 47")}\n`;
-    expect(messages(await loadAgents(text))).toEqual([
-      `${join(dir, "agents.yaml")}:5:12: agents[0].model: Invalid input: expected string, received number`,
+    const text = `version: 1\nbots:\n${bot.replace("model: grok-4.7", "model: 47")}\n`;
+    expect(messages(await loadBots(text))).toEqual([
+      `${join(dir, "bots.yaml")}:5:12: bots[0].model: Invalid input: expected string, received number`,
     ]);
   });
 
   test("rejects an unknown field", async () => {
-    const text = `version: 1\nagents:\n${agent}\n    modle: typo\n`;
-    expect(messages(await loadAgents(text))).toEqual([
-      `${join(dir, "agents.yaml")}:9:12: agents[0].modle: unknown field`,
+    const text = `version: 1\nbots:\n${bot}\n    modle: typo\n`;
+    expect(messages(await loadBots(text))).toEqual([
+      `${join(dir, "bots.yaml")}:9:12: bots[0].modle: unknown field`,
     ]);
   });
 
   test("rejects names that can't be folder names", async () => {
-    const text = `version: 1\nagents:\n${agent.replace("name: triage", "name: ../root")}\n`;
-    expect(messages(await loadAgents(text))).toEqual([
-      `${join(dir, "agents.yaml")}:3:11: agents[0].name: must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter`,
+    const text = `version: 1\nbots:\n${bot.replace("name: triage", "name: ../root")}\n`;
+    expect(messages(await loadBots(text))).toEqual([
+      `${join(dir, "bots.yaml")}:3:11: bots[0].name: must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter`,
     ]);
   });
 
   test("rejects a relative folder", async () => {
-    const text = `version: 1\nagents:\n${agent.replace("folder: /var/lib/aphelion-agents/triage", "folder: triage")}\n`;
-    expect(messages(await loadAgents(text))).toEqual([
-      `${join(dir, "agents.yaml")}:8:13: agents[0].folder: must be an absolute path`,
+    const text = `version: 1\nbots:\n${bot.replace("folder: /var/lib/aphelion-bots/triage", "folder: triage")}\n`;
+    expect(messages(await loadBots(text))).toEqual([
+      `${join(dir, "bots.yaml")}:8:13: bots[0].folder: must be an absolute path`,
     ]);
   });
 
-  test("rejects a second agent with the same name", async () => {
-    const text = `version: 1\nagents:\n${agent}\n${agent}\n`;
-    expect(messages(await loadAgents(text))).toEqual([
-      `${join(dir, "agents.yaml")}:9:11: agents[1].name: duplicates agents[0].name "triage"`,
+  test("rejects a second bot with the same name", async () => {
+    const text = `version: 1\nbots:\n${bot}\n${bot}\n`;
+    expect(messages(await loadBots(text))).toEqual([
+      `${join(dir, "bots.yaml")}:9:11: bots[1].name: duplicates bots[0].name "triage"`,
     ]);
   });
 });
@@ -115,7 +115,7 @@ describe("agents.yaml", () => {
 describe("server.yaml", () => {
   async function loadServer(text: string): Promise<LoadResult> {
     await writeFile(join(dir, "server.yaml"), text);
-    return loadAgents("version: 1\nagents: []\n");
+    return loadBots("version: 1\nbots: []\n");
   }
 
   test.each(["0.0.0.0", "127.0.0.1", "::", "100.71.226.67"])(
@@ -149,18 +149,18 @@ describe("server.yaml", () => {
 
 describe("any config file", () => {
   test("reports a YAML syntax error with its position", async () => {
-    const result = await loadAgents(
-      "version: 1\nagents:\n  - name: a\n   model: b\n",
+    const result = await loadBots(
+      "version: 1\nbots:\n  - name: a\n   model: b\n",
     );
     expect(messages(result)).toEqual([
-      `${join(dir, "agents.yaml")}:4:1: Sequence item without - indicator`,
+      `${join(dir, "bots.yaml")}:4:1: Sequence item without - indicator`,
     ]);
   });
 
   test("rejects a key that appears twice", async () => {
-    const result = await loadAgents("version: 1\nversion: 1\nagents: []\n");
+    const result = await loadBots("version: 1\nversion: 1\nbots: []\n");
     expect(messages(result)).toEqual([
-      `${join(dir, "agents.yaml")}:2:1: Map keys must be unique`,
+      `${join(dir, "bots.yaml")}:2:1: Map keys must be unique`,
     ]);
   });
 
@@ -176,32 +176,32 @@ describe("any config file", () => {
             .join(", ")}]`,
       ),
     ].join("\n");
-    expect(messages(await loadAgents(bomb))).toEqual([
-      `${join(dir, "agents.yaml")}: Excessive alias count indicates a resource exhaustion attack`,
+    expect(messages(await loadBots(bomb))).toEqual([
+      `${join(dir, "bots.yaml")}: Excessive alias count indicates a resource exhaustion attack`,
     ]);
   });
 
   test("rejects a version newer than this Aphelion reads", async () => {
-    expect(messages(await loadAgents("version: 2\nagents: []\n"))).toEqual([
-      `${join(dir, "agents.yaml")}:1:10: version: must be a whole number from 1 to 1, the newest version this Aphelion reads`,
+    expect(messages(await loadBots("version: 2\nbots: []\n"))).toEqual([
+      `${join(dir, "bots.yaml")}:1:10: version: must be a whole number from 1 to 1, the newest version this Aphelion reads`,
     ]);
   });
 
   test("rejects a file without a version", async () => {
-    expect(messages(await loadAgents("agents: []\n"))).toEqual([
-      `${join(dir, "agents.yaml")}: version: is required`,
+    expect(messages(await loadBots("bots: []\n"))).toEqual([
+      `${join(dir, "bots.yaml")}: version: is required`,
     ]);
   });
 
   test("rejects an empty file", async () => {
-    expect(messages(await loadAgents(""))).toEqual([
-      `${join(dir, "agents.yaml")}: must be a YAML mapping with a version field`,
+    expect(messages(await loadBots(""))).toEqual([
+      `${join(dir, "bots.yaml")}: must be a YAML mapping with a version field`,
     ]);
   });
 
   test("rejects fields in a file whose schema has none yet", async () => {
     await writeFile(join(dir, "policy.yaml"), "version: 1\nrules: []\n");
-    expect(messages(await loadAgents("version: 1\nagents: []\n"))).toEqual([
+    expect(messages(await loadBots("version: 1\nbots: []\n"))).toEqual([
       `${join(dir, "policy.yaml")}:2:8: rules: unknown field`,
     ]);
   });
@@ -209,7 +209,7 @@ describe("any config file", () => {
   test("reports every missing file", async () => {
     await rm(join(dir, "policy.yaml"));
     expect(messages(await loadConfig(dir))).toEqual([
-      `${join(dir, "agents.yaml")}: is missing. Create it with the line \`version: 1\`.`,
+      `${join(dir, "bots.yaml")}: is missing. Create it with the line \`version: 1\`.`,
       `${join(dir, "policy.yaml")}: is missing. Create it with the line \`version: 1\`.`,
     ]);
   });

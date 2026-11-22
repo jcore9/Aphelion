@@ -15,7 +15,7 @@ The server listens on the `address` and `port` in [`server.yaml`](config.md#serv
 
 `0.0.0.0` means every network interface of the container. The container has its own interfaces, separate from the host's. The host's network is reached only through the published port, so the Compose file decides which host address exposes the server ([decision 0016](../decisions/0016-one-docker-container.md)).
 
-Every process inside the container can reach the server on `127.0.0.1`, agents included. For that reason, the server trusts no request because of where it comes from ([decision 0022](../decisions/0022-agent-network-boundary.md)).
+Every process inside the container can reach the server on `127.0.0.1`, bots included. For that reason, the server trusts no request because of where it comes from ([decision 0022](../decisions/0022-bot-network-boundary.md)).
 
 ## What `/health` returns
 
@@ -90,7 +90,7 @@ The Compose file must publish the server's port only on the host's tailnet addre
 
 `checkComposePorts(file, text)` reads the output of `docker compose config`, as YAML or as the JSON that `--format json` prints, and lists every port that breaks the rule. That command prints the Compose model that Docker will run. It fills in variables such as `${TAILNET_IP}`, and merges `include`, `extends` and override files such as `compose.override.yaml` into one file. `aphelion config check` will run the command and pass its output to the check (M0-11, [#13](https://github.com/jcore9/Aphelion/issues/13)).
 
-The check looks at every published port of every service, not only the server's port, because nothing else in the container should be published ([decision 0022](../decisions/0022-agent-network-boundary.md)). The owner confirmed this rule on 2026-11-22.
+The check looks at every published port of every service, not only the server's port, because nothing else in the container should be published ([decision 0022](../decisions/0022-bot-network-boundary.md)). The owner confirmed this rule on 2026-11-22.
 
 | `ports` entry in the Compose file | Result |
 | --- | --- |
@@ -125,7 +125,7 @@ compose.yaml:5:9: services.aphelion.ports[0]: publishes the port on every host a
 
 ### What the check guarantees
 
-When the check passes, every port the file publishes is bound only to a tailnet address, on bridge networks in NAT mode. It says nothing about the host itself. The host firewall from [decision 0022](../decisions/0022-agent-network-boundary.md) is the second layer, and it blocks the container from the LAN whatever the Compose file says.
+When the check passes, every port the file publishes is bound only to a tailnet address, on bridge networks in NAT mode. It says nothing about the host itself. The host firewall from [decision 0022](../decisions/0022-bot-network-boundary.md) is the second layer, and it blocks the container from the LAN whatever the Compose file says.
 
 The check parses the YAML with the `yaml` package and checks its shape with Zod. The server's own validation uses Zod, not Effect's `Schema` module. The owner decided this on 2026-11-22 ([decision 0041](../decisions/0041-effect-in-server-and-cli.md#owner-decision-2026-11-22)).
 

@@ -1,4 +1,4 @@
-# 0019. Agents run the Claude and Grok CLIs on the owner's own subscription logins
+# 0019. Bots run the Claude and Grok CLIs on the owner's own subscription logins
 
 - Status: Accepted
 - Date: 2026-11-21
@@ -24,13 +24,13 @@ Option 1. The owner's position is that both vendors allow their CLIs to be drive
 Guardrails, which hold even if the vendors' wording changes:
 
 - **Unmodified binaries.** Aphelion runs the official, unmodified `claude` and `grok` CLIs, and the official ACP adapter, at pinned versions. It never patches them.
-- **Sign-in through the vendor's own flow.** The owner signs in with `claude login` and `grok login`, run as `aphelion-agent` inside the container. Aphelion never asks for, reads, copies, logs or transmits the CLIs' tokens. The CLIs keep their own credential files in the agent user's home, and the broker doesn't hold them.
+- **Sign-in through the vendor's own flow.** The owner signs in with `claude login` and `grok login`, run as `aphelion-bot` inside the container. Aphelion never asks for, reads, copies, logs or transmits the CLIs' tokens. The CLIs keep their own credential files in the bot user's home, and the broker doesn't hold them.
 - **One person's own subscription.** Aphelion is self-hosted by the person whose subscription it uses. It never routes one person's login on behalf of other people, and the docs say so.
-- **API keys stay possible.** Each provider can be switched to an API key per agent, through the secrets broker, for anyone who wants it.
+- **API keys stay possible.** Each provider can be switched to an API key per bot, through the secrets broker, for anyone who wants it.
 
 ## Consequences
 
 - M1-02 and M4-01 go ahead on subscription logins.
 - The install guide (M0-12) covers signing in to each CLI inside the container, and states the one-person rule.
-- If a vendor publishes wording that rules this out, this record is revisited, and that provider's agents switch to API keys.
+- If a vendor publishes wording that rules this out, this record is revisited, and that provider's bots switch to API keys.
 - Usage comes from the subscriptions' own windows (M7), shared with the owner's other use of Claude and Grok.

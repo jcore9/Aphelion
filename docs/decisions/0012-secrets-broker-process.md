@@ -22,6 +22,6 @@ Option 1. The broker runs as `aphelion-secrets`, its own system user, with its o
 ## Consequences
 
 - The broker's API is a socket protocol from day one, so M3-01 moves it without changing callers.
-- Agents (`aphelion-agent`) can't reach the socket or the store.
-- The install script (M0-12) creates a third system user, `aphelion-secrets`. This doesn't change [decision 0010](0010-agent-folders.md): agents still share one user, however many there are.
-- M0-14 also ships the broker's unit and socket permissions, with a test that `aphelion-agent` can't connect.
+- Bots (`aphelion-bot`) can't reach the socket or the store.
+- The install script (M0-12) creates a third system user, `aphelion-secrets`. This doesn't change [decision 0010](0010-bot-folders.md): bots still share one user, however many there are.
+- M0-14 also ships the broker's unit and socket permissions, with a test that `aphelion-bot` can't connect.

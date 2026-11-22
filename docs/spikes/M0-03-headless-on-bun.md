@@ -12,7 +12,7 @@ The shape from decisions [0007](../decisions/0007-bun-runtime.md), [0016](../dec
 
 Four details have to change, and decision 0021 proposes the changes:
 
-- **The init is `tini` plus `setpriv`.** A Bun launcher drops supplementary groups, which breaks the server's read access to the agent folders.
+- **The init is `tini` plus `setpriv`.** A Bun launcher drops supplementary groups, which breaks the server's read access to the bot folders.
 - **Compose ignores a secret's `uid`, `gid` and `mode`.** The bootstrap secret therefore stays root-only, and the init hands it to the broker on stdin.
 - **The 1Password SDK can't be compiled into a binary.** Plugins run from their installed package with the `bun` runtime, which the image ships.
 - **Vitest needs `pool: "threads"` under `bun --bun`.**
@@ -35,20 +35,20 @@ Yes, with `tini` plus `setpriv` (measured). Two variants were built and compared
 | | Variant A: `tini` + `setpriv` script | Variant B: compiled Bun launcher with `spawn({ uid, gid })` |
 | --- | --- | --- |
 | Starts all four users with only `SETUID` and `SETGID` | Yes | Yes |
-| Keeps supplementary groups (`harness` in group `aphelion-agent`) | Yes, with `--init-groups` | **No.** The children start with no supplementary groups. |
-| Server can list `/var/lib/aphelion-agents` | Yes | No, `EACCES` |
+| Keeps supplementary groups (`harness` in group `aphelion-bot`) | Yes, with `--init-groups` | **No.** The children start with no supplementary groups. |
+| Server can list `/var/lib/aphelion-bots` | Yes | No, `EACCES` |
 | Root-owned code we maintain | A 10-line shell script | A Bun program running as root |
 
 `setpriv --bounding-set=-all` fails with "Operation not permitted", because changing the bounding set needs `CAP_SETPCAP`. That flag isn't needed: `cap_drop` already limits the container's bounding set, and switching to a non-root user clears the remaining capabilities.
 
 Isolation, measured with variant A, probing as each user:
 
-| Probe | `aphelion-agent` | `aphelion-plugins` |
+| Probe | `aphelion-bot` | `aphelion-plugins` |
 | --- | --- | --- |
 | List `/etc/aphelion`, `/var/lib/aphelion`, `/var/lib/aphelion-secrets` | Denied | Denied |
 | Read the bootstrap secret | Denied | Denied |
 | Write the managed settings or `/usr/local/bin` | Denied (`EACCES`, `EROFS`) | Denied |
-| Write the agent folders | Allowed | Denied |
+| Write the bot folders | Allowed | Denied |
 | Switch to `harness` | Denied (`EPERM`) | Denied (`EPERM`) |
 
 Not tested: `SO_PEERCRED` checks on the runner sockets that 0016 and 0018 describe. Node's `net` module documents no way to read a Unix socket peer's credentials, and Bun's docs don't either (inferred, not measured). M1-04 must confirm a mechanism before relying on it. The stdin handoff in question 5 is one alternative: the init can give each runner a pipe to the server before dropping privileges.
@@ -94,13 +94,13 @@ Not tested, because it needs root on the host: installing the unit, starting it 
 
 ## Review findings
 
-After this finding was written, two independent adversarial reviewers (Claude Haiku 5.5 and Grok 4.7 Fast) tried to break the design with real runs, and every finding was rerun before it was kept. File and secret isolation held. These four did not, and [decision 0022](../decisions/0022-agent-network-boundary.md) answers them:
+After this finding was written, two independent adversarial reviewers (Claude Haiku 5.5 and Grok 4.7 Fast) tried to break the design with real runs, and every finding was rerun before it was kept. File and secret isolation held. These four did not, and [decision 0022](../decisions/0022-bot-network-boundary.md) answers them:
 
 | Finding | Evidence (measured) |
 | --- | --- |
-| Agents aren't blocked from the LAN | As `aphelion-agent`, one connect each succeeded to `10.0.0.1:80`, `10.0.0.133:22`, `100.71.226.67:22`, `100.93.139.95:22`, `172.17.0.1:22` and `1.1.1.1:443` |
+| Bots aren't blocked from the LAN | As `aphelion-bot`, one connect each succeeded to `10.0.0.1:80`, `10.0.0.133:22`, `100.71.226.67:22`, `100.93.139.95:22`, `172.17.0.1:22` and `1.1.1.1:443` |
 | Every container user reaches the server API on loopback | `127.0.0.1:7400/health` returned `200` to uids 10002 and 10004 |
-| The server follows symlinks that agents plant | An agent's `instructions.md` linked to `/etc/aphelion/policy.json`: the agent got `Permission denied`, and the server read the policy. Opening with `O_NOFOLLOW` returned `ELOOP`. |
+| The server follows symlinks that bots plant | A bot's `instructions.md` linked to `/etc/aphelion/policy.json`: the bot got `Permission denied`, and the server read the policy. Opening with `O_NOFOLLOW` returned `ELOOP`. |
 | Node and Bun can't read socket peer credentials | `net.Socket` on Node 24 and Bun 1.4.5 exposes only `_getpeername` |
 
 ## Downstream changes
@@ -113,7 +113,7 @@ These apply once decisions 0021 and 0022 are approved.
 | [M0-12](https://github.com/jcore9/Aphelion/issues/14) | Use `tini` plus a `setpriv --init-groups` launcher. Hand the root-only bootstrap secret to the broker on stdin. Wait for the tailnet address in `ExecStartPre`. Ship the `bun` runtime for plugins. |
 | [M0-14c](https://github.com/jcore9/Aphelion/issues/105) | The broker reads the bootstrap secret from stdin, not from a file mounted for its user. |
 | [M0-13b](https://github.com/jcore9/Aphelion/issues/100) | Plugins run as `bun <entry>` from their installed package folder. The plugin runner channel uses init-created pipes, not `SO_PEERCRED`. |
-| [M1-04](https://github.com/jcore9/Aphelion/issues/22) | Talk to the agent runner over init-created pipes, through one framed message channel. Never signal agent PIDs or read `/proc` directly. Set agent egress only through `HTTPS_PROXY` and `NO_PROXY`. |
+| [M1-04](https://github.com/jcore9/Aphelion/issues/22) | Talk to the bot runner over init-created pipes, through one framed message channel. Never signal bot PIDs or read `/proc` directly. Set bot egress only through `HTTPS_PROXY` and `NO_PROXY`. |
 | [M0-12](https://github.com/jcore9/Aphelion/issues/14) (network) | Install the `DOCKER-USER` rules for a pinned bridge network. The exit test repeats the six connects and requires the first five to fail. |
 | [M0-10b](https://github.com/jcore9/Aphelion/issues/98) | Require a device token on every endpoint except `/health`, including from `127.0.0.1`. |
-| [M4-02](https://github.com/jcore9/Aphelion/issues/45) | Read agent files only through the no-follow helper. A lint rule bans other reads under the agents root. |
+| [M4-02](https://github.com/jcore9/Aphelion/issues/45) | Read bot files only through the no-follow helper. A lint rule bans other reads under the bots root. |

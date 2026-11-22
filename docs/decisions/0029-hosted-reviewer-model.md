@@ -23,4 +23,4 @@ A small hosted model. Revisit a local model once the rules are stable.
 ## Consequences
 
 - M8-01 builds the reviewer plugin with a configurable model and configurable releasable risk classes.
-- [Decision 0019](0019-cli-subscription-use.md) covers the agents' own CLI logins, not the reviewer.
+- [Decision 0019](0019-cli-subscription-use.md) covers the bots' own CLI logins, not the reviewer.

@@ -36,7 +36,7 @@ Both the log and the audit log pass through the same redactor.
 Each call writes one line. A line is a JSON object with `time`, `level` and `msg` first, then the fields that the caller passed:
 
 ```json
-{"time":"2026-11-22T10:00:00.000Z","level":"info","msg":"agent started","agentId":"triage","attempt":2}
+{"time":"2026-11-22T10:00:00.000Z","level":"info","msg":"bot started","botId":"triage","attempt":2}
 ```
 
 | Field | Holds |
@@ -52,11 +52,11 @@ The tests cover getters, `toJSON` methods and `redactSelf` methods that throw, a
 
 ### Fixed messages
 
-A log message is fixed text: a string written directly in the code, such as `"agent started"`. Anything that changes from call to call, such as a user name or an error, goes in a named field instead.
+A log message is fixed text: a string written directly in the code, such as `"bot started"`. Anything that changes from call to call, such as a user name or an error, goes in a named field instead.
 
 ```ts
-log.info("agent started", { agentId }); // compiles
-log.info(`agent ${agentId} started`); // fails typecheck
+log.info("bot started", { botId }); // compiles
+log.info(`bot ${botId} started`); // fails typecheck
 log.info(message); // fails typecheck when message is a string variable
 ```
 
@@ -70,7 +70,7 @@ At run time, the message is still redacted as a backup. A string is redacted lik
 import { createLogger } from "@aphelion/server/log";
 
 const log = createLogger({ level: "info" });
-log.info("agent started", { agentId: "triage" });
+log.info("bot started", { botId: "triage" });
 log.error("push failed", { error });
 ```
 
@@ -216,16 +216,16 @@ The `audit_log` table in the SQLite store holds one row per audited action. M2's
 | --- | --- | --- |
 | `id` | Integer | The row number. Each new row gets a larger one. |
 | `at` | Text | When the row was written, in UTC, as ISO 8601 with milliseconds. SQLite fills it in. |
-| `actor_kind` | Text | Who acted: `server`, `cli`, `device`, `agent` or `plugin` |
-| `actor_id` | Text or empty | Which device, agent or plugin. Empty for `server` and `cli`. |
+| `actor_kind` | Text | Who acted: `server`, `cli`, `device`, `bot` or `plugin` |
+| `actor_id` | Text or empty | Which device, bot or plugin. Empty for `server` and `cli`. |
 | `action` | Text | What was done, as a dotted name such as `approval.decide`. It must be fixed text in the code, like a log message. |
 | `outcome` | Text | `allowed`, `denied`, `succeeded` or `failed` |
-| `agent_id` | Text or empty | The agent the action concerns |
-| `session_id` | Text or empty | The agent session the action concerns |
+| `bot_id` | Text or empty | The bot the action concerns |
+| `session_id` | Text or empty | The bot session the action concerns |
 | `request_id` | Text or empty | The request that caused it. The same ID can appear in log lines. |
 | `detail` | Text | A JSON object with anything else, after redaction. `{}` when empty. |
 
-`appendAudit` applies the text rules, including exact-value masks, to the free-text columns `actor_id`, `action`, `agent_id`, `session_id` and `request_id`, and the full redactor to `detail`, before the insert. `actor_kind` and `outcome` aren't masked. They must be one of the values in their lists, `actorKinds` and `outcomes`, so they can't hold a secret, and `appendAudit` throws a `TypeError` and writes no row if one isn't. If the redacted `detail` isn't an object, for example because it couldn't be read, the row is stored with the detail `{"unreadable":true}`, so the write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked in `apps/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
+`appendAudit` applies the text rules, including exact-value masks, to the free-text columns `actor_id`, `action`, `bot_id`, `session_id` and `request_id`, and the full redactor to `detail`, before the insert. `actor_kind` and `outcome` aren't masked. They must be one of the values in their lists, `actorKinds` and `outcomes`, so they can't hold a secret, and `appendAudit` throws a `TypeError` and writes no row if one isn't. If the redacted `detail` isn't an object, for example because it couldn't be read, the row is stored with the detail `{"unreadable":true}`, so the write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked in `apps/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
 
 Write a row with `appendAudit`, which returns the new row's `id`:
 
@@ -236,7 +236,7 @@ appendAudit(db, {
 	actor: { kind: "device", id: "laptop" },
 	action: "approval.decide",
 	outcome: "allowed",
-	agentId: "triage",
+	botId: "triage",
 	detail: { tool: "git push" },
 });
 ```
@@ -251,4 +251,4 @@ Three SQLite triggers stop any change to a row once it is written. A trigger is 
 | `audit_log_no_delete` | `DELETE` |
 | `audit_log_no_replace` | `INSERT OR REPLACE` or `REPLACE` with the `id` of an existing row. SQLite replaces such a row without running delete triggers, so the delete trigger alone doesn't catch it. The trigger checks only ids above 0, because SQLite shows an id that it hasn't assigned yet as `-1`. |
 
-The triggers protect the table from mistakes in the server's own code. They don't protect it from a process that can write to the database file, because such a process can drop the triggers. Agents can't reach the database file ([decision 0014](../decisions/0014-filesystem-layout.md)).
+The triggers protect the table from mistakes in the server's own code. They don't protect it from a process that can write to the database file, because such a process can drop the triggers. Bots can't reach the database file ([decision 0014](../decisions/0014-filesystem-layout.md)).

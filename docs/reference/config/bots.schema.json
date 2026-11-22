@@ -7,7 +7,7 @@
       "const": 1,
       "description": "The file's format version. Aphelion migrates older ones."
     },
-    "agents": {
+    "bots": {
       "type": "array",
       "items": {
         "type": "object",
@@ -15,12 +15,12 @@
           "name": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]{0,62}$",
-            "description": "Unique agent name. Also the name of the agent's folder (decision 0010)."
+            "description": "Unique bot name. Also the name of the bot's folder (decision 0010)."
           },
           "provider": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]{0,62}$",
-            "description": "The agent CLI that runs the agent."
+            "description": "The bot CLI that runs the bot."
           },
           "model": {
             "type": "string",
@@ -33,17 +33,17 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9-]{0,62}$"
             },
-            "description": "Ids of the connectors the agent may use. Can be empty."
+            "description": "Ids of the connectors the bot may use. Can be empty."
           },
           "policyProfile": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]{0,62}$",
-            "description": "The approval profile the agent's actions pass."
+            "description": "The approval profile the bot's actions pass."
           },
           "folder": {
             "type": "string",
             "pattern": "^\\/",
-            "description": "Absolute path of the agent's folder. Normally the agent's name under /var/lib/aphelion-agents."
+            "description": "Absolute path of the bot's folder. Normally the bot's name under /var/lib/aphelion-bots."
           }
         },
         "required": [
@@ -56,14 +56,14 @@
         ],
         "additionalProperties": false
       },
-      "description": "One entry per agent. Names must be unique."
+      "description": "One entry per bot. Names must be unique."
     }
   },
   "required": [
     "version",
-    "agents"
+    "bots"
   ],
   "additionalProperties": false,
-  "title": "agents.yaml",
-  "description": "What each agent is allowed to do. Instructions live in the agent's folder, not here (decision 0010)."
+  "title": "bots.yaml",
+  "description": "What each bot is allowed to do. Instructions live in the bot's folder, not here (decision 0010)."
 }

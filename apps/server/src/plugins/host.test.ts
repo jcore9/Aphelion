@@ -520,11 +520,7 @@ describe("the plugin host", () => {
           watcher: (io) =>
             Effect.gen(function* () {
               yield* handshake(io);
-              for (const event of [
-                "agent.status",
-                "chat.message",
-                "tool.call",
-              ]) {
+              for (const event of ["bot.status", "chat.message", "tool.call"]) {
                 replies.push(yield* io.call("events.subscribe", { event }));
               }
               for (;;) {
@@ -534,14 +530,14 @@ describe("the plugin host", () => {
             }),
         },
         {
-          grants: (_, permission) => permission.name === "agent.status",
+          grants: (_, permission) => permission.name === "bot.status",
         },
       );
       return Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.start(
           yield* serverPlugin("watcher", {
-            events: ["agent.status", "chat.message"],
+            events: ["bot.status", "chat.message"],
           }),
         );
         yield* waitUntil(() => replies.length === 3);
@@ -552,7 +548,7 @@ describe("the plugin host", () => {
           { code: -32001, message: "Not granted" },
           { code: -32001, message: "Not granted" },
         ]);
-        for (const name of ["chat.message", "tool.call", "agent.status"]) {
+        for (const name of ["chat.message", "tool.call", "bot.status"]) {
           yield* host.publish({ name, data: { busy: true } });
         }
         yield* waitUntil(() => events.length === 1);
@@ -561,7 +557,7 @@ describe("the plugin host", () => {
           {
             jsonrpc: "2.0",
             method: "event",
-            params: { name: "agent.status", data: { busy: true } },
+            params: { name: "bot.status", data: { busy: true } },
           },
         ]);
       }).pipe(Effect.provide(layer));
@@ -574,14 +570,14 @@ describe("the plugin host", () => {
       watcher: (io) =>
         Effect.gen(function* () {
           yield* handshake(io);
-          reply = yield* io.call("events.subscribe", { event: "agent.status" });
+          reply = yield* io.call("events.subscribe", { event: "bot.status" });
           return yield* serveUntilShutdown(io);
         }),
     });
     return Effect.gen(function* () {
       const host = yield* PluginHost;
       yield* host.start(
-        yield* serverPlugin("watcher", { events: ["agent.status"] }),
+        yield* serverPlugin("watcher", { events: ["bot.status"] }),
       );
       yield* waitUntil(() => reply !== undefined);
       expect(reply?.["error"]).toEqual({
@@ -613,7 +609,7 @@ describe("the plugin host", () => {
       yield* host.start(
         yield* serverPlugin("keyring", {
           secrets: ["op://vault/item/field"],
-          events: ["agent.status"],
+          events: ["bot.status"],
         }),
       );
       yield* waitUntil(() => replies.length === 2);
@@ -626,7 +622,7 @@ describe("the plugin host", () => {
       }
       const secret = Secret.make(canary);
       const refused = yield* Effect.flip(
-        host.publish({ name: "agent.status", data: { secret } }),
+        host.publish({ name: "bot.status", data: { secret } }),
       );
       expect(refused).toMatchObject({
         _tag: "MessageNotSent",
@@ -656,7 +652,7 @@ describe("the plugin host", () => {
               const run = ++runs;
               yield* handshake(io);
               if (run === 1) {
-                yield* io.call("events.subscribe", { event: "agent.status" });
+                yield* io.call("events.subscribe", { event: "bot.status" });
                 subscribed = true;
               }
               for (;;) {
@@ -678,14 +674,14 @@ describe("the plugin host", () => {
       return Effect.gen(function* () {
         const host = yield* PluginHost;
         const folder = yield* serverPlugin("racer", {
-          events: ["agent.status"],
+          events: ["bot.status"],
         });
         yield* host.start(folder);
         yield* waitUntil(() => subscribed);
         const opened = yield* Deferred.make<boolean>();
         gate = opened;
         const publishing = yield* Effect.forkChild(
-          host.publish({ name: "agent.status", data: {} }),
+          host.publish({ name: "bot.status", data: {} }),
         );
         yield* waitUntil(() => checking);
         yield* host.stop("racer");
@@ -743,7 +739,7 @@ describe("the plugin host", () => {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "events.subscribe",
-                params: { event: "agent.status" },
+                params: { event: "bot.status" },
               });
               const padding = "x".repeat(maxPluginLineBytes - 100);
               for (let i = 0; i < 20; i++) {
@@ -761,7 +757,7 @@ describe("the plugin host", () => {
       return Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.start(
-          yield* serverPlugin("flood", { events: ["agent.status"] }),
+          yield* serverPlugin("flood", { events: ["bot.status"] }),
         );
         yield* waitFor("flood", { state: "crashed", run: 1 });
         expect(logs).toContainEqual(
@@ -786,7 +782,7 @@ describe("the plugin host", () => {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "events.subscribe",
-                params: { event: "agent.status" },
+                params: { event: "bot.status" },
               });
               for (let i = 0; i < 5000; i++) {
                 yield* io.write({ jsonrpc: "2.0", method: "note" });
@@ -799,7 +795,7 @@ describe("the plugin host", () => {
       return Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.start(
-          yield* serverPlugin("chatter", { events: ["agent.status"] }),
+          yield* serverPlugin("chatter", { events: ["bot.status"] }),
         );
         yield* waitFor("chatter", { state: "crashed", run: 1 });
         expect(logs).toContainEqual(

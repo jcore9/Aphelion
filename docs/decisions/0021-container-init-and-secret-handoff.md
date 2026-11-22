@@ -3,14 +3,14 @@
 - Status: Accepted (approved by merging #111 on 2026-11-22)
 - Date: 2026-11-21
 - Proposed by: orchestrator, from the [M0-03 finding](../spikes/M0-03-headless-on-bun.md)
-- Amended by: [0022](0022-agent-network-boundary.md) (runner channels use init-created pipes, not `SO_PEERCRED`)
+- Amended by: [0022](0022-bot-network-boundary.md) (runner channels use init-created pipes, not `SO_PEERCRED`)
 - Amends: [0016](0016-one-docker-container.md) (the init tool, and how the bootstrap secret reaches the broker), [0018](0018-shared-plugin-user.md) (how plugins run)
 
 ## Context
 
 [Decision 0016](0016-one-docker-container.md) left the init tool to M0-12, and said the bootstrap secret would be "a Compose secret, mounted readable only by `aphelion-secrets`". The M0-03 spike tested both, and found two problems:
 
-- A Bun launcher that uses `spawn({ uid, gid })` starts the children with no supplementary groups. That breaks `harness`'s read access to the agent folders through group `aphelion-agent`.
+- A Bun launcher that uses `spawn({ uid, gid })` starts the children with no supplementary groups. That breaks `harness`'s read access to the bot folders through group `aphelion-bot`.
 - Compose ignores `uid`, `gid` and `mode` on file secrets, so it can't make the secret readable by `aphelion-secrets` only.
 
 The spike also found that the 1Password SDK can't run inside a compiled binary, because it reads its WebAssembly core from `node_modules` at runtime.
@@ -32,7 +32,7 @@ For the bootstrap secret:
 
 Option 1 for both.
 
-- **Init.** `tini` runs a launcher script. The script starts the server, the broker, the agent runner and the plugin runner, each with `setpriv --init-groups --inh-caps=-all`. It doesn't use `--bounding-set`, which needs `CAP_SETPCAP`; the container's `cap_drop` already limits the bounding set. No root-owned program of our own runs in the container.
+- **Init.** `tini` runs a launcher script. The script starts the server, the broker, the bot runner and the plugin runner, each with `setpriv --init-groups --inh-caps=-all`. It doesn't use `--bounding-set`, which needs `CAP_SETPCAP`; the container's `cap_drop` already limits the bounding set. No root-owned program of our own runs in the container.
 - **Bootstrap secret.** On the host, the file in `$CREDENTIALS_DIRECTORY` is owned by root. Compose mounts it at `/run/secrets/bootstrap`. The launcher opens it as root and passes it to the broker as stdin, then drops privileges. No container user other than root can read the file.
 - **Plugins.** The server and the CLI are one compiled binary. Plugins run from their installed package folders with the `bun` runtime, which the image includes. That keeps SDKs such as 1Password's, which load files at runtime, working, and it matches how plugins install from npm, git or a local folder.
 

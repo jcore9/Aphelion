@@ -5,7 +5,7 @@ A plugin's server part runs on the server as its own process. Two pieces run it:
 - The **plugin host** lives inside the server. It reads each plugin's manifest, decides what the plugin may do, and talks to the plugin.
 - The **plugin runner** is a separate small program that runs as the `aphelion-plugins` user ([decision 0018](../decisions/0018-shared-plugin-user.md)). It starts and stops plugin processes, and passes messages between them and the host. It decides nothing.
 
-The host and the runner talk over a pipe that the container's init creates before it drops privileges ([decision 0022](../decisions/0022-agent-network-boundary.md)). The server never signals a plugin process or reads `/proc` itself. It asks the runner.
+The host and the runner talk over a pipe that the container's init creates before it drops privileges ([decision 0022](../decisions/0022-bot-network-boundary.md)). The server never signals a plugin process or reads `/proc` itself. It asks the runner.
 
 A plugin with only a client part has no process. The host starts nothing for it ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
 

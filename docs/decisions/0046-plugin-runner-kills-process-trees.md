@@ -51,7 +51,7 @@ An orphan carries no mark of the plugin it came from. So the runner treats every
 
 A plugin can still start child processes that stay attached to it. It can't run a detached daemon.
 
-Only the runner reads `/proc` and sends signals. The server still goes through the runner, as [decision 0022](0022-agent-network-boundary.md) requires. The `prctl` and `waitpid` calls go through `bun:ffi`, in [`plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/plugin-processes.ts), the one file where Bun-only code is allowed ([decision 0023](0023-scaffold-toolchain.md)).
+Only the runner reads `/proc` and sends signals. The server still goes through the runner, as [decision 0022](0022-bot-network-boundary.md) requires. The `prctl` and `waitpid` calls go through `bun:ffi`, in [`plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/plugin-processes.ts), the one file where Bun-only code is allowed ([decision 0023](0023-scaffold-toolchain.md)).
 
 ## Consequences
 
@@ -63,5 +63,5 @@ Only the runner reads `/proc` and sends signals. The server still goes through t
 - Stopping one plugin kills the detached processes of every plugin, because an orphan carries no mark of its plugin. A plugin can use that to disrupt another plugin.
 - The runner depends on Linux and on `libc.so.6`. Aphelion supports only Linux on the server ([decision 0011](0011-ubuntu-lts.md)).
 - Every plugin runs as the same user, so a plugin can send signals to another plugin's processes. This method doesn't change that. [Decision 0045](0045-no-bot-namespaces-default-seccomp.md) accepted it.
-- The agent runner has the same problem in M1-04 ([#22](https://github.com/jcore9/Aphelion/issues/22)). It may reuse this method. M1-04 decides.
+- The bot runner has the same problem in M1-04 ([#22](https://github.com/jcore9/Aphelion/issues/22)). It may reuse this method. M1-04 decides.
 - Revisit this decision if the owner adds per-plugin namespaces or cgroups. Killing a namespace or a cgroup replaces the tree walk, and plugins could then run detached daemons.
