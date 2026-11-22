@@ -1,6 +1,6 @@
 # 0039. Aphelion's bots are called bots, not agents, in the code, the docs and the issues
 
-- Status: Proposed
+- Status: Accepted (approved by merging #149 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: the rename PR ([#149](https://github.com/jcore9/Aphelion/pull/149)), for issue [#147](https://github.com/jcore9/Aphelion/issues/147)
 - Answers: the owner's choice of 2026-11-22 to call Aphelion's bots "bots", and the questions it raised: old records' text, the audit log's `agent_id` column, the config file `agents.yaml`, and open GitHub issues

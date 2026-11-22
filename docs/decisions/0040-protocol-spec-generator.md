@@ -1,6 +1,6 @@
 # 0040. A test renders the protocol spec and the frame JSON Schemas from the Zod schemas, and fails when the committed files are stale
 
-- Status: Proposed
+- Status: Accepted (approved by merging #133 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: the M0-09b protocol spec PR ([#96](https://github.com/jcore9/Aphelion/issues/96))
 - Answers: which generator turns the protocol schemas into the published spec, and how CI catches a stale spec

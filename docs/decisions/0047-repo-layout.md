@@ -1,6 +1,6 @@
 # 0047. The code is split into apps and shared packages, and the server and its CLI are one package in `apps/server`
 
-- Status: Proposed
+- Status: Accepted (approved by merging #148 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: the repo layout PR ([#146](https://github.com/jcore9/Aphelion/issues/146))
 - Answers: the owner's choice of 2026-11-22 to lay the code out as separate apps plus shared packages, and the issue's open question of how `packages/cli` joins the server

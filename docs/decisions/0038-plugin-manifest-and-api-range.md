@@ -1,6 +1,6 @@
 # 0038. A plugin's manifest is `aphelion-plugin.json`, checked with Zod 4, and its API range is checked with the `semver` package
 
-- Status: Proposed
+- Status: Accepted (approved by merging #131 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: the M0-13a plugin manifest PR ([#99](https://github.com/jcore9/Aphelion/issues/99))
 - Amended by: [decision 0042](0042-plugin-server-and-client-parts.md) (`entry` is replaced by a `server` part and a `client` part, each with its own `entry`, and the plugin API goes to 0.2.0)

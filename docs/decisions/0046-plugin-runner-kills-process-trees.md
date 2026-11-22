@@ -1,6 +1,6 @@
 # 0046. The plugin runner adopts every process its plugins leave behind, and freezes then kills a plugin's whole process tree
 
-- Status: Proposed
+- Status: Accepted (approved by merging #145 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: the M0-13b PR ([#100](https://github.com/jcore9/Aphelion/issues/100))
 - Answers: how the plugin runner stops a plugin and all its children, without namespaces ([decision 0045](0045-no-bot-namespaces-default-seccomp.md))
