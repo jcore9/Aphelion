@@ -32,6 +32,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 
 - [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
+- [The client protocol](reference/protocol.md): the frames, sequence numbers, replay, resync and command ids.
 
 ## Decision records
 
@@ -74,3 +75,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0033](decisions/0033-docs-site-in-place.md) | The docs site reads the Markdown files where they are, and takes each page title from its first heading | Accepted |
 | [0034](decisions/0034-vendor-protocol-per-cli.md) | Each agent CLI is driven over its vendor's own protocol | Accepted |
 | [0035](decisions/0035-codex-login-sandbox-approvals.md) | Codex runs on the owner's ChatGPT login, with its own sandbox in the container and `untrusted` approvals on a pinned version | Accepted |
+| [0037](decisions/0037-protocol-frames-in-zod.md) | Protocol frames are Zod 4 schemas, and the TypeScript types come from them | Accepted |
