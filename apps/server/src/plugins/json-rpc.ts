@@ -11,6 +11,8 @@ export const rpcErrors = {
   methodNotFound: { code: -32601, message: "Method not found" },
   invalidParams: { code: -32602, message: "Invalid params" },
   notGranted: { code: -32001, message: "Not granted" },
+  busy: { code: -32004, message: "Operation in progress" },
+  operationFailed: { code: -32003, message: "Operation failed" },
   noSecretOperations: {
     code: -32002,
     message: "The host doesn't offer secret operations yet",

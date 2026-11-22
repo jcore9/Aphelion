@@ -13,6 +13,7 @@ const options = {
   "state-dir": { type: "string" },
   compose: { type: "string" },
   days: { type: "string" },
+  approve: { type: "string" },
 } as const;
 
 type Option = keyof typeof options;
@@ -36,6 +37,12 @@ export type Command =
       readonly stateDir: string;
       readonly name: string;
       readonly days: number | undefined;
+    }
+  | {
+      readonly kind: "plugin install";
+      readonly stateDir: string;
+      readonly folder: string;
+      readonly approve: string | undefined;
     }
   | { readonly kind: "device list"; readonly stateDir: string }
   | {
@@ -62,6 +69,11 @@ const grammar: Record<
     flags: ["config-dir", "state-dir", "compose"],
   },
   "device add": { words: 2, operand: "name", flags: ["state-dir", "days"] },
+  "plugin install": {
+    words: 2,
+    operand: "folder",
+    flags: ["state-dir", "approve"],
+  },
   "device list": { words: 2, flags: ["state-dir"] },
   "device revoke": { words: 2, operand: "id", flags: ["state-dir"] },
 };
@@ -206,6 +218,11 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
         command: { kind, stateDir, name: name.value, days: lifetime.value },
       };
     }
+    case "plugin install":
+      return {
+        ok: true,
+        command: { kind, stateDir, folder: operand, approve: values.approve },
+      };
     case "device list":
       return { ok: true, command: { kind, stateDir } };
     case "device revoke": {

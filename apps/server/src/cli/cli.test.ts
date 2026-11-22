@@ -8,6 +8,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Effect, Exit, Layer } from "effect";
@@ -289,4 +290,72 @@ test("an unexpected error prints its message and exits 1", async () => {
   expect(code).toBe(1);
   expect(err).toHaveLength(1);
   expect(err[0]).toMatch(/^aphelion: .*ENOENT/);
+});
+
+test("plugin install previews permissions and only saves the approved manifest", async () => {
+  const folder = join(root, "plugin");
+  await mkdir(folder);
+  const file = join(folder, "aphelion-plugin.json");
+  const manifest = {
+    id: "weather",
+    version: "1.0.0",
+    api: "^0.2.0",
+    server: { entry: "index.js" },
+    permissions: { network: ["api.example.com"], events: ["bot.status"] },
+  };
+  const text = JSON.stringify(manifest);
+  await writeFile(file, text);
+  const digest = createHash("sha256").update(text).digest("hex");
+  const approval = createHash("sha256")
+    .update(JSON.stringify([folder, digest]))
+    .digest("hex");
+  const command = ["plugin", "install", folder, "--state-dir", stateDir];
+
+  const preview = await run(command);
+  expect(preview.code).toBe(0);
+  expect(preview.out).toEqual([
+    `Plugin weather 1.0.0 at ${JSON.stringify(folder)}`,
+    'events\t"bot.status"',
+    'network\t"api.example.com"',
+    expect.stringContaining(approval),
+  ]);
+  expect(await readdir(stateDir)).toEqual([]);
+
+  const sibling = join(root, "sibling");
+  await cp(folder, sibling, { recursive: true });
+  const siblingCommand = [
+    "plugin",
+    "install",
+    sibling,
+    "--state-dir",
+    stateDir,
+  ];
+  expect((await run([...siblingCommand, "--approve", approval])).code).toBe(1);
+  expect(await readdir(stateDir)).toEqual([]);
+
+  await writeFile(file, JSON.stringify({ ...manifest, version: "1.0.1" }));
+  expect((await run([...command, "--approve", approval])).code).toBe(1);
+  expect(await readdir(stateDir)).toEqual([]);
+
+  await writeFile(file, text);
+  expect((await run([...command, "--approve", approval])).code).toBe(0);
+  const db = openStore(join(stateDir, "aphelion.db"));
+  try {
+    expect(
+      db.all(
+        "SELECT plugin, folder, digest, kind, name FROM plugin_grants ORDER BY kind",
+      ),
+    ).toEqual([
+      { plugin: "weather", folder, digest, kind: "events", name: "bot.status" },
+      {
+        plugin: "weather",
+        folder,
+        digest,
+        kind: "network",
+        name: "api.example.com",
+      },
+    ]);
+  } finally {
+    db.close();
+  }
 });
