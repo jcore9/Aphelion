@@ -7,13 +7,18 @@ export class SqlitePathError extends Error {
 
   constructor(readonly path: string) {
     super(
-      `SQLite path ${JSON.stringify(path)} is a special name, not a file. Pass the path of a database file.`,
+      `SQLite path ${JSON.stringify(path)} is a special name or has surrounding spaces. Pass the path of a database file.`,
     );
   }
 }
 
 function isSpecialName(path: string): boolean {
-  return path === "" || path === ":memory:" || path.startsWith("file:");
+  return (
+    path.trim() === "" ||
+    path !== path.trim() ||
+    path === ":memory:" ||
+    path.startsWith("file:")
+  );
 }
 
 export function openSqlite(path: string): Database {

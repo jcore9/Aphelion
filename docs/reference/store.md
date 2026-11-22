@@ -26,7 +26,14 @@ To get an ID or a count back from a write, use `RETURNING` with `all`.
 
 Every connection uses WAL mode, enforces foreign keys and waits up to 5 seconds for a write lock. The adapter creates the database file with mode 0600, and SQLite gives the `-wal` and `-shm` files the same mode.
 
-`openSqlite` takes the path of a database file and nothing else. It refuses the names that SQLite reads as something other than a file: the empty string (a temporary database), `:memory:` (a database held in memory), and any name that starts with `file:` (a URI, a web-address-style name that can carry options). It throws `SqlitePathError` before it creates anything on disk. The server always stores its data in a file, and an in-memory database can't use WAL mode.
+`openSqlite` takes the path of a database file and nothing else. It throws `SqlitePathError`, before it creates anything on disk, for:
+
+- the empty string, or a name made only of spaces, which SQLite opens as a temporary database;
+- a name with spaces at the start or end, because Bun trims them, so `" :memory: "` would become `:memory:`;
+- `:memory:`, SQLite's name for a database held in memory;
+- any name that starts with `file:`.
+
+Bun opens a `file:` name as an ordinary file today, so the last rule is a precaution. SQLite can also read such a name as a URI, a web-address-style name that carries options such as "keep this in memory", and refusing the prefix means that reading can never apply. A file whose name starts with `file:` still opens when you write it as `./file:aphelion.db` or as a full path. The server always stores its data in a file, and an in-memory database can't use WAL mode.
 
 ## Add a migration
 
