@@ -8,6 +8,12 @@ These are plain Markdown files until M0-16 builds them into a Starlight site.
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
 
+## Spike findings
+
+Each spike answers its questions in writing before anything builds on it. Prototype code stays on its `spike/` branch and is never merged.
+
+- [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
+
 ## Decision records
 
 One numbered record per significant decision: context, options, choice, consequences.
@@ -32,3 +38,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0016](decisions/0016-one-docker-container.md) | The headless server ships as one Docker container, with separate users inside | Accepted |
 | [0017](decisions/0017-desktop-remote-only.md) | The desktop app only connects to a server; it never runs one | Accepted |
 | [0018](decisions/0018-shared-plugin-user.md) | Server plugins share one user and are started by a plugin runner | Accepted |
+| [0021](decisions/0021-container-init-and-secret-handoff.md) | The container's init is tini plus setpriv, and the bootstrap secret arrives on stdin | Proposed |
