@@ -32,14 +32,17 @@ Coding agents open PRs from the `jcore9-bot` account, never from the owner's acc
 
 A PR that changes behavior, config, the protocol or a public API updates the affected docs in the same PR. The PR template asks which docs you touched.
 
+Write docs and PR descriptions for a reader who isn't a TypeScript or web developer. Say what a change does for Aphelion before you say how it works, and explain each technical term the first time you use it. Every PR has a "How to review" section that names the files to read, in order, and what to check in each one.
+
 ## Run the checks before you push
 
-Run the three checks from the [Develop section of the README](README.md#develop). All three must pass, and CI runs the same ones.
+Run the four checks below. All four must pass, and CI runs the same ones. `bun run docs` builds the docs site and checks every link in it.
 
 ```sh
 bun run lint
 bun run typecheck
 bun run test
+bun run docs
 ```
 
 ## Labels
