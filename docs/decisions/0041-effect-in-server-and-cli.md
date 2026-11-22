@@ -55,7 +55,7 @@ The server and the CLI use Effect. Each Effect module is adopted when a real iss
 
 **Rules.**
 
-1. **One pinned version.** `effect` and every `@effect/*` package use one exact version, and they change together in one PR. No `^` ranges. The peer range of each `@effect/*` package is `effect ^4.1.5`, so a mismatch fails at install.
+1. **One pinned version.** `effect` and every `@effect/*` package use one exact version, and they change together in one PR. No `^` ranges. The peer range of each `@effect/*` package is `effect ^4.1.5`, so a package pinned to a different `effect` version breaks that range.
 2. **Bun-only packages stay in adapters.** `@effect/platform-bun` and `@effect/sql-sqlite-bun` call Bun-only APIs inside. They count as Bun APIs under [decision 0007](0007-bun-runtime.md) and [decision 0023](0023-scaffold-toolchain.md). Import them only from `packages/server/src/adapters/` and `packages/cli/src/adapters/`. The lint rule bans them everywhere else, and `lint-boundaries.test.ts` checks that. Plain `effect` imports are allowed in the rest of the server and the CLI.
 3. **Zod stays where it is.** `protocol` and `plugin-sdk` keep Zod, because they stay plain. For the server's own code, whether to use Effect's `Schema` or Zod is **not decided here**. It is an open question for the owner, listed below.
 4. **Explain Effect in the PR.** Every PR that adds Effect code explains its Effect parts in plain words under **How to review**: what each service is, which errors can happen, and what a Layer wires together. A reviewer who has never seen `pipe` or `Effect.gen` must be able to follow the PR from that section.
