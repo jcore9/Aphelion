@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-21
 - Decided by: project owner
+- Amended by: [decision 0022](0022-agent-network-boundary.md) (the host firewall is the network boundary, and every API endpoint except `/health` needs a token, even on loopback)
 - Amended by: [decision 0018](0018-shared-plugin-user.md) (a fourth user, `aphelion-plugins`, and a plugin runner)
 - Amended by: [decision 0017](0017-desktop-remote-only.md) (the desktop app only connects to a server; local mode is dropped)
 - Amends: [0006](0006-shared-agent-user.md) (how agents are started), [0009](0009-electron-desktop-shell.md) (desktop local mode), [0010](0010-agent-folders.md) (per-agent systemd units), [0012](0012-secrets-broker-process.md) (where the broker runs), [0014](0014-filesystem-layout.md) (where the paths live)
