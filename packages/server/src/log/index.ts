@@ -2,10 +2,12 @@ export {
   createLogger,
   levels,
   type Fields,
+  type FixedText,
   type Level,
   type Logger,
   type LoggerOptions,
 } from "./logger";
+export { maskSecretValue, minimumMaskLength } from "./masks";
 export {
   CIRCULAR,
   defaultRules,

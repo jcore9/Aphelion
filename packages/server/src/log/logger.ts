@@ -31,11 +31,19 @@ function messageText(msg: unknown, rules: RedactionRules): string {
   return UNREADABLE;
 }
 
+type HasHole<T extends string> = T extends unknown
+  ? Partial<Record<T, unknown>> extends Record<T, unknown>
+    ? true
+    : false
+  : never;
+
+export type FixedText<T extends string> = true extends HasHole<T> ? never : T;
+
 export interface Logger {
-  debug(msg: string, fields?: Fields): void;
-  info(msg: string, fields?: Fields): void;
-  warn(msg: string, fields?: Fields): void;
-  error(msg: string, fields?: Fields): void;
+  debug<M extends string>(msg: M & FixedText<M>, fields?: Fields): void;
+  info<M extends string>(msg: M & FixedText<M>, fields?: Fields): void;
+  warn<M extends string>(msg: M & FixedText<M>, fields?: Fields): void;
+  error<M extends string>(msg: M & FixedText<M>, fields?: Fields): void;
 }
 
 export interface LoggerOptions {

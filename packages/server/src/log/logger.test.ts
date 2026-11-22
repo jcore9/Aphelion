@@ -69,7 +69,7 @@ test("redacts a string message, writes numbers and booleans as text, and nothing
       },
     },
   ];
-  for (const msg of messages) log.info(msg as string);
+  for (const msg of messages) log.info(msg as never);
 
   expect(
     lines.map((line) => (JSON.parse(line) as { msg: string }).msg),
@@ -84,4 +84,25 @@ test("redacts a string message, writes numbers and booleans as text, and nothing
     "[Unreadable]",
     "[Unreadable]",
   ]);
+});
+
+test("accepts only fixed text as a message, at compile time", () => {
+  const { log, lines } = capture();
+  const user = String(lines.length);
+  const flag = lines.length === 0;
+  const name = "triage";
+
+  log.info("user signed in", { user });
+  log.warn(flag ? "cache cold" : "cache warm");
+  log.error(`agent ${name} stopped`);
+  // @ts-expect-error A message held in a variable isn't fixed text.
+  log.debug(user);
+  // @ts-expect-error A template with a value in it isn't fixed text.
+  log.info(`user ${user} signed in`);
+  // @ts-expect-error One branch isn't fixed text.
+  log.warn(flag ? "cache cold" : `cache ${user}`);
+  // @ts-expect-error A string built at run time isn't fixed text.
+  log.error(String(flag));
+
+  expect(lines).toHaveLength(6);
 });

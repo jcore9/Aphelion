@@ -47,15 +47,27 @@ The rules that follow:
 - `createLogger` passes every record through `redact` before it writes the line, and adds `time`, `level` and `msg` afterwards. Redaction catches the field names and the secret formats in its rules. It doesn't catch every secret, and [the logging reference](../reference/logging.md#what-redaction-doesnt-catch) lists what it misses.
 - The redaction rules are data, in `defaultRules` in `packages/server/src/log/redact.ts`. Adding a rule is a one-line change with a paired test.
 - The redactor's output is plain data. It reads each property it uses at most once per visit, so a getter can't return one thing when it is checked and another when it is copied. A test checks this for `toJSON`. A value that throws becomes `[Unreadable]`, and nesting beyond 32 levels becomes `[Too deep]`. The tests show a log call writing one line, without throwing, for each hostile value they cover. The [logging reference](../reference/logging.md#log-format) lists them.
-- Each value rule is written so that it doesn't scan the same run of characters again from every position inside it. A string that holds JSON of up to 64 KB is parsed and redacted as data, instead of searched with patterns. A test runs the text rules on 25 hostile strings of about 1 MB and requires each to finish in under 1 second.
+- Each value rule is written so that it doesn't scan the same run of characters again from every position inside it. JSON segments inside a string, up to 64 KB each in UTF-16 code units and at most 16 per string, are parsed and redacted as data, instead of searched with patterns. A test runs the text rules on 29 hostile strings of about 1 MB and requires each to finish in under 1 second.
 - A value that has a method under `Symbol.for("aphelion.redactSelf")` is replaced by what that method returns. `Symbol.for` reads a registry that every module shares, so `plugin-sdk` can define `Secret` without importing the server. M0-14 builds `Secret` on this.
 - The audit writer applies the same rules to every text column and to the detail before the insert.
 
 LogTape is the fallback. It is the only library that passed the test, and it has no dependencies.
 
+## Owner decision, 2026-11-22: structure first, patterns as a backup
+
+Four review rounds each found a secret that slipped past the pattern rules, and each fix moved the gap. The owner decided to rely on structure instead of scanning free text:
+
+1. **The `Secret` type** from M0-14 holds every secret the server handles, and always hides itself.
+2. **Every log message is fixed text**, and data goes only in named fields, which are hidden by name. The audit `action` follows the same rule. The compiler enforces both: `Logger` and `appendAudit` accept only a string written in the code, through the `FixedText` type.
+3. **Known secret values are masked exactly.** `maskSecretValue` registers a secret's value, and the redactor replaces that exact text everywhere, as GitHub Actions does with `::add-mask::` ([workflow commands](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands)). `Secret` calls it when a secret is resolved.
+4. **Pattern scanning of free text is a backup.** Its known gaps are listed in [the logging reference](../reference/logging.md#what-redaction-doesnt-catch), not chased.
+
+This matches what established tools do. pino hides fixed field paths ([pino 10.4.0 redaction](https://unpkg.com/pino@10.4.0/docs/redaction.md)). Effect wraps secrets in `Redacted` ([Effect `Redacted`](https://effect.website/docs/data-types/redacted/)). T3 Code 0.1.12, inspected in its bundled code on 2026-11-22, uses Effect's `Redacted`, hides HTTP headers and URL parameters by name, and replaces a token it knows by its exact value, with no broad list of token patterns. OWASP ASVS chapter V7 requires that logs hold no secrets ([V7](https://github.com/OWASP/ASVS/blob/master/4.0/en/0x15-V7-Error-Logging.md)).
+
 ## Consequences
 
-- M0-14 gives `Secret` a `[Symbol.for("aphelion.redactSelf")]` method and adds its case to `packages/server/src/log/redact.test.ts`.
+- M0-14 gives `Secret` a `[Symbol.for("aphelion.redactSelf")]` method, calls `maskSecretValue` when a secret is resolved, and adds its cases to `packages/server/src/log/redact.test.ts`.
+- Code can't put a run-time string in a log message or an audit `action`. A message that needs data uses a named field instead.
 - M0-10b's device tokens need a fixed prefix, so a value-pattern rule can catch a device token that ends up in a string.
 - A secret with no known format, in a field whose name isn't on the list, still reaches the log. The field list and the patterns reduce leaks. They can't prevent every one, so code that handles a secret uses the `Secret` type, whose `redactSelf` method returns a placeholder.
 - The logger writes each record as one line to standard output when the call is made. If logging ever shows up as a cost in a profile, revisit this record.

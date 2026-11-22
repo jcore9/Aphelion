@@ -14,7 +14,7 @@ function logLine(fields: Fields, msg = "event"): string {
   createLogger({
     write: (line) => lines.push(line),
     now: () => new Date("2026-11-22T10:00:00.000Z"),
-  }).info(msg, fields);
+  }).info(msg as never, fields);
   expect(lines).toHaveLength(1);
   return lines[0] ?? "";
 }
@@ -507,6 +507,13 @@ describe("large hostile strings", () => {
     ).repeat(size / jsonParseLimit),
     "deeply nested JSON arrays": `${"[".repeat(30_000)}${"]".repeat(30_000)}`,
     "long escaped JSON names": `{"${"\\u0070".repeat(size / 6)}":"x"}`,
+    "PEM keys with different labels and no end": Array.from(
+      { length: size / 40 },
+      (_, i) => `-----BEGIN K${String(i)} PRIVATE KEY-----"`,
+    ).join(""),
+    "many small JSON objects": '{"a":1} '.repeat(size / 8),
+    "unclosed JSON openings": "{".repeat(size),
+    "JSON strings with no end": '{"'.repeat(size / 2),
     "spaces before JSON names": `"${" ".repeat(1000)}password":"x",`.repeat(
       size / 1015,
     ),
@@ -768,4 +775,69 @@ describe("rules next to each other", () => {
       expect(leaks).toEqual([]);
     },
   );
+});
+
+describe("URL credentials with quotes", () => {
+  test("masks a URL password that contains an apostrophe or a backtick", () => {
+    for (const password of ["sample'pass", "sample`pass"]) {
+      expect(redactText(`https://user:${password}@example.test/`)).toBe(
+        "https://user:[REDACTED]@example.test/",
+      );
+    }
+  });
+
+  test("masks a query value that contains an apostrophe, and keeps the next one", () => {
+    expect(redactText("https://example.test/?password=abc'pass&page=2")).toBe(
+      "https://example.test/?password=[REDACTED]&page=2",
+    );
+  });
+
+  test("still stops a query value at a double quote", () => {
+    expect(
+      redactText('{"url":"https://example.test/?token=fake","password":1'),
+    ).toBe('{"url":"https://example.test/?token=[REDACTED]","password":1');
+  });
+});
+
+describe("several JSON values in one string", () => {
+  test("parses each object by itself", () => {
+    expect(
+      redactText('received {"password":1234} then {"status":"done"}'),
+    ).toBe('received {"password":"[REDACTED]"} then {"status":"done"}');
+  });
+
+  test("skips braces inside JSON strings when it looks for the end", () => {
+    expect(
+      redactText('a {"note":"} not the end","token":"abc"} b [1,{"pwd":2}]'),
+    ).toBe(
+      'a {"note":"} not the end","token":"[REDACTED]"} b [1,{"pwd":"[REDACTED]"}]',
+    );
+  });
+
+  test("parses at most the first 16 values, and leaves the rest to the text rules", () => {
+    const text = Array.from({ length: 20 }, () => '{"password":"x1"}').join(
+      " ",
+    );
+
+    expect(redactText(text)).not.toContain("x1");
+  });
+
+  test("masks a cut-off secret value to the end of the string", () => {
+    expect(redactText('{"user":"ada","password":"dummy')).toBe(
+      '{"user":"ada","password":"[REDACTED]',
+    );
+  });
+
+  test("leaves a JSON value byte for byte when nothing in it is secret", () => {
+    const text =
+      'got {"id":9007199254740993,"exponent":1e400,  "ok": true} done';
+
+    expect(redactText(text)).toBe(text);
+  });
+
+  test("rewrites a JSON value, numbers included, when something in it is secret", () => {
+    expect(redactText('{"id":9007199254740993,"token":"t"}')).toBe(
+      '{"id":9007199254740992,"token":"[REDACTED]"}',
+    );
+  });
 });

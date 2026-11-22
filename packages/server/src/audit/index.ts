@@ -3,6 +3,7 @@ import {
   redact,
   redactText,
   type Fields,
+  type FixedText,
   type RedactionRules,
 } from "../log";
 import type { Database } from "../store";
@@ -13,9 +14,9 @@ export type Actor =
 
 export type Outcome = "allowed" | "denied" | "succeeded" | "failed";
 
-export interface AuditEntry {
+export interface AuditEntry<A extends string = string> {
   readonly actor: Actor;
-  readonly action: string;
+  readonly action: A;
   readonly outcome: Outcome;
   readonly agentId?: string;
   readonly sessionId?: string;
@@ -37,9 +38,9 @@ function redactDetail(entry: AuditEntry, rules: RedactionRules): unknown {
   }
 }
 
-export function appendAudit(
+export function appendAudit<A extends string>(
   db: Database,
-  entry: AuditEntry,
+  entry: AuditEntry<A & FixedText<A>>,
   rules: RedactionRules = defaultRules,
 ): number {
   const text = (value: string | undefined) =>

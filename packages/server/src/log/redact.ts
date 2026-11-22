@@ -1,3 +1,5 @@
+import { maskKnownValues } from "./masks";
+
 export const REDACTED = "[REDACTED]";
 export const UNREADABLE = "[Unreadable]";
 export const TOO_DEEP = "[Too deep]";
@@ -32,7 +34,6 @@ export function pattern(
 function redactPemPrivateKeys(text: string): string {
   const begin = "-----BEGIN ";
   const quotes = /["'`]/g;
-  const footers = new Map<string, number>();
   let quote = -1;
   const quoteAt = (from: number): number => {
     if (quote < from) {
@@ -40,13 +41,6 @@ function redactPemPrivateKeys(text: string): string {
       quote = quotes.exec(text)?.index ?? text.length;
     }
     return quote;
-  };
-  const footerAt = (footer: string, from: number): number => {
-    const cached = footers.get(footer);
-    if (cached !== undefined && (cached < 0 || cached >= from)) return cached;
-    const at = text.indexOf(footer, from);
-    footers.set(footer, at);
-    return at;
   };
   let result = "";
   let from = 0;
@@ -62,10 +56,10 @@ function redactPemPrivateKeys(text: string): string {
       continue;
     }
     const footer = `-----END ${label}-----`;
-    const end = footerAt(footer, labelEnd);
     const stop = quoteAt(labelEnd);
+    const end = text.slice(labelEnd, stop).indexOf(footer);
     result += text.slice(from, start) + REDACTED;
-    from = end >= 0 && end < stop ? end + footer.length : stop;
+    from = end >= 0 ? labelEnd + end + footer.length : stop;
   }
   return result + text.slice(from);
 }
@@ -138,7 +132,7 @@ export const defaultRules: RedactionRules = {
     ),
     pattern(
       "Password in a URL",
-      /(\/\/[^\s/@:"'`]+:)[^\s/@"'`]+@/g,
+      /(\/\/[^\s/@:"]+:)[^\s/@"]+@/g,
       `$1${REDACTED}@`,
     ),
     pattern(
@@ -191,9 +185,10 @@ function decodedJsonName(name: string): string {
 }
 
 function redactUnstructuredText(text: string, rules: RedactionRules): string {
-  const named = text
+  return rules.valueRules
+    .reduce((result, rule) => rule.replace(result), text)
     .replace(
-      /([?&])([\w.-]+)=([^&\s"'`]*)/g,
+      /([?&])([\w.-]+)=([^&#\s"]*)/g,
       (match, separator: string, name: string) =>
         isSensitiveName(name, rules)
           ? `${separator}${name}=${REDACTED}`
@@ -203,49 +198,79 @@ function redactUnstructuredText(text: string, rules: RedactionRules): string {
       isSensitiveName(name, rules) ? `${name}=${REDACTED}` : match,
     )
     .replace(
-      /"((?:[^"\\]|\\[^"]){1,1024})"(\s*:\s*)"[^"\\]*(?:\\.[^"\\]*)*"/g,
-      (match, name: string, colon: string) =>
+      /"((?:[^"\\]|\\[^"]){1,1024})"(\s*:\s*)"[^"\\]*(?:\\.[^"\\]*)*(")?/g,
+      (match, name: string, colon: string, close: string | undefined) =>
         isSensitiveName(decodedJsonName(name), rules)
-          ? `"${name}"${colon}"${REDACTED}"`
+          ? `"${name}"${colon}"${REDACTED}${close ?? ""}`
           : match,
     );
-  return rules.valueRules.reduce((result, rule) => rule.replace(result), named);
 }
 
-function redactEmbeddedJson(
-  text: string,
-  open: string,
-  close: string,
+export const jsonSegmentLimit = 16;
+
+const closers: Readonly<Record<string, string>> = { "{": "}", "[": "]" };
+
+function jsonSegments(text: string): [number, number][] {
+  const segments: [number, number][] = [];
+  const expected: string[] = [];
+  let start = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text.charAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+    } else if (char === '"' && expected.length > 0) {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      if (expected.length === 0) start = i;
+      expected.push(closers[char] ?? "");
+    } else if ((char === "}" || char === "]") && expected.length > 0) {
+      if (char !== expected.pop()) {
+        expected.length = 0;
+      } else if (expected.length === 0) {
+        segments.push([start, i + 1]);
+        if (segments.length >= jsonSegmentLimit) break;
+      }
+    }
+    if (expected.length > 0 && i + 1 - start >= jsonParseLimit) {
+      expected.length = 0;
+      inString = false;
+      escaped = false;
+    }
+  }
+  return segments;
+}
+
+function redactedJson(
+  segment: string,
   rules: RedactionRules,
 ): string | undefined {
-  const start = text.indexOf(open);
-  const end = text.lastIndexOf(close);
-  if (start < 0 || end <= start || end - start >= jsonParseLimit) {
-    return undefined;
-  }
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(text.slice(start, end + 1));
+    const { value, changed } = redactAndReport(JSON.parse(segment), rules);
+    return changed ? JSON.stringify(value) : undefined;
   } catch {
     return undefined;
   }
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  return (
-    redactUnstructuredText(text.slice(0, start), rules) +
-    JSON.stringify(redact(parsed, rules)) +
-    redactUnstructuredText(text.slice(end + 1), rules)
-  );
 }
 
 export function redactText(
-  text: string,
+  raw: string,
   rules: RedactionRules = defaultRules,
 ): string {
-  return (
-    redactEmbeddedJson(text, "{", "}", rules) ??
-    redactEmbeddedJson(text, "[", "]", rules) ??
-    redactUnstructuredText(text, rules)
-  );
+  const text = maskKnownValues(raw, REDACTED);
+  let result = "";
+  let from = 0;
+  for (const [start, end] of jsonSegments(text)) {
+    result +=
+      redactUnstructuredText(text.slice(from, start), rules) +
+      (redactedJson(text.slice(start, end), rules) ??
+        redactUnstructuredText(text.slice(start, end), rules));
+    from = end;
+  }
+  return result + redactUnstructuredText(text.slice(from), rules);
 }
 
 function errorKeys(error: Error): string[] {
@@ -261,17 +286,22 @@ function errorKeys(error: Error): string[] {
   ];
 }
 
-export function redact(
+function redactAndReport(
   value: unknown,
-  rules: RedactionRules = defaultRules,
-): unknown {
+  rules: RedactionRules,
+): { value: unknown; changed: boolean } {
   const ancestors = new WeakSet<object>();
+  let changed = false;
+  const marker = (text: string): string => {
+    changed = true;
+    return text;
+  };
 
   function field(source: object, key: string | number, depth: number): unknown {
     try {
       return walk((source as Record<string | number, unknown>)[key], depth);
     } catch {
-      return UNREADABLE;
+      return marker(UNREADABLE);
     }
   }
 
@@ -295,7 +325,7 @@ export function redact(
     const entries: [string, unknown][] = [];
     for (const key of keys) {
       const result = isSensitiveName(key, rules)
-        ? REDACTED
+        ? marker(REDACTED)
         : key === "toJSON"
           ? walk(toJSON, depth)
           : field(value, key, depth);
@@ -306,8 +336,11 @@ export function redact(
 
   function walk(value: unknown, depth: number): unknown {
     switch (typeof value) {
-      case "string":
-        return redactText(value, rules);
+      case "string": {
+        const redacted = redactText(value, rules);
+        if (redacted !== value) changed = true;
+        return redacted;
+      }
       case "bigint":
         return value.toString();
       case "number":
@@ -319,17 +352,25 @@ export function redact(
         return undefined;
     }
     if (value === null) return null;
-    if (depth >= maxDepth) return TOO_DEEP;
-    if (ancestors.has(value)) return CIRCULAR;
+    if (depth >= maxDepth) return marker(TOO_DEEP);
+    if (ancestors.has(value)) return marker(CIRCULAR);
     ancestors.add(value);
     try {
       return walkObject(value, depth + 1);
     } catch {
-      return UNREADABLE;
+      return marker(UNREADABLE);
     } finally {
       ancestors.delete(value);
     }
   }
 
-  return walk(value, 0);
+  const result = walk(value, 0);
+  return { value: result, changed };
+}
+
+export function redact(
+  value: unknown,
+  rules: RedactionRules = defaultRules,
+): unknown {
+  return redactAndReport(value, rules).value;
 }

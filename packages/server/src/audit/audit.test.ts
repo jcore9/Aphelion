@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, onTestFinished, test } from "vitest";
+import { maskSecretValue } from "../log";
 import { openStore, type Database } from "../store";
 import { appendAudit, type AuditEntry } from ".";
 
@@ -15,7 +16,7 @@ function openDatabase(): Database {
   return db;
 }
 
-const approval: AuditEntry = {
+const approval = {
   actor: { kind: "device", id: "laptop" },
   action: "approval.decide",
   outcome: "allowed",
@@ -23,7 +24,7 @@ const approval: AuditEntry = {
   sessionId: "s-1",
   requestId: "r-1",
   detail: { tool: "git push", remote: "origin" },
-};
+} satisfies AuditEntry<"approval.decide">;
 
 test("appends an entry and reads it back with every field", () => {
   const db = openDatabase();
@@ -229,4 +230,36 @@ test("stores a marker object when reading the detail itself throws", () => {
   expect(db.all("SELECT detail FROM audit_log WHERE id = ?", [id])).toEqual([
     { detail: '{"unreadable":true}' },
   ]);
+});
+
+test("accepts only fixed text as the action, at compile time", () => {
+  const db = openDatabase();
+  const tool = String(db.all("SELECT 1 AS n").length);
+
+  appendAudit(db, { ...approval, action: "secret.read" });
+  // @ts-expect-error An action held in a variable isn't fixed text.
+  appendAudit(db, { ...approval, action: tool });
+  // @ts-expect-error A template with a value in it isn't fixed text.
+  appendAudit(db, { ...approval, action: `tool.${tool}` });
+
+  expect(db.all("SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 3 }]);
+});
+
+test("masks a registered secret value in every text column", () => {
+  const db = openDatabase();
+  maskSecretValue("Audit7rQ-live-value");
+  appendAudit(db, {
+    ...approval,
+    actor: { kind: "agent", id: "Audit7rQ-live-value" },
+    requestId: "r Audit7rQ-live-value",
+    detail: { note: "Audit7rQ-live-value", tool: "git push" },
+  });
+
+  const [row] = db.all("SELECT * FROM audit_log");
+  expect(JSON.stringify(row)).not.toContain("Audit7rQ-live-value");
+  expect(row).toMatchObject({
+    actor_id: "[REDACTED]",
+    request_id: "r [REDACTED]",
+  });
+  expect(row?.["detail"]).toContain('"tool":"git push"');
 });
