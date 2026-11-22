@@ -4,13 +4,18 @@ Last updated Nov 21, 2026
 
 This is a living document. It grows as decisions are made, and once the repo exists, the decisions it records move into decision records under `docs/`.
 
+> **Amendments.** This plan was imported unchanged under [decision 0004](../decisions/0004-import-plan-with-m0-plan.md). Later decision records change parts of it. Each changed passage links the record that changed it. In tables, the original text is struck through next to the new text. In prose, an "Amended by" note follows the new text and quotes the original. Text with no mark is the plan as imported.
+
 ## Goals and scope
 
 Aphelion is a self-hosted bot application, not a coding app. Its bots (called agents throughout this plan) are persistent managers and orchestrators: they plan work, track it across connected services, coordinate with each other, delegate hands-on coding to dedicated tools such as T3 Code through MCP, and follow up. Claude Code and Grok Build are the engines underneath, running on a headless VM, with every risky action gated by an approval layer the user configures and controls.
 
 **Must do (v1)**
 
-- Ship one app with two modes: launched with a CLI flag it runs headless (for example as a systemd service on an agent VM, reachable over Tailscale); launched normally it opens the desktop app.
+- Ship the server as one container image, reachable over Tailscale, and clients (the PWA and the desktop app) that connect to it. The desktop app never runs a server itself.
+
+  > Amended by [decision 0017](../decisions/0017-desktop-remote-only.md), with the container from [decision 0016](../decisions/0016-one-docker-container.md). The original said: "Ship one app with two modes: launched with a CLI flag it runs headless (for example as a systemd service on an agent VM, reachable over Tailscale); launched normally it opens the desktop app."
+
 - Be plugin-first: every feature is a plugin on a public, versioned API, and the UI is fully themeable, down to animations in the chat panel.
 - Drive multiple AI CLIs through one adapter interface, starting with Claude Code and Grok Build, using their existing subscription logins.
 - Keep persistent agents: each has a name, instructions, a workspace, and resumable session history.
@@ -174,7 +179,9 @@ flowchart TB
 
 Clients reach the harness only over Tailscale. Agents send permission requests back to the policy engine and reach third-party services only through the gateway.
 
-**One app, two modes.** v1 supports Linux only. The same Aphelion install runs headless when started with `aphelion --headless` (server only, for a VM or an always-on machine) and otherwise opens the desktop app. The desktop app wraps the same web client and either starts a local server or connects to a remote headless instance over Tailscale. In local mode the gateway and agents still run as separate Unix users on the same machine, which is weaker isolation than a separate gateway host, and the client says so. Electron is the default shell because the server already runs on Node, but headless mode must start the Node server without loading Electron, so a server VM doesn't need any GUI libraries.
+**One app, two modes.** v1 supports Linux only. Aphelion runs only as the server container, with its protections, and every client connects to it. The server runs on Bun as `aphelion --headless`. The desktop app is Electron wrapping the same web client that the PWA serves. It connects to a server over Tailscale and never bundles or starts one. To use Aphelion on one machine, run the container on that machine and connect the desktop app to it. Electron is the shell because it renders with the same Chromium engine on every Linux distro. The server never loads Electron, so a server needs no GUI libraries.
+
+> Amended by [decision 0007](../decisions/0007-bun-runtime.md) (Bun), [decision 0009](../decisions/0009-electron-desktop-shell.md) (why Electron) and [decision 0017](../decisions/0017-desktop-remote-only.md) (no local mode). The original said: "v1 supports Linux only. The same Aphelion install runs headless when started with `aphelion --headless` (server only, for a VM or an always-on machine) and otherwise opens the desktop app. The desktop app wraps the same web client and either starts a local server or connects to a remote headless instance over Tailscale. In local mode the gateway and agents still run as separate Unix users on the same machine, which is weaker isolation than a separate gateway host, and the client says so. Electron is the default shell because the server already runs on Node, but headless mode must start the Node server without loading Electron, so a server VM doesn't need any GUI libraries."
 
 ## Components
 
@@ -185,7 +192,7 @@ The harness is one server process with a handful of modules, plus a connector ga
 | API server | Serves clients: commands in, events out | WebSocket for streaming, REST for everything else. Binds to the tailnet only. Device identity from Tailscale, plus a per-device token so a lost phone can be revoked. |
 | Agent registry | Defines each agent | Name, provider, model, instructions, workspace path, policy profile. Stored as YAML in git, loaded into SQLite. |
 | Agent adapters | Talk to the AI CLIs | [ACP](https://agentclientprotocol.com/) client first: Grok via `grok agent stdio`, Claude via an ACP adapter. Fallback: `-p --output-format stream-json` with `--resume`. One normalized event type out. |
-| Session manager | Owns agent processes | One live process per agent, run as that agent's Unix user. Restart on crash, resume by session id, kill the whole process tree on cancel. |
+| Session manager | Owns agent processes | One live process per agent, ~~run as that agent's Unix user~~ run as the shared `aphelion-agent` user and started by the agent runner ([0006](../decisions/0006-shared-agent-user.md), [0016](../decisions/0016-one-docker-container.md)). Restart on crash, resume by session id, kill the whole process tree on cancel. |
 | Queue | Orders work per agent | FIFO per agent, one turn at a time. Pause, resume, cancel, reorder. Survives restarts. |
 | Scheduler | Runs routines | Routine = agent + prompt + schedule + policy profile. Cron expressions in an explicit time zone. Missed-run and overlap policy per routine. Run history kept. |
 | Usage monitor | Tracks subscription headroom | One collector per provider, polled on a timer, stored as snapshots. Budget guard can pause routines near a cap. |
@@ -242,7 +249,10 @@ Assume every agent can be prompt-injected, so the agents get nothing they could 
 
 - **Hypervisor host and firewall (trusted):** enforces LAN isolation; the VM can't change it. Firewall rules live on the host, outside the VM.
 - **Harness user on the VM (trusted):** owns the server, the policy engine, the database and the CLI configs. Agents can't write to its files.
-- **Agent users (untrusted):** one Unix user per agent, no sudo, write access only to their own home and workspace.
+- **Agent user (untrusted):** every agent runs as one shared `aphelion-agent` user with no sudo. Agents can read and write each other's workspaces. They can't read or write the harness's config, database, audit log, policy file or managed hooks.
+
+  > Amended by [decision 0006](../decisions/0006-shared-agent-user.md). The original said: "**Agent users (untrusted):** one Unix user per agent, no sudo, write access only to their own home and workspace."
+
 - **Connector gateway (trusted, separate machine):** the only place OAuth tokens and API keys for third-party services live.
 - **Clients (trusted, revocable):** your laptop and phone, identified by Tailscale plus a per-device token that expires.
 
@@ -397,7 +407,7 @@ The harness is plugin-first. Core features ship as first-party plugins on the sa
 | --- | --- | --- | --- |
 | Theme | Colors, type, spacing, motion, icons, chat backgrounds, declarative animations | Client | Data only, no code |
 | UI plugin | Panels, message renderers, chat-panel effects and animations, commands | Client | Sandboxed iframe, talks to the app through a message API |
-| Server plugin | Agent adapters, connectors, secret backends, notifiers, triggers, reviewers | Harness or gateway host | Separate process under its own Unix user, JSON-RPC to the host |
+| Server plugin | Agent adapters, connectors, secret backends, notifiers, triggers, reviewers | Harness or gateway host | Separate process ~~under its own Unix user~~ under the shared `aphelion-plugins` user, started by the plugin runner ([0018](../decisions/0018-shared-plugin-user.md)), JSON-RPC to the host |
 
 **Manifest and permissions**
 
@@ -435,7 +445,7 @@ The web client exposes named slots that themes and UI plugins can fill: chat bac
 | --- | --- | --- |
 | UI plugin isolation | Sandboxed iframes, Web Components in the main page | Sandboxed iframes; in-page only for first-party plugins |
 | Animation formats | CSS keyframes, Lottie, Rive, video | CSS keyframes and Lottie first; Rive later for interactive state machines |
-| Server plugin isolation | Process per plugin, worker threads, in-process | Process per plugin under its own Unix user |
+| Server plugin isolation | Process per plugin, worker threads, in-process | Process per plugin ~~under its own Unix user~~ under the shared `aphelion-plugins` user ([0018](../decisions/0018-shared-plugin-user.md)) |
 | Plugin distribution | npm, git, own registry | npm and git first |
 | Theme format | JSON tokens plus CSS, CSS only | JSON tokens plus optional scoped CSS |
 
@@ -607,16 +617,18 @@ The biggest risks are things outside the project's code: CLI changes, subscripti
 
 Each has a recommended default so stage 0 can start now; the first two matter most because they shape everything after.
 
+> Amended by [decision 0007](../decisions/0007-bun-runtime.md) and [decision 0008](../decisions/0008-react-and-tailwind.md), which change two defaults. Records 0027 to 0032 write up the other rows. Each row links the record that settles it.
+
 | Decision | Options | Recommended default |
 | --- | --- | --- |
-| Server language | TypeScript, Rust, Go | Decided: TypeScript on Node.js LTS. Official ACP, MCP and 1Password SDKs, and one language with the web client |
-| Adapter protocol | ACP, native stream-json per CLI | ACP first, stream-json as fallback per provider |
-| Where the policy engine runs | Inside the harness (own Unix user), on the gateway host | Inside the harness for v1; move it next to the gateway once connectors land |
-| Reviewer model | Small hosted model via API key, local model on your own GPU | Small hosted model; revisit local once the rules are stable |
-| Web client stack | SolidJS, React, Svelte; Tailwind for styling | SolidJS + Tailwind |
-| Connector gateway | Native connectors, off-the-shelf MCP proxy (hoophq mcpproxy, Arbitus) | Native connectors, GitHub first (see Native connectors) |
-| Agent privileges | Keep root in the VM, unprivileged users | Unprivileged users; the gate only holds if agents can't edit it |
-| Native app stack | Tauri mobile, React Native, Swift and Kotlin | Decide at stage 9 |
+| Server language | TypeScript, Rust, Go | Decided: TypeScript ~~on Node.js LTS~~ on Bun ([0007](../decisions/0007-bun-runtime.md)). Official ACP, MCP and 1Password SDKs, and one language with the web client |
+| Adapter protocol | ACP, native stream-json per CLI | ACP first, stream-json as fallback per provider ([0027](../decisions/0027-acp-first-adapters.md)) |
+| Where the policy engine runs | Inside the harness (own Unix user), on the gateway host | Inside the harness for v1; move it next to the gateway once connectors land ([0028](../decisions/0028-policy-engine-in-harness.md)) |
+| Reviewer model | Small hosted model via API key, local model on your own GPU | Small hosted model; revisit local once the rules are stable ([0029](../decisions/0029-hosted-reviewer-model.md)) |
+| Web client stack | SolidJS, React, Svelte; Tailwind for styling | ~~SolidJS + Tailwind~~ Decided: React + Tailwind ([0008](../decisions/0008-react-and-tailwind.md)) |
+| Connector gateway | Native connectors, off-the-shelf MCP proxy (hoophq mcpproxy, Arbitus) | Native connectors, GitHub first (see Native connectors) ([0030](../decisions/0030-native-connectors.md)) |
+| Agent privileges | Keep root in the VM, unprivileged users | Unprivileged users; the gate only holds if agents can't edit it ([0031](../decisions/0031-unprivileged-agents.md), amended by [0006](../decisions/0006-shared-agent-user.md): one shared agent user) |
+| Native app stack | Tauri mobile, React Native, Swift and Kotlin | Decide at stage 9 ([0032](../decisions/0032-native-app-stack-deferred.md)) |
 
 ## Sources
 
@@ -676,7 +688,7 @@ Issue-sized tasks for every milestone, each with acceptance criteria and depende
 | M0-01 | Spike: Claude over ACP on a subscription login | Written finding: which ACP adapter runs on a Pro or Max login without an API key, and whether that fits current terms | M0-00 |
 | M0-02 | Spike: Grok headless billing | Written finding: whether `grok agent stdio` draws on the SuperGrok subscription or an xAI API key | M0-00 |
 | M0-03 | Spike: headless without Electron | Prototype where one install exposes `aphelion --headless` and runs on a server VM with no GUI libraries | M0-00 |
-| M0-04 | Monorepo scaffold | pnpm workspaces (server, client, protocol, plugin-sdk, cli), strict TypeScript, lint, Vitest; GitHub Actions green on lint, typecheck and test | M0-00 |
+| M0-04 | Monorepo scaffold | ~~pnpm workspaces~~ Bun workspaces ([0007](../decisions/0007-bun-runtime.md)) (server, client, protocol, plugin-sdk, cli), strict TypeScript, lint, Vitest; GitHub Actions green on lint, typecheck and test | M0-00 |
 | M0-05 | Repo hygiene and MIT license | LICENSE (MIT), README, CONTRIBUTING, SECURITY.md with a private reporting channel; issue and PR templates that ask for the plan link and docs touched; protected main and dev branches, code owners for security-sensitive paths, and the label set | M0-04 |
 | M0-16 | Docs site and decision records | Starlight site in `docs/` built in CI with a link check; decision-record template; this plan imported as `docs/plan` and its decisions written up as the first records | M0-04 |
 | M0-06 | Config directory and schema | Versioned layout for agents, policy, routines and connectors; invalid config fails with a clear error; one migration tested | M0-04 |
@@ -685,7 +697,7 @@ Issue-sized tasks for every milestone, each with acceptance criteria and depende
 | M0-09 | Protocol package v0 | Command and event types, sequence numbers, replay from a cursor, idempotent command ids, `v: 1` on every frame; replay test; protocol spec generated into the docs | M0-04, M0-16 |
 | M0-10 | API server skeleton | HTTP and WebSocket bound to a configured interface; `/health`; per-device tokens; unauthenticated sockets rejected | M0-09 |
 | M0-11 | CLI and headless mode | `aphelion --headless`, `--version` and `config check`, following M0-03's finding | M0-03, M0-10 |
-| M0-12 | Linux install script and systemd unit | Creates the harness user and agent users without sudo, sets directory permissions, installs a hardened unit; service survives a reboot; install guide written | M0-11 |
+| M0-12 | Linux install script and systemd unit | Creates the ~~harness user and agent users~~ `harness` and `aphelion-agent` users ([0006](../decisions/0006-shared-agent-user.md)) without sudo, sets directory permissions, installs a hardened unit; service survives a reboot; install guide written | M0-11 |
 | M0-13 | Plugin host v0 | Manifest schema, API-range check, one process per plugin over JSON-RPC, permission grants stored and enforced; a sample plugin passes and an out-of-range plugin is refused; API reference generated into the docs | M0-04, M0-07, M0-16 |
 | M0-14 | Secrets broker v0 | Secret wrapper, reference syntax, local age-encrypted store, bootstrap secret via systemd-creds; test proves values never land in logs or the database | M0-08 |
 | M0-15 | 1Password backend plugin | Resolves op:// references with a read-only service account through the official SDK | M0-13, M0-14 |
@@ -696,10 +708,11 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
+| M1-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M1 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M1-01 | Agent adapter contract | Plugin interface that emits normalized events: text delta, tool start and end, permission request, turn end, error, usage | M0-13 |
 | M1-02 | Claude adapter plugin (ACP) | Streams a full turn with tool calls, using the auth path from M0-01 | M1-01, M0-01 |
 | M1-03 | Claude stream-json fallback | `-p --output-format stream-json --verbose --resume` behind the same contract, switchable per agent | M1-01 |
-| M1-04 | Session manager | One process per agent under its own Unix user; restart on crash; resume by session id and working directory; cancel kills the whole process group | M1-02, M0-12 |
+| M1-04 | Session manager | One process per agent ~~under its own Unix user~~ as the shared `aphelion-agent` user ([0006](../decisions/0006-shared-agent-user.md)); restart on crash; resume by session id and working directory; cancel kills the whole process group | M1-02, M0-12 |
 | M1-05 | Message history | Turns and events persisted; a client that reconnects gets the missed events replayed | M1-04, M0-09 |
 | M1-06 | Minimal test client | CLI chat against the API that shows streaming text and tool events | M0-10, M1-05 |
 | M1-07 | Adapter contract tests | Recorded event streams for each adapter replayed in CI | M1-02, M1-03 |
@@ -708,6 +721,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
+| M2-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M2 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M2-01 | Policy model and file format | Rules match on agent, tool, connector and arguments; actions are allow, review, ask and deny; presets, scopes and a hard floor; schema-validated | M0-06 |
 | M2-02 | Policy engine | Tests cover most-specific-wins, the hard floor and every preset | M2-01 |
 | M2-03 | Approval lifecycle | Requests bound to a hash of the exact tool and arguments; pending, decided and expired states; timeout defaults to deny; grant lengths (once, session, timed, always) | M2-02, M0-07 |
@@ -720,6 +734,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
+| M3-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M3 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M3-01 | Gateway service | Runs on a separate host or as a separate local user; authenticated channel to the harness; hosts the secrets broker | M0-14 |
 | M3-02 | Connector plugin contract | Manifest with tools, risk classes and provider permissions; auth flow; handlers; optional event source | M0-13 |
 | M3-03 | Harness MCP endpoint | One endpoint per agent session with a short-lived bearer token; aggregates connector tools; every call goes through the policy engine | M3-02, M2-04 |
@@ -733,6 +748,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
+| M4-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M4 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M4-01 | Grok adapter plugin | `grok agent stdio` behind the adapter contract, using the auth path from M0-02 | M1-01, M0-02 |
 | M4-02 | Agent registry | Agents defined in config and synced to the database; create, edit and archive | M0-06 |
 | M4-03 | Per-agent queues | Pause, resume, cancel and reorder; queues survive a restart | M1-04 |
@@ -746,7 +762,8 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
-| M5-01 | Client shell | SolidJS and Tailwind; three-pane layout that collapses to one pane on phones; PWA manifest; reconnect with event replay | M0-09 |
+| M5-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M5 (scope, design notes, risks, open questions), reviewed before other work starts | none |
+| M5-01 | Client shell | ~~SolidJS and Tailwind~~ React and Tailwind ([0008](../decisions/0008-react-and-tailwind.md)); three-pane layout that collapses to one pane on phones; PWA manifest; reconnect with event replay | M0-09 |
 | M5-02 | Theme engine and default theme | Token schema; default theme from Visual design; light, dark and follow-system; token lint; contrast check | M5-01 |
 | M5-03 | Chat view | Streaming text, mono tool-call cards, inline approval cards, linked agent-to-agent threads | M5-01, M2-06, M4-06 |
 | M5-04 | Right panel | Activity, Approvals, Files and Usage tabs | M5-03 |
@@ -767,6 +784,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
+| M6-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M6 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M6-01 | Scheduler | Cron with IANA time zones; missed-run and overlap policies; run history | M4-03 |
 | M6-02 | Routine definitions | Routines in config and the UI, each with its own policy profile | M6-01, M5-01 |
 | M6-03 | GitHub event source | Polling for new issues and review requests triggers routines | M3-04, M6-01 |
@@ -776,6 +794,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
+| M7-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M7 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M7-01 | Usage collector contract | Snapshots per provider: window, percent used, reset time | M0-13 |
 | M7-02 | Claude collector | Reads status-line rate limits, with the usage endpoint as an optional fallback; degrades gracefully when either breaks | M7-01 |
 | M7-03 | Grok collector | Estimates from token counts, with manual calibration | M7-01 |
@@ -785,6 +804,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
+| M8-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M8 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M8-01 | Reviewer plugin | A model call that sees only the tool and its arguments; configurable model and releasable risk classes; reviews agent handoffs | M2-02, M4-07 |
 | M8-02 | Forgejo connector | Same tool set, policy model and Work view support as GitHub | M3-02, M5-06 |
 | M8-03 | Notion connector (read-only first) | Read tools first; writes default to ask | M3-02 |
@@ -795,6 +815,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
+| M9-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M9 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M9-01 | Native app shell | Same protocol over Tailscale; stack chosen in an opening spike | M5-01 |
 | M9-02 | Push via APNs and FCM | Content-free pings; the app fetches details over Tailscale | M9-01 |
 | M9-03 | WebRTC transport | Only if Tailscale on the phone becomes a blocker; carries the same protocol | M9-01 |
