@@ -36,12 +36,13 @@ Write docs and PR descriptions for a reader who isn't a TypeScript or web develo
 
 ## Run the checks before you push
 
-Run the three checks from the [Develop section of the README](README.md#develop). All three must pass, and CI runs the same ones.
+Run the four checks below. All four must pass, and CI runs the same ones. `bun run docs` builds the docs site and checks every link in it.
 
 ```sh
 bun run lint
 bun run typecheck
 bun run test
+bun run docs
 ```
 
 ## Labels

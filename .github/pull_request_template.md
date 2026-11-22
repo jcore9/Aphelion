@@ -10,7 +10,7 @@ Closes #
 
 ## How to review
 
-<!-- The owner is not a TypeScript or web developer. Name the few files that matter, in reading order. For each one, give its path and line range, say in plain words what it does, and say what to check there. Then list what is safe to skim, such as `bun.lock`, generated files and tests that repeat the code's cases. -->
+<!-- The owner is not a TypeScript or web developer. Name the few files that matter, in reading order. For each one, give its path and line range, say in plain words what it does, and say what to check there. Name the tests that show the change works. Then list what is safe to skim, such as `bun.lock` and generated files. -->
 
 1. `path/to/file.ts` lines N to M: what it does, and what to check.
 
