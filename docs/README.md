@@ -36,6 +36,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [The client protocol](reference/protocol.md): how frames, sequence numbers, replay, resync and command ids work.
 - [Protocol spec](reference/protocol-spec.md): every frame, command, event and error code, generated from the protocol schemas.
 - [Plugin manifest](reference/plugin-manifest.md): the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
+- [Secrets](reference/secrets.md): the `Secret` type, what it guarantees and what it doesn't, how to read a value, and the secret reference syntax.
 
 ## Decision records
 
@@ -84,3 +85,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0040](decisions/0040-protocol-spec-generator.md) | A test renders the protocol spec and the frame JSON Schemas from the Zod schemas, and fails when the committed files are stale | Proposed |
 | [0041](decisions/0041-effect-in-server-and-cli.md) | The server and the CLI use the Effect library, and nothing else does | Accepted |
 | [0042](decisions/0042-plugin-server-and-client-parts.md) | A plugin has a server part, a client part or both, and its client part is installed on the server, served to every client and always sandboxed | Accepted |
+| [0044](decisions/0044-secret-type.md) | `Secret` is a small class of Aphelion's own, modelled on Effect's `Redacted`, and it throws when serialized | Proposed |

@@ -6,7 +6,7 @@ The server keeps two records of what it does. The log is for people who debug th
 
 The owner decided on 2026-11-22 to rely on structure, not on searching free text. There are three layers, and a fourth that is only a backup:
 
-1. **The `Secret` type.** M0-14 adds a wrapper that holds a secret and always hides itself when it is logged. Code that handles a secret keeps it in this wrapper. [Values that redact themselves](#values-that-redact-themselves) explains the hook it uses.
+1. **The `Secret` type.** A wrapper that holds a secret and always hides itself when it is logged. Code that handles a secret keeps it in this wrapper. [The secrets reference](secrets.md) describes it, and [values that redact themselves](#values-that-redact-themselves) explains the hook it uses.
 2. **Fixed messages and named fields.** Every log message is fixed text, written in the code, and the same holds for the audit `action`. The compiler catches ordinary mistakes, such as pasting a value into the message. Data goes only in named fields, and a field whose name says it holds a secret, such as `password` or `token`, is hidden whatever its value is. [Fixed messages](#fixed-messages) explains the rule.
 3. **Masking known secret values.** When the server learns a secret's exact value, it registers it with `maskSecretValue`. From then on, every occurrence of that exact text is replaced with `[REDACTED]`. [Known secret values](#known-secret-values) explains it.
 4. **Pattern scanning, as a backup.** The redactor also searches text for known token formats, such as GitHub tokens and `Bearer` headers. It can't recognize every secret. [What redaction doesn't catch](#what-redaction-doesnt-catch) lists its known gaps, and they are listed rather than chased.
@@ -118,11 +118,11 @@ So `accessToken`, `ACCESSTOKEN`, `refresh_token`, `x-api-key` and `set-cookie` a
 - When registered values contain or overlap each other, the whole run they cover becomes one `[REDACTED]`.
 - The mask also applies to object keys, and to numbers and `bigint` values through their text form. A number whose text is a registered value is written as `"[REDACTED]"`.
 - When a value is registered, its base64 form, its `encodeURIComponent` form and its JSON-escaped form are registered too, each only when it differs from the value and is 8 or more characters long. This follows the GitHub Actions runner, which registers encoded forms of each mask ([`HostContext.cs`](https://github.com/actions/runner/blob/main/src/Runner.Common/HostContext.cs)).
-- `unmaskSecretValue(value)` removes a value and its encoded forms.
-- The list holds at most 10,000 values (`maskLimit`). Once it is full, `maskSecretValue` throws a `MaskListFullError` and adds nothing, and the values already on the list stay masked. This fails closed: a secret that can't be masked can't be used either, because M0-14's `Secret` must let this error stop the secret's resolution. Registering a value that is already on the list doesn't throw. The list never drops an old value on its own, because that would quietly stop masking it.
+- `unmaskSecretValue(value)` removes a value and its encoded forms. The list counts how many times each value was registered, so a value stays masked until each `maskSecretValue` call for it has a matching `unmaskSecretValue`.
+- The list holds at most 10,000 values (`maskLimit`). Once it is full, `maskSecretValue` throws a `MaskListFullError` and adds nothing, and the values already on the list stay masked. This fails closed: a secret that can't be masked can't be used either, because `Secret.make` lets this error through and makes no `Secret`. Registering a value that is already on the list doesn't throw. The list never drops an old value on its own, because that would quietly stop masking it.
 - `maskSecretValue` returns `"masked"` on success, and `"too short"` for a value under 8 characters, which isn't masked.
 - The list lives only in the server's memory, from registration until `unmaskSecretValue` or the end of the process. It is never written anywhere, and nothing can read it back.
-- M0-14's `Secret` type will call `maskSecretValue` when a secret is resolved, and `unmaskSecretValue` when it is wiped. That integration arrives with M0-14.
+- `Secret.make` calls `maskSecretValue`, and `secret.wipe()` calls `unmaskSecretValue` ([secrets reference](secrets.md#what-a-secret-guarantees)).
 
 A test registers 1,000 values and checks a 1 MB line in under 1 second. On the development machine on 2026-11-22, it took about 100 ms.
 
@@ -172,7 +172,7 @@ The minimum lengths keep ordinary words such as `sk-learn`, `sk-this-is-an-ordin
 
 ### Values that redact themselves
 
-An object that has a method under `Symbol.for("aphelion.redactSelf")` is replaced by what that method returns. The method must return a placeholder string, such as `"[secret op://vault/item]"`, and never the value itself. The redactor applies the rules to whatever the method returns, but a secret with no known format passes through unchanged. The server exports the symbol as `redactSelf`. Code outside the server, such as `plugin-sdk`, reaches the same symbol with `Symbol.for("aphelion.redactSelf")`, with no import. M0-14's `Secret` type uses this method.
+An object that has a method under `Symbol.for("aphelion.redactSelf")` is replaced by what that method returns. The method must return a placeholder string, such as `"[secret op://vault/item]"`, and never the value itself. The redactor applies the rules to whatever the method returns, but a secret with no known format passes through unchanged. The server exports the symbol as `redactSelf`. Code outside the server, such as `plugin-sdk`, reaches the same symbol with `Symbol.for("aphelion.redactSelf")`, with no import. The `Secret` type uses this method, and returns `<redacted>` or `<redacted:label>`.
 
 ```ts
 class Secret {

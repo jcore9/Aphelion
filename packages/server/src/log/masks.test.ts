@@ -117,3 +117,15 @@ test("stops masking a value and its encoded forms once it is removed", () => {
     expect(redactText(form)).toBe(form);
   }
 });
+
+test("keeps a value masked until every registration of it is removed", () => {
+  const value = "Twice-registered-value";
+  maskSecretValue(value);
+  maskSecretValue(value);
+
+  unmaskSecretValue(value);
+  expect(redactText(`x ${value} y`)).toBe(`x ${REDACTED} y`);
+
+  unmaskSecretValue(value);
+  expect(redactText(`x ${value} y`)).toBe(`x ${value} y`);
+});
