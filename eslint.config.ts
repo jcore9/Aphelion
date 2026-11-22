@@ -22,6 +22,11 @@ const webOnly =
 const nodeModules = builtinModules.filter((name) => !name.startsWith("bun"));
 
 const bunImports = { regex: "^bun(:|$)", message: bunOnly };
+const effectBunImports = {
+  regex: "^@effect/(platform-bun|sql-sqlite-bun)(/|$)",
+  message:
+    "@effect/platform-bun and @effect/sql-sqlite-bun use Bun-only APIs. Import them from an adapter module under src/adapters/ in server or cli (decisions 0007 and 0041).",
+};
 const nodeImports = {
   regex: `^(node:|(${nodeModules.join("|")})(/|$))`,
   message: webOnly,
@@ -84,7 +89,7 @@ export default defineConfig(
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
-      ...restrict([bunImports], bunGlobals),
+      ...restrict([bunImports, effectBunImports], bunGlobals),
       "no-restricted-properties": [
         "error",
         { object: "globalThis", property: "Bun", message: bunOnly },
@@ -94,7 +99,7 @@ export default defineConfig(
   {
     files: webPackages,
     rules: restrict(
-      [bunImports, nodeImports, hostImports],
+      [bunImports, effectBunImports, nodeImports, hostImports],
       [...bunGlobals, ...nodeGlobals],
     ),
   },

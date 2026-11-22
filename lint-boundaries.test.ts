@@ -29,6 +29,12 @@ const code = {
     'import * as server from "@aphelion/server";\nexport const host = server;\n',
   dynamicBunImport: 'export const load = () => import("bun:sqlite");\n',
   requireBun: 'export const bun: unknown = require("bun");\n',
+  effectBunImport:
+    'import { BunHttpServer } from "@effect/platform-bun";\nexport const http = BunHttpServer;\n',
+  effectSqliteSubpath:
+    'import { SqliteClient } from "@effect/sql-sqlite-bun/SqliteClient";\nexport const sql = SqliteClient;\n',
+  effectImport:
+    'import { Effect } from "effect";\nexport const run = Effect.succeed(1);\n',
   dynamicNodeImport: 'export const load = () => import("fs/promises");\n',
   dynamicServerImport:
     'export const load = () => import("@aphelion/server/store");\n',
@@ -65,6 +71,14 @@ test.each([
     ["@typescript-eslint/no-require-imports"],
   ],
   ["packages/server/src/adapters/store.ts", "dynamicBunImport", []],
+  ["packages/server/src/http.ts", "effectBunImport", [imports]],
+  ["packages/cli/src/main.ts", "effectBunImport", [imports]],
+  ["packages/server/src/store.ts", "effectSqliteSubpath", [imports]],
+  ["packages/protocol/src/frame.ts", "effectBunImport", [imports]],
+  ["packages/server/src/adapters/http.ts", "effectBunImport", []],
+  ["packages/server/src/adapters/store.ts", "effectSqliteSubpath", []],
+  ["packages/cli/src/adapters/run.ts", "effectBunImport", []],
+  ["packages/server/src/http.ts", "effectImport", []],
   ["packages/server/src/config.ts", "dynamicNodeImport", []],
   ["packages/protocol/src/frame.ts", "dynamicNodeImport", [syntax]],
   ["packages/client/src/main.ts", "dynamicServerImport", [syntax]],
