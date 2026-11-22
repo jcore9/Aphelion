@@ -13,12 +13,16 @@ export interface ProcessExit {
   readonly signal: string | null;
 }
 
+export interface Cleanup {
+  readonly survivors: number;
+}
+
 export interface PluginProcess {
   readonly write: (line: string) => Effect.Effect<void>;
   readonly stdout: Stream.Stream<Uint8Array>;
   readonly stderr: Stream.Stream<Uint8Array>;
   readonly exited: Effect.Effect<ProcessExit>;
-  readonly kill: Effect.Effect<void>;
+  readonly kill: Effect.Effect<Cleanup>;
 }
 
 export class SpawnFailed extends Data.TaggedError("SpawnFailed")<{
@@ -31,6 +35,6 @@ export class PluginProcesses extends Context.Service<
     readonly spawn: (
       spec: SpawnSpec,
     ) => Effect.Effect<PluginProcess, SpawnFailed>;
-    readonly sweep: Effect.Effect<void>;
+    readonly sweep: Effect.Effect<Cleanup>;
   }
 >()("aphelion/plugins/PluginProcesses") {}

@@ -17,6 +17,7 @@ Some words used below:
 - An **orphan** is a process whose parent died. Linux gives it a new parent, normally the container's init.
 - A **child subreaper** is a process that asks Linux, with `prctl(PR_SET_CHILD_SUBREAPER)`, to become the new parent of orphans from below it, instead of init.
 - **Freezing** a process means sending it `SIGSTOP`. A frozen process can't fork.
+- A **PID** is the number Linux gives a process. Linux reuses the number after the process is gone. The **start time** in `/proc/<pid>/stat` (field 22) tells two processes with the same PID apart.
 
 ## Options
 
@@ -35,10 +36,13 @@ The runner makes itself a child subreaper when it starts. So every process that 
 
 To stop a plugin, the runner:
 
-1. Collects the plugin's process tree and every orphan it has adopted, from the parent of each process in `/proc`.
+1. Collects the plugin's process tree and every orphan it has adopted, from the parent of each process in `/proc`. It records each process as its PID and start time.
 2. Freezes each process it found with `SIGSTOP`.
-3. Collects again, and freezes the new processes, until a pass finds no new process. A frozen process can't fork, so the passes end.
-4. Kills every frozen process with `SIGKILL`, and waits for each to be gone.
+3. Collects again, and freezes the new processes, until a pass finds no new process.
+4. Kills every frozen process with `SIGKILL`.
+5. Waits up to 2 seconds for each process to be gone. It logs an error with the number of processes that are still there.
+
+Before each signal, the runner reads the start time again. If it changed, the PID belongs to a new process, and the runner doesn't send the signal.
 
 An orphan carries no mark of the plugin it came from. So the runner treats every orphan as a process to kill:
 
@@ -52,6 +56,11 @@ Only the runner reads `/proc` and sends signals. The server still goes through t
 ## Consequences
 
 - Plugin authors must keep child processes attached. [Running plugins on the server](../reference/plugins.md#child-processes) says so.
+- The cleanup is best effort, for these reasons:
+  - Linux delivers `SIGSTOP` a moment after the runner sends it. A process can fork in that moment, after the runner's last pass. The fork becomes an orphan when its parent is killed, and the next 10-second sweep kills it.
+  - A PID can be reused between the runner's check of the start time and its signal. The window is a few microseconds. Only a `pidfd`, a file handle that names one process, closes it. Bun has no `pidfd` call yet.
+  - The runner reports processes that didn't go away in time as an error in its log. It still tells the host that the plugin stopped.
+- Stopping one plugin kills the detached processes of every plugin, because an orphan carries no mark of its plugin. A plugin can use that to disrupt another plugin.
 - The runner depends on Linux and on `libc.so.6`. Aphelion supports only Linux on the server ([decision 0011](0011-ubuntu-lts.md)).
 - Every plugin runs as the same user, so a plugin can send signals to another plugin's processes. This method doesn't change that. [Decision 0045](0045-no-bot-namespaces-default-seccomp.md) accepted it.
 - The agent runner has the same problem in M1-04 ([#22](https://github.com/jcore9/Aphelion/issues/22)). It may reuse this method. M1-04 decides.

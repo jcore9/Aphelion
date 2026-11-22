@@ -22,9 +22,15 @@ import {
   type ProcessExit,
   type SpawnSpec,
 } from "./processes";
-import { runRunner } from "./runner";
+import {
+  maxLogLinesPerMinute,
+  runRunner,
+  stoppedReading,
+  tooMuchLog,
+} from "./runner";
 import {
   maxFrameBytes,
+  maxPluginLineBytes,
   runnerReplySchema,
   runnerRequestSchema,
   type RunnerReply,
@@ -37,19 +43,23 @@ interface FakeIo {
   readonly env: Readonly<Record<string, string>>;
   readonly read: Effect.Effect<Message>;
   readonly write: (message: Message | string) => Effect.Effect<void>;
+  readonly writeError: (text: string) => Effect.Effect<void>;
   readonly call: (method: string, params?: unknown) => Effect.Effect<Message>;
 }
 
 type FakePlugin = (io: FakeIo) => Effect.Effect<number>;
 
-function fakeProcesses(plugins: Record<string, FakePlugin>) {
+function fakeProcesses(
+  plugins: Record<string, FakePlugin>,
+  deaf: readonly string[],
+) {
   const record = {
     spawned: [] as SpawnSpec[],
     received: [] as string[],
     killed: 0,
   };
   const layer = Layer.succeed(PluginProcesses, {
-    sweep: Effect.void,
+    sweep: Effect.succeed({ survivors: 0 }),
     spawn: (spec) =>
       Effect.gen(function* () {
         record.spawned.push(spec);
@@ -58,6 +68,7 @@ function fakeProcesses(plugins: Record<string, FakePlugin>) {
           return yield* new SpawnFailed({ reason: "no such plugin" });
         const stdin = yield* Queue.unbounded<string>();
         const stdout = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+        const stderr = yield* Queue.unbounded<Uint8Array, Cause.Done>();
         const exit = yield* Deferred.make<ProcessExit>();
         const encoder = new TextEncoder();
         let nextId = 1000;
@@ -71,6 +82,8 @@ function fakeProcesses(plugins: Record<string, FakePlugin>) {
               `${typeof message === "string" ? message : JSON.stringify(message)}\n`,
             ),
           ).pipe(Effect.asVoid);
+        const writeError = (text: string) =>
+          Queue.offer(stderr, encoder.encode(text)).pipe(Effect.asVoid);
         const call = (method: string, params?: unknown) =>
           Effect.gen(function* () {
             const id = nextId++;
@@ -80,27 +93,37 @@ function fakeProcesses(plugins: Record<string, FakePlugin>) {
               if (message["id"] === id) return message;
             }
           });
-        const fiber = yield* script({ env: spec.env, read, write, call }).pipe(
+        const fiber = yield* script({
+          env: spec.env,
+          read,
+          write,
+          writeError,
+          call,
+        }).pipe(
           Effect.flatMap((code) =>
             Deferred.succeed(exit, { code, signal: null }),
           ),
           Effect.ensuring(Queue.end(stdout)),
+          Effect.ensuring(Queue.end(stderr)),
           Effect.forkDetach,
         );
         return {
           write: (line: string) =>
-            Effect.sync(() => record.received.push(line)).pipe(
-              Effect.andThen(Queue.offer(stdin, line)),
-              Effect.asVoid,
-            ),
+            deaf.includes(spec.plugin)
+              ? Effect.never
+              : Effect.sync(() => record.received.push(line)).pipe(
+                  Effect.andThen(Queue.offer(stdin, line)),
+                  Effect.asVoid,
+                ),
           stdout: Stream.fromQueue(stdout),
-          stderr: Stream.empty,
+          stderr: Stream.fromQueue(stderr),
           exited: Deferred.await(exit),
           kill: Fiber.interrupt(fiber).pipe(
             Effect.andThen(
               Deferred.succeed(exit, { code: null, signal: "SIGKILL" }),
             ),
             Effect.andThen(Effect.sync(() => record.killed++)),
+            Effect.as({ survivors: 0 }),
           ),
         };
       }),
@@ -118,21 +141,24 @@ const fastPolicy: RestartPolicy = {
   handshakeMs: 1_000,
   graceMs: 100,
   firstRetryMs: 20,
-  maxRetryMs: 100,
   maxCrashes: 3,
   stableMs: 60_000,
 };
 
 interface HarnessOptions {
-  readonly grants?: (plugin: string, permission: Permission) => boolean;
+  readonly grants?: (
+    plugin: string,
+    permission: Permission,
+  ) => boolean | Effect.Effect<boolean>;
   readonly policy?: RestartPolicy;
+  readonly deaf?: readonly string[];
 }
 
 function harness(
   plugins: Record<string, FakePlugin>,
   options: HarnessOptions = {},
 ) {
-  const fake = fakeProcesses(plugins);
+  const fake = fakeProcesses(plugins, options.deaf ?? []);
   const logs: Message[] = [];
   const logger = createLogger({
     level: "debug",
@@ -145,24 +171,29 @@ function harness(
         framing(runnerReplySchema),
         framing(runnerRequestSchema),
       );
-      yield* runRunner(b, { dataRoot: "/data", sweepEvery: "1 hour" }).pipe(
-        Effect.provide(fake.layer),
-        Effect.forkScoped,
-      );
+      yield* runRunner(b, {
+        dataRoot: "/data",
+        sweepEvery: "1 hour",
+        inputDeadline: "50 millis",
+        logger,
+      }).pipe(Effect.provide(fake.layer), Effect.forkScoped);
       return a;
     }),
   );
   const { grants } = options;
   const grantsLayer = grants
     ? Layer.succeed(PluginGrants, {
-        allows: (plugin, permission) =>
-          Effect.succeed(grants(plugin, permission)),
+        allows: (plugin, permission) => {
+          const allowed = grants(plugin, permission);
+          return typeof allowed === "boolean"
+            ? Effect.succeed(allowed)
+            : allowed;
+        },
       })
     : PluginGrants.refuseAll;
   const layer = pluginHostLayer({
     logger,
     policy: options.policy ?? fastPolicy,
-    proxy: { httpsProxy: "http://proxy:3128", noProxy: "localhost" },
   }).pipe(Layer.provide(runnerLink), Layer.provide(grantsLayer));
   return { layer, record: fake.record, logs };
 }
@@ -503,8 +534,7 @@ describe("the plugin host", () => {
             }),
         },
         {
-          grants: (_, permission) =>
-            permission.kind === "event" && permission.name === "agent.status",
+          grants: (_, permission) => permission.name === "agent.status",
         },
       );
       return Effect.gen(function* () {
@@ -612,29 +642,155 @@ describe("the plugin host", () => {
   });
 
   it.live(
-    "passes the proxy only to a plugin with a granted network host",
+    "doesn't hand an event checked for one run to the run that replaced it",
     () => {
-      const run = (io: FakeIo) =>
-        handshake(io).pipe(Effect.andThen(serveUntilShutdown(io)));
-      const { layer, record } = harness(
-        { online: run, offline: run, ungranted: run },
-        { grants: (plugin) => plugin !== "ungranted" },
+      const events: Message[] = [];
+      let runs = 0;
+      let subscribed = false;
+      let checking = false;
+      let gate: Deferred.Deferred<boolean> | undefined;
+      const { layer } = harness(
+        {
+          racer: (io) =>
+            Effect.gen(function* () {
+              const run = ++runs;
+              yield* handshake(io);
+              if (run === 1) {
+                yield* io.call("events.subscribe", { event: "agent.status" });
+                subscribed = true;
+              }
+              for (;;) {
+                const message = yield* io.read;
+                if (message["method"] === "shutdown") return 0;
+                if (message["method"] === "event")
+                  events.push({ run, message });
+              }
+            }),
+        },
+        {
+          grants: () => {
+            if (gate === undefined) return true;
+            checking = true;
+            return Deferred.await(gate);
+          },
+        },
       );
       return Effect.gen(function* () {
         const host = yield* PluginHost;
-        const network = { network: ["api.example.com"] };
-        yield* host.start(yield* serverPlugin("online", network));
-        yield* host.start(yield* serverPlugin("offline"));
-        yield* host.start(yield* serverPlugin("ungranted", network));
-        yield* waitUntil(() => record.spawned.length === 3);
-        const proxyOf = (plugin: string) =>
-          record.spawned.find((spec) => spec.plugin === plugin)?.env[
-            "HTTPS_PROXY"
-          ];
-        expect(proxyOf("online")).toBe("http://proxy:3128");
-        expect(proxyOf("offline")).toBeUndefined();
-        expect(proxyOf("ungranted")).toBeUndefined();
+        const folder = yield* serverPlugin("racer", {
+          events: ["agent.status"],
+        });
+        yield* host.start(folder);
+        yield* waitUntil(() => subscribed);
+        const opened = yield* Deferred.make<boolean>();
+        gate = opened;
+        const publishing = yield* Effect.forkChild(
+          host.publish({ name: "agent.status", data: {} }),
+        );
+        yield* waitUntil(() => checking);
+        yield* host.stop("racer");
+        yield* waitFor("racer", { state: "stopped" });
+        yield* host.start(folder);
+        yield* waitFor("racer", { state: "running", run: 2 });
+        yield* Deferred.succeed(opened, true);
+        yield* Fiber.join(publishing);
+        yield* Effect.sleep("50 millis");
+        expect(events).toEqual([]);
       }).pipe(Effect.provide(layer));
     },
   );
+
+  it.live(
+    "keeps stopping other plugins while one plugin doesn't read its input",
+    () => {
+      const { layer, record, logs } = harness(
+        {
+          deaf: () => Effect.never,
+          polite: (io) =>
+            handshake(io).pipe(Effect.andThen(serveUntilShutdown(io))),
+        },
+        { deaf: ["deaf"], policy: { ...fastPolicy, handshakeMs: 60_000 } },
+      );
+      return Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.start(yield* serverPlugin("polite"));
+        yield* waitFor("polite", { state: "running" });
+        yield* host.start(yield* serverPlugin("deaf"));
+        yield* waitUntil(() =>
+          record.spawned.some((spec) => spec.plugin === "deaf"),
+        );
+        yield* Effect.sleep("10 millis");
+        yield* host.stop("polite");
+        yield* waitFor("polite", { state: "stopped", reason: "requested" });
+        yield* waitUntil(() =>
+          logs.some(
+            (log) => log["plugin"] === "deaf" && log["line"] === stoppedReading,
+          ),
+        );
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
+  it.live(
+    "crashes a plugin that sends messages faster than the host handles them",
+    () => {
+      const { layer, logs } = harness(
+        {
+          flood: (io) =>
+            Effect.gen(function* () {
+              yield* handshake(io);
+              yield* io.write({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "events.subscribe",
+                params: { event: "agent.status" },
+              });
+              const padding = "x".repeat(maxPluginLineBytes - 100);
+              for (let i = 0; i < 20; i++) {
+                yield* io.write({
+                  jsonrpc: "2.0",
+                  method: "note",
+                  params: [padding],
+                });
+              }
+              return yield* serveUntilShutdown(io);
+            }),
+        },
+        { grants: () => Effect.sleep("300 millis").pipe(Effect.as(true)) },
+      );
+      return Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.start(
+          yield* serverPlugin("flood", { events: ["agent.status"] }),
+        );
+        yield* waitFor("flood", { state: "crashed", run: 1 });
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            msg: "plugin sent messages faster than the host handles them",
+            plugin: "flood",
+          }),
+        );
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
+  it.live("logs at most 1000 lines a minute from a plugin's stderr", () => {
+    const { layer, logs } = harness({
+      chatty: (io) =>
+        Effect.gen(function* () {
+          yield* handshake(io);
+          yield* io.writeError("line\n".repeat(maxLogLinesPerMinute + 50));
+          return yield* serveUntilShutdown(io);
+        }),
+    });
+    return Effect.gen(function* () {
+      const host = yield* PluginHost;
+      yield* host.start(yield* serverPlugin("chatty"));
+      yield* waitUntil(() => logs.some((log) => log["line"] === tooMuchLog));
+      yield* Effect.sleep("20 millis");
+      expect(
+        logs.filter((log) => log["msg"] === "plugin wrote to stderr"),
+      ).toHaveLength(maxLogLinesPerMinute + 1);
+    }).pipe(Effect.provide(layer));
+  });
 });

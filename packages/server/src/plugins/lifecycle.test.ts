@@ -31,8 +31,8 @@ describe("the plugin lifecycle", () => {
     expect(state).toEqual({ state: "running", run: 1, crashes: 0, since: 0 });
     expect(commands).toEqual([
       { type: "spawn", run: 1 },
-      { type: "arm", run: 1, ms: policy.handshakeMs },
       { type: "initialize" },
+      { type: "arm", run: 1, deadline: "handshake", ms: policy.handshakeMs },
     ]);
   });
 
@@ -40,7 +40,7 @@ describe("the plugin lifecycle", () => {
     const { state, commands } = play([
       ...toRunning,
       { type: "exited", run: 1, at: 10 },
-      { type: "timer", run: 1 },
+      { type: "timer", run: 1, deadline: "retry" },
       { type: "spawned", run: 2 },
       { type: "exited", run: 2, at: 20 },
     ]);
@@ -53,12 +53,18 @@ describe("the plugin lifecycle", () => {
     expect(commands).toContainEqual({ type: "spawn", run: 2 });
   });
 
-  it("caps the delay and gives up after too many crashes", () => {
-    expect(retryDelay(1, policy)).toBe(policy.firstRetryMs);
-    expect(retryDelay(30, policy)).toBe(policy.maxRetryMs);
+  it("waits 1, 2, 4, 8 and 16 seconds, then gives up after the sixth crash", () => {
+    expect(
+      Array.from({ length: policy.maxCrashes }, (_, i) =>
+        retryDelay(i + 1, policy),
+      ),
+    ).toEqual([1_000, 2_000, 4_000, 8_000, 16_000]);
     const events: LifecycleEvent[] = [{ type: "start" }];
     for (let run = 1; run <= policy.maxCrashes + 1; run++) {
-      events.push({ type: "exited", run, at: 0 }, { type: "timer", run });
+      events.push(
+        { type: "exited", run, at: 0 },
+        { type: "timer", run, deadline: "retry" },
+      );
     }
     expect(play(events).state).toEqual({
       state: "stopped",
@@ -71,7 +77,7 @@ describe("the plugin lifecycle", () => {
     const { state } = play([
       { type: "start" },
       { type: "exited", run: 1, at: 0 },
-      { type: "timer", run: 1 },
+      { type: "timer", run: 1, deadline: "retry" },
       { type: "spawned", run: 2 },
       { type: "ready", run: 2, at: 0 },
       { type: "exited", run: 2, at: policy.stableMs },
@@ -83,23 +89,61 @@ describe("the plugin lifecycle", () => {
     const { state, commands } = play([
       { type: "start" },
       { type: "spawned", run: 1 },
-      { type: "timer", run: 1 },
+      { type: "timer", run: 1, deadline: "handshake" },
     ]);
     expect(state).toMatchObject({ state: "crashed", crashes: 1 });
     expect(commands).toContainEqual({ type: "kill" });
+  });
+
+  it("starts the handshake deadline when initialize is sent, not at launch", () => {
+    const launched = play([{ type: "start" }]);
+    expect(launched.commands).toEqual([{ type: "spawn", run: 1 }]);
+    expect(
+      step(launched.state, { type: "spawned", run: 1 }, policy).commands,
+    ).toContainEqual({
+      type: "arm",
+      run: 1,
+      deadline: "handshake",
+      ms: policy.handshakeMs,
+    });
+  });
+
+  it("doesn't cut the shutdown grace short when the handshake deadline fires", () => {
+    const { state, commands } = play([
+      { type: "start" },
+      { type: "spawned", run: 1 },
+      { type: "ready", run: 1, at: 1_000 },
+      { type: "stop" },
+      { type: "timer", run: 1, deadline: "handshake" },
+    ]);
+    expect(state).toEqual({ state: "stopping", run: 1 });
+    expect(commands).not.toContainEqual({ type: "kill" });
+  });
+
+  it("doesn't skip the restart wait when the handshake deadline fires", () => {
+    const { state, commands } = play([
+      { type: "start" },
+      { type: "spawned", run: 1 },
+      { type: "exited", run: 1, at: 9_000 },
+      { type: "timer", run: 1, deadline: "handshake" },
+    ]);
+    expect(state).toMatchObject({ state: "crashed", run: 1 });
+    expect(commands).not.toContainEqual({ type: "spawn", run: 2 });
   });
 
   it("ignores timers and process events from an earlier run", () => {
     const restarted = play([
       { type: "start" },
       { type: "exited", run: 1, at: 0 },
-      { type: "timer", run: 1 },
+      { type: "timer", run: 1, deadline: "retry" },
+      { type: "spawned", run: 2 },
     ]).state;
     expect(restarted).toMatchObject({ state: "starting", run: 2 });
     for (const stale of [
-      { type: "timer", run: 1 },
+      { type: "timer", run: 1, deadline: "handshake" },
       { type: "exited", run: 1, at: 0 },
       { type: "spawned", run: 1 },
+      { type: "killed", run: 1 },
     ] as const) {
       expect(step(restarted, stale, policy)).toEqual({
         state: restarted,
@@ -113,10 +157,13 @@ describe("the plugin lifecycle", () => {
     expect(asked.state).toEqual({ state: "stopping", run: 1 });
     expect(asked.commands.slice(-2)).toEqual([
       { type: "shutdown" },
-      { type: "arm", run: 1, ms: policy.graceMs },
+      { type: "arm", run: 1, deadline: "grace", ms: policy.graceMs },
     ]);
     const killed = play(
-      [{ type: "timer", run: 1 }, { type: "killed" }],
+      [
+        { type: "timer", run: 1, deadline: "grace" },
+        { type: "killed", run: 1 },
+      ],
       asked.state,
     );
     expect(killed.commands).toEqual([{ type: "kill" }]);
@@ -141,7 +188,7 @@ describe("the plugin lifecycle", () => {
       { type: "start" },
       { type: "exited", run: 1, at: 0 },
       { type: "stop" },
-      { type: "timer", run: 1 },
+      { type: "timer", run: 1, deadline: "retry" },
     ]);
     expect(state).toEqual({ state: "stopped", run: 1, reason: "requested" });
   });

@@ -40,15 +40,16 @@ import {
 } from "./lifecycle";
 import type { Link } from "./link";
 import {
+  maxPendingInputBytes,
   maxPluginLineBytes,
-  type Proxy,
   type RunnerReply,
   type RunnerRequest,
 } from "./runner-protocol";
 
-export type Permission =
-  | { readonly kind: "event"; readonly name: string }
-  | { readonly kind: "network"; readonly host: string };
+export interface Permission {
+  readonly kind: "event";
+  readonly name: string;
+}
 
 export class PluginGrants extends Context.Service<
   PluginGrants,
@@ -104,7 +105,6 @@ export class PluginHost extends Context.Service<
 export interface HostOptions {
   readonly logger: Logger;
   readonly policy?: RestartPolicy;
-  readonly proxy?: Proxy;
 }
 
 type ServerManifest = Extract<PluginManifest, { server: object }>;
@@ -122,6 +122,8 @@ interface Slot {
   subscriptions: Set<string>;
   nextRequestId: number;
   initializeId: RpcId | undefined;
+  pendingBytes: number;
+  floodedRun: number | undefined;
 }
 
 const subscribeParams = z.strictObject({ event: z.string().max(128) });
@@ -171,40 +173,19 @@ export const pluginHostLayer = (options: HostOptions) =>
       const policy = options.policy ?? defaultRestartPolicy;
       const slots = new Map<string, Slot>();
 
-      const mayUse = (slot: Slot, permission: Permission) => {
-        const declared =
-          permission.kind === "event"
-            ? slot.manifest.permissions.events.includes(permission.name)
-            : slot.manifest.permissions.network.includes(permission.host);
-        return declared
+      const mayUse = (slot: Slot, permission: Permission) =>
+        slot.manifest.permissions.events.includes(permission.name)
           ? grants.allows(slot.id, permission)
           : Effect.succeed(false);
-      };
 
-      const sendLine = (slot: Slot, line: string) =>
-        link.send({
-          type: "input",
-          plugin: slot.id,
-          run: slot.state.run,
-          line,
-        });
+      const sendLine = (slot: Slot, run: number, line: string) =>
+        link.send({ type: "input", plugin: slot.id, run, line });
 
       const send = (slot: Slot, message: unknown) =>
         encode(message).pipe(
-          Effect.flatMap((line) => sendLine(slot, line)),
+          Effect.flatMap((line) => sendLine(slot, slot.state.run, line)),
           Effect.orDie,
         );
-
-      const proxyFor = (slot: Slot) =>
-        Effect.gen(function* () {
-          if (!options.proxy) return {};
-          for (const host of slot.manifest.permissions.network) {
-            if (yield* mayUse(slot, { kind: "network", host })) {
-              return { proxy: options.proxy };
-            }
-          }
-          return {};
-        });
 
       const methods = new Map<
         string,
@@ -249,7 +230,6 @@ export const pluginHostLayer = (options: HostOptions) =>
                 run: command.run,
                 folder: slot.folder,
                 entry: slot.manifest.server.entry,
-                ...(yield* proxyFor(slot)),
               });
             case "initialize": {
               const id = slot.nextRequestId++;
@@ -265,13 +245,18 @@ export const pluginHostLayer = (options: HostOptions) =>
             case "shutdown":
               return yield* send(slot, notification("shutdown"));
             case "kill":
-              return yield* link.send({ type: "stop", plugin: slot.id });
+              return yield* link.send({
+                type: "stop",
+                plugin: slot.id,
+                run: slot.state.run,
+              });
             case "arm":
               yield* Effect.sleep(command.ms).pipe(
                 Effect.andThen(
                   Queue.offer(slot.mailbox, {
                     type: "timer",
                     run: command.run,
+                    deadline: command.deadline,
                   }),
                 ),
                 Effect.forkIn(scope),
@@ -343,6 +328,7 @@ export const pluginHostLayer = (options: HostOptions) =>
 
       const handle = (slot: Slot, input: SlotInput) => {
         if (input.type !== "line") return apply(slot, input);
+        slot.pendingBytes -= input.line.length;
         const { state } = slot.state;
         const current = input.run === slot.state.run;
         return current && (state === "starting" || state === "running")
@@ -385,16 +371,33 @@ export const pluginHostLayer = (options: HostOptions) =>
                 at: yield* Clock.currentTimeMillis,
               } as const;
             case "stopped":
-              return { type: "killed" } as const;
+              return { type: "killed", run: reply.run } as const;
           }
         });
+
+      const deliver = (slot: Slot, input: SlotInput) => {
+        if (input.type !== "line") return Queue.offer(slot.mailbox, input);
+        if (slot.pendingBytes + input.line.length <= maxPendingInputBytes) {
+          slot.pendingBytes += input.line.length;
+          return Queue.offer(slot.mailbox, input);
+        }
+        if (slot.floodedRun === input.run) return Effect.void;
+        slot.floodedRun = input.run;
+        logger.warn("plugin sent messages faster than the host handles them", {
+          plugin: slot.id,
+        });
+        return Queue.offer(slot.mailbox, {
+          type: "broke-protocol",
+          run: input.run,
+        });
+      };
 
       yield* Queue.take(link.incoming).pipe(
         Effect.flatMap((reply) =>
           Effect.gen(function* () {
             const slot = slots.get(reply.plugin);
             const input = yield* toSlotInput(reply);
-            if (slot && input) yield* Queue.offer(slot.mailbox, input);
+            if (slot && input) yield* deliver(slot, input);
           }),
         ),
         Effect.forever,
@@ -409,7 +412,8 @@ export const pluginHostLayer = (options: HostOptions) =>
       yield* Effect.addFinalizer(() =>
         Effect.forEach(
           slots.values(),
-          (slot) => link.send({ type: "stop", plugin: slot.id }),
+          (slot) =>
+            link.send({ type: "stop", plugin: slot.id, run: slot.state.run }),
           { discard: true },
         ),
       );
@@ -431,6 +435,8 @@ export const pluginHostLayer = (options: HostOptions) =>
               subscriptions: new Set(),
               nextRequestId: 1,
               initializeId: undefined,
+              pendingBytes: 0,
+              floodedRun: undefined,
             };
             slots.set(created.id, created);
             yield* Queue.take(created.mailbox).pipe(
@@ -455,13 +461,18 @@ export const pluginHostLayer = (options: HostOptions) =>
           const line = yield* encode(
             notification("event", { name: event.name, data: event.data }),
           );
+          const receives = (slot: Slot, run: number) =>
+            slot.state.state === "running" &&
+            slot.state.run === run &&
+            slot.subscriptions.has(event.name);
           for (const slot of slots.values()) {
+            const { run } = slot.state;
             if (
-              slot.state.state === "running" &&
-              slot.subscriptions.has(event.name) &&
-              (yield* mayUse(slot, { kind: "event", name: event.name }))
+              receives(slot, run) &&
+              (yield* mayUse(slot, { kind: "event", name: event.name })) &&
+              receives(slot, run)
             ) {
-              yield* sendLine(slot, line);
+              yield* sendLine(slot, run, line);
             }
           }
         });

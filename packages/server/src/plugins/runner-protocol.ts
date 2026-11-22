@@ -2,15 +2,11 @@ import { z } from "zod";
 
 export const maxPluginLineBytes = 1024 * 1024;
 export const maxFrameBytes = 8 * maxPluginLineBytes;
+export const maxPendingInputBytes = 16 * maxPluginLineBytes;
 
 const plugin = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/);
 const run = z.int().min(1);
 const line = z.string().max(maxPluginLineBytes);
-
-const proxy = z.strictObject({
-  httpsProxy: z.string().max(2048),
-  noProxy: z.string().max(4096),
-});
 
 export const runnerRequestSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -19,9 +15,8 @@ export const runnerRequestSchema = z.discriminatedUnion("type", [
     run,
     folder: z.string().startsWith("/").max(4096),
     entry: z.string().min(1).max(1024),
-    proxy: proxy.optional(),
   }),
-  z.strictObject({ type: z.literal("stop"), plugin }),
+  z.strictObject({ type: z.literal("stop"), plugin, run }),
   z.strictObject({ type: z.literal("input"), plugin, run, line }),
 ]);
 
@@ -42,10 +37,9 @@ export const runnerReplySchema = z.discriminatedUnion("type", [
     code: z.int().nullable(),
     signal: z.string().max(32).nullable(),
   }),
-  z.strictObject({ type: z.literal("stopped"), plugin }),
+  z.strictObject({ type: z.literal("stopped"), plugin, run }),
 ]);
 
 export type RunnerRequest = z.infer<typeof runnerRequestSchema>;
 export type RunnerReply = z.infer<typeof runnerReplySchema>;
 export type StartRequest = Extract<RunnerRequest, { type: "start" }>;
-export type Proxy = z.infer<typeof proxy>;

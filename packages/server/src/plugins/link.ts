@@ -26,6 +26,8 @@ function decode<In>(schema: z.ZodType<In>, text: string): In | undefined {
 
 const encode = (message: unknown) => `${JSON.stringify(message)}\n`;
 
+export const linkCapacity = 16;
+
 export const pipeLink = <In, Out>(
   readable: ReadableStream<Uint8Array>,
   write: (text: string) => Promise<unknown> | undefined,
@@ -33,7 +35,7 @@ export const pipeLink = <In, Out>(
   sends: z.ZodType<Out>,
 ) =>
   Effect.gen(function* () {
-    const incoming = yield* Queue.unbounded<In, Cause.Done>();
+    const incoming = yield* Queue.bounded<In, Cause.Done>(linkCapacity);
     const splitter = new LineSplitter(framing.maxBytes);
     const deliver = (chunk: Uint8Array) =>
       Effect.forEach(splitter.push(chunk), (piece) => {
@@ -67,8 +69,8 @@ export const memoryLinkPair = <A, B>(
   framingB: Framing<B>,
 ) =>
   Effect.gen(function* () {
-    const toA = yield* Queue.unbounded<A, Cause.Done>();
-    const toB = yield* Queue.unbounded<B, Cause.Done>();
+    const toA = yield* Queue.bounded<A, Cause.Done>(linkCapacity);
+    const toB = yield* Queue.bounded<B, Cause.Done>(linkCapacity);
     const through =
       <M>(queue: Queue.Queue<M, Cause.Done>, framing: Framing<M>) =>
       (message: unknown) => {

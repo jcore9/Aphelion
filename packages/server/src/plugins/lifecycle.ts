@@ -26,6 +26,8 @@ export type LifecycleState =
       readonly reason: StopReason;
     };
 
+export type Deadline = "handshake" | "grace" | "retry";
+
 export type LifecycleEvent =
   | { readonly type: "start" }
   | { readonly type: "stop" }
@@ -34,21 +36,29 @@ export type LifecycleEvent =
   | { readonly type: "ready"; readonly run: number; readonly at: number }
   | { readonly type: "broke-protocol"; readonly run: number }
   | { readonly type: "exited"; readonly run: number; readonly at: number }
-  | { readonly type: "killed" }
-  | { readonly type: "timer"; readonly run: number };
+  | { readonly type: "killed"; readonly run: number }
+  | {
+      readonly type: "timer";
+      readonly run: number;
+      readonly deadline: Deadline;
+    };
 
 export type LifecycleCommand =
   | { readonly type: "spawn"; readonly run: number }
   | { readonly type: "initialize" }
   | { readonly type: "shutdown" }
   | { readonly type: "kill" }
-  | { readonly type: "arm"; readonly run: number; readonly ms: number };
+  | {
+      readonly type: "arm";
+      readonly run: number;
+      readonly deadline: Deadline;
+      readonly ms: number;
+    };
 
 export interface RestartPolicy {
   readonly handshakeMs: number;
   readonly graceMs: number;
   readonly firstRetryMs: number;
-  readonly maxRetryMs: number;
   readonly maxCrashes: number;
   readonly stableMs: number;
 }
@@ -57,7 +67,6 @@ export const defaultRestartPolicy: RestartPolicy = {
   handshakeMs: 10_000,
   graceMs: 5_000,
   firstRetryMs: 1_000,
-  maxRetryMs: 60_000,
   maxCrashes: 5,
   stableMs: 60_000,
 };
@@ -70,18 +79,15 @@ export interface Step {
 export const installed: LifecycleState = { state: "installed", run: 0 };
 
 export function retryDelay(crashes: number, policy: RestartPolicy): number {
-  return Math.min(policy.firstRetryMs * 2 ** (crashes - 1), policy.maxRetryMs);
+  return policy.firstRetryMs * 2 ** (crashes - 1);
 }
 
 const stay = (state: LifecycleState): Step => ({ state, commands: [] });
 
-function launch(run: number, crashes: number, policy: RestartPolicy): Step {
+function launch(run: number, crashes: number): Step {
   return {
     state: { state: "starting", run, crashes },
-    commands: [
-      { type: "spawn", run },
-      { type: "arm", run, ms: policy.handshakeMs },
-    ],
+    commands: [{ type: "spawn", run }],
   };
 }
 
@@ -101,29 +107,45 @@ function crash(
   const retryInMs = retryDelay(crashes, policy);
   return {
     state: { state: "crashed", run, crashes, retryInMs },
-    commands: [...kill, { type: "arm", run, ms: retryInMs }],
+    commands: [...kill, { type: "arm", run, deadline: "retry", ms: retryInMs }],
   };
 }
 
-const ofThisRun = (state: LifecycleState, event: LifecycleEvent) =>
-  !("run" in event) || event.run === state.run;
+const awaitedDeadline: Partial<Record<LifecycleState["state"], Deadline>> = {
+  starting: "handshake",
+  stopping: "grace",
+  crashed: "retry",
+};
+
+const concerns = (state: LifecycleState, event: LifecycleEvent) =>
+  (!("run" in event) || event.run === state.run) &&
+  (event.type !== "timer" || event.deadline === awaitedDeadline[state.state]);
 
 export function step(
   state: LifecycleState,
   event: LifecycleEvent,
   policy: RestartPolicy,
 ): Step {
-  if (!ofThisRun(state, event)) return stay(state);
+  if (!concerns(state, event)) return stay(state);
   switch (state.state) {
     case "installed":
     case "stopped":
-      return event.type === "start"
-        ? launch(state.run + 1, 0, policy)
-        : stay(state);
+      return event.type === "start" ? launch(state.run + 1, 0) : stay(state);
     case "starting":
       switch (event.type) {
         case "spawned":
-          return { state, commands: [{ type: "initialize" }] };
+          return {
+            state,
+            commands: [
+              { type: "initialize" },
+              {
+                type: "arm",
+                run: state.run,
+                deadline: "handshake",
+                ms: policy.handshakeMs,
+              },
+            ],
+          };
         case "ready":
           return stay({ ...state, state: "running", since: event.at });
         case "spawn-failed":
@@ -158,7 +180,12 @@ export function step(
             state: { state: "stopping", run: state.run },
             commands: [
               { type: "shutdown" },
-              { type: "arm", run: state.run, ms: policy.graceMs },
+              {
+                type: "arm",
+                run: state.run,
+                deadline: "grace",
+                ms: policy.graceMs,
+              },
             ],
           };
         default:
@@ -182,7 +209,7 @@ export function step(
     case "crashed":
       switch (event.type) {
         case "timer":
-          return launch(state.run + 1, state.crashes, policy);
+          return launch(state.run + 1, state.crashes);
         case "stop":
           return stay({
             state: "stopped",

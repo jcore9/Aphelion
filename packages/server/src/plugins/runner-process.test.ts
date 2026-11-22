@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -7,13 +7,14 @@ import {
   readdir,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { expect, it } from "@effect/vitest";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, type Scope } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import { PluginGrants, PluginHost, pluginHostLayer, RunnerLink } from "./host";
@@ -62,7 +63,8 @@ for await (const line of createInterface({ input: process.stdin })) {
 `;
 
 const runnerMain = join(import.meta.dirname, "runner-main.ts");
-const isRoot = process.getuid?.() === 0;
+const uid = process.getuid?.() ?? 0;
+const isRoot = uid === 0;
 
 function sleepers(): number {
   let count = 0;
@@ -96,10 +98,141 @@ async function setPermissions(path: string, mode: "read-only" | "writable") {
   for (const entry of entries) {
     const child = join(path, entry.name);
     if (entry.isDirectory()) await setPermissions(child, mode);
-    else await chmod(child, mode === "read-only" ? 0o444 : 0o644);
+    else if (entry.isFile()) {
+      await chmod(child, mode === "read-only" ? 0o444 : 0o644);
+    }
   }
   await chmod(path, mode === "read-only" ? 0o555 : 0o755);
 }
+
+async function installPlugin(folder: string, id: string) {
+  await mkdir(folder, { recursive: true });
+  await writeFile(join(folder, "index.js"), pluginSource);
+  await writeFile(join(folder, ".env"), "APHELION_DOTENV=leaked\n");
+  await writeFile(
+    join(folder, "aphelion-plugin.json"),
+    JSON.stringify({
+      id,
+      version: "1.0.0",
+      api: "^0.2.0",
+      server: { entry: "index.js" },
+      permissions: { events: ["agent.status"] },
+    }),
+  );
+}
+
+type Launch = "as the plugin user" | "as another user";
+
+function runnerArguments(launch: Launch, dataRoot: string): string[] {
+  if (launch === "as the plugin user") {
+    return [runnerMain, "--bun", process.execPath, "--data", dataRoot];
+  }
+  const options = { bun: process.execPath, data: dataRoot, pluginUid: uid + 1 };
+  return [
+    "-e",
+    `import { serveRunner } from ${JSON.stringify(runnerMain)};
+await serveRunner(${JSON.stringify(options)});
+process.exit(0);`,
+  ];
+}
+
+const testFolder = Effect.gen(function* () {
+  const base = yield* Effect.promise(() =>
+    mkdtemp(join(tmpdir(), "aphelion-runner-")),
+  );
+  yield* Effect.addFinalizer(() =>
+    Effect.promise(async () => {
+      await setPermissions(base, "writable").catch(() => undefined);
+      await rm(base, { recursive: true, force: true });
+    }),
+  );
+  return base;
+});
+
+const startRunner = (
+  launch: Launch,
+  dataRoot: string,
+  logs: Record<string, unknown>[],
+  canary: string,
+): Effect.Effect<
+  { host: Context.Service.Shape<typeof PluginHost>; runnerPid: number },
+  never,
+  Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const runner = spawn(process.execPath, runnerArguments(launch, dataRoot), {
+      env: { ...process.env, APHELION_CANARY: canary },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(
+        () =>
+          new Promise<void>((done) => {
+            if (runner.exitCode !== null) {
+              done();
+              return;
+            }
+            const timer = setTimeout(() => {
+              runner.kill("SIGKILL");
+              done();
+            }, 5_000);
+            runner.once("exit", () => {
+              clearTimeout(timer);
+              done();
+            });
+            runner.stdin.end();
+          }),
+      ),
+    );
+    const link = yield* pipeLink(
+      Readable.toWeb(runner.stdout) as ReadableStream<Uint8Array>,
+      (text) =>
+        new Promise((done) => {
+          runner.stdin.write(text, () => {
+            done(undefined);
+          });
+        }),
+      {
+        schema: runnerReplySchema,
+        maxBytes: maxFrameBytes,
+        onDrop: () => Effect.void,
+      },
+      runnerRequestSchema,
+    );
+    const services = yield* Layer.build(
+      pluginHostLayer({
+        logger: createLogger({
+          write: (line) =>
+            logs.push(JSON.parse(line) as Record<string, unknown>),
+        }),
+        policy: {
+          handshakeMs: 10_000,
+          graceMs: 200,
+          firstRetryMs: 10_000,
+          maxCrashes: 1,
+          stableMs: 60_000,
+        },
+      }).pipe(
+        Layer.provide(Layer.succeed(RunnerLink, link)),
+        Layer.provide(
+          Layer.succeed(PluginGrants, {
+            allows: () => Effect.succeed(true),
+          }),
+        ),
+      ),
+    );
+    return {
+      host: Context.get(services, PluginHost),
+      runnerPid: runner.pid ?? 0,
+    };
+  });
+
+const refusal = (logs: Record<string, unknown>[], plugin: string) =>
+  logs.find(
+    (log) =>
+      log["msg"] === "plugin runner couldn't start the plugin" &&
+      log["plugin"] === plugin,
+  )?.["reason"];
 
 describe.skipIf(process.platform !== "linux" || isRoot)(
   "the plugin runner process",
@@ -110,89 +243,36 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
         const canary = `canary-${crypto.randomUUID()}`;
         const logs: Record<string, unknown>[] = [];
         return Effect.gen(function* () {
-          const base = yield* Effect.promise(() =>
-            mkdtemp(join(tmpdir(), "aphelion-runner-")),
-          );
-          yield* Effect.addFinalizer(() =>
-            Effect.promise(async () => {
-              await setPermissions(base, "writable").catch(() => undefined);
-              await rm(base, { recursive: true, force: true });
-            }),
-          );
-          const folder = join(base, "installed", "sampler");
-          const writableFolder = join(base, "installed", "careless");
+          const base = yield* testFolder;
+          const installed = join(base, "installed");
+          const folder = join(installed, "sampler");
           const dataRoot = join(base, "data");
-          for (const [path, id] of [
-            [folder, "sampler"],
-            [writableFolder, "careless"],
-          ] as const) {
-            yield* Effect.promise(async () => {
-              await mkdir(path, { recursive: true });
-              await writeFile(join(path, "index.js"), pluginSource);
-              await writeFile(
-                join(path, "aphelion-plugin.json"),
-                JSON.stringify({
-                  id,
-                  version: "1.0.0",
-                  api: "^0.2.0",
-                  server: { entry: "index.js" },
-                  permissions: { events: ["agent.status"] },
-                }),
-              );
-            });
-          }
-          yield* Effect.promise(() => setPermissions(folder, "read-only"));
-
-          const runner = spawn(
-            process.execPath,
-            [runnerMain, "--bun", process.execPath, "--data", dataRoot],
-            {
-              env: { ...process.env, APHELION_CANARY: canary },
-              stdio: ["pipe", "pipe", "inherit"],
-            },
+          yield* Effect.promise(async () => {
+            await installPlugin(folder, "sampler");
+            await installPlugin(join(installed, "careless"), "careless");
+            await installPlugin(join(installed, "linked"), "linked");
+            await installPlugin(join(installed, "borrower"), "borrower");
+            await installPlugin(join(base, "outside"), "outside");
+            await rm(join(installed, "linked", "index.js"));
+            await symlink(
+              join(base, "outside", "index.js"),
+              join(installed, "linked", "index.js"),
+            );
+            await symlink(
+              join(base, "outside", "index.js"),
+              join(installed, "borrower", "lib.js"),
+            );
+            await setPermissions(base, "read-only");
+            await setPermissions(join(installed, "careless"), "writable");
+            await chmod(installed, 0o755);
+            await chmod(base, 0o755);
+          });
+          const { host, runnerPid } = yield* startRunner(
+            "as another user",
+            dataRoot,
+            logs,
+            canary,
           );
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => runner.kill("SIGKILL")),
-          );
-          const link = yield* pipeLink(
-            Readable.toWeb(runner.stdout) as ReadableStream<Uint8Array>,
-            (text) =>
-              new Promise((done) => {
-                runner.stdin.write(text, () => {
-                  done(undefined);
-                });
-              }),
-            {
-              schema: runnerReplySchema,
-              maxBytes: maxFrameBytes,
-              onDrop: () => Effect.void,
-            },
-            runnerRequestSchema,
-          );
-          const services = yield* Layer.build(
-            pluginHostLayer({
-              logger: createLogger({
-                write: (line) =>
-                  logs.push(JSON.parse(line) as Record<string, unknown>),
-              }),
-              policy: {
-                handshakeMs: 10_000,
-                graceMs: 200,
-                firstRetryMs: 10_000,
-                maxRetryMs: 10_000,
-                maxCrashes: 1,
-                stableMs: 60_000,
-              },
-            }).pipe(
-              Layer.provide(Layer.succeed(RunnerLink, link)),
-              Layer.provide(
-                Layer.succeed(PluginGrants, {
-                  allows: () => Effect.succeed(true),
-                }),
-              ),
-            ),
-          );
-          const host = Context.get(services, PluginHost);
 
           yield* host.start(folder);
           yield* poll(host.status("sampler"), (s) => s?.state === "running");
@@ -225,7 +305,11 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
             APHELION_PLUGIN_ID: "sampler",
             HOME: join(dataRoot, "sampler"),
           });
+          expect(report.env).not.toHaveProperty("APHELION_DOTENV");
           expect(JSON.stringify(report.env)).not.toContain(canary);
+          expect(() => readlinkSync(`/proc/${String(runnerPid)}/fd/0`)).toThrow(
+            expect.objectContaining({ code: "EACCES" }),
+          );
 
           yield* host.stop("sampler");
           yield* poll(host.status("sampler"), (s) => s?.state === "stopped");
@@ -233,14 +317,47 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
             yield* poll(Effect.sync(sleepers), (count) => count === 0),
           ).toBe(0);
 
-          yield* host.start(writableFolder);
-          yield* poll(host.status("careless"), (s) => s?.state === "crashed");
-          expect(logs).toContainEqual(
-            expect.objectContaining({
-              plugin: "careless",
-              reason: "the plugin user can write to the plugin's folder",
-            }),
+          for (const plugin of ["careless", "linked", "borrower"]) {
+            yield* host.start(join(installed, plugin));
+            yield* poll(host.status(plugin), (s) => s?.state === "crashed");
+          }
+          expect(refusal(logs, "careless")).toBe(
+            "the plugin user can write to the plugin's folder",
           );
+          expect(refusal(logs, "linked")).toBe(
+            "the entry is outside the plugin's folder",
+          );
+          expect(refusal(logs, "borrower")).toBe(
+            "a link in the plugin's folder points outside it",
+          );
+        }).pipe(Effect.scoped);
+      },
+      30_000,
+    );
+
+    it.live(
+      "refuses a plugin whose files the plugin user owns, even when they are read-only",
+      () => {
+        const logs: Record<string, unknown>[] = [];
+        return Effect.gen(function* () {
+          const base = yield* testFolder;
+          const folder = join(base, "installed", "sampler");
+          yield* Effect.promise(async () => {
+            await installPlugin(folder, "sampler");
+            await setPermissions(folder, "read-only");
+          });
+          const { host } = yield* startRunner(
+            "as the plugin user",
+            join(base, "data"),
+            logs,
+            "unused",
+          );
+          yield* host.start(folder);
+          yield* poll(host.status("sampler"), (s) => s?.state === "crashed");
+          expect(refusal(logs, "sampler")).toBe(
+            "the plugin user owns a file in the plugin's folder",
+          );
+          expect(sleepers()).toBe(0);
         }).pipe(Effect.scoped);
       },
       30_000,
