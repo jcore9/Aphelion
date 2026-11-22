@@ -1,0 +1,216 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number",
+              "const": 1,
+              "description": "The protocol version."
+            },
+            "type": {
+              "type": "string",
+              "const": "result",
+              "description": "The frame type."
+            },
+            "id": {
+              "description": "The id of the command this frame answers.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CommandId"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "const": "ping",
+              "description": "The command that ran."
+            },
+            "result": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false,
+              "description": "The command's output."
+            }
+          },
+          "required": [
+            "v",
+            "type",
+            "id",
+            "name",
+            "result"
+          ],
+          "additionalProperties": false,
+          "description": "Answers a command that succeeded."
+        }
+      ]
+    },
+    {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number",
+              "const": 1,
+              "description": "The protocol version."
+            },
+            "type": {
+              "type": "string",
+              "const": "event",
+              "description": "The frame type."
+            },
+            "seq": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "description": "The event's number in the stream."
+            },
+            "name": {
+              "type": "string",
+              "const": "notice",
+              "description": "The kind of event."
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "description": "Text for a person to read."
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "additionalProperties": false,
+              "description": "What happened."
+            }
+          },
+          "required": [
+            "v",
+            "type",
+            "seq",
+            "name",
+            "payload"
+          ],
+          "additionalProperties": false,
+          "description": "Tells every client that something happened."
+        }
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1,
+          "description": "The protocol version."
+        },
+        "type": {
+          "type": "string",
+          "const": "resync",
+          "description": "The frame type."
+        },
+        "cursor": {
+          "description": "Where the client continues after it reloads.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Cursor"
+            }
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "cursor"
+      ],
+      "additionalProperties": false,
+      "description": "Tells a client that it can't catch up."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1,
+          "description": "The protocol version."
+        },
+        "type": {
+          "type": "string",
+          "const": "error",
+          "description": "The frame type."
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "malformed",
+            "unsupported-version"
+          ],
+          "description": "Why the frame was rejected."
+        },
+        "message": {
+          "type": "string",
+          "description": "Fixed text that is safe to log."
+        },
+        "id": {
+          "description": "The rejected command's id, when it had a valid one.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CommandId"
+            }
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "code",
+        "message"
+      ],
+      "additionalProperties": false,
+      "description": "Rejects a frame."
+    }
+  ],
+  "title": "ServerFrame",
+  "definitions": {
+    "CommandId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Names one command. The client picks it, and a retry sends the same id."
+    },
+    "StreamId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Names one event stream. A server that restarts starts a new stream."
+    },
+    "Cursor": {
+      "type": "object",
+      "properties": {
+        "stream": {
+          "description": "The stream that the position is in.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamId"
+            }
+          ]
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The last sequence number the client has seen."
+        }
+      },
+      "required": [
+        "stream",
+        "seq"
+      ],
+      "additionalProperties": false,
+      "description": "A position in an event stream."
+    }
+  }
+}
