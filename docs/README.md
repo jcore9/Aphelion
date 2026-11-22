@@ -32,6 +32,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 
 - [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
+- [Logging and the audit log](reference/logging.md): the log format, the redaction rules and how to add one, and the append-only audit table.
 
 ## Decision records
 
@@ -72,3 +73,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0031](decisions/0031-unprivileged-agents.md) | Agents run as unprivileged users | Accepted |
 | [0032](decisions/0032-native-app-stack-deferred.md) | The native app stack is chosen in M9 | Accepted |
 | [0033](decisions/0033-docs-site-in-place.md) | The docs site reads the Markdown files where they are, and takes each page title from its first heading | Proposed |
+| [0036](decisions/0036-logging-library.md) | The server writes its own JSON logs, with no logging library | Proposed |
