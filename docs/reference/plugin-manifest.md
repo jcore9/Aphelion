@@ -13,7 +13,7 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
   "$schema": "./node_modules/@aphelion/plugin-sdk/plugin-manifest.schema.json",
   "id": "weather-alerts",
   "version": "1.2.0",
-  "api": "^0.1.0",
+  "api": "^0.2.0",
   "server": { "entry": "dist/server.js" },
   "client": { "entry": "dist/client.js" },
   "permissions": {
@@ -33,15 +33,15 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
 | `id` | string | yes | Unique plugin id. 1 to 63 lowercase letters, digits or hyphens, starting with a letter. |
 | `version` | string | yes | The plugin's own version, in strict [semver](https://semver.org/) form, such as `1.2.0` or `2.0.0-rc.1`. No `v` prefix, and no leading zeros in a number, so `1.0.0-rc.01` is refused. Each of the first three numbers has at most 15 digits. At most 256 characters. |
 | `api` | string | yes | The plugin-API versions the plugin supports, as an npm semver range. At most 256 characters. See [The API range](#the-api-range). |
-| `server` | object | one of `server` and `client` | The plugin's server part. The plugin runner starts it on the server, in its own process. See [Server and client parts](#server-and-client-parts). |
+| `server` | object | at least one of `server` and `client` | The plugin's server part. The plugin runner starts it on the server, in its own process. See [Server and client parts](#server-and-client-parts). |
 | `server.entry` | string | yes, in `server` | The file the plugin runner starts, as a plain relative path inside the plugin's folder, such as `dist/server.js`. See [The entry path](#the-entry-path). At most 1024 characters. |
-| `client` | object | one of `server` and `client` | The plugin's client part. Every client downloads it from the server and runs it in a sandbox. See [Server and client parts](#server-and-client-parts). |
+| `client` | object | at least one of `server` and `client` | The plugin's client part. Every client downloads it from the server and runs it in a sandbox. See [Server and client parts](#server-and-client-parts). |
 | `client.entry` | string | yes, in `client` | The file the client loads in the sandbox, with the same rules as `server.entry`, such as `dist/client.js`. |
 | `permissions.events` | list of strings | no | Events the plugin receives, in either part. Each is words joined by dots, such as `approval.requested`, at most 128 characters. |
-| `permissions.secrets` | list of strings | no | Secret references the plugin asks the host to resolve, such as `op://vault/item/field`, at most 1024 characters. Needs a server part. After `://`, a reference may hold letters in any script, accents, digits, punctuation, symbols such as emoji, and the ordinary space. Invisible characters, such as control, format, zero-width and direction characters, line and paragraph separators, and every other kind of space, are refused. The plugin never reads a secret store itself. |
+| `permissions.secrets` | list of strings | no | Secret references the plugin may ask the host to use for it, such as `op://vault/item/field`, at most 1024 characters. The host uses the secret in an operation for the plugin, such as an HTTP call, and the plugin never receives the value. See [Secrets](#secrets). Needs a server part. After `://`, a reference may hold letters in any script, accents, digits, punctuation, symbols such as emoji, and the ordinary space. Invisible characters, such as control, format, zero-width and direction characters, line and paragraph separators, and every other kind of space, are refused. The plugin never reads a secret store itself. |
 | `permissions.network` | list of strings | no | Lowercase hostnames the plugin connects to, such as `api.github.com`, at most 253 characters. No scheme, port or path. Needs a server part. |
 | `permissions.uiSlots` | list of strings | no | UI slots the plugin shows content in. Each is words joined by dots, such as `agent.sidebar`, at most 128 characters. Needs a client part. |
-| `contributes.secretSchemes` | list of strings | no | Secret reference schemes the plugin resolves as a secret backend, such as `op`, at most 32 characters. Needs a server part. See [Secret backends](#secret-backends). |
+| `contributes.secretSchemes` | list of strings | no | Secret reference schemes the plugin resolves as a secret backend, such as `op`, at most 32 characters. The values it returns go only to the secrets broker. Needs a server part. See [Secret backends](#secret-backends). |
 
 `permissions` and `contributes` can be left out, and so can each list in them. A missing list is empty, so the plugin gets nothing it didn't ask for. Any field not in this table is an error.
 
@@ -65,12 +65,20 @@ Some permissions and contributions only make sense for one part. A list that nee
 | List | Needs | Why |
 | --- | --- | --- |
 | `permissions.events` | either part | Either part can react to events. The server part gets them from the plugin host, and the client part through the app's messages. |
-| `permissions.secrets` | a server part | A secret value must never reach a device. |
-| `permissions.network` | a server part | A client part gets data only through the app's messages. If it needs data from the internet, its server part fetches it. |
+| `permissions.secrets` | a server part | The host uses each secret on the server, for the server part. No part ever receives a value, so none can reach a device. |
+| `permissions.network` | a server part | A client part has no network access. It talks only to the app. Internet access, including to MCP servers, goes through the server part and the approval layer. |
 | `permissions.uiSlots` | a client part | Only a client part can show anything in the app. |
 | `contributes.secretSchemes` | a server part | Secret backends run on the server, next to the secrets broker. |
 
 Each permission is granted to the plugin as a whole. When a plugin has both parts, events it is granted can go to either part.
+
+The `PluginManifest` type describes a manifest that `parsePluginManifest` accepted. It has three shapes: server only, client only, or both. A list the plugin's parts can't use has the type `readonly never[]`, which is always empty, and every list is read-only. `pluginManifestSchema` on its own returns a looser type, so read manifests through `parsePluginManifest`.
+
+## Secrets
+
+A plugin never receives a secret's value. `permissions.secrets` lists the secrets a plugin may ask the host to use for it. For example, the plugin asks "make this HTTP call with my GitHub token", and the host makes the call with the token in it. The value stays inside the host and the secrets broker, in the `Secret` wrapper that is never serialized, so the plugin has nothing it could send to a device. The operations a plugin can ask for are designed in the plugin runner (M0-13b), the permission grants (M0-13c) and the M3 connector gateway ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
+
+The one exception is a [secret backend](#secret-backends). It produces values, so it sees the values it produces. It hands them only to the secrets broker, never to another plugin or a client part.
 
 ## The entry path
 
@@ -84,19 +92,19 @@ This check reads the text only. When the server loads or serves a part, it must 
 
 ## The API range
 
-The plugin API has its own [semver](https://semver.org/) version, `pluginApiVersion` in `@aphelion/plugin-sdk`. It is `0.1.0` today. The version changes like this:
+The plugin API has its own [semver](https://semver.org/) version, `pluginApiVersion` in `@aphelion/plugin-sdk`. It is `0.2.0` today. [Changes](#changes) lists what changed in each version. The version changes like this:
 
 - A change that could break a plugin raises the major version. Before 1.0.0, it raises the minor version instead, so 0.1.x to 0.2.0 is a breaking change.
 - A change that adds to the API raises the minor version, or the patch version before 1.0.0.
 
-A plugin's `api` field says which versions it supports, using the range syntax from [npm's semver documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json#dependencies), the same syntax as `dependencies` in `package.json`. Write `^0.1.0` to accept 0.1.0 and any later 0.1.x.
+A plugin's `api` field says which versions it supports, using the range syntax from [npm's semver documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json#dependencies), the same syntax as `dependencies` in `package.json`. Write `^0.2.0` to accept 0.2.0 and any later 0.2.x.
 
 When the host loads a plugin, it checks its own `pluginApiVersion` against the plugin's `api` range:
 
-- If the range includes the host's version, the plugin loads. The range `*` includes every version. It skips the compatibility check, so a plugin that uses it may break without warning when Aphelion upgrades the plugin API. Prefer a range such as `^0.1.0`.
-- If it doesn't, the host refuses the plugin with `api: doesn't include plugin API 0.1.0, which this host runs`.
+- If the range includes the host's version, the plugin loads. The range `*` includes every version. It skips the compatibility check, so a plugin that uses it may break without warning when Aphelion upgrades the plugin API. Prefer a range such as `^0.2.0`.
+- If it doesn't, the host refuses the plugin with `api: doesn't include plugin API 0.2.0, which this host runs`.
 - If the range is longer than 256 characters, the manifest is invalid, with `api: must be at most 256 characters`. The parser checks the length first, and never hands a longer range to `semver`.
-- If the range isn't valid semver range syntax, the manifest is invalid, with `api: must be an npm semver range, such as ^0.1.0`. A range that is blank, or has a blank part between `||` signs, counts as invalid, because npm would read the blank as "any version".
+- If the range isn't valid semver range syntax, the manifest is invalid, with `api: must be an npm semver range, such as ^0.2.0`. A range that is blank, or has a blank part between `||` signs, counts as invalid, because npm would read the blank as "any version".
 
 ## Secret backends
 
@@ -113,7 +121,7 @@ A secret backend is a plugin that turns a secret reference, such as `op://vault/
    };
    ```
 
-   `resolve` returns the value as a string, or throws if it can't. The secrets broker (M0-14) sends a backend only references with a scheme the backend listed. How the plugin hands its backend to the host is the plugin runner's job (M0-13b).
+   `resolve` returns the value as a string, or throws if it can't. The secrets broker (M0-14) sends a backend only references with a scheme the backend listed, and the value goes only to the broker. How the plugin hands its backend to the host is the plugin runner's job (M0-13b).
 
 ## Errors
 
@@ -138,7 +146,22 @@ The parser checks a value already read from JSON. The plugin runner (M0-13b) own
 | A field of the wrong type | `permissions.events` | `has the wrong type` |
 | A bad value | `permissions.network[0]` | `must be a lowercase hostname, such as api.github.com` |
 | A value that is too long | `server.entry` | `must be at most 1024 characters` |
-| An out-of-range plugin | `api` | `doesn't include plugin API 0.1.0, which this host runs` |
+| An out-of-range plugin | `api` | `doesn't include plugin API 0.2.0, which this host runs` |
+
+## Changes
+
+### 0.2.0
+
+A breaking change ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)). To move a manifest from 0.1.0:
+
+1. Replace `"entry": "dist/index.js"` with `"server": { "entry": "dist/index.js" }`.
+2. Set `api` to `^0.2.0`.
+
+`permissions.secrets` now lists the secrets the host may use for the plugin. A plugin that expected to receive a secret's value must ask the host to do the operation instead.
+
+### 0.1.0
+
+The first version ([decision 0038](../decisions/0038-plugin-manifest-and-api-range.md)).
 
 ## JSON Schema for editors
 

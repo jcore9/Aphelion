@@ -72,7 +72,7 @@
         },
         "secrets": {
           "default": [],
-          "description": "Secret references the plugin asks the host to resolve.",
+          "description": "Secret references the plugin may ask the host to use for it, such as in an HTTP call. The plugin never receives the values.",
           "type": "array",
           "items": {
             "type": "string",
@@ -110,7 +110,7 @@
       "properties": {
         "secretSchemes": {
           "default": [],
-          "description": "Secret reference schemes the plugin resolves as a secret backend.",
+          "description": "Secret reference schemes the plugin resolves as a secret backend. The values it returns go only to the secrets broker.",
           "type": "array",
           "items": {
             "type": "string",

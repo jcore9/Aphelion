@@ -383,6 +383,14 @@ describe("permissions and contributions by side", () => {
     };
     expect([...valid, neither, secretsOnClient]).toHaveLength(4);
   });
+
+  test("a parsed manifest's lists can't be changed after the check", () => {
+    const result = parsePluginManifest(clientOnly);
+    if (!result.ok) throw new Error("expected the manifest to be accepted");
+    // @ts-expect-error a parsed manifest's lists are read-only
+    const secrets: string[] = result.manifest.permissions.secrets;
+    expect(secrets).toEqual([]);
+  });
 });
 
 describe("the API-range check", () => {
@@ -397,17 +405,19 @@ describe("the API-range check", () => {
     expect(parsePluginManifest({ ...minimal, api }).ok).toBe(true);
   });
 
-  test.each([`>${pluginApiVersion}`, "^1.0.0", `<${pluginApiVersion}`])(
-    "refuses a plugin whose range %j leaves this host out",
-    (api) => {
-      expect(issuesOf({ ...minimal, api })).toEqual([
-        {
-          field: "api",
-          message: `doesn't include plugin API ${pluginApiVersion}, which this host runs`,
-        },
-      ]);
-    },
-  );
+  test.each([
+    `>${pluginApiVersion}`,
+    "^1.0.0",
+    `<${pluginApiVersion}`,
+    "^0.1.0",
+  ])("refuses a plugin whose range %j leaves this host out", (api) => {
+    expect(issuesOf({ ...minimal, api })).toEqual([
+      {
+        field: "api",
+        message: `doesn't include plugin API ${pluginApiVersion}, which this host runs`,
+      },
+    ]);
+  });
 
   test.each(["banana", "latest", "^", ">>0.1.0", "", " ", "^0.1.0 ||"])(
     "refuses the malformed range %j",
@@ -415,7 +425,7 @@ describe("the API-range check", () => {
       expect(issuesOf({ ...minimal, api })).toEqual([
         {
           field: "api",
-          message: "must be an npm semver range, such as ^0.1.0",
+          message: "must be an npm semver range, such as ^0.2.0",
         },
       ]);
     },

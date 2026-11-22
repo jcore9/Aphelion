@@ -1,7 +1,7 @@
 import { satisfies, valid, validRange } from "semver";
 import { z } from "zod";
 
-export const pluginApiVersion = "0.1.0";
+export const pluginApiVersion = "0.2.0";
 
 export const pluginManifestFile = "aphelion-plugin.json";
 
@@ -29,7 +29,7 @@ const apiRange = text(256).refine(
   (range) =>
     range.split("||").every((part) => part.trim() !== "") &&
     validRange(range) !== null,
-  { error: "must be an npm semver range, such as ^0.1.0" },
+  { error: "must be an npm semver range, such as ^0.2.0" },
 );
 
 const entry = text(1024).regex(
@@ -68,7 +68,7 @@ const permissions = {
   events: list(dottedName, "Events the plugin receives."),
   secrets: list(
     secretReference,
-    "Secret references the plugin asks the host to resolve.",
+    "Secret references the plugin may ask the host to use for it, such as in an HTTP call. The plugin never receives the values.",
   ),
   network: list(host, "Hostnames the plugin connects to."),
   uiSlots: list(
@@ -80,7 +80,7 @@ const permissions = {
 const contributions = {
   secretSchemes: list(
     scheme,
-    "Secret reference schemes the plugin resolves as a secret backend.",
+    "Secret reference schemes the plugin resolves as a secret backend. The values it returns go only to the secrets broker.",
   ),
 };
 
@@ -90,6 +90,9 @@ export type ContributionKind = keyof typeof contributions;
 type PluginSide = "server" | "client";
 
 const pluginSides: readonly PluginSide[] = ["server", "client"];
+
+type Sides =
+  readonly ["server"] | readonly ["client"] | readonly ["server", "client"];
 
 const sidesFor = {
   permissions: {
@@ -102,8 +105,8 @@ const sidesFor = {
     secretSchemes: ["server"],
   },
 } as const satisfies {
-  permissions: Record<PermissionKind, readonly PluginSide[]>;
-  contributes: Record<ContributionKind, readonly PluginSide[]>;
+  permissions: Record<PermissionKind, Sides>;
+  contributes: Record<ContributionKind, Sides>;
 };
 
 type OneSideRule = {
@@ -113,11 +116,10 @@ type OneSideRule = {
 };
 
 const oneSideRules = Object.entries(sidesFor).flatMap(([group, kinds]) =>
-  Object.entries(kinds).flatMap(
-    ([kind, [side, ...others]]: [string, readonly PluginSide[]]) =>
-      side && others.length === 0
-        ? [{ group: group as OneSideRule["group"], kind, side }]
-        : [],
+  Object.entries(kinds).flatMap(([kind, sides]: [string, Sides]) =>
+    sides.length === 1
+      ? [{ group: group as OneSideRule["group"], kind, side: sides[0] }]
+      : [],
   ),
 );
 
@@ -200,26 +202,30 @@ export const pluginManifestSchema = z
     })),
   });
 
-type PluginPart = { entry: string };
+type PluginPart = { readonly entry: string };
 
 type ListsFor<
-  Kinds extends Record<string, readonly PluginSide[]>,
+  Kinds extends Record<string, Sides>,
   Present extends PluginSide,
 > = {
-  [Kind in keyof Kinds]: [Extract<Kinds[Kind][number], Present>] extends [never]
-    ? never[]
-    : string[];
+  readonly [Kind in keyof Kinds]: [
+    Extract<Kinds[Kind][number], Present>,
+  ] extends [never]
+    ? readonly never[]
+    : readonly string[];
 };
 
-type ManifestWith<Present extends PluginSide> = Omit<
-  z.output<typeof pluginManifestSchema>,
-  PluginSide | "permissions" | "contributes"
-> & { [Side in Present]: PluginPart } & {
-  [Side in Exclude<PluginSide, Present>]?: never;
-} & {
-  permissions: ListsFor<(typeof sidesFor)["permissions"], Present>;
-  contributes: ListsFor<(typeof sidesFor)["contributes"], Present>;
-};
+type ManifestWith<Present extends PluginSide> = Readonly<
+  Omit<
+    z.output<typeof pluginManifestSchema>,
+    PluginSide | "permissions" | "contributes"
+  > & { [Side in Present]: PluginPart } & {
+    [Side in Exclude<PluginSide, Present>]?: never;
+  } & {
+    permissions: ListsFor<(typeof sidesFor)["permissions"], Present>;
+    contributes: ListsFor<(typeof sidesFor)["contributes"], Present>;
+  }
+>;
 
 export type PluginManifest =
   ManifestWith<"server"> | ManifestWith<"client"> | ManifestWith<PluginSide>;
