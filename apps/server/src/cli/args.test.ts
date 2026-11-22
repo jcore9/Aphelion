@@ -1,0 +1,132 @@
+import { describe, expect, test } from "vitest";
+import { defaultConfigDir } from "../config";
+import { defaultStateDir, parseCommandLine } from "./args";
+
+const accepted = (argv: string[]) => {
+  const result = parseCommandLine(argv);
+  if (!result.ok) throw new Error(result.message);
+  return result.command;
+};
+
+const refused = (argv: string[]) => {
+  const result = parseCommandLine(argv);
+  if (result.ok) throw new Error(`accepted ${JSON.stringify(result.command)}`);
+  return result.message;
+};
+
+describe("accepted command lines", () => {
+  test.each([
+    [[], { kind: "help" }],
+    [["--help"], { kind: "help" }],
+    [["-h"], { kind: "help" }],
+    [["device", "add", "--help"], { kind: "help" }],
+    [["--version"], { kind: "version" }],
+    [
+      ["--headless"],
+      {
+        kind: "headless",
+        configDir: defaultConfigDir,
+        stateDir: defaultStateDir,
+      },
+    ],
+    [
+      ["--headless", "--config-dir", "/c", "--state-dir=/s"],
+      { kind: "headless", configDir: "/c", stateDir: "/s" },
+    ],
+    [
+      ["config", "check"],
+      {
+        kind: "config check",
+        configDir: defaultConfigDir,
+        stateDir: defaultStateDir,
+        compose: undefined,
+      },
+    ],
+    [
+      ["config", "check", "--compose", "-"],
+      {
+        kind: "config check",
+        configDir: defaultConfigDir,
+        stateDir: defaultStateDir,
+        compose: "-",
+      },
+    ],
+    [
+      ["device", "add", "my laptop"],
+      {
+        kind: "device add",
+        stateDir: defaultStateDir,
+        name: "my laptop",
+        days: undefined,
+      },
+    ],
+    [
+      ["device", "add", "phone", "--days", "365"],
+      {
+        kind: "device add",
+        stateDir: defaultStateDir,
+        name: "phone",
+        days: 365,
+      },
+    ],
+    [["device", "list"], { kind: "device list", stateDir: defaultStateDir }],
+    [
+      ["device", "revoke", "0123456789abcdef"],
+      {
+        kind: "device revoke",
+        stateDir: defaultStateDir,
+        id: "0123456789abcdef",
+      },
+    ],
+  ])("%j", (argv, command) => {
+    expect(accepted(argv)).toEqual(command);
+  });
+});
+
+describe("refused command lines", () => {
+  test.each([
+    [["bogus"], 'unknown command "bogus"'],
+    [["device"], 'unknown command "device"'],
+    [["device", "remove", "x"], 'unknown command "device remove"'],
+    [
+      ["--headless", "config", "check"],
+      '"headless" takes no arguments, but got: config check',
+    ],
+    [["--version", "--headless"], '--headless isn\'t an option of "version"'],
+    [["--headless", "--days", "3"], '--days isn\'t an option of "headless"'],
+    [
+      ["config", "check", "--days", "3"],
+      '--days isn\'t an option of "config check"',
+    ],
+    [
+      ["device", "list", "--config-dir", "/c"],
+      '--config-dir isn\'t an option of "device list"',
+    ],
+    [["device", "add"], '"device add" needs a name'],
+    [["device", "add", "a", "b"], '"device add" takes one name, but got: a b'],
+    [
+      ["device", "add", " laptop"],
+      "the device name must be 1 to 64 characters",
+    ],
+    [
+      ["device", "add", "x", "--days", "0"],
+      "--days must be a whole number of days from 1 to 365",
+    ],
+    [
+      ["device", "add", "x", "--days", "366"],
+      "--days must be a whole number of days from 1 to 365",
+    ],
+    [
+      ["device", "add", "x", "--days", "1.5"],
+      "--days must be a whole number of days",
+    ],
+    [["device", "revoke", "laptop"], "the device id must be 16 hex digits"],
+    [["--nope"], "Unknown option '--nope'"],
+    [
+      ["config", "check", "--compose"],
+      "Option '--compose <value>' argument missing",
+    ],
+  ])("%j", (argv, message) => {
+    expect(refused(argv)).toContain(message);
+  });
+});

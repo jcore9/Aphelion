@@ -50,12 +50,12 @@ function ruleIssues(
   ].filter((message): message is string => typeof message === "string");
 }
 
-export async function checkConfigPermissions(
-  dir: string,
+async function checkRules(
+  list: Rule[],
   owner: Owner,
-  stat: Lstat = lstat,
+  stat: Lstat,
 ): Promise<ConfigIssue[]> {
-  const checks = rules(dir).map(async (rule) => {
+  const checks = list.map(async (rule) => {
     try {
       const messages = ruleIssues(rule, owner, await stat(rule.path));
       return messages.map((message) => ({ file: rule.path, message }));
@@ -73,4 +73,26 @@ export async function checkConfigPermissions(
     }
   });
   return (await Promise.all(checks)).flat();
+}
+
+export function checkConfigPermissions(
+  dir: string,
+  owner: Owner,
+  stat: Lstat = lstat,
+): Promise<ConfigIssue[]> {
+  return checkRules(rules(dir), owner, stat);
+}
+
+export function checkStatePermissions(
+  dir: string,
+  owner: Owner,
+  stat: Lstat = lstat,
+): Promise<ConfigIssue[]> {
+  const rule = {
+    path: dir,
+    type: constants.S_IFDIR,
+    typeName: "a directory",
+    maxMode: 0o700,
+  };
+  return checkRules([rule], owner, stat);
 }

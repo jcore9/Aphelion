@@ -1,0 +1,274 @@
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Cause, Effect, Exit, Layer } from "effect";
+import { afterEach, beforeEach, expect, test } from "vitest";
+import { openStore } from "../store";
+import { version } from "../version";
+import { cli, CliFailure, CliIo } from "./index";
+import { stdinLabel } from "./config-check";
+
+const example = join(
+  import.meta.dirname,
+  "../../../../docs/reference/config/example",
+);
+
+let root: string;
+let configDir: string;
+let stateDir: string;
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "aphelion-cli-"));
+  configDir = join(root, "etc");
+  stateDir = join(root, "state");
+  await cp(example, configDir, { recursive: true });
+  await chmod(configDir, 0o750);
+  for (const file of await readdir(configDir)) {
+    await chmod(join(configDir, file), 0o640);
+  }
+  await mkdir(stateDir, { mode: 0o700 });
+  await chmod(stateDir, 0o700);
+});
+
+afterEach(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+async function run(argv: string[], stdin = "") {
+  const out: string[] = [];
+  const err: string[] = [];
+  const io = Layer.succeed(CliIo, {
+    out: (line) => Effect.sync(() => void out.push(line)),
+    err: (line) => Effect.sync(() => void err.push(line)),
+    stdin: Effect.succeed(stdin),
+  });
+  const exit = await Effect.runPromiseExit(cli(argv).pipe(Effect.provide(io)));
+  let code = 0;
+  if (Exit.isFailure(exit)) {
+    const error = Cause.squash(exit.cause);
+    code = error instanceof CliFailure ? error.exitCode : -1;
+  }
+  return { code, out, err };
+}
+
+const dirs = () => ["--config-dir", configDir, "--state-dir", stateDir];
+
+test("--version prints the version", async () => {
+  expect(await run(["--version"])).toEqual({
+    code: 0,
+    out: [`aphelion ${version}`],
+    err: [],
+  });
+});
+
+test("version.ts matches package.json", async () => {
+  const pkg = JSON.parse(
+    await readFile(join(import.meta.dirname, "../../package.json"), "utf8"),
+  ) as { version: string };
+  expect(version).toBe(pkg.version);
+});
+
+test("--help and no arguments print the commands", async () => {
+  for (const argv of [["--help"], []]) {
+    const { code, out } = await run(argv);
+    expect(code).toBe(0);
+    for (const command of [
+      "aphelion --headless",
+      "aphelion config check",
+      "aphelion device add NAME",
+      "aphelion device list",
+      "aphelion device revoke ID",
+      "aphelion --version",
+    ]) {
+      expect(out.join("\n")).toContain(command);
+    }
+  }
+});
+
+test("a usage error exits 2 and says how to get help", async () => {
+  expect(await run(["device", "add"])).toEqual({
+    code: 2,
+    out: [],
+    err: [
+      'aphelion: "device add" needs a name',
+      "Run aphelion --help to see the commands.",
+    ],
+  });
+});
+
+test("config check passes a good config", async () => {
+  const { code, out } = await run(["config", "check", ...dirs()]);
+  expect(code).toBe(0);
+  expect(out).toEqual([
+    "Config OK. The Compose file wasn't checked: pass --compose to check it.",
+  ]);
+});
+
+test("config check lists config, mode and state folder problems, and exits 1", async () => {
+  await writeFile(
+    join(configDir, "server.yaml"),
+    "version: 1\naddress: x\nport: 7400\n",
+  );
+  await chmod(configDir, 0o755);
+  await chmod(stateDir, 0o750);
+  const { code, out, err } = await run(["config", "check", ...dirs()]);
+  expect(code).toBe(1);
+  expect(out).toEqual([
+    `${configDir}/server.yaml:2:10: address: must be an IPv4 or IPv6 address, such as 0.0.0.0`,
+    `${configDir}: has mode 0755, which is looser than 0750`,
+    `${stateDir}: has mode 0750, which is looser than 0700`,
+  ]);
+  expect(err).toEqual(["3 problems found."]);
+});
+
+test("config check reports a missing state folder", async () => {
+  await rm(stateDir, { recursive: true });
+  const { code, out } = await run(["config", "check", ...dirs()]);
+  expect(code).toBe(1);
+  expect(out).toEqual([`${stateDir}: is missing`]);
+});
+
+const tailnetCompose = `services:
+  aphelion:
+    ports:
+      - host_ip: 100.71.226.67
+        target: 7400
+        published: "7400"
+`;
+
+test("config check --compose - accepts tailnet-only ports from standard input", async () => {
+  const { code, out } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    tailnetCompose,
+  );
+  expect(code).toBe(0);
+  expect(out).toEqual([
+    "Config OK, and the Compose file publishes ports only on the tailnet.",
+  ]);
+});
+
+test("config check --compose - refuses a port on every address", async () => {
+  const { code, out } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    "services:\n  aphelion:\n    ports: ['7400:7400']\n",
+  );
+  expect(code).toBe(1);
+  expect(out).toEqual([
+    `${stdinLabel}:3:13: services.aphelion.ports[0]: publishes the port on every host address. Publish it only on the host's tailnet address, such as "100.71.226.67:7400:7400" (decision 0022).`,
+  ]);
+});
+
+test("config check --compose - refuses empty input", async () => {
+  const { code, out } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    "",
+  );
+  expect(code).toBe(1);
+  expect(out).toEqual([`${stdinLabel}: must be a YAML mapping`]);
+});
+
+test("config check --compose reads a file, and reports one it can't read", async () => {
+  const file = join(root, "rendered.yaml");
+  await writeFile(file, tailnetCompose);
+  expect(
+    (await run(["config", "check", ...dirs(), "--compose", file])).code,
+  ).toBe(0);
+
+  const missing = join(root, "missing.yaml");
+  const { code, out } = await run([
+    "config",
+    "check",
+    ...dirs(),
+    "--compose",
+    missing,
+  ]);
+  expect(code).toBe(1);
+  expect(out).toEqual([`${missing}: can't be read (ENOENT)`]);
+});
+
+test("device add prints only the token on standard output, once", async () => {
+  const { code, out, err } = await run([
+    "device",
+    "add",
+    "my laptop",
+    "--days",
+    "30",
+    "--state-dir",
+    stateDir,
+  ]);
+  expect(code).toBe(0);
+  expect(out).toHaveLength(1);
+  const token = out[0] ?? "";
+  expect(token).toMatch(/^aph_dev_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/);
+  expect(err.join("\n")).not.toContain(token);
+  expect(err[0]).toMatch(/^Added device "my laptop" with id [0-9a-f]{16}\./);
+
+  const db = openStore(join(stateDir, "aphelion.db"));
+  try {
+    const [row] = db.all("SELECT name, created_at, expires_at FROM devices");
+    expect(row?.["name"]).toBe("my laptop");
+    const days =
+      (Date.parse(String(row?.["expires_at"])) -
+        Date.parse(String(row?.["created_at"]))) /
+      86_400_000;
+    expect(days).toBe(30);
+    expect(JSON.stringify(db.all("SELECT * FROM audit_log"))).not.toContain(
+      token,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("device list shows each device's status, and revoke stops a token", async () => {
+  const state = ["--state-dir", stateDir];
+  expect((await run(["device", "list", ...state])).err).toEqual([
+    "No devices. Add one with: aphelion device add <name>",
+  ]);
+
+  await run(["device", "add", "laptop", ...state]);
+  await run(["device", "add", "phone", ...state]);
+  const listed = await run(["device", "list", ...state]);
+  expect(listed.out[0]).toBe("ID\tSTATUS\tEXPIRES\tNAME");
+  const ids = listed.out.slice(1).map((line) => line.split("\t")[0] ?? "");
+  expect(listed.out.slice(1).map((line) => line.split("\t")[1])).toEqual([
+    "active",
+    "active",
+  ]);
+
+  expect(await run(["device", "revoke", ids[0] ?? "", ...state])).toEqual({
+    code: 0,
+    out: [],
+    err: [`Revoked device ${ids[0] ?? ""}.`],
+  });
+  const after = await run(["device", "list", ...state]);
+  expect(after.out.slice(1).map((line) => line.split("\t")[1])).toEqual([
+    "revoked",
+    "active",
+  ]);
+
+  const again = await run(["device", "revoke", ids[0] ?? "", ...state]);
+  expect(again.code).toBe(1);
+  expect(again.err[0]).toContain("No active device has the id");
+});
+
+test("an unexpected error prints its message and exits 1", async () => {
+  const { code, err } = await run([
+    "device",
+    "list",
+    "--state-dir",
+    join(root, "nowhere"),
+  ]);
+  expect(code).toBe(1);
+  expect(err).toHaveLength(1);
+  expect(err[0]).toMatch(/^aphelion: .*ENOENT/);
+});

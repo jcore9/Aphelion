@@ -5,7 +5,7 @@ const tokenPrefix = "aph_dev_";
 
 export const deviceId = z
   .string()
-  .regex(/^[0-9a-f]{16}$/)
+  .regex(/^[0-9a-f]{16}$/, { error: "must be 16 hex digits" })
   .brand<"DeviceId">();
 export type DeviceId = z.infer<typeof deviceId>;
 
