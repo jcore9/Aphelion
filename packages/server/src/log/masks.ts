@@ -12,7 +12,10 @@ export class MaskListFullError extends Error {
   }
 }
 
-const formsByValue = new Map<string, readonly string[]>();
+const registrations = new Map<
+  string,
+  { readonly forms: readonly string[]; count: number }
+>();
 const formCounts = new Map<string, number>();
 const byPrefix = new Map<string, string[]>();
 
@@ -67,19 +70,25 @@ function removeForm(form: string): void {
 
 export function maskSecretValue(value: string): MaskResult {
   if (value.length < minimumMaskLength) return "too short";
-  if (formsByValue.has(value)) return "masked";
-  if (formsByValue.size >= maskLimit) throw new MaskListFullError();
+  const registration = registrations.get(value);
+  if (registration !== undefined) {
+    registration.count += 1;
+    return "masked";
+  }
+  if (registrations.size >= maskLimit) throw new MaskListFullError();
   const forms = encodedForms(value);
-  formsByValue.set(value, forms);
+  registrations.set(value, { forms, count: 1 });
   forms.forEach(addForm);
   return "masked";
 }
 
 export function unmaskSecretValue(value: string): void {
-  const forms = formsByValue.get(value);
-  if (forms === undefined) return;
-  formsByValue.delete(value);
-  forms.forEach(removeForm);
+  const registration = registrations.get(value);
+  if (registration === undefined) return;
+  registration.count -= 1;
+  if (registration.count > 0) return;
+  registrations.delete(value);
+  registration.forms.forEach(removeForm);
 }
 
 export function maskKnownValues(text: string, replacement: string): string {
