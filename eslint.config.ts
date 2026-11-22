@@ -27,6 +27,11 @@ const effectBunImports = {
   message:
     "@effect/platform-bun and @effect/sql-sqlite-bun use Bun-only APIs. Import them from an adapter module under src/adapters/ in server or cli (decisions 0007 and 0041).",
 };
+const effectImports = {
+  regex: "^(effect|@effect/.+)(/|$)",
+  message:
+    "Only server and cli use the Effect library. protocol, plugin-sdk and client stay plain TypeScript (decision 0041).",
+};
 const nodeImports = {
   regex: `^(node:|(${nodeModules.join("|")})(/|$))`,
   message: webOnly,
@@ -51,10 +56,19 @@ function restrict(
   imports: { regex: string; message: string }[],
   globals: { name: string; message: string }[],
 ): Linter.RulesRecord {
-  const calls = imports.map(({ regex, message }) => ({
-    selector: `ImportExpression > Literal[value=/${regex.replaceAll("/", "\\u002F")}/]`,
-    message,
-  }));
+  const calls = imports.flatMap(({ regex, message }) => {
+    const pattern = `/${regex.replaceAll("/", "\\u002F")}/`;
+    return [
+      {
+        selector: `ImportExpression > Literal[value=${pattern}]`,
+        message,
+      },
+      {
+        selector: `ImportExpression > TemplateLiteral[expressions.length=0][quasis.0.value.cooked=${pattern}]`,
+        message,
+      },
+    ];
+  });
   return {
     "no-restricted-imports": ["error", { patterns: imports }],
     "no-restricted-syntax": ["error", ...calls],
@@ -87,7 +101,7 @@ export default defineConfig(
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
-    files: ["**/*.{ts,tsx}"],
+    files: ["**/*.{ts,tsx,js,mjs,cjs}"],
     rules: {
       ...restrict([bunImports, effectBunImports], bunGlobals),
       "no-restricted-properties": [
@@ -99,7 +113,7 @@ export default defineConfig(
   {
     files: webPackages,
     rules: restrict(
-      [bunImports, effectBunImports, nodeImports, hostImports],
+      [bunImports, effectBunImports, effectImports, nodeImports, hostImports],
       [...bunGlobals, ...nodeGlobals],
     ),
   },
