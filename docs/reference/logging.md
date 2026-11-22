@@ -163,6 +163,7 @@ Every string is searched for these patterns, in `valueRules`, and each match is 
 | GitHub token | `ghp_`, `gho_`, `ghu_`, `ghs_` or `ghr_` and 30 or more characters, or `github_pat_` |
 | 1Password service account token | `ops_` and 20 or more characters |
 | Slack token | `xoxb-`, `xoxp-` and the other `xox` prefixes |
+| Aphelion device token | `aph_dev_` and 20 or more letters, digits, `_` or `-` ([device tokens](devices.md)) |
 | AWS access key ID | `AKIA` or `ASIA` and 16 capital letters or digits |
 | age secret key | `AGE-SECRET-KEY-1` and 58 characters |
 | JSON Web Token | Three dot-separated parts, the first two starting with `eyJ` |

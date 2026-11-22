@@ -2,7 +2,7 @@
 
 The server answers HTTP requests and WebSocket connections from Aphelion's clients. HTTP is the request-and-reply protocol that web browsers and `curl` use. A WebSocket is a connection that starts as an HTTP request and then stays open, so both sides can send messages at any time. Clients will use one to exchange [protocol frames](protocol.md).
 
-Until device tokens arrive in M0-10b ([#98](https://github.com/jcore9/Aphelion/issues/98)), the server answers one question, "are you running?", and refuses everything else. [Decision 0043](../decisions/0043-http-server-on-effect-platform-bun.md) explains how it is built.
+Without a [device token](devices.md), the server answers one question, "are you running?", and refuses everything else. With a valid token, a client can open a WebSocket on `/ws`. [Decision 0043](../decisions/0043-http-server-on-effect-platform-bun.md) explains how the server is built.
 
 ## Where it listens
 
@@ -27,7 +27,7 @@ A `GET` request for exactly `/health` needs no token. The reply is status `200`,
 
 The reply never carries a version or any other detail, so it tells an attacker nothing about the server.
 
-Only the method `GET` with the request target `/health` is public. The request target is the path plus any query string. A request with a query string, such as `/health?verbose=1`, goes through the token check like every other request, so today it gets `401`.
+Only the method `GET` with the request target `/health` is public. The request target is the path plus any query string. A request with a query string, such as `/health?verbose=1`, goes through the token check like every other request, so without a token it gets `401`.
 
 One known limit: a request may name the full URL instead of the path, as in `GET http://example.com/health HTTP/1.1`. The listener removes the scheme and host before Aphelion's handler sees the request, so the handler can't tell this request from `GET /health`. It gets the same `200` and the same body, and nothing else. Aphelion accepts this.
 
@@ -35,27 +35,54 @@ One known limit: a request may name the full URL instead of the path, as in `GET
 curl http://127.0.0.1:7400/health
 ```
 
-## What the server refuses until M0-10b
+## What the server answers
 
-Decision 0022 says that every endpoint except `/health` needs a device token, even a request from `127.0.0.1`. The server can't check tokens yet, so it refuses every other request.
+Decision 0022 says that every endpoint except `/health` needs a device token, even a request from `127.0.0.1`. The token goes in the `Authorization` header, as `Authorization: Bearer aph_dev_…`. [Device tokens](devices.md) explains how tokens are made, checked and revoked.
 
 | Request | Reply |
 | --- | --- |
-| `GET /health` | `200` and `{"status":"ok"}` |
-| Any other path, query string or method, such as `GET /`, `GET /ws`, `GET /health?verbose=1` or `POST /health` | `401` with an empty body |
-| Any of those requests with an `Authorization` header | `401` with an empty body, because no token is valid yet |
-| A WebSocket connection to any path, `/health` included | Refused. The server never switches the connection to a WebSocket, so the client sees the connection fail. |
+| `GET /health` | `200` and `{"status":"ok"}`, with or without a token |
+| Any other request without a valid token | `401` with an empty body |
+| A WebSocket to `GET /ws` with a valid token | The connection switches to a WebSocket. See [WebSockets](#websockets). |
+| A WebSocket without a valid token, or to any other path | Refused before the switch. The client sees the connection fail. |
+| `GET /ws` with a valid token but no WebSocket request | `400` with an empty body |
+| Any other request with a valid token | `404` with an empty body. M1 adds the API. |
 | A request body larger than 64 KiB | `413`, from the listener, before the token check runs |
 | `CONNECT` | `501` with an empty body, from the listener, before the token check runs. No tunnel opens. |
 
-`401` means "you haven't proved who you are". The reply has no body, so it doesn't say whether the path exists.
+"A valid token" means a device token that exists, matches, hasn't expired and hasn't been revoked. A missing token and each kind of bad token get exactly the same `401`, with the same headers and an empty body. `401` means "you haven't proved who you are". The reply doesn't say which check failed, or whether the path exists.
 
 Two replies come from the listener, `@effect/platform-bun`, before Aphelion's own code sees the request:
 
-- The listener refuses a request body over 64 KiB (65,536 bytes) with `413`. The server answers only `/health` for now, so it needs no large bodies. M0-10b raises the limit if the API needs more.
+- The listener refuses a request body over 64 KiB (65,536 bytes) with `413`. No endpoint needs a larger body yet, so the limit stays.
 - `CONNECT` asks a server to open a tunnel to another host. The listener answers every `CONNECT` with `501` ("not implemented") and an empty body, and opens no tunnel. It is the one refusal that isn't `401`.
 
-In code, each request that isn't `GET /health` goes through one authentication check. Today that check refuses everyone. M0-10b replaces the check with one that reads the device token, and adds the WebSocket route behind it. The WebSocket route will read each frame with `parseClientFrame` from [the protocol package](protocol.md).
+## WebSockets
+
+A client with a valid token opens a WebSocket on `/ws` and sends [protocol frames](protocol.md), one JSON text message each. The server reads each one with `parseClientFrame`. M1 answers the frames. Until then the server reads them and sends nothing back.
+
+The server closes the WebSocket in these cases. The close code and reason are fixed text.
+
+| When | Close code | Reason |
+| --- | --- | --- |
+| A message isn't a valid client frame, or is binary | `1007` | `malformed frame` |
+| A frame has a protocol version that the server doesn't speak | `1007` | `unsupported version` |
+| The token is revoked or expires | `1008` | `token no longer valid` |
+| A message is larger than 64 KiB | `1009` | Set by Bun |
+| Unread messages from the client pass 256 KiB | `1008` | `Inbound message buffer limit exceeded`, set by the listener |
+
+The server checks the token again every 5 seconds while the WebSocket is open, so a revoked or expired token closes it within 5 seconds.
+
+These limits are set in [`packages/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/adapters/http-server.ts):
+
+| Limit | Value | Why |
+| --- | --- | --- |
+| Largest message | 64 KiB | Matches the request body limit. Bun's default is 16 MiB. |
+| Unread messages from the client | 256 KiB | Bun can't pause a client, so the listener closes one that sends faster than the server reads. The default is no limit. |
+| Unsent messages to the client | 1 MiB, then the WebSocket closes | A client that stops reading can't make the server hold its messages without limit. Bun's default is 16 MiB, and it keeps the connection open. |
+| Idle time | 60 seconds | Bun pings the client shortly before, so a client that answers stays connected. Bun's default is 120 seconds. |
+
+Compression stays off, so a small compressed message can't expand into a large one.
 
 ## The Compose port rule
 
@@ -106,7 +133,9 @@ The check parses the YAML with the `yaml` package and checks its shape with Zod.
 
 | File | Holds |
 | --- | --- |
-| [`packages/server/src/http/app.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/app.ts) | The request handler, the `Authenticator` service and `refuseEveryone` |
-| [`packages/server/src/http/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/index.ts) | `serveHttp({ address, port })`, which starts the server with `refuseEveryone` |
-| [`packages/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/adapters/http-server.ts) | The Bun listener, the only file that imports `@effect/platform-bun` |
+| [`packages/server/src/http/app.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/app.ts) | The request handler and the `Authenticator` service |
+| [`packages/server/src/http/authenticator.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/authenticator.ts) | `deviceTokens(db)`, the `Authenticator` that checks device tokens |
+| [`packages/server/src/http/socket.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/socket.ts) | One WebSocket: reads frames and closes it when a frame is bad or the token ends |
+| [`packages/server/src/http/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/http/index.ts) | `serveHttp({ address, port }, db)`, which starts the server |
+| [`packages/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/adapters/http-server.ts) | The Bun listener and its WebSocket limits, the only file that imports `@effect/platform-bun` |
 | [`packages/server/src/config/compose.ts`](https://github.com/jcore9/Aphelion/blob/dev/packages/server/src/config/compose.ts) | `checkComposePorts` |
