@@ -13,6 +13,7 @@
     "./secrets": "./src/secrets/index.ts"
   },
   "scripts": {
+    "build": "bun build --compile src/cli/main.ts --outfile dist/aphelion",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -25,5 +26,8 @@
   },
   "devDependencies": {
     "@effect/vitest": "4.1.5"
+  },
+  "bin": {
+    "aphelion": "./src/cli/main.ts"
   }
 }

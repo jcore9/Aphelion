@@ -235,6 +235,8 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 > Amended by [decision 0047](../../decisions/0047-repo-layout.md). The CLI is part of the server package, in `apps/server/src/cli/`, with its Bun-only code in `apps/server/src/adapters/`.
 
+> Amended by [decision 0048](../../decisions/0048-cli-on-node-parseargs.md). The command line is read with Node's `parseArgs`. `config check --compose -` reads the output of `docker compose config` from standard input, and `device list` and `device revoke` join `device add`. [The `aphelion` command](../../reference/cli.md) lists them all.
+
 **M0-12, container image, Compose file and host unit.** Rewritten by [decision 0016](../../decisions/0016-one-docker-container.md). The image is built on Ubuntu LTS and contains:
 
 - the users `harness`, `aphelion-bot`, `aphelion-secrets` and `aphelion-plugins` ([decision 0018](../../decisions/0018-shared-plugin-user.md)), with fixed UIDs and no sudo;

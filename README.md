@@ -42,6 +42,17 @@ You need [Bun](https://bun.sh) 1.4.5, the version pinned in `package.json`.
 
 `bun run format` rewrites code in the Prettier style that `lint` checks.
 
+To run the server from source, give it a config folder and a state folder that only you can read, make it listen on `127.0.0.1` only, then start it:
+
+```sh
+cp -r docs/reference/config/example /tmp/aphelion-etc && chmod 750 /tmp/aphelion-etc && chmod 640 /tmp/aphelion-etc/*
+sed -i 's/0.0.0.0/127.0.0.1/' /tmp/aphelion-etc/server.yaml
+mkdir -m 700 /tmp/aphelion-state
+bun apps/server/src/cli/main.ts --headless --config-dir /tmp/aphelion-etc --state-dir /tmp/aphelion-state
+```
+
+[The `aphelion` command](docs/reference/cli.md) lists the other commands.
+
 `bun run docs` builds the docs site into `docs/dist/` and fails on a broken internal link. `bun run --filter @aphelion/docs dev` serves it with live reload. [The docs index](docs/README.md) says how the site reads the files.
 
 The code is split into apps, which are programs you run, and packages, which the apps share ([decision 0047](docs/decisions/0047-repo-layout.md)):

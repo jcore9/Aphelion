@@ -7,4 +7,9 @@ export {
   type LoadResult,
   type Migrated,
 } from "./load";
-export { checkConfigPermissions, type Lstat, type Owner } from "./permissions";
+export {
+  checkConfigPermissions,
+  checkStatePermissions,
+  type Lstat,
+  type Owner,
+} from "./permissions";

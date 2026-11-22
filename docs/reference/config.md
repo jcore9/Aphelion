@@ -35,7 +35,7 @@ Every file is at version 1, and no migrations exist yet.
 
 ## Owners and modes
 
-`checkConfigPermissions` refuses a config directory that bots could read or write. `aphelion config check` calls it (M0-11).
+`checkConfigPermissions` refuses a config directory that bots could read or write. [`aphelion config check`](cli.md#aphelion-config-check) calls it, and `aphelion --headless` doesn't start when it fails. Both also check the state folder, `/var/lib/aphelion`, with `checkStatePermissions`: it must be a folder owned by the server's user and group, with a mode no looser than `0700`.
 
 | Path | Must be | Owner and group | Mode no looser than |
 | --- | --- | --- | --- |

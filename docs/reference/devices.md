@@ -4,10 +4,10 @@ A device token is a long random password that one of the owner's devices, such a
 
 ## The life of a token
 
-1. **Add.** `aphelion device add <name>` prints a new token once (M0-11, [#13](https://github.com/jcore9/Aphelion/issues/13), builds the command on `addDevice`). The server keeps only a fingerprint of it, so a lost token can't be shown again. Add a new device instead.
+1. **Add.** `aphelion device add <name>` prints a new token once ([the `aphelion` command](cli.md#aphelion-device-add-name)). The server keeps only a fingerprint of it, so a lost token can't be shown again. Add a new device instead.
 2. **Use.** The device sends the token in the `Authorization` header of each request, as `Authorization: Bearer aph_dev_…`.
-3. **Expire.** A token stops working 90 days after it was added, unless `addDevice` was given another lifetime, from 1 to 365 days.
-4. **Revoke.** `revokeDevice` stops a token at once. A WebSocket that uses it closes within 5 seconds.
+3. **Expire.** A token stops working 90 days after it was added, unless `device add --days` gave it another lifetime, from 1 to 365 days.
+4. **Revoke.** `aphelion device revoke <id>` stops a token at once. A WebSocket that uses it closes within 5 seconds. `aphelion device list` shows each device's id.
 
 ## What a token looks like
 
@@ -74,11 +74,11 @@ A test adds a device, logs the token and the result in several shapes, tries it 
 
 | File | Holds |
 | --- | --- |
-| [`apps/server/src/devices/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/devices/index.ts) | `addDevice`, `revokeDevice`, `checkAuthorization`, `isDeviceActive` and the failed-attempt audit limit |
+| [`apps/server/src/devices/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/devices/index.ts) | `addDevice`, `listDevices`, `revokeDevice`, `checkAuthorization`, `isDeviceActive` and the failed-attempt audit limit |
 | [`apps/server/src/devices/token.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/devices/token.ts) | The token format, the SHA-256 fingerprint and the constant-time comparison |
 | [`apps/server/src/store/migrations/0002-devices.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/store/migrations/0002-devices.ts) | The `devices` table |
 
-M0-11 calls them from `@aphelion/server/devices`:
+The `aphelion device` commands call them from `@aphelion/server/devices`:
 
 ```ts
 import { addDevice, revokeDevice } from "@aphelion/server/devices";

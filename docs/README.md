@@ -32,6 +32,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 
 ## Reference
 
+- [The aphelion command](reference/cli.md): `--headless`, `--version`, `config check` and the `device` commands, their options, output and exit codes.
 - [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
 - [Logging and the audit log](reference/logging.md): the log format, the redaction rules and how to add one, and the append-only audit table.
@@ -96,3 +97,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0045](decisions/0045-no-bot-namespaces-default-seccomp.md) | Bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox | Accepted |
 | [0046](decisions/0046-plugin-runner-kills-process-trees.md) | The plugin runner adopts every process its plugins leave behind, and freezes then kills a plugin's whole process tree | Accepted |
 | [0047](decisions/0047-repo-layout.md) | The code is split into apps and shared packages, and the server and its CLI are one package in `apps/server` | Accepted |
+| [0048](decisions/0048-cli-on-node-parseargs.md) | The aphelion command reads its command line with Node's parseArgs, and Docker's Compose output reaches config check through standard input | Proposed |

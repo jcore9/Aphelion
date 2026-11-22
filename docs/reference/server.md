@@ -88,7 +88,7 @@ Compression stays off, so a small compressed message can't expand into a large o
 
 The Compose file must publish the server's port only on the host's tailnet address. The tailnet is the private network that Tailscale builds between the owner's devices. Its IPv4 addresses are in the range `100.64.0.0/10`, which runs from `100.64.0.0` to `100.127.255.255`.
 
-`checkComposePorts(file, text)` reads the output of `docker compose config`, as YAML or as the JSON that `--format json` prints, and lists every port that breaks the rule. That command prints the Compose model that Docker will run. It fills in variables such as `${TAILNET_IP}`, and merges `include`, `extends` and override files such as `compose.override.yaml` into one file. `aphelion config check` will run the command and pass its output to the check (M0-11, [#13](https://github.com/jcore9/Aphelion/issues/13)).
+`checkComposePorts(file, text)` reads the output of `docker compose config`, as YAML or as the JSON that `--format json` prints, and lists every port that breaks the rule. That command prints the Compose model that Docker will run. It fills in variables such as `${TAILNET_IP}`, and merges `include`, `extends` and override files such as `compose.override.yaml` into one file. `aphelion config check --compose -` reads that output from standard input and runs the check on it. [The `aphelion` command](cli.md#checking-the-compose-file) shows the command line.
 
 The check looks at every published port of every service, not only the server's port, because nothing else in the container should be published ([decision 0022](../decisions/0022-bot-network-boundary.md)). The owner confirmed this rule on 2026-11-22.
 

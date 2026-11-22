@@ -19,9 +19,14 @@ export const deviceName = z.string().regex(/^(?!\s)[^\p{Cc}]{1,64}(?<!\s)$/u, {
 
 export const defaultLifetimeDays = 90;
 
+export const lifetimeDays = z
+  .int({ error: "must be a whole number of days from 1 to 365" })
+  .min(1, { error: "must be a whole number of days from 1 to 365" })
+  .max(365, { error: "must be a whole number of days from 1 to 365" });
+
 const addInput = z.strictObject({
   name: deviceName,
-  lifetimeDays: z.int().min(1).max(365).default(defaultLifetimeDays),
+  lifetimeDays: lifetimeDays.default(defaultLifetimeDays),
 });
 
 export interface Device {
@@ -85,6 +90,29 @@ export function revokeDevice(
     });
     return revoked;
   });
+}
+
+export interface ListedDevice {
+  readonly id: DeviceId;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly revokedAt: string | null;
+}
+
+export function listDevices(db: Database): ListedDevice[] {
+  return db
+    .all(
+      `SELECT id, name, created_at, expires_at, revoked_at
+        FROM devices ORDER BY created_at, id`,
+    )
+    .map((row) => ({
+      id: deviceId.parse(row["id"]),
+      name: String(row["name"]),
+      createdAt: String(row["created_at"]),
+      expiresAt: String(row["expires_at"]),
+      revokedAt: row["revoked_at"] === null ? null : String(row["revoked_at"]),
+    }));
 }
 
 export type Refusal =
