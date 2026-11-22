@@ -4,7 +4,8 @@
   "properties": {
     "$schema": {
       "description": "The manifest's JSON Schema, for editors. The host ignores it.",
-      "type": "string"
+      "type": "string",
+      "maxLength": 2048
     },
     "id": {
       "type": "string",
@@ -13,16 +14,19 @@
     },
     "version": {
       "type": "string",
-      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$",
+      "maxLength": 256,
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-(0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\\+[0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*)?$",
       "description": "The plugin's own version."
     },
     "api": {
       "type": "string",
+      "maxLength": 256,
       "description": "The plugin-API versions the plugin supports, as an npm semver range."
     },
     "entry": {
       "type": "string",
-      "pattern": "^(?!\\/)(?!.*\\\\)(?!(.*\\/)?\\.\\.(\\/|$)).+$",
+      "maxLength": 1024,
+      "pattern": "^(\\.\\/)?((?!\\.\\.?\\/)[\\w.@+-]+\\/)*(?!\\.\\.?$)[\\w.@+-]+$",
       "description": "The module the host starts, relative to the manifest."
     },
     "permissions": {
@@ -36,6 +40,7 @@
           "type": "array",
           "items": {
             "type": "string",
+            "maxLength": 128,
             "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
           }
         },
@@ -45,7 +50,8 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9+.-]*:\\/\\/[\\s\\S]{1,}$"
+            "maxLength": 1024,
+            "pattern": "^[a-z][a-z0-9+.-]*:\\/\\/[^\\u0000-\\u001f\\u007f]+$"
           }
         },
         "network": {
@@ -54,7 +60,18 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
+          }
+        },
+        "uiSlots": {
+          "default": [],
+          "description": "UI slots the plugin shows content in. The owner grants each one, because content there can show what is in a chat.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
           }
         }
       },
@@ -65,21 +82,13 @@
       "default": {},
       "type": "object",
       "properties": {
-        "uiSlots": {
-          "default": [],
-          "description": "UI slots the plugin renders into.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
-          }
-        },
         "secretSchemes": {
           "default": [],
           "description": "Secret reference schemes the plugin resolves as a secret backend.",
           "type": "array",
           "items": {
             "type": "string",
+            "maxLength": 32,
             "pattern": "^[a-z][a-z0-9+.-]*$"
           }
         }

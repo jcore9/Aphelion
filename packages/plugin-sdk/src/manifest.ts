@@ -1,57 +1,63 @@
-import { satisfies, validRange } from "semver";
+import { satisfies, valid, validRange } from "semver";
 import { z } from "zod";
 
 export const pluginApiVersion = "0.1.0";
 
 export const pluginManifestFile = "aphelion-plugin.json";
 
+const text = (max: number) =>
+  z.string().max(max, {
+    error: `must be at most ${String(max)} characters`,
+    abort: true,
+  });
+
 const id = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/, {
   error:
     "must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter",
 });
 
-const version = z
-  .string()
+const versionError = "must be a semver version, such as 1.0.0";
+
+const version = text(256)
   .regex(
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/,
-    { error: "must be a semver version, such as 1.0.0" },
-  );
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$/,
+    { error: versionError, abort: true },
+  )
+  .refine((value) => valid(value) !== null, { error: versionError });
 
-const apiRange = z
-  .string()
-  .refine(
-    (range) =>
-      range.split("||").every((part) => part.trim() !== "") &&
-      validRange(range) !== null,
-    { error: "must be an npm semver range, such as ^0.1.0" },
-  );
-
-const entry = z.string().regex(/^(?!\/)(?!.*\\)(?!(.*\/)?\.\.(\/|$)).+$/, {
-  error:
-    "must be a relative path inside the plugin's folder, such as dist/index.js",
-});
-
-const dottedName = z
-  .string()
-  .regex(/^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)+$/, {
-    error: "must be words joined by dots, such as approval.requested",
-  });
-
-const schemeName = /^[a-z][a-z0-9+.-]*$/;
-
-const secretReference = z.templateLiteral(
-  [z.string().regex(schemeName), "://", z.string().min(1)],
-  { error: "must be a secret reference, such as op://vault/item/field" },
+const apiRange = text(256).refine(
+  (range) =>
+    range.split("||").every((part) => part.trim() !== "") &&
+    validRange(range) !== null,
+  { error: "must be an npm semver range, such as ^0.1.0" },
 );
 
-const host = z
-  .string()
-  .regex(
-    /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/,
-    { error: "must be a lowercase hostname, such as api.github.com" },
-  );
+const entry = text(1024).regex(
+  /^(\.\/)?((?!\.\.?\/)[\w.@+-]+\/)*(?!\.\.?$)[\w.@+-]+$/,
+  {
+    error:
+      "must be a relative path inside the plugin's folder, such as dist/index.js",
+  },
+);
 
-const scheme = z.string().regex(schemeName, {
+const dottedName = text(128).regex(
+  /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)+$/,
+  { error: "must be words joined by dots, such as approval.requested" },
+);
+
+const secretReference = text(1024).regex(
+  /^[a-z][a-z0-9+.-]*:\/\/[^\u0000-\u001f\u007f]+$/,
+  {
+    error: "must be a secret reference, such as op://vault/item/field",
+  },
+);
+
+const host = text(253).regex(
+  /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/,
+  { error: "must be a lowercase hostname, such as api.github.com" },
+);
+
+const scheme = text(32).regex(/^[a-z][a-z0-9+.-]*$/, {
   error: "must be a reference scheme without ://, such as op",
 });
 
@@ -65,10 +71,13 @@ const permissions = {
     "Secret references the plugin asks the host to resolve.",
   ),
   network: list(host, "Hostnames the plugin connects to."),
+  uiSlots: list(
+    dottedName,
+    "UI slots the plugin shows content in. The owner grants each one, because content there can show what is in a chat.",
+  ),
 };
 
 const contributions = {
-  uiSlots: list(dottedName, "UI slots the plugin renders into."),
   secretSchemes: list(
     scheme,
     "Secret reference schemes the plugin resolves as a secret backend.",
@@ -80,8 +89,7 @@ export type ContributionKind = keyof typeof contributions;
 
 export const pluginManifestSchema = z
   .strictObject({
-    $schema: z
-      .string()
+    $schema: text(2048)
       .optional()
       .describe(
         "The manifest's JSON Schema, for editors. The host ignores it.",
@@ -147,6 +155,8 @@ function reason(data: unknown, problem: z.core.$ZodIssue): string {
     case "custom":
     case "invalid_format":
       return problem.message;
+    case "too_big":
+      return `must be at most ${String(problem.maximum)} characters`;
     case "unrecognized_keys":
       return "has an unknown field";
     case "invalid_type":
