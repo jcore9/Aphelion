@@ -47,7 +47,21 @@ stop_broker() {
   wait "$broker"
 }
 
-trap 'kill -TERM "${broker:-}" 2>/dev/null || true' EXIT
+trap 'if [[ -n "${broker:-}" ]]; then kill -TERM "$broker" 2>/dev/null || true; fi' EXIT
+
+chgrp aphelion-bot /run/aphelion-secrets
+chmod 2710 /run/aphelion-secrets
+if timeout 5s setpriv --reuid aphelion-secrets --regid aphelion-secrets --init-groups --inh-caps=-all \
+    /broker >>/broker.log 2>&1; then
+  echo "The broker accepted the bot group on its socket directory" >&2
+  exit 1
+else
+  status=$?
+  [[ "$status" == 1 ]]
+fi
+test ! -e /run/aphelion-secrets/broker.sock
+chgrp harness /run/aphelion-secrets
+chmod 2710 /run/aphelion-secrets
 start_broker
 as_user harness bun /check/broker-probe.mjs write
 for account in harness aphelion-bot aphelion-plugins; do
@@ -67,8 +81,11 @@ start_broker
 as_user harness bun /check/broker-probe.mjs read
 stop_broker
 grep -q 'Secrets broker startup failed' /broker.log
-if grep -arq 'broker-canary-' /broker.log /var/lib/aphelion-secrets; then
-  echo "Plaintext canary reached a broker log or store file" >&2
-  exit 1
-fi
+status=0
+grep -ar 'broker-canary-' /broker.log /var/lib/aphelion-secrets >/dev/null || status=$?
+case "$status" in
+  1) ;;
+  0) echo "Plaintext canary reached a broker log or store file" >&2; exit 1 ;;
+  *) echo "Could not scan broker logs and store files" >&2; exit 1 ;;
+esac
 echo "harness read the encrypted secret across broker restart"

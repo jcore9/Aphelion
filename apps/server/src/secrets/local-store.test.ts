@@ -71,6 +71,19 @@ describe("local secret store", () => {
     }
   });
 
+  it.each(["\uFEFFleading-marker", "unpaired-\uD800-surrogate"])(
+    "preserves the exact string %j across opens",
+    async (value) => {
+      await write(await openLocalStore(directory), value);
+      const secret = await (await openLocalStore(directory)).read(name);
+      try {
+        expect(secret?.reveal()).toBe(value);
+      } finally {
+        secret?.wipe();
+      }
+    },
+  );
+
   it("refuses unsafe permissions and refuses to replace a missing identity", async () => {
     await chmod(directory, 0o750);
     await expect(openLocalStore(directory)).rejects.toThrow(

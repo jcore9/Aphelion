@@ -14,7 +14,7 @@ The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003)
 | `/run/aphelion-secrets/broker.sock` | `aphelion-secrets:harness`, `0660` | The broker creates the socket at startup. The service accounts for bots and plugins are outside the `harness` group. |
 | `/var/lib/aphelion-secrets/` | `aphelion-secrets`, `0700` | The persistent store. The broker creates the age private key and encrypted entries with mode `0600`. |
 
-Init provisions the directories before starting the broker. Their parent directories must be writable only by trusted system users. After an unclean stop, init may remove a leftover socket once it confirms that the previous broker has exited. The broker refuses to replace an existing socket at startup.
+Init provisions the directories before starting the broker. Their parent directories must be writable only by trusted system users. After an unclean stop, init may remove a leftover socket once it confirms that the previous broker has exited. The broker checks the socket directory group against the local `harness` group in `/etc/group`. It refuses to replace an existing socket at startup.
 
 The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. Backups that include `identity.agekey` can decrypt entries, so they need the same access restrictions as the store. If the key is missing and entries exist, startup fails.
 

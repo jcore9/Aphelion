@@ -81,6 +81,7 @@ async function loadIdentity(directory: string, uid: number): Promise<string> {
   }
 
   try {
+    // The first opener installs the identity without replacing another opener's key.
     await publish(directory, path, await generateIdentity(), link);
   } catch (error) {
     if (!hasCode(error, "EEXIST")) throw error;
@@ -113,10 +114,15 @@ export async function openLocalStore(directory: string) {
     async read(name: string): Promise<Secret | undefined> {
       const encrypted = await readPrivateFile(entryPath(name), uid);
       if (!encrypted) return undefined;
-      return Secret.make(await decrypter.decrypt(encrypted, "text"));
+      const value: unknown = JSON.parse(
+        await decrypter.decrypt(encrypted, "text"),
+      );
+      if (typeof value !== "string")
+        throw new Error("Invalid local secret entry");
+      return Secret.make(value);
     },
     async write(name: string, value: Secret): Promise<void> {
-      const encrypted = await encrypter.encrypt(value.reveal());
+      const encrypted = await encrypter.encrypt(JSON.stringify(value.reveal()));
       await publish(directory, entryPath(name), encrypted, rename);
     },
   };

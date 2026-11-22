@@ -35,7 +35,7 @@ async function send(text) {
 }
 
 switch (process.argv[2]) {
-  case "write":
+  case "write": {
     assert.deepEqual(await send(JSON.stringify({ op: "read", ref })), [
       404,
       "",
@@ -54,7 +54,22 @@ switch (process.argv[2]) {
       204,
       "",
     ]);
+    const sizeTestRef = "local://contract/size";
+    const writeSized = (size) =>
+      JSON.stringify({
+        op: "write",
+        ref: sizeTestRef,
+        value: "a".repeat(size),
+      });
+    const limit = 64 * 1024 - Buffer.byteLength(writeSized(0));
+    assert.deepEqual(await send(writeSized(limit)), [204, ""]);
+    await assert.rejects(send(writeSized(limit + 1)), { code: "ECONNRESET" });
+    assert.deepEqual(
+      await send(JSON.stringify({ op: "read", ref: sizeTestRef })),
+      [200, JSON.stringify("a".repeat(limit))],
+    );
     break;
+  }
   case "read":
     assert.deepEqual(await send(JSON.stringify({ op: "read", ref })), [
       200,

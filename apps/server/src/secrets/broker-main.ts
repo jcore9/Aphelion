@@ -1,4 +1,4 @@
-import { chmod, lstat } from "node:fs/promises";
+import { chmod, lstat, readFile } from "node:fs/promises";
 import {
   createServer,
   type IncomingMessage,
@@ -98,10 +98,13 @@ async function run(): Promise<void> {
     throw new Error("The secrets broker requires its Linux service account");
   }
   process.umask(0o077);
+  const groups = await readFile("/etc/group", "utf8");
+  const harnessGid = /^harness:[^:\n]*:([0-9]+):/m.exec(groups)?.[1];
   const directory = await lstat(socketDirectory);
   if (
     !directory.isDirectory() ||
     directory.uid !== brokerUid ||
+    directory.gid !== Number(harnessGid) ||
     (directory.mode & 0o7777) !== 0o2710
   ) {
     throw new Error("Unsafe broker socket directory");
