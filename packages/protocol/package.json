@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client-frame.schema.json": "./client-frame.schema.json",
+    "./server-frame.schema.json": "./server-frame.schema.json"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
