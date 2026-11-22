@@ -10,9 +10,10 @@ The server reads its config from `/etc/aphelion/` ([decision 0014](../decisions/
   policy.yaml           approval rules (no fields yet, M2-01)
   routines.yaml         routines (no fields yet, M6-02)
   connectors.yaml       connector settings (no fields yet, M3)
+  server.yaml           the address and port the server listens on
 ```
 
-All four files must exist. The directory can be a git repo. [`example/`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config/example) holds a complete, valid directory, and a test loads it.
+All five files must exist. The directory can be a git repo. [`example/`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config/example) holds a complete, valid directory, and a test loads it.
 
 ## File format
 
@@ -39,7 +40,7 @@ Every file is at version 1, and no migrations exist yet.
 | Path | Must be | Owner and group | Mode no looser than |
 | --- | --- | --- | --- |
 | `/etc/aphelion/` | a directory | the server's user and group | `0750` |
-| Each of the four files | a regular file, not a symlink | the server's user and group | `0644` |
+| Each of the five files | a regular file, not a symlink | the server's user and group | `0644` |
 
 The files may be `0644`, the mode git checks files out with, because only the server's user and group can enter the directory. The check doesn't look inside a `.git` folder.
 
@@ -63,6 +64,8 @@ Each error names the file, then the line and column where the parser found it, t
 | A missing field | `agents.yaml:3:5: agents[0].model: is required` |
 | An unknown field | `agents.yaml:9:12: agents[0].modle: unknown field` |
 | A name that can't be a folder name | `agents.yaml:3:11: agents[0].name: must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter` |
+| An address that isn't an IP address | `server.yaml:2:10: address: must be an IPv4 or IPv6 address, such as 0.0.0.0` |
+| A port outside 1 to 65535 | `server.yaml:3:7: port: must be from 1 to 65535` |
 | A relative folder | `agents.yaml:8:13: agents[0].folder: must be an absolute path` |
 | Two agents with one name | `agents.yaml:9:11: agents[1].name: duplicates agents[0].name "triage"` |
 | A directory mode looser than 0750 | `/etc/aphelion: has mode 0755, which is looser than 0750` |
@@ -72,7 +75,7 @@ Each error names the file, then the line and column where the parser found it, t
 
 ## JSON Schema for editors
 
-Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config): [`agents.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/agents.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/routines.schema.json) and [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/connectors.schema.json). The schemas describe the current version. To get completion and checks in an editor that runs the YAML language server, add a first line that points at the schema:
+Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config): [`agents.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/agents.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/server.schema.json). The schemas describe the current version. To get completion and checks in an editor that runs the YAML language server, add a first line that points at the schema:
 
 ```yaml
 # yaml-language-server: $schema=../path/to/agents.schema.json
@@ -129,5 +132,15 @@ Connector settings. No fields yet: M3 adds connector entries.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `version` | `1` | yes | The file's format version. Aphelion migrates older ones. |
+
+### `server.yaml`, version 1
+
+Where the server listens for HTTP and WebSocket connections (decisions 0016 and 0022).
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `version` | `1` | yes | The file's format version. Aphelion migrates older ones. |
+| `address` | string | yes | The address the server listens on. In the container that's 0.0.0.0, the container's own interface. The Compose file decides which host address the port is published on. |
+| `port` | integer | yes | The TCP port the server listens on. Normally 7400. |
 
 <!-- End of generated section -->

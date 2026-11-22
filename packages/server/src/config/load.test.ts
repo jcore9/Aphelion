@@ -28,6 +28,10 @@ beforeEach(async () => {
   for (const file of ["policy.yaml", "routines.yaml", "connectors.yaml"]) {
     await writeFile(join(dir, file), "version: 1\n");
   }
+  await writeFile(
+    join(dir, "server.yaml"),
+    "version: 1\naddress: 0.0.0.0\nport: 7400\n",
+  );
 });
 
 afterEach(async () => {
@@ -51,6 +55,11 @@ test("loads the example config from the docs into typed config", async () => {
     "triage",
   ]);
   expect(result.config.policy).toEqual({ version: 1 });
+  expect(result.config.server).toEqual({
+    version: 1,
+    address: "0.0.0.0",
+    port: 7400,
+  });
   expect(result.migrated).toEqual([]);
 });
 
@@ -99,6 +108,41 @@ describe("agents.yaml", () => {
     const text = `version: 1\nagents:\n${agent}\n${agent}\n`;
     expect(messages(await loadAgents(text))).toEqual([
       `${join(dir, "agents.yaml")}:9:11: agents[1].name: duplicates agents[0].name "triage"`,
+    ]);
+  });
+});
+
+describe("server.yaml", () => {
+  async function loadServer(text: string): Promise<LoadResult> {
+    await writeFile(join(dir, "server.yaml"), text);
+    return loadAgents("version: 1\nagents: []\n");
+  }
+
+  test.each(["0.0.0.0", "127.0.0.1", "::", "100.71.226.67"])(
+    "accepts the address %s",
+    async (address) => {
+      const result = await loadServer(
+        `version: 1\naddress: "${address}"\nport: 7400\n`,
+      );
+      expect(messages(result)).toEqual([]);
+    },
+  );
+
+  test("rejects an address that isn't an IP address", async () => {
+    const result = await loadServer(
+      "version: 1\naddress: localhost\nport: 7400\n",
+    );
+    expect(messages(result)).toEqual([
+      `${join(dir, "server.yaml")}:2:10: address: must be an IPv4 or IPv6 address, such as 0.0.0.0`,
+    ]);
+  });
+
+  test("rejects a port outside 1 to 65535", async () => {
+    const result = await loadServer(
+      "version: 1\naddress: 0.0.0.0\nport: 70000\n",
+    );
+    expect(messages(result)).toEqual([
+      `${join(dir, "server.yaml")}:3:7: port: must be from 1 to 65535`,
     ]);
   });
 });

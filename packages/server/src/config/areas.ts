@@ -70,6 +70,14 @@ const agents = z.array(agent).superRefine((list, context) => {
   });
 });
 
+const ipAddress = z
+  .string()
+  .refine(
+    (value) =>
+      z.ipv4().safeParse(value).success || z.ipv6().safeParse(value).success,
+    { error: "must be an IPv4 or IPv6 address, such as 0.0.0.0" },
+  );
+
 export const configAreas = {
   agents: defineArea({
     file: "agents.yaml",
@@ -99,6 +107,22 @@ export const configAreas = {
       "Connector settings. No fields yet: M3 adds connector entries.",
     migrations: [],
     fields: {},
+  }),
+  server: defineArea({
+    file: "server.yaml",
+    description:
+      "Where the server listens for HTTP and WebSocket connections (decisions 0016 and 0022).",
+    migrations: [],
+    fields: {
+      address: ipAddress.describe(
+        "The address the server listens on. In the container that's 0.0.0.0, the container's own interface. The Compose file decides which host address the port is published on.",
+      ),
+      port: z
+        .int({ error: "must be a whole number" })
+        .min(1, { error: "must be from 1 to 65535" })
+        .max(65535, { error: "must be from 1 to 65535" })
+        .describe("The TCP port the server listens on. Normally 7400."),
+    },
   }),
 };
 
