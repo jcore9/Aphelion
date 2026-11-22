@@ -1,3 +1,4 @@
 *.md
 bun.lock
 spikes/
+docs/reference/config/*.schema.json
