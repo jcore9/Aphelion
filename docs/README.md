@@ -15,6 +15,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [M0-01: Claude over ACP on a subscription login](spikes/M0-01-claude-over-acp.md)
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
+- [M0-17: Codex headless on a ChatGPT login](spikes/M0-17-codex-headless.md)
 
 ## Decision records
 

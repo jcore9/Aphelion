@@ -153,6 +153,8 @@ If a dependency fails on Bun, or the hardening can't hold with three users in on
 
 [Decision 0024](../../decisions/0024-codex-third-agent-cli.md) makes OpenAI's Codex CLI a third agent CLI, on the owner's own ChatGPT login. The adapter is built later, in [M4-10]. This spike answers first whether Codex can run here at all. The issue lists what was found on 2026-11-21 under each question, as a starting point.
 
+The answers are in the [M0-17 finding](../../spikes/M0-17-codex-headless.md).
+
 Questions:
 
 1. Which headless or ACP path exists today, at which version: [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp), `codex app-server`, `codex exec --json` or `codex mcp-server`? Does the chosen path run on Bun?
