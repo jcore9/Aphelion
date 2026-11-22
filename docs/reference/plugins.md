@@ -23,6 +23,7 @@ The runner then starts your server part as `bun --no-env-file <server.entry>`, w
 - The `aphelion-plugins` user can write to a file or folder in it.
 - A symbolic link in it points outside the folder. A symbolic link is a file that points to another path.
 - `server.entry` leads outside the folder, after the runner follows symbolic links.
+- The `aphelion-plugins` user owns, or can write to, a folder above the plugin's folder, up to `/`. It could swap the plugin's folder for another one after the check. A shared folder such as `/tmp` is allowed only with its "sticky" bit set, which stops users from renaming each other's files.
 
 Your plugin gets a fresh environment. Nothing from the server's environment is passed on. Bun doesn't load a `.env` file from your folder. Your plugin has only these variables:
 
@@ -45,14 +46,14 @@ Your plugin talks to the host in [JSON-RPC 2.0](https://www.jsonrpc.org/specific
 - The host writes to your plugin's standard input.
 - Your plugin writes to its standard output.
 - A line can be at most 1 MiB. The runner drops a longer line and logs that it did.
-- Anything your plugin writes to standard error goes to the server's log, one line per entry, up to 1000 lines a minute. The runner drops the rest of that minute and logs that it did.
+- Anything your plugin writes to standard error goes to the server's log, one line per entry, up to 1000 lines a minute. The notes about dropped long lines count toward the same 1000. The runner drops the rest of that minute and logs that it did.
 
 Keep reading your standard input. Messages for your plugin wait in a buffer of about 16 MiB. The runner kills your plugin if either of these happens:
 
 - Writing one message to your plugin's standard input takes more than 5 seconds.
 - More than about 16 MiB of messages wait for your plugin.
 
-The host has the same limit the other way. If more than about 16 MiB of your plugin's messages wait for the host, the host counts it as a crash. In both cases the host restarts your plugin as after any other crash.
+The host has a similar limit the other way. If more than about 16 MiB, or more than 4096 messages, from your plugin wait for the host, the host drops them and counts it as a crash. The host counts each waiting message as twice its length plus 256 bytes, to cover the memory it really takes. In both cases the host restarts your plugin as after any other crash.
 
 ### Messages the host sends
 
@@ -102,9 +103,9 @@ The restarts after the first five crashes in a row wait 1, 2, 4, 8 and 16 second
 
 ### Child processes
 
-Your plugin can start child processes. When the plugin stops, the runner kills every process your plugin started, including children of children.
+Your plugin can start child processes. When the plugin stops, the runner tries to kill every process your plugin started, including children of children. This is best effort: [decision 0046](../decisions/0046-plugin-runner-kills-process-trees.md) lists the rare cases it misses, and the runner logs an error when a process is still there after the kill.
 
-Keep your child processes attached to your plugin. A process that detaches, for example with `setsid` and a double fork, leaves your plugin's process tree. The runner kills every such process within 10 seconds, and it also kills them whenever it stops any plugin ([decision 0046](../decisions/0046-plugin-runner-kills-process-trees.md)).
+Keep your child processes attached to your plugin. A process that detaches, for example with `setsid` and a double fork, leaves your plugin's process tree. The runner's sweep kills every such process it finds every 10 seconds, and it also kills them whenever it stops any plugin, whichever plugin they came from ([decision 0046](../decisions/0046-plugin-runner-kills-process-trees.md)).
 
 ## For operators
 
@@ -144,7 +145,7 @@ The runner also runs as `aphelion-plugins`, so a plugin can send signals to the 
 
 The runner trusts every message on its standard input. Only the server may write there. The runner protects its pipe in two ways:
 
-- The runner marks itself as not dumpable with `prctl(PR_SET_DUMPABLE, 0)`. Linux then hides the runner's memory and open files from other processes of the same user. A plugin can't open the runner's pipe through `/proc/<runner>/fd/` or attach a debugger to the runner. A test checks that `/proc/<runner>/fd/0` can't be opened.
+- The runner marks itself as not dumpable with `prctl(PR_SET_DUMPABLE, 0)`. Linux then hides the runner's memory and open files from other processes of the same user. A plugin can't open the runner's pipe through `/proc/<runner>/fd/` or attach a debugger to the runner. A test checks that a process of the same user can't read where `/proc/<runner>/fd/0` points, which Linux refuses for the same reason it refuses opening it.
 - The runner gives each plugin new pipes for its standard input, output and error. A plugin doesn't inherit the runner's pipe.
 
 Issue [#14](https://github.com/jcore9/Aphelion/issues/14), the container image, must make sure of the rest:

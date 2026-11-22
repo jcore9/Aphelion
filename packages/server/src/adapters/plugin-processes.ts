@@ -8,7 +8,7 @@ import {
   readdir,
   realpath,
 } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { Effect, Layer, Stream } from "effect";
 import {
   PluginProcesses,
@@ -20,6 +20,7 @@ import {
 const PR_SET_DUMPABLE = 4;
 const PR_SET_CHILD_SUBREAPER = 36;
 const WNOHANG = 1;
+const STICKY = 0o1000;
 
 const libc = () =>
   dlopen("libc.so.6", {
@@ -131,6 +132,24 @@ async function installProblem(
   return visit(installRoot);
 }
 
+async function ancestorProblem(
+  installRoot: string,
+  pluginUid: number,
+): Promise<string | undefined> {
+  for (let path = dirname(installRoot); ; path = dirname(path)) {
+    const info = await lstat(path);
+    const writable = await access(path, constants.W_OK).then(
+      () => true,
+      () => false,
+    );
+    const sticky = (info.mode & STICKY) !== 0;
+    if (info.uid === pluginUid || (writable && !sticky)) {
+      return "the plugin user can change a folder above the plugin's folder";
+    }
+    if (path === dirname(path)) return undefined;
+  }
+}
+
 export const bunPluginProcesses = (runtime: string, pluginUid: number) =>
   Layer.effect(
     PluginProcesses,
@@ -186,7 +205,9 @@ export const bunPluginProcesses = (runtime: string, pluginUid: number) =>
             return yield* fail("the entry is outside the plugin's folder");
           }
           const problem = yield* Effect.tryPromise({
-            try: () => installProblem(folder, pluginUid),
+            try: async () =>
+              (await installProblem(folder, pluginUid)) ??
+              (await ancestorProblem(folder, pluginUid)),
             catch: () => fail("the plugin's folder can't be read"),
           });
           if (problem !== undefined) return yield* fail(problem);
@@ -239,8 +260,13 @@ export const bunPluginProcesses = (runtime: string, pluginUid: number) =>
               const cleanup = yield* reap(
                 killed.filter((proc) => proc.pid !== child.pid),
               );
-              yield* Effect.promise(() => ended);
-              return cleanup;
+              const exited = yield* Effect.promise(() => ended).pipe(
+                Effect.timeout("5 seconds"),
+                Effect.option,
+              );
+              return {
+                survivors: cleanup.survivors + (exited._tag === "None" ? 1 : 0),
+              };
             }),
           } satisfies PluginProcess;
         });

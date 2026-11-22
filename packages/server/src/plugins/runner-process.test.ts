@@ -253,6 +253,7 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
             await installPlugin(join(installed, "linked"), "linked");
             await installPlugin(join(installed, "borrower"), "borrower");
             await installPlugin(join(base, "outside"), "outside");
+            await installPlugin(join(base, "loose", "exposed"), "exposed");
             await rm(join(installed, "linked", "index.js"));
             await symlink(
               join(base, "outside", "index.js"),
@@ -262,10 +263,12 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
               join(base, "outside", "index.js"),
               join(installed, "borrower", "lib.js"),
             );
-            await setPermissions(base, "read-only");
+            await mkdir(dataRoot);
+            await setPermissions(installed, "read-only");
+            await setPermissions(join(base, "outside"), "read-only");
+            await setPermissions(join(base, "loose", "exposed"), "read-only");
             await setPermissions(join(installed, "careless"), "writable");
-            await chmod(installed, 0o755);
-            await chmod(base, 0o755);
+            await chmod(base, 0o555);
           });
           const { host, runnerPid } = yield* startRunner(
             "as another user",
@@ -321,6 +324,11 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
             yield* host.start(join(installed, plugin));
             yield* poll(host.status(plugin), (s) => s?.state === "crashed");
           }
+          yield* host.start(join(base, "loose", "exposed"));
+          yield* poll(host.status("exposed"), (s) => s?.state === "crashed");
+          expect(refusal(logs, "exposed")).toBe(
+            "the plugin user can change a folder above the plugin's folder",
+          );
           expect(refusal(logs, "careless")).toBe(
             "the plugin user can write to the plugin's folder",
           );

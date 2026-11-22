@@ -774,6 +774,44 @@ describe("the plugin host", () => {
     },
   );
 
+  it.live(
+    "crashes a plugin that floods the host with many short messages",
+    () => {
+      const { layer, logs } = harness(
+        {
+          chatter: (io) =>
+            Effect.gen(function* () {
+              yield* handshake(io);
+              yield* io.write({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "events.subscribe",
+                params: { event: "agent.status" },
+              });
+              for (let i = 0; i < 5000; i++) {
+                yield* io.write({ jsonrpc: "2.0", method: "note" });
+              }
+              return yield* serveUntilShutdown(io);
+            }),
+        },
+        { grants: () => Effect.sleep("300 millis").pipe(Effect.as(true)) },
+      );
+      return Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.start(
+          yield* serverPlugin("chatter", { events: ["agent.status"] }),
+        );
+        yield* waitFor("chatter", { state: "crashed", run: 1 });
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            msg: "plugin sent messages faster than the host handles them",
+            plugin: "chatter",
+          }),
+        );
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
   it.live("logs at most 1000 lines a minute from a plugin's stderr", () => {
     const { layer, logs } = harness({
       chatty: (io) =>
@@ -786,6 +824,29 @@ describe("the plugin host", () => {
     return Effect.gen(function* () {
       const host = yield* PluginHost;
       yield* host.start(yield* serverPlugin("chatty"));
+      yield* waitUntil(() => logs.some((log) => log["line"] === tooMuchLog));
+      yield* Effect.sleep("20 millis");
+      expect(
+        logs.filter((log) => log["msg"] === "plugin wrote to stderr"),
+      ).toHaveLength(maxLogLinesPerMinute + 1);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.live("counts dropped long lines against the same log limit", () => {
+    const { layer, logs } = harness({
+      sprawling: (io) =>
+        Effect.gen(function* () {
+          yield* handshake(io);
+          yield* io.writeError("line\n".repeat(maxLogLinesPerMinute - 1));
+          for (let i = 0; i < 5; i++) {
+            yield* io.write("x".repeat(maxPluginLineBytes + 1));
+          }
+          return yield* serveUntilShutdown(io);
+        }),
+    });
+    return Effect.gen(function* () {
+      const host = yield* PluginHost;
+      yield* host.start(yield* serverPlugin("sprawling"));
       yield* waitUntil(() => logs.some((log) => log["line"] === tooMuchLog));
       yield* Effect.sleep("20 millis");
       expect(

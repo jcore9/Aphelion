@@ -122,9 +122,12 @@ interface Slot {
   subscriptions: Set<string>;
   nextRequestId: number;
   initializeId: RpcId | undefined;
-  pendingBytes: number;
+  pending: { bytes: number; messages: number };
   floodedRun: number | undefined;
 }
+
+const maxPendingInputMessages = 4096;
+const pendingCost = (line: string) => 2 * line.length + 256;
 
 const subscribeParams = z.strictObject({ event: z.string().max(128) });
 
@@ -328,7 +331,8 @@ export const pluginHostLayer = (options: HostOptions) =>
 
       const handle = (slot: Slot, input: SlotInput) => {
         if (input.type !== "line") return apply(slot, input);
-        slot.pendingBytes -= input.line.length;
+        slot.pending.bytes -= pendingCost(input.line);
+        slot.pending.messages--;
         const { state } = slot.state;
         const current = input.run === slot.state.run;
         return current && (state === "starting" || state === "running")
@@ -377,18 +381,27 @@ export const pluginHostLayer = (options: HostOptions) =>
 
       const deliver = (slot: Slot, input: SlotInput) => {
         if (input.type !== "line") return Queue.offer(slot.mailbox, input);
-        if (slot.pendingBytes + input.line.length <= maxPendingInputBytes) {
-          slot.pendingBytes += input.line.length;
+        if (slot.floodedRun === input.run) return Effect.void;
+        const cost = pendingCost(input.line);
+        if (
+          slot.pending.bytes + cost <= maxPendingInputBytes &&
+          slot.pending.messages < maxPendingInputMessages
+        ) {
+          slot.pending.bytes += cost;
+          slot.pending.messages++;
           return Queue.offer(slot.mailbox, input);
         }
-        if (slot.floodedRun === input.run) return Effect.void;
         slot.floodedRun = input.run;
         logger.warn("plugin sent messages faster than the host handles them", {
           plugin: slot.id,
         });
-        return Queue.offer(slot.mailbox, {
-          type: "broke-protocol",
-          run: input.run,
+        return Effect.gen(function* () {
+          const backlog = yield* Queue.clear(slot.mailbox);
+          slot.pending = { bytes: 0, messages: 0 };
+          yield* Queue.offerAll(slot.mailbox, [
+            { type: "broke-protocol", run: input.run },
+            ...backlog.filter((queued) => queued.type !== "line"),
+          ]);
         });
       };
 
@@ -435,7 +448,7 @@ export const pluginHostLayer = (options: HostOptions) =>
               subscriptions: new Set(),
               nextRequestId: 1,
               initializeId: undefined,
-              pendingBytes: 0,
+              pending: { bytes: 0, messages: 0 },
               floodedRun: undefined,
             };
             slots.set(created.id, created);

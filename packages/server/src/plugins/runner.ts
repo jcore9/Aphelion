@@ -34,7 +34,7 @@ export const lineTooLong =
   "the plugin wrote a line longer than 1 MiB, and the runner dropped it";
 export const stoppedReading =
   "the plugin stopped reading its input, and the runner killed it";
-export const tooMuchLog = `the plugin wrote more than ${String(maxLogLinesPerMinute)} lines to standard error in a minute, and the runner drops the rest of that minute`;
+export const tooMuchLog = `the plugin wrote more than ${String(maxLogLinesPerMinute)} log lines in a minute, counting stderr lines and dropped long lines, and the runner drops the rest of that minute`;
 
 export function pluginEnvironment(
   plugin: string,
@@ -107,28 +107,32 @@ export const runRunner = (
       plugin: string,
       run: number,
       type: "output" | "log",
+      budget: (now: number) => "send" | "notice" | "drop",
     ) => {
       const splitter = new LineSplitter(maxPluginLineBytes);
-      const budget = logBudget();
-      const reply = (line: string) =>
+      const log = (line: string) =>
         Effect.gen(function* () {
-          if (type === "output") {
-            return yield* link.send({ type, plugin, run, line });
-          }
           switch (budget(yield* Clock.currentTimeMillis)) {
             case "send":
-              return yield* link.send({ type, plugin, run, line });
+              return yield* link.send({ type: "log", plugin, run, line });
             case "notice":
-              return yield* link.send({ type, plugin, run, line: tooMuchLog });
+              return yield* link.send({
+                type: "log",
+                plugin,
+                run,
+                line: tooMuchLog,
+              });
             case "drop":
               return;
           }
         });
       return Stream.runForEach(bytes, (chunk) =>
         Effect.forEach(splitter.push(chunk), (piece) =>
-          piece.kind === "line"
-            ? reply(piece.text)
-            : link.send({ type: "log", plugin, run, line: lineTooLong }),
+          piece.kind !== "line"
+            ? log(lineTooLong)
+            : type === "output"
+              ? link.send({ type, plugin, run, line: piece.text })
+              : log(piece.text),
         ),
       );
     };
@@ -195,11 +199,12 @@ export const runRunner = (
       live.set(plugin, entry);
       yield* link.send({ type: "started", plugin, run });
       const writer = yield* Effect.forkScoped(feed(plugin, entry));
+      const budget = logBudget();
       const output = yield* Effect.forkScoped(
-        forward(process.stdout, plugin, run, "output"),
+        forward(process.stdout, plugin, run, "output", budget),
       );
       const errors = yield* Effect.forkScoped(
-        forward(process.stderr, plugin, run, "log"),
+        forward(process.stderr, plugin, run, "log", budget),
       );
       yield* Effect.forkScoped(
         Effect.gen(function* () {

@@ -59,7 +59,7 @@ Only the runner reads `/proc` and sends signals. The server still goes through t
 - The cleanup is best effort, for these reasons:
   - Linux delivers `SIGSTOP` a moment after the runner sends it. A process can fork in that moment, after the runner's last pass. The fork becomes an orphan when its parent is killed, and the next 10-second sweep kills it.
   - A PID can be reused between the runner's check of the start time and its signal. The window is a few microseconds. Only a `pidfd`, a file handle that names one process, closes it. Bun has no `pidfd` call yet.
-  - The runner reports processes that didn't go away in time as an error in its log. It still tells the host that the plugin stopped.
+  - The runner reports processes that didn't go away in time as an error in its log. It still tells the host that the plugin stopped. It waits at most 5 seconds for the plugin's own process to exit after the kill, so one stuck process can't hold up stopping other plugins.
 - Stopping one plugin kills the detached processes of every plugin, because an orphan carries no mark of its plugin. A plugin can use that to disrupt another plugin.
 - The runner depends on Linux and on `libc.so.6`. Aphelion supports only Linux on the server ([decision 0011](0011-ubuntu-lts.md)).
 - Every plugin runs as the same user, so a plugin can send signals to another plugin's processes. This method doesn't change that. [Decision 0045](0045-no-bot-namespaces-default-seccomp.md) accepted it.
