@@ -32,6 +32,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 
 - [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
+- [The client protocol](reference/protocol.md): the frames, sequence numbers, replay, resync and command ids.
 - [Plugin manifest](reference/plugin-manifest.md): the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
 
 ## Decision records
@@ -73,4 +74,5 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0031](decisions/0031-unprivileged-agents.md) | Agents run as unprivileged users | Accepted |
 | [0032](decisions/0032-native-app-stack-deferred.md) | The native app stack is chosen in M9 | Accepted |
 | [0033](decisions/0033-docs-site-in-place.md) | The docs site reads the Markdown files where they are, and takes each page title from its first heading | Proposed |
+| [0037](decisions/0037-protocol-frames-in-zod.md) | Protocol frames are Zod 4 schemas, and the TypeScript types come from them | Proposed |
 | [0038](decisions/0038-plugin-manifest-and-api-range.md) | A plugin's manifest is `aphelion-plugin.json`, checked with Zod 4, and its API range is checked with the `semver` package | Proposed |

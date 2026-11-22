@@ -13,6 +13,15 @@ function realNode(): string {
   return found;
 }
 
+function runOnNode(script: string, ...args: string[]): unknown {
+  const output = execFileSync(
+    realNode(),
+    ["--input-type=module", "--no-warnings", "-e", script, ...args],
+    { cwd: import.meta.dirname, encoding: "utf8" },
+  );
+  return JSON.parse(output);
+}
+
 function docsExample(): string {
   const page = readFileSync(
     join(import.meta.dirname, "docs/reference/plugin-manifest.md"),
@@ -23,6 +32,18 @@ function docsExample(): string {
   return block;
 }
 
+test("the protocol package loads and parses a frame in plain Node", () => {
+  const script = `
+    const { parseClientFrame } = await import("./packages/protocol/src/index.ts");
+    const parsed = parseClientFrame('{"v":1,"type":"resume","cursor":null}');
+    console.log(JSON.stringify({ bun: process.versions.bun ?? null, parsed }));
+  `;
+  expect(runOnNode(script)).toEqual({
+    bun: null,
+    parsed: { ok: true, frame: { v: 1, type: "resume", cursor: null } },
+  });
+});
+
 test("the plugin SDK loads in plain Node and accepts the docs' example manifest", () => {
   const script = `
     const { parsePluginManifest } = await import("./packages/plugin-sdk/src/index.ts");
@@ -30,10 +51,8 @@ test("the plugin SDK loads in plain Node and accepts the docs' example manifest"
     const results = [manifest, { ...manifest, api: "^99.0.0" }].map(parsePluginManifest);
     console.log(JSON.stringify({ bun: process.versions.bun ?? null, ok: results.map((r) => r.ok) }));
   `;
-  const output = execFileSync(
-    realNode(),
-    ["--input-type=module", "--no-warnings", "-e", script, docsExample()],
-    { cwd: import.meta.dirname, encoding: "utf8" },
-  );
-  expect(JSON.parse(output)).toEqual({ bun: null, ok: [true, false] });
+  expect(runOnNode(script, docsExample())).toEqual({
+    bun: null,
+    ok: [true, false],
+  });
 });
