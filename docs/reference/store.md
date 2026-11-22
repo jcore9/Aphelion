@@ -33,14 +33,13 @@ Every connection uses WAL mode, enforces foreign keys and waits up to 5 seconds 
    ```ts
    import type { Migration } from "../migrate";
 
-   export const auditLog: Migration = {
-   	version: 1,
-   	name: "audit-log",
+   export const devices: Migration = {
+   	version: 2,
+   	name: "devices",
    	sql: `
-   		CREATE TABLE audit_log (
+   		CREATE TABLE devices (
    			id INTEGER PRIMARY KEY,
-   			at TEXT NOT NULL,
-   			event TEXT NOT NULL
+   			name TEXT NOT NULL
    		) STRICT;
    	`,
    };
@@ -49,6 +48,12 @@ Every connection uses WAL mode, enforces foreign keys and waits up to 5 seconds 
 2. Add it to the end of the list in `packages/server/src/store/migrations/index.ts`.
 3. Run `bun run test`. The store test applies every listed migration to a fresh database.
 4. Add a test for the tables that the migration creates, next to the code that uses them.
+
+## Migrations
+
+| Version | Name | Creates |
+| --- | --- | --- |
+| 1 | `audit-log` | The append-only `audit_log` table ([logging and the audit log](logging.md#the-audit-log)) |
 
 ## Rules
 
