@@ -27,6 +27,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
 - [M0-17: Codex headless on a ChatGPT login](spikes/M0-17-codex-headless.md)
+- [M0-18: per-bot isolation with user namespaces](spikes/M0-18-namespaces.md)
 - [M0-10b: Tailscale `whois` from inside the container](spikes/M0-10b-tailscale-whois.md)
 
 ## Reference
@@ -90,3 +91,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0042](decisions/0042-plugin-server-and-client-parts.md) | A plugin has a server part, a client part or both, and its client part is installed on the server, served to every client and always sandboxed | Accepted |
 | [0043](decisions/0043-http-server-on-effect-platform-bun.md) | The server listens through `@effect/platform-bun`'s HTTP server, in an adapter | Proposed |
 | [0044](decisions/0044-secret-type.md) | `Secret` is a small class of Aphelion's own, modelled on Effect's `Redacted`, and it throws when serialized | Proposed |
+| [0045](decisions/0045-no-bot-namespaces-default-seccomp.md) | Bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox | Accepted |

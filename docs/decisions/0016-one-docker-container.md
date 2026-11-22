@@ -8,6 +8,7 @@
 - Amended by: [decision 0017](0017-desktop-remote-only.md) (the desktop app only connects to a server; local mode is dropped)
 - Amends: [0006](0006-shared-agent-user.md) (how agents are started), [0009](0009-electron-desktop-shell.md) (desktop local mode), [0010](0010-agent-folders.md) (per-agent systemd units), [0012](0012-secrets-broker-process.md) (where the broker runs), [0014](0014-filesystem-layout.md) (where the paths live)
 - Amended by: [0035](0035-codex-login-sandbox-approvals.md) (the container's seccomp profile allows user namespaces, so Codex's sandbox runs)
+- Amended by: [0045](0045-no-bot-namespaces-default-seccomp.md) (reverses that: the container keeps Docker's default seccomp profile)
 
 ## Context
 
@@ -44,7 +45,7 @@ Option 2, on **Docker with Compose**. Desktop local mode runs everything as the 
 - A small init process is PID 1. It runs as root only to start three long-lived processes, each as its own user: the server, the broker and the agent runner. The init tool is chosen in M0-12.
 - The **agent runner** replaces the per-agent systemd units from 0006 and 0010. It already runs as `aphelion-agent`, so it starts agents as its own child processes, with no privileges needed.
 - The server tells the runner to start, stop or cancel an agent over a Unix socket. The runner checks the caller's UID (`SO_PEERCRED`) and accepts only `harness`, so an agent can't use the runner to start or stop other agents.
-- Cancel kills the agent's whole process group.
+- Cancel kills the agent's whole process group. *Amended by [0045](0045-no-bot-namespaces-default-seccomp.md): a process group misses processes that leave it, so M1-04 must find a cancel that leaves none alive.*
 
 **Storage.** The paths from [decision 0014](0014-filesystem-layout.md) stay the same, but they're now Docker volumes mounted at those paths inside the container, with the same owners and modes. `/tmp` is a tmpfs.
 
