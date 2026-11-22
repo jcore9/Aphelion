@@ -4,6 +4,7 @@
 - Date: 2026-11-21
 - Proposed by: orchestrator, in the M0-04 scaffold PR ([#5](https://github.com/jcore9/Aphelion/issues/5))
 - Answers: the linter **DR** in the M0 plan's M0-04 design note
+- Amended by: [decision 0047](0047-repo-layout.md), which moves the folders this record names
 
 ## Context
 
