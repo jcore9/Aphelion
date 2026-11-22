@@ -4,18 +4,23 @@ import {
   parsePluginManifest,
   pluginApiVersion,
   pluginManifestSchema,
+  type PluginManifest,
 } from "./manifest.ts";
 
-const minimal = {
+const identity = {
   id: "weather",
   version: "1.0.0",
   api: `^${pluginApiVersion}`,
-  entry: "dist/index.js",
 };
+
+const minimal = { ...identity, server: { entry: "dist/index.js" } };
+
+const clientOnly = { ...identity, client: { entry: "dist/client.js" } };
 
 const full = {
   ...minimal,
   $schema: "./node_modules/@aphelion/plugin-sdk/plugin-manifest.schema.json",
+  client: { entry: "dist/client.js" },
   permissions: {
     events: ["approval.requested"],
     secrets: ["op://AI Agents/Weather/api-key"],
@@ -133,7 +138,32 @@ describe("parsePluginManifest", () => {
     expect(issuesOf({ id: "weather" })).toEqual([
       { field: "version", message: "is required" },
       { field: "api", message: "is required" },
-      { field: "entry", message: "is required" },
+    ]);
+  });
+
+  test.each([
+    ["a server part", minimal],
+    ["a client part", clientOnly],
+    ["both parts", full],
+  ])("accepts a plugin with %s", (_parts, manifest) => {
+    expect(parsePluginManifest(manifest).ok).toBe(true);
+  });
+
+  test("refuses a plugin with neither part", () => {
+    expect(issuesOf(identity)).toEqual([
+      { message: "must have a server part, a client part, or both" },
+    ]);
+  });
+
+  test.each(["server", "client"])("needs an entry in the %s part", (side) => {
+    expect(issuesOf({ ...identity, [side]: {} })).toEqual([
+      { field: `${side}.entry`, message: "is required" },
+    ]);
+  });
+
+  test("refuses the single entry field that parts replaced", () => {
+    expect(issuesOf({ ...minimal, entry: "dist/index.js" })).toEqual([
+      { message: "has an unknown field" },
     ]);
   });
 
@@ -245,18 +275,113 @@ describe("parsePluginManifest", () => {
     ]);
   });
 
-  test.each(entryCases.accepted)("accepts the entry %j", (entry) => {
-    expect(parsePluginManifest({ ...minimal, entry }).ok).toBe(true);
+  describe.each(["server", "client"])("the %s entry", (side) => {
+    test.each(entryCases.accepted)("accepts %j", (entry) => {
+      expect(parsePluginManifest({ ...identity, [side]: { entry } }).ok).toBe(
+        true,
+      );
+    });
+
+    test.each(entryCases.refused)("refuses %j", (entry) => {
+      expect(issuesOf({ ...identity, [side]: { entry } })).toEqual([
+        {
+          field: `${side}.entry`,
+          message:
+            "must be a relative path inside the plugin's folder, such as dist/index.js",
+        },
+      ]);
+    });
+  });
+});
+
+describe("permissions and contributions by side", () => {
+  const serverOnly: [string, unknown][] = [
+    ["permissions.secrets", { permissions: { secrets: ["op://v/i/f"] } }],
+    ["permissions.network", { permissions: { network: ["api.github.com"] } }],
+    ["contributes.secretSchemes", { contributes: { secretSchemes: ["op"] } }],
+  ];
+  const clientOnlyLists: [string, unknown][] = [
+    ["permissions.uiSlots", { permissions: { uiSlots: ["agent.sidebar"] } }],
+  ];
+  const either = { permissions: { events: ["agent.status"] } };
+
+  test.each(serverOnly)("refuses %s without a server part", (field, lists) => {
+    expect(issuesOf({ ...clientOnly, ...(lists as object) })).toEqual([
+      { field, message: "needs a server part" },
+    ]);
   });
 
-  test.each(entryCases.refused)("refuses the entry %j", (entry) => {
-    expect(issuesOf({ ...minimal, entry })).toEqual([
-      {
-        field: "entry",
-        message:
-          "must be a relative path inside the plugin's folder, such as dist/index.js",
-      },
+  test.each(serverOnly)("accepts %s with a server part", (_field, lists) => {
+    expect(parsePluginManifest({ ...minimal, ...(lists as object) }).ok).toBe(
+      true,
+    );
+  });
+
+  test.each(clientOnlyLists)(
+    "refuses %s without a client part",
+    (field, lists) => {
+      expect(issuesOf({ ...minimal, ...(lists as object) })).toEqual([
+        { field, message: "needs a client part" },
+      ]);
+    },
+  );
+
+  test.each(clientOnlyLists)(
+    "accepts %s with a client part",
+    (_field, lists) => {
+      expect(
+        parsePluginManifest({ ...clientOnly, ...(lists as object) }).ok,
+      ).toBe(true);
+    },
+  );
+
+  test.each([minimal, clientOnly])(
+    "accepts events with either part",
+    (manifest) => {
+      expect(parsePluginManifest({ ...manifest, ...either }).ok).toBe(true);
+    },
+  );
+
+  test("accepts an empty list on the side that can't use it", () => {
+    expect(
+      parsePluginManifest({
+        ...clientOnly,
+        permissions: { secrets: [], network: [] },
+        contributes: { secretSchemes: [] },
+      }).ok,
+    ).toBe(true);
+  });
+
+  test("names every list that needs a missing part", () => {
+    expect(
+      issuesOf({
+        ...clientOnly,
+        permissions: { secrets: ["op://v/i/f"], network: ["api.github.com"] },
+        contributes: { secretSchemes: ["op"] },
+      }),
+    ).toEqual([
+      { field: "permissions.secrets", message: "needs a server part" },
+      { field: "permissions.network", message: "needs a server part" },
+      { field: "contributes.secretSchemes", message: "needs a server part" },
     ]);
+  });
+
+  test("the manifest type has no variant without a part, or with secrets on a client part", () => {
+    const lists = { events: [], secrets: [], network: [], uiSlots: [] };
+    const base = { ...identity, contributes: { secretSchemes: [] } };
+    const valid: PluginManifest[] = [
+      { ...base, server: minimal.server, permissions: lists },
+      { ...base, client: clientOnly.client, permissions: lists },
+    ];
+    // @ts-expect-error a manifest needs a server part, a client part, or both
+    const neither: PluginManifest = { ...base, permissions: lists };
+    // @ts-expect-error only a server part can hold secrets
+    const secretsOnClient: PluginManifest = {
+      ...base,
+      client: clientOnly.client,
+      permissions: { ...lists, secrets: ["op://v/i/f"] },
+    };
+    expect([...valid, neither, secretsOnClient]).toHaveLength(4);
   });
 });
 
@@ -302,7 +427,16 @@ describe("length limits", () => {
   const cases: [string, number, (text: string) => unknown][] = [
     ["api", 256, (api) => ({ ...minimal, api: `^${pluginApiVersion} ${api}` })],
     ["version", 256, (text) => ({ ...minimal, version: `1.0.0-${text}` })],
-    ["entry", 1024, (text) => ({ ...minimal, entry: `${text}.js` })],
+    [
+      "server.entry",
+      1024,
+      (text) => ({ ...identity, server: { entry: `${text}.js` } }),
+    ],
+    [
+      "client.entry",
+      1024,
+      (text) => ({ ...identity, client: { entry: `${text}.js` } }),
+    ],
     ["$schema", 2048, (text) => ({ ...minimal, $schema: text })],
     [
       "permissions.events[0]",
@@ -355,7 +489,18 @@ type JsonSchema = {
 };
 
 test.each([
-  ["entry", entryCases, (schema: JsonSchema) => schema.properties?.["entry"]],
+  [
+    "server.entry",
+    entryCases,
+    (schema: JsonSchema) =>
+      schema.properties?.["server"]?.properties?.["entry"],
+  ],
+  [
+    "client.entry",
+    entryCases,
+    (schema: JsonSchema) =>
+      schema.properties?.["client"]?.properties?.["entry"],
+  ],
   [
     "version",
     versionCases,

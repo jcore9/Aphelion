@@ -3,6 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-22
 - Proposed by: the M0-13a plugin manifest PR ([#99](https://github.com/jcore9/Aphelion/issues/99))
+- Amended by: [decision 0042](0042-plugin-server-and-client-parts.md) (`entry` is replaced by a `server` part and a `client` part, each with its own `entry`)
 - Answers: M0-13a's choices of manifest file, schema library and semver range check, under the M0 plan's [Keeping it extensible](../plan/milestones/M0-foundations.md#keeping-it-extensible) rules 1, 4 and 5
 
 ## Context

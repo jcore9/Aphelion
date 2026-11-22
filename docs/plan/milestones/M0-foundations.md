@@ -257,6 +257,7 @@ The isolation in this milestone (users, runners, the container) must not leak in
 5. **Versioned from day one.** The plugin API follows semver, each plugin declares the API range it supports, the reference is generated from the types ([M0-13d]), and a breaking change gets `risk/breaking` and a migration note.
 6. **Named extension points.** Each kind of plugin (agent adapter, connector, secret backend, notifier, trigger, reviewer, usage collector) gets one interface in `plugin-sdk` when its milestone starts; M0 defines the secret backend interface. Inside the server, the swappable edges (store, process spawner, HTTP server) sit behind interfaces too ([decision 0007](../../decisions/0007-bun-runtime.md)).
 7. **A fast inner loop.** Dev mode mounts a local plugin folder into the container and reloads it on change ([M0-13e]).
+8. **A server part, a client part, or both.** The manifest declares each part a plugin has. A client part is installed on the server, served to every client and always sandboxed, and only a server part can hold secrets or network hosts ([decision 0042](../../decisions/0042-plugin-server-and-client-parts.md)).
 
 The PR template ([M0-05a]) asks every PR that touches `plugin-sdk` or the plugin host: can a plugin author still do this without knowing about users, sockets or Docker?
 

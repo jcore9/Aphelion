@@ -78,3 +78,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0035](decisions/0035-codex-login-sandbox-approvals.md) | Codex runs on the owner's ChatGPT login, with its own sandbox in the container and `untrusted` approvals on a pinned version | Accepted |
 | [0037](decisions/0037-protocol-frames-in-zod.md) | Protocol frames are Zod 4 schemas, and the TypeScript types come from them | Accepted |
 | [0038](decisions/0038-plugin-manifest-and-api-range.md) | A plugin's manifest is `aphelion-plugin.json`, checked with Zod 4, and its API range is checked with the `semver` package | Proposed |
+| [0042](decisions/0042-plugin-server-and-client-parts.md) | A plugin has a server part, a client part or both, and its client part is installed on the server, served to every client and always sandboxed | Accepted |

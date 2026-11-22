@@ -87,6 +87,50 @@ const contributions = {
 export type PermissionKind = keyof typeof permissions;
 export type ContributionKind = keyof typeof contributions;
 
+type PluginSide = "server" | "client";
+
+const pluginSides: readonly PluginSide[] = ["server", "client"];
+
+const sidesFor = {
+  permissions: {
+    events: ["server", "client"],
+    secrets: ["server"],
+    network: ["server"],
+    uiSlots: ["client"],
+  },
+  contributes: {
+    secretSchemes: ["server"],
+  },
+} as const satisfies {
+  permissions: Record<PermissionKind, readonly PluginSide[]>;
+  contributes: Record<ContributionKind, readonly PluginSide[]>;
+};
+
+type OneSideRule = {
+  group: keyof typeof sidesFor;
+  kind: string;
+  side: PluginSide;
+};
+
+const oneSideRules = Object.entries(sidesFor).flatMap(([group, kinds]) =>
+  Object.entries(kinds).flatMap(
+    ([kind, [side, ...others]]: [string, readonly PluginSide[]]) =>
+      side && others.length === 0
+        ? [{ group: group as OneSideRule["group"], kind, side }]
+        : [],
+  ),
+);
+
+const part = (description: string) =>
+  z
+    .strictObject({
+      entry: entry.describe(
+        "The file the host loads, relative to the manifest.",
+      ),
+    })
+    .optional()
+    .describe(description);
+
 export const pluginManifestSchema = z
   .strictObject({
     $schema: text(2048)
@@ -99,8 +143,11 @@ export const pluginManifestSchema = z
     api: apiRange.describe(
       "The plugin-API versions the plugin supports, as an npm semver range.",
     ),
-    entry: entry.describe(
-      "The module the host starts, relative to the manifest.",
+    server: part(
+      "The part the plugin runner starts on the server, in its own process.",
+    ),
+    client: part(
+      "The part every client loads from the server and runs in a sandbox.",
     ),
     permissions: z
       .strictObject(permissions)
@@ -111,12 +158,71 @@ export const pluginManifestSchema = z
       .prefault({})
       .describe("What the plugin adds to Aphelion."),
   })
+  .check((context) => {
+    const manifest = context.value;
+    const present = pluginSides.filter((side) => manifest[side] !== undefined);
+    if (present.length === 0) {
+      context.issues.push({
+        code: "custom",
+        path: [],
+        message: "must have a server part, a client part, or both",
+        input: manifest,
+      });
+      return;
+    }
+    for (const { group, kind, side } of oneSideRules) {
+      const lists: Record<string, string[]> = manifest[group];
+      if (lists[kind]?.length && !present.includes(side)) {
+        context.issues.push({
+          code: "custom",
+          path: [group, kind],
+          message: `needs a ${side} part`,
+          input: lists[kind],
+        });
+      }
+    }
+  })
   .meta({
     title: pluginManifestFile,
     description: "An Aphelion plugin's manifest.",
+    anyOf: pluginSides.map((side) => ({ required: [side] })),
+    allOf: oneSideRules.map(({ group, kind, side }) => ({
+      if: {
+        properties: {
+          [group]: {
+            properties: { [kind]: { minItems: 1 } },
+            required: [kind],
+          },
+        },
+        required: [group],
+      },
+      then: { required: [side] },
+    })),
   });
 
-export type PluginManifest = z.output<typeof pluginManifestSchema>;
+type PluginPart = { entry: string };
+
+type ListsFor<
+  Kinds extends Record<string, readonly PluginSide[]>,
+  Present extends PluginSide,
+> = {
+  [Kind in keyof Kinds]: [Extract<Kinds[Kind][number], Present>] extends [never]
+    ? never[]
+    : string[];
+};
+
+type ManifestWith<Present extends PluginSide> = Omit<
+  z.output<typeof pluginManifestSchema>,
+  PluginSide | "permissions" | "contributes"
+> & { [Side in Present]: PluginPart } & {
+  [Side in Exclude<PluginSide, Present>]?: never;
+} & {
+  permissions: ListsFor<(typeof sidesFor)["permissions"], Present>;
+  contributes: ListsFor<(typeof sidesFor)["contributes"], Present>;
+};
+
+export type PluginManifest =
+  ManifestWith<"server"> | ManifestWith<"client"> | ManifestWith<PluginSide>;
 
 export type ManifestIssue = { field?: string; message: string };
 
@@ -180,7 +286,7 @@ export function parsePluginManifest(data: unknown): ManifestResult {
   if (!parsed.success) {
     return { ok: false, issues: schemaIssues(data, parsed.error) };
   }
-  const manifest = parsed.data;
+  const manifest = parsed.data as PluginManifest;
   if (!satisfies(pluginApiVersion, manifest.api)) {
     return {
       ok: false,
