@@ -3,6 +3,7 @@ import { createLogger, type Fields } from "./logger";
 import {
   REDACTED,
   redactSelf,
+  jsonParseLimit,
   redactText,
   TOO_DEEP,
   UNREADABLE,
@@ -491,6 +492,24 @@ describe("large hostile strings", () => {
     "query names with no value": "&a".repeat(size / 2),
     "escaped JSON names": '"\\'.repeat(size / 2),
     "AWS prefixes": "AKIA-".repeat(size / 5),
+    "JSON openings with no close": '{"a":'.repeat(size / 5),
+    "a large valid JSON object": JSON.stringify(
+      Object.fromEntries(
+        Array.from({ length: size / 20 }, (_, i) => [
+          `key${String(i)}`,
+          "value",
+        ]),
+      ),
+    ),
+    "JSON just under the parse limit, many times": (
+      JSON.stringify({ password: "x", list: "y".repeat(jsonParseLimit - 40) }) +
+      " "
+    ).repeat(size / jsonParseLimit),
+    "deeply nested JSON arrays": `${"[".repeat(30_000)}${"]".repeat(30_000)}`,
+    "long escaped JSON names": `{"${"\\u0070".repeat(size / 6)}":"x"}`,
+    "spaces before JSON names": `"${" ".repeat(1000)}password":"x",`.repeat(
+      size / 1015,
+    ),
   };
 
   test.each(Object.entries(inputs))("%s finishes quickly", (_name, input) => {
@@ -593,7 +612,7 @@ describe("text rules", () => {
     );
 
     expect(redacted).not.toContain("plain-escaped");
-    expect(redacted).toContain('"us\\u0065r":"ada"');
+    expect(redacted).toBe('{"password":"[REDACTED]","user":"ada"}');
   });
 });
 
@@ -628,4 +647,125 @@ describe("more hostile values", () => {
       real: "[3 bytes]",
     });
   });
+});
+
+describe("JSON inside strings", () => {
+  const canary = "CANARYjson1";
+
+  test("masks a secret field next to a URL with a query", () => {
+    const body = `{"url":"https://example.test/?token=fake","password": "${canary}"}`;
+    const line = logLine({ body });
+
+    expect(line).not.toContain(canary);
+    expect(line).not.toContain("fake");
+    expect(line).toContain("https://example.test/?token=[REDACTED]");
+  });
+
+  test("masks the same field when the JSON is cut off and can't be parsed", () => {
+    const body = `{"url":"https://example.test/?token=fake","password": "${canary}","more`;
+
+    expect(redactText(body)).not.toContain(canary);
+    expect(redactText(body)).toContain(
+      '"url":"https://example.test/?token=[REDACTED]"',
+    );
+  });
+
+  test("masks names with leading spaces or escapes, parsed or not", () => {
+    const spaced = `{"${" ".repeat(57)}password":"${canary}","user":"ada"}`;
+    const escapedName = "adminPassword".replace(
+      /./g,
+      (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+    );
+    const escaped = `{"${escapedName}":"${canary}","user":"ada"}`;
+
+    for (const json of [spaced, escaped]) {
+      for (const text of [json, `${json},broken`]) {
+        expect(redactText(text), text).not.toContain(canary);
+        expect(redactText(text), text).toContain('"user":"ada"');
+      }
+    }
+  });
+
+  test("redacts a JSON object inside a sentence and keeps the words around it", () => {
+    const text = `upstream said {"error":"denied","api_key":"${canary}"} at Bearer abc123def456ghi`;
+
+    expect(redactText(text)).toBe(
+      'upstream said {"error":"denied","api_key":"[REDACTED]"} at Bearer [REDACTED]',
+    );
+  });
+
+  test("redacts JSON arrays, and JSON encoded inside JSON", () => {
+    const inner = JSON.stringify({ token: canary, id: 7 });
+    const text = JSON.stringify([{ nested: inner }, "kept"]);
+
+    expect(redactText(text)).not.toContain(canary);
+    expect(JSON.parse(redactText(text))).toEqual([
+      { nested: '{"token":"[REDACTED]","id":7}' },
+      "kept",
+    ]);
+  });
+
+  test("leaves text that only looks like JSON to the text rules", () => {
+    expect(redactText("[x] and {y} with password=hunter2")).toBe(
+      "[x] and {y} with password=[REDACTED]",
+    );
+  });
+
+  test("uses the text rules above the parse limit", () => {
+    const big = JSON.stringify({
+      filler: "z".repeat(jsonParseLimit),
+      password: canary,
+    });
+
+    expect(redactText(big)).not.toContain(canary);
+  });
+});
+
+describe("rules next to each other", () => {
+  const targets: Record<string, readonly [string, string]> = {
+    "query parameter": ["https://example.test/?token=QRYsecret1", "QRYsecret1"],
+    "name=value": ["password=ASGsecret1", "ASGsecret1"],
+    Bearer: ["Bearer BRRsecret123", "BRRsecret123"],
+    "URL password": ["https://ada:URIsecret1@example.test/", "URIsecret1"],
+    "JSON field": ['"password":"JSNsecret1"', "JSNsecret1"],
+    GitHub: [
+      "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+      "abcdefghijklmnopqrstuvwxyz0123456789",
+    ],
+    OpenAI: ["sk-proj-OPNabcdefghijklmnopqrstu", "OPNabcdefghijklmnopqrstu"],
+    AWS: ["AKIAIOSFODNN7EXAMPLE", "IOSFODNN7EXAMPLE"],
+    JWT: [jwt, "c2lnbmF0dXJlc2lnbmF0dXJl"],
+    "PEM private key": [pem, "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"],
+    "unterminated PEM private key": [
+      "-----BEGIN PRIVATE KEY-----\\nMIIEpemTailSecret",
+      "MIIEpemTailSecret",
+    ],
+  };
+  const separators = ['"', "'", "`", '","', '", "', " "];
+
+  test.each(Object.keys(targets))(
+    "%s stays masked next to every other rule",
+    (name) => {
+      const [first, firstSecret] = targets[name] ?? ["", ""];
+      const leaks: string[] = [];
+      for (const [other, [second, secondSecret]] of Object.entries(targets)) {
+        if (other === name) continue;
+        for (const separator of separators) {
+          for (const text of [
+            `${first}${separator}${second}`,
+            `${second}${separator}${first}`,
+          ]) {
+            const redacted = redactText(text);
+            if (
+              redacted.includes(firstSecret) ||
+              redacted.includes(secondSecret)
+            ) {
+              leaks.push(text);
+            }
+          }
+        }
+      }
+      expect(leaks).toEqual([]);
+    },
+  );
 });

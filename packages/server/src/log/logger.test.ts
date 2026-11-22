@@ -52,18 +52,36 @@ test("writes info and above by default", () => {
   expect(lines).toHaveLength(1);
 });
 
-test("writes a line for a message that isn't a string", () => {
+test("redacts a string message, writes numbers and booleans as text, and nothing else", () => {
   const { log, lines } = capture();
-  log.info(42 as unknown as string);
-  log.info(Symbol("x") as unknown as string);
-  log.info({
-    toJSON() {
-      throw new Error("plain-message-error");
+  const messages: unknown[] = [
+    "Bearer abc123def456ghi",
+    42,
+    true,
+    12345678901234567890n,
+    Symbol("x"),
+    new Uint8Array(2),
+    { toJSON: () => true },
+    { toJSON: () => "Bearer abc123def456ghi" },
+    {
+      toJSON() {
+        throw new Error("plain-message-error");
+      },
     },
-  } as unknown as string);
-  log.info({ toJSON: () => "Bearer abc123def456ghi" } as unknown as string);
+  ];
+  for (const msg of messages) log.info(msg as string);
 
   expect(
     lines.map((line) => (JSON.parse(line) as { msg: string }).msg),
-  ).toEqual(["42", "[Unreadable]", "[Unreadable]", "Bearer [REDACTED]"]);
+  ).toEqual([
+    "Bearer [REDACTED]",
+    "42",
+    "true",
+    "[Unreadable]",
+    "[Unreadable]",
+    "[Unreadable]",
+    "[Unreadable]",
+    "[Unreadable]",
+    "[Unreadable]",
+  ]);
 });

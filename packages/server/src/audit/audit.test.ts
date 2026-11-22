@@ -201,3 +201,32 @@ test("stores a marker object when the detail can't be read, and keeps the row", 
     { id: other, detail: '{"unreadable":true}' },
   ]);
 });
+
+test("masks a secret JSON field next to a URL in the action", () => {
+  const db = openDatabase();
+  appendAudit(db, {
+    ...approval,
+    action:
+      '{"url":"https://example.test/?token=fake","password": "CANARYaudit1"}',
+  });
+
+  const [row] = db.all("SELECT action FROM audit_log");
+  expect(row?.["action"]).not.toContain("CANARYaudit1");
+  expect(row?.["action"]).toContain(
+    '"url":"https://example.test/?token=[REDACTED]"',
+  );
+});
+
+test("stores a marker object when reading the detail itself throws", () => {
+  const db = openDatabase();
+  const entry = Object.defineProperty({ ...approval }, "detail", {
+    get() {
+      throw new Error("plain-detail-getter");
+    },
+  });
+  const id = appendAudit(db, entry);
+
+  expect(db.all("SELECT detail FROM audit_log WHERE id = ?", [id])).toEqual([
+    { detail: '{"unreadable":true}' },
+  ]);
+});

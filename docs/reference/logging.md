@@ -32,7 +32,7 @@ The logger redacts the fields first and adds `time`, `level` and `msg` afterward
 
 The tests cover getters, `toJSON` methods and `redactSelf` methods that throw, a proxy that throws, nesting 10,000 levels deep, and a message that isn't a string. In each case the call writes one line and doesn't throw. A `write` function that throws still makes the call throw.
 
-A message that isn't a string is written as text if it is a number or a boolean, or if its `toJSON` returns text. Any other message is written as `[Unreadable]`.
+A message that is a string is redacted like any other string. A number or a boolean is written as text. Any other message, such as a `bigint`, bytes or an object, is written as `[Unreadable]`.
 
 ```ts
 import { createLogger } from "@aphelion/server/log";
@@ -78,17 +78,29 @@ It is also redacted when the whole name is one of these, in `exactFieldNames`: `
 
 So `accessToken`, `ACCESSTOKEN`, `refresh_token`, `x-api-key` and `set-cookie` are redacted. `inputTokens`, `tokenCount`, `secretRef`, `cacheKey` and `bypass` are kept. The whole value is replaced, whatever it is, and the redactor never reads it. The rule applies at any depth, inside arrays, and to the fields of errors.
 
-The same names are matched inside text, in two forms:
+### JSON inside a string
+
+A string that holds JSON is parsed, not searched. The redactor looks for the first `{` and the last `}` in the string, then for the first `[` and the last `]`. If the text between them is at most 64 KB (`jsonParseLimit`) and `JSON.parse` reads it as an object or an array, the redactor redacts the parsed value with the same rules as any other object. It writes the result back with `JSON.stringify`, and applies the text rules to the text before and after it. So `upstream said {"api_key":"abc"}` becomes `upstream said {"api_key":"[REDACTED]"}`, and JSON encoded inside a JSON string is handled the same way.
+
+The JSON is written back without its original spacing, and escapes such as `\u0077` come back as the characters they stand for.
+
+A string that doesn't parse, or is larger than 64 KB, goes to the text rules below.
+
+### Names inside text
+
+The text rules match the same field names in these forms:
 
 | Form | Example | Written as |
 | --- | --- | --- |
-| A URL query parameter, after `?` or `&` | `?access_token=a,b;c&page=2` | `?access_token=[REDACTED]&page=2`. The value is masked up to the next `&`, whitespace or the end of the string. |
+| A URL query parameter, after `?` or `&` | `?access_token=a,b;c&page=2` | `?access_token=[REDACTED]&page=2`. The value ends at `&`, whitespace, a quote or the end of the string. |
 | `name=value` elsewhere, as in an environment variable | `GITHUB_TOKEN=abc PORT=8080` | `GITHUB_TOKEN=[REDACTED] PORT=8080`. The value ends at whitespace, `&`, `#`, a quote, `,` or `;`. |
-| A JSON string field inside a string | `{"password":"abc"}` | `{"password":"[REDACTED]"}`. Escapes in the name, such as `\u0077`, are decoded before the name is compared. |
+| A JSON string field in text that doesn't parse | `{"password":"abc",` | `{"password":"[REDACTED]",`. Escapes in the name, such as `\u0077`, are decoded before the name is compared. Names up to 1,024 characters are checked. |
+
+A quote here means `"`, `'` or a backtick. Every text rule stops at a quote, so no rule can run into the next field. A test puts each rule's target next to every other rule's target, with each kind of quote and a space between them, and checks that both stay masked.
 
 ### By value pattern
 
-Every string is searched for these patterns, in `valueRules`, and each match is replaced. The rest of the string stays. Each rule is written so that it doesn't scan the same run of characters again from every position inside it. A test runs the text rules on 19 hostile 1 MB strings and requires each to finish in under 1 second. On the development machine on 2026-11-22, each took under 60 ms.
+Every string is searched for these patterns, in `valueRules`, and each match is replaced. The rest of the string stays. Each rule is written so that it doesn't scan the same run of characters again from every position inside it. A test runs the text rules on 25 hostile strings of about 1 MB, 6 of them shaped like JSON, and requires each to finish in under 1 second. On the development machine on 2026-11-22, each took under 100 ms.
 
 | Pattern | Matches |
 | --- | --- |
@@ -103,7 +115,7 @@ Every string is searched for these patterns, in `valueRules`, and each match is 
 | AWS access key ID | `AKIA` or `ASIA` and 16 capital letters or digits |
 | age secret key | `AGE-SECRET-KEY-1` and 58 characters |
 | JSON Web Token | Three dot-separated parts, the first two starting with `eyJ` |
-| PEM private key | A whole `-----BEGIN ... PRIVATE KEY-----` block. Without an `-----END` line, everything from `-----BEGIN` to the end of the string. |
+| PEM private key | A whole `-----BEGIN ... PRIVATE KEY-----` block. Without an `-----END` line, everything from `-----BEGIN` up to the next quote or the end of the string. |
 
 The minimum lengths keep ordinary words such as `sk-learn`, `sk-this-is-an-ordinary-slug` and `ghp_short`. A token is matched when the character in front of it isn't a letter, a digit or `_`. So `key-ghp_...`, `key.ghp_...`, `/ghp_...`, `=ghp_...` and `"ghp_..."` are masked, and `xghp_...` isn't. A test checks each token type in 15 positions, including inside a URL and in a `name=value` pair.
 
@@ -125,8 +137,9 @@ The redactor works from names and formats. These reach the log unchanged:
 
 - A secret with no known format, in a field whose name isn't on the list. Examples are a password in a field named `value`, or a list of tokens named `tokens`.
 - A secret used as a field name, for example an object keyed by token.
-- A secret in a `name=value` pair whose value is in quotes, as in `password="abc"`, or a JSON field whose value isn't a string, as in `{"pin": 1234}`.
-- A JSON field whose name is longer than 64 characters, or contains an escaped quote `\"`.
+- A secret in a `name=value` pair whose value is in quotes, as in `password="abc"`.
+- In JSON that doesn't parse or is over 64 KB: a field whose value isn't a string, as in `{"password": 1234}`, or whose name is longer than 1,024 characters or contains an escaped quote `\"`.
+- Two JSON Web Tokens joined by `-`. The second one isn't matched.
 - A secret that has been encoded, such as base64 of a token, or split across two fields.
 - What a `toJSON` or `redactSelf` method returns, beyond the rules above.
 

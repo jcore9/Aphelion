@@ -31,6 +31,23 @@ export function pattern(
 
 function redactPemPrivateKeys(text: string): string {
   const begin = "-----BEGIN ";
+  const quotes = /["'`]/g;
+  const footers = new Map<string, number>();
+  let quote = -1;
+  const quoteAt = (from: number): number => {
+    if (quote < from) {
+      quotes.lastIndex = from;
+      quote = quotes.exec(text)?.index ?? text.length;
+    }
+    return quote;
+  };
+  const footerAt = (footer: string, from: number): number => {
+    const cached = footers.get(footer);
+    if (cached !== undefined && (cached < 0 || cached >= from)) return cached;
+    const at = text.indexOf(footer, from);
+    footers.set(footer, at);
+    return at;
+  };
   let result = "";
   let from = 0;
   for (;;) {
@@ -45,10 +62,10 @@ function redactPemPrivateKeys(text: string): string {
       continue;
     }
     const footer = `-----END ${label}-----`;
-    const end = text.indexOf(footer, labelEnd);
+    const end = footerAt(footer, labelEnd);
+    const stop = quoteAt(labelEnd);
     result += text.slice(from, start) + REDACTED;
-    if (end < 0) return result;
-    from = end + footer.length;
+    from = end >= 0 && end < stop ? end + footer.length : stop;
   }
   return result + text.slice(from);
 }
@@ -121,7 +138,7 @@ export const defaultRules: RedactionRules = {
     ),
     pattern(
       "Password in a URL",
-      /(\/\/[^\s/@:]+:)[^\s/@]+@/g,
+      /(\/\/[^\s/@:"'`]+:)[^\s/@"'`]+@/g,
       `$1${REDACTED}@`,
     ),
     pattern(
@@ -163,6 +180,8 @@ export function isSensitiveName(
   );
 }
 
+export const jsonParseLimit = 64 * 1024;
+
 function decodedJsonName(name: string): string {
   try {
     return String(JSON.parse(`"${name}"`));
@@ -171,29 +190,62 @@ function decodedJsonName(name: string): string {
   }
 }
 
-export function redactText(
-  text: string,
-  rules: RedactionRules = defaultRules,
-): string {
+function redactUnstructuredText(text: string, rules: RedactionRules): string {
   const named = text
     .replace(
-      /([?&])([\w.-]+)=([^&\s]*)/g,
+      /([?&])([\w.-]+)=([^&\s"'`]*)/g,
       (match, separator: string, name: string) =>
         isSensitiveName(name, rules)
           ? `${separator}${name}=${REDACTED}`
           : match,
     )
-    .replace(/(?<![\w.-])([\w.-]+)=([^\s&#"',;]+)/g, (match, name: string) =>
+    .replace(/(?<![\w.-])([\w.-]+)=([^\s&#"'`,;]+)/g, (match, name: string) =>
       isSensitiveName(name, rules) ? `${name}=${REDACTED}` : match,
     )
     .replace(
-      /"((?:[^"\\]|\\[^"]){1,64})"(\s*:\s*)"[^"\\]*(?:\\.[^"\\]*)*"/g,
+      /"((?:[^"\\]|\\[^"]){1,1024})"(\s*:\s*)"[^"\\]*(?:\\.[^"\\]*)*"/g,
       (match, name: string, colon: string) =>
         isSensitiveName(decodedJsonName(name), rules)
           ? `"${name}"${colon}"${REDACTED}"`
           : match,
     );
   return rules.valueRules.reduce((result, rule) => rule.replace(result), named);
+}
+
+function redactEmbeddedJson(
+  text: string,
+  open: string,
+  close: string,
+  rules: RedactionRules,
+): string | undefined {
+  const start = text.indexOf(open);
+  const end = text.lastIndexOf(close);
+  if (start < 0 || end <= start || end - start >= jsonParseLimit) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  return (
+    redactUnstructuredText(text.slice(0, start), rules) +
+    JSON.stringify(redact(parsed, rules)) +
+    redactUnstructuredText(text.slice(end + 1), rules)
+  );
+}
+
+export function redactText(
+  text: string,
+  rules: RedactionRules = defaultRules,
+): string {
+  return (
+    redactEmbeddedJson(text, "{", "}", rules) ??
+    redactEmbeddedJson(text, "[", "]", rules) ??
+    redactUnstructuredText(text, rules)
+  );
 }
 
 function errorKeys(error: Error): string[] {

@@ -1,6 +1,7 @@
 import {
   defaultRules,
   redact,
+  redactText,
   type RedactionRules,
   UNREADABLE,
 } from "./redact";
@@ -25,12 +26,9 @@ function payloadEntries(payload: unknown): [string, unknown][] {
 }
 
 function messageText(msg: unknown, rules: RedactionRules): string {
-  const redacted = redact(msg, rules);
-  return typeof redacted === "string" ||
-    typeof redacted === "number" ||
-    typeof redacted === "boolean"
-    ? String(redacted)
-    : UNREADABLE;
+  if (typeof msg === "string") return redactText(msg, rules);
+  if (typeof msg === "number" || typeof msg === "boolean") return String(msg);
+  return UNREADABLE;
 }
 
 export interface Logger {

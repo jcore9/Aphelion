@@ -29,6 +29,14 @@ function detailObject(detail: unknown): object {
     : { unreadable: true };
 }
 
+function redactDetail(entry: AuditEntry, rules: RedactionRules): unknown {
+  try {
+    return redact(entry.detail ?? {}, rules);
+  } catch {
+    return undefined;
+  }
+}
+
 export function appendAudit(
   db: Database,
   entry: AuditEntry,
@@ -49,7 +57,7 @@ export function appendAudit(
       text(entry.agentId),
       text(entry.sessionId),
       text(entry.requestId),
-      JSON.stringify(detailObject(redact(entry.detail ?? {}, rules))),
+      JSON.stringify(detailObject(redactDetail(entry, rules))),
     ],
   );
   return Number(row?.["id"]);
