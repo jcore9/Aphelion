@@ -8,19 +8,13 @@ import {
 } from "../log";
 import type { Database } from "../store";
 
-export const actorKinds = [
-  "server",
-  "cli",
-  "device",
-  "agent",
-  "plugin",
-] as const;
+export const actorKinds = ["server", "cli", "device", "bot", "plugin"] as const;
 
 export const outcomes = ["allowed", "denied", "succeeded", "failed"] as const;
 
 export type Actor =
   | { readonly kind: "server" | "cli" }
-  | { readonly kind: "device" | "agent" | "plugin"; readonly id: string };
+  | { readonly kind: "device" | "bot" | "plugin"; readonly id: string };
 
 export type Outcome = (typeof outcomes)[number];
 
@@ -41,7 +35,7 @@ export interface AuditEntry<A extends string = string> {
   readonly actor: Actor;
   readonly action: A;
   readonly outcome: Outcome;
-  readonly agentId?: string;
+  readonly botId?: string;
   readonly sessionId?: string;
   readonly requestId?: string;
   readonly detail?: Fields;
@@ -70,7 +64,7 @@ export function appendAudit<A extends string>(
     value === undefined ? null : redactText(value, rules);
   const [row] = db.all(
     `INSERT INTO audit_log
-      (actor_kind, actor_id, action, outcome, agent_id, session_id, request_id, detail)
+      (actor_kind, actor_id, action, outcome, bot_id, session_id, request_id, detail)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING id`,
     [
@@ -78,7 +72,7 @@ export function appendAudit<A extends string>(
       text("id" in entry.actor ? entry.actor.id : undefined),
       text(entry.action),
       allowed(outcomes, entry.outcome, "outcome"),
-      text(entry.agentId),
+      text(entry.botId),
       text(entry.sessionId),
       text(entry.requestId),
       JSON.stringify(detailObject(redactDetail(entry, rules))),

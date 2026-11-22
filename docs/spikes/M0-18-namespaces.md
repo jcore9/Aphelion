@@ -4,13 +4,13 @@
 - Date: 2026-11-22. Sources were read and every test ran on this date (UTC).
 - Tested with: Docker 29.10.0, the `ubuntu:26.04` image (26.04.1), `bubblewrap` 0.11.1 (`0.11.1-1ubuntu0.3`), `unshare` from util-linux 2.41.3, Claude Code 2.1.330, Codex CLI 0.171.0 and Grok Build 1.0.92. The host was Debian 13 on kernel 6.5.13-3-pve, inside an unprivileged LXC container on Proxmox.
 - Prototype: `spikes/M0-18/` on the [`spike/M0-18-namespaces-prototype`](https://github.com/jcore9/Aphelion/tree/spike/M0-18-namespaces-prototype/spikes/M0-18) branch, with the run logs in `runs/`. That branch is never merged.
-- Decisions: [0006](../decisions/0006-shared-agent-user.md), [0016](../decisions/0016-one-docker-container.md), [0022](../decisions/0022-agent-network-boundary.md), [0035](../decisions/0035-codex-login-sandbox-approvals.md). This finding settles nothing itself. The owner answered its questions on 2026-11-22, and [decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md) records the answers.
+- Decisions: [0006](../decisions/0006-shared-bot-user.md), [0016](../decisions/0016-one-docker-container.md), [0022](../decisions/0022-bot-network-boundary.md), [0035](../decisions/0035-codex-login-sandbox-approvals.md). This finding settles nothing itself. The owner answered its questions on 2026-11-22, and [decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md) records the answers.
 
 Each answer is labeled **measured** (run on this box), **documented** (read in a source, which is linked), or **inferred** (reasoned from the two).
 
 ## Summary
 
-The agent runner can start each bot in its own namespaces inside the hardened container, and a bot then sees only its own folder. The seccomp profile needs five more system calls than Docker's default: `clone` and `unshare` with namespace flags, `mount`, `umount2` and `pivot_root`. Killing the bot's `bwrap` process killed every process the bot had started, including one that had left its process group. Today's plan, which kills the process group, missed two of five.
+The bot runner can start each bot in its own namespaces inside the hardened container, and a bot then sees only its own folder. The seccomp profile needs five more system calls than Docker's default: `clone` and `unshare` with namespace flags, `mount`, `umount2` and `pivot_root`. Killing the bot's `bwrap` process killed every process the bot had started, including one that had left its process group. Today's plan, which kills the process group, missed two of five.
 
 Three costs go beyond what decision 0035 assumed:
 
@@ -33,8 +33,8 @@ Grok Build's sandbox couldn't be tested, because this kernel has no Landlock. Wi
 
 ## How the tests ran
 
-- **The container.** Every test used `checks/run.sh`. It starts the `ubuntu:26.04` image with decision 0016's hardening: `--read-only`, `--cap-drop ALL` with only `SETUID` and `SETGID` added back, and `no-new-privileges`. It also sets a process and memory limit and gives `/tmp` a tmpfs. The container starts as root and switches to `aphelion-agent` (uid 10001) with `setpriv`, the way the init starts the runner. From there the process had no capabilities: `CapEff` was 0 (measured).
-- **The bot sandbox.** `checks/botwrap.sh` is what the runner would run for one bot. It calls `bwrap` with new user, PID, IPC and hostname namespaces, `--die-with-parent` and `--new-session`. It makes `/usr` and `/etc` read-only and gives the bot a fresh `/dev` and `/tmp`. Under `/var/lib/aphelion-agents` it mounts only the bot's own folder, plus any folder the runner grants. The agents root was a Docker volume, as in decision 0016.
+- **The container.** Every test used `checks/run.sh`. It starts the `ubuntu:26.04` image with decision 0016's hardening: `--read-only`, `--cap-drop ALL` with only `SETUID` and `SETGID` added back, and `no-new-privileges`. It also sets a process and memory limit and gives `/tmp` a tmpfs. The container starts as root and switches to `aphelion-bot` (uid 10001) with `setpriv`, the way the init starts the runner. From there the process had no capabilities: `CapEff` was 0 (measured).
+- **The bot sandbox.** `checks/botwrap.sh` is what the runner would run for one bot. It calls `bwrap` with new user, PID, IPC and hostname namespaces, `--die-with-parent` and `--new-session`. It makes `/usr` and `/etc` read-only and gives the bot a fresh `/dev` and `/tmp`. Under `/var/lib/aphelion-bots` it mounts only the bot's own folder, plus any folder the runner grants. The bots root was a Docker volume, as in decision 0016.
 - **Seccomp profiles.** `seccomp/docker-29.10.0-default.json` is Docker's built-in profile, taken from moby tag `docker-v29.10.0` (the running daemon's commit, `06db173`). That tag vendors `github.com/moby/profiles/seccomp` v0.3.0. `seccomp/make-profiles.py` adds rules to it to make each variant.
 - **The CLIs.** The installed CLI packages were mounted read-only at `/opt/cli`. Every home was a scratch folder. No real `~/.claude`, `~/.codex` or `~/.grok` was mounted, copied or read.
 - **No logins.** Claude Code ran a real tool call against `checks/mock_anthropic.py`, a local stand-in for the Messages API, with the dummy key `sk-dummy-m018`. The egress test pointed each CLI's API address at `https://example.com`. Codex saved a dummy API key to test how it writes its login file.
@@ -47,7 +47,7 @@ Grok Build's sandbox couldn't be tested, because this kernel has no Landlock. Wi
 
 ### 1. Can the runner start each bot in its own namespaces
 
-Yes, with a custom seccomp profile (measured). As `aphelion-agent` with no capabilities:
+Yes, with a custom seccomp profile (measured). As `aphelion-bot` with no capabilities:
 
 | Profile | `unshare -U` | `bwrap` with user namespace | Fresh `/proc` in a PID namespace |
 | --- | --- | --- | --- |
@@ -74,8 +74,8 @@ There are three ways to give a bot a `/proc`. All three were measured:
 
 **What a bot sees.** With the fresh `/proc` and the recommended profile (measured, `runs/recommended-profile.txt`):
 
-- `ls /var/lib/aphelion-agents` showed only `a`. Reading bot `b`'s file failed: "No such file or directory".
-- The bot had no capabilities outside its namespace (`CapEff` 0, `NoNewPrivs` 1), and its uid stayed `aphelion-agent`.
+- `ls /var/lib/aphelion-bots` showed only `a`. Reading bot `b`'s file failed: "No such file or directory".
+- The bot had no capabilities outside its namespace (`CapEff` 0, `NoNewPrivs` 1), and its uid stayed `aphelion-bot`.
 - `/proc` held 4 process entries: the bot's own.
 - A nested user and mount namespace started inside the bot and listed only the bot's own tree. The unmount in that test failed ("not mounted"), so the log doesn't show that an unmount can't bring the outside tree back. That is not tested.
 
@@ -103,7 +103,7 @@ Each binary starts inside a bot's namespaces (measured): `claude --version` prin
 - `curl` through the proxy got 200, and `curl --noproxy '*'` failed to resolve the host.
 - Claude Code, Codex and Grok each reached `example.com:443` through the proxy, and got `example.com`'s 405 back. Codex also opened `api.github.com` and `codeload.github.com`, as M0-17 found.
 
-**Shared login files.** Decision 0006 keeps one login per provider in the `aphelion-agent` home. With per-bot namespaces, the runner would mount those files into each bot. Tested with dummy files only (measured, `runs/q2-creds.txt`):
+**Shared login files.** Decision 0006 keeps one login per provider in the `aphelion-bot` home. With per-bot namespaces, the runner would mount those files into each bot. Tested with dummy files only (measured, `runs/q2-creds.txt`):
 
 | Mounted as | Read | Overwrite in place | Replace by rename | Delete |
 | --- | --- | --- | --- | --- |
@@ -199,7 +199,7 @@ For files, yes (measured, `runs/q5-isolation.txt`, fresh `/proc`):
 
 | From bot `a` | Result |
 | --- | --- |
-| List `/var/lib/aphelion-agents` | Only `a` |
+| List `/var/lib/aphelion-bots` | Only `a` |
 | Read `b`'s file by path | "No such file or directory" |
 | Read `b`'s file through `/proc/<b's pid>/root` | "No such file or directory": `b`'s processes aren't in `a`'s `/proc` |
 | Signal `b`'s process by pid | `kill` said "No such process". A probe that passed a `/proc/<pid>` directory descriptor to `pidfd_send_signal` failed with "No such file or directory". That descriptor isn't a real pidfd, so only `kill` is a valid result. |
@@ -214,10 +214,10 @@ With the container's `/proc` shared instead, bot `a` could list every process in
 
 - **The network.** Bots share the container's network, so they can reach each other's local ports and abstract Unix sockets. Bot `a` bound an abstract socket in the shared namespace.
 - **The shared logins.** Every bot that mounts a provider's login folder can read that login, as today.
-- **Same uid on the volume.** Files a bot writes are owned by `aphelion-agent`, as today. The runner, outside any namespace, can still reach every folder.
+- **Same uid on the volume.** Files a bot writes are owned by `aphelion-bot`, as today. The runner, outside any namespace, can still reach every folder.
 - **Bugs that defeat namespaces.** A kernel bug, or a runner bug in the mount list, puts a bot back where decision 0006 is today (inferred). It doesn't give the bot more than that, because the other boundaries don't depend on namespaces.
 
-**The four fixed users all stay** (inferred). Namespaces replace only the idea of one Unix user per bot. Every bot's namespaces are created by `aphelion-agent`, so they separate bots from each other only.
+**The four fixed users all stay** (inferred). Namespaces replace only the idea of one Unix user per bot. Every bot's namespaces are created by `aphelion-bot`, so they separate bots from each other only.
 
 - `harness` keeps the config, the database and the audit log out of bots' reach.
 - `aphelion-secrets` keeps the broker's store out of reach.
@@ -242,7 +242,7 @@ Yes (measured for kill; inferred for the rest).
 | `bwrap`, PID namespace, no `--die-with-parent` | The `bwrap` process | 5 of 5 |
 | `bwrap`, no PID namespace, `--die-with-parent` | The `bwrap` process | 4 of 5 |
 
-Killing the bot's first process inside its PID namespace kills every process in that namespace. `--die-with-parent` makes that happen when the runner kills `bwrap` or dies itself. Both are needed. Decision 0016's "cancel kills the agent's whole process group" missed the two processes that left the group.
+Killing the bot's first process inside its PID namespace kills every process in that namespace. `--die-with-parent` makes that happen when the runner kills `bwrap` or dies itself. Both are needed. Decision 0016's "cancel kills the bot's whole process group" missed the two processes that left the group.
 
 **The other rules.**
 
@@ -287,7 +287,7 @@ What the exit-test VM would have had to provide:
 | [M1-04](https://github.com/jcore9/Aphelion/issues/22) | Start each bot through `bwrap` with new user, PID, IPC and hostname namespaces, `--die-with-parent` and `--new-session`. Mount the bot's folder, the folders its config grants, and a shared login folder per provider. Cancel by SIGKILL to the `bwrap` process, not the process group. Even without per-bot isolation, a process group misses daemons, as question 6 measured. |
 | [M4-10](https://github.com/jcore9/Aphelion/issues/114) | Codex's sandbox runs inside a bot. The profile needs `CLONE_NEWNET` for it. `$CODEX_HOME/auth.json` is a link into the shared login folder, never a single-file mount. Mount `$CODEX_HOME/rules` read-only. |
 | [M2-05](https://github.com/jcore9/Aphelion/issues/31) | Where bots have namespaces, the runner mounts Codex's rules folder and every hook file read-only inside each bot. |
-| [Decision 0006](../decisions/0006-shared-agent-user.md) | Amended by a new decision record only if the owner says yes to question 3. |
-| [Decision 0016](../decisions/0016-one-docker-container.md) | "Cancel kills the agent's whole process group" misses processes that leave the group. Cancel kills the bot's PID namespace instead. |
+| [Decision 0006](../decisions/0006-shared-bot-user.md) | Amended by a new decision record only if the owner says yes to question 3. |
+| [Decision 0016](../decisions/0016-one-docker-container.md) | "Cancel kills the bot's whole process group" misses processes that leave the group. Cancel kills the bot's PID namespace instead. |
 | [Decision 0035](../decisions/0035-codex-login-sandbox-approvals.md) | The narrow profile is now measured: one rule with five calls, plus network namespaces for Codex's sandbox, plus a container AppArmor profile on Ubuntu. |
-| [Decision 0022](../decisions/0022-agent-network-boundary.md) | No change. Bots share the container's network, and option 2 moves their namespaces with them. |
+| [Decision 0022](../decisions/0022-bot-network-boundary.md) | No change. Bots share the container's network, and option 2 moves their namespaces with them. |

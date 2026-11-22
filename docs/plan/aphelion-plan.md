@@ -4,27 +4,27 @@ Last updated Nov 21, 2026
 
 This is a living document. It grows as decisions are made, and once the repo exists, the decisions it records move into decision records under `docs/`.
 
-> **Amendments.** This plan was imported unchanged under [decision 0004](../decisions/0004-import-plan-with-m0-plan.md). Later decision records change parts of it. Each changed passage links the record that changed it. In tables, the original text is struck through next to the new text. In prose, an "Amended by" note follows the new text and quotes the original. Text with no mark is the plan as imported.
+> **Amendments.** This plan was imported unchanged under [decision 0004](../decisions/0004-import-plan-with-m0-plan.md). Later decision records change parts of it. Each changed passage links the record that changed it. In tables, the original text is struck through next to the new text. In prose, an "Amended by" note follows the new text and quotes the original. Text with no mark is the plan as imported, except that [decision 0039](../decisions/0039-bots-not-agents.md) renamed "agent" to "bot" throughout, without marks.
 
 ## Goals and scope
 
-Aphelion is a self-hosted bot application, not a coding app. Its bots (called agents throughout this plan) are persistent managers and orchestrators: they plan work, track it across connected services, coordinate with each other, delegate hands-on coding to dedicated tools such as T3 Code through MCP, and follow up. Claude Code and Grok Build are the engines underneath, running on a headless VM, with every risky action gated by an approval layer the user configures and controls.
+Aphelion is a self-hosted bot application, not a coding app. Its bots are persistent managers and orchestrators: they plan work, track it across connected services, coordinate with each other, delegate hands-on coding to dedicated tools such as T3 Code through MCP, and follow up. Claude Code and Grok Build are the engines underneath, running on a headless VM, with every risky action gated by an approval layer the user configures and controls.
 
 **Must do (v1)**
 
 - Ship the server as one container image, reachable over Tailscale, and clients (the PWA and the desktop app) that connect to it. The desktop app never runs a server itself.
 
-  > Amended by [decision 0017](../decisions/0017-desktop-remote-only.md), with the container from [decision 0016](../decisions/0016-one-docker-container.md). The original said: "Ship one app with two modes: launched with a CLI flag it runs headless (for example as a systemd service on an agent VM, reachable over Tailscale); launched normally it opens the desktop app."
+  > Amended by [decision 0017](../decisions/0017-desktop-remote-only.md), with the container from [decision 0016](../decisions/0016-one-docker-container.md). The original said: "Ship one app with two modes: launched with a CLI flag it runs headless (for example as a systemd service on a bot VM, reachable over Tailscale); launched normally it opens the desktop app."
 
 - Be plugin-first: every feature is a plugin on a public, versioned API, and the UI is fully themeable, down to animations in the chat panel.
 - Drive multiple AI CLIs through one adapter interface, starting with Claude Code and Grok Build, using their existing subscription logins.
-- Keep persistent agents: each has a name, instructions, a workspace, and resumable session history.
-- Let agents message each other and hand off tasks, under the same approval rules as everything else.
-- Queue messages per agent, with pause, resume and cancel.
+- Keep persistent bots: each has a name, instructions, a workspace, and resumable session history.
+- Let bots message each other and hand off tasks, under the same approval rules as everything else.
+- Queue messages per bot, with pause, resume and cancel.
 - Run routines on schedules (cron-style) and on demand, with run history.
 - Show subscription usage per provider: current window, weekly cap, reset times.
 - Connect services through native connectors (GitHub first) and any custom MCP server the user adds, such as a coding tool's MCP server.
-- Show the work in the app: a live map of agents and what they're doing, and pull requests and issues from connected repos.
+- Show the work in the app: a live map of bots and what they're doing, and pull requests and issues from connected repos.
 - Gate risky tool calls and connector calls through a configurable approval layer: auto-allow, reviewer model, or ask the user.
 - Serve a web client first, with a protocol a native app can reuse later.
 
@@ -35,14 +35,14 @@ Aphelion is a self-hosted bot application, not a coding app. Its bots (called ag
 - Voice, embedded browser, computer use.
 - Multi-user accounts, teams, or anything public-facing.
 - Native mobile app and WebRTC (protocol is designed for them; built later).
-- Shared multi-agent group channels (direct messages and handoffs between agents are in v1).
+- Shared multi-bot group channels (direct messages and handoffs between bots are in v1).
 - Merging or reviewing pull requests from inside the app (v1 shows them and links out).
 
 **Design principles**
 
-- **Extremely opinionated.** Aphelion makes the hard choices for the user instead of hiding them behind options: approvals on by default, agents unprivileged and isolated, credentials never on the agent host, ~~ACP for agents~~ each CLI driven over its vendor's own protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)), MCP for tools, design tokens for every pixel. Plugins and themes extend it within those rules; they don't relax them.
+- **Extremely opinionated.** Aphelion makes the hard choices for the user instead of hiding them behind options: approvals on by default, bots unprivileged and isolated, credentials never on the bot host, ~~ACP for bots~~ each CLI driven over its vendor's own protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)), MCP for tools, design tokens for every pixel. Plugins and themes extend it within those rules; they don't relax them.
 - **Bots manage; tools build.** Bots break work down, file and triage issues, coordinate other bots, delegate implementation to coding tools over MCP and check the results. Aphelion has no code editor, diff viewer or terminal UI, and doesn't try to.
-- **The agents are untrusted.** Enforcement lives outside their reach (root-owned config, separate machine for credentials).
+- **The bots are untrusted.** Enforcement lives outside their reach (root-owned config, separate machine for credentials).
 - **Minimal attack surface.** Every feature added must justify its attack surface and maintenance cost.
 - **Swappable edges.** Adapters, transports and stores sit behind interfaces so a CLI change or a new client touches one module.
 
@@ -63,7 +63,7 @@ Documentation and planning are the most critical parts of the project: nothing i
 | --- | --- | --- |
 | README | Everyone | What Aphelion is (and isn't), a quick start, links to everything else |
 | Install guides | Users | Headless server setup, desktop app, Tailscale, gateway host, upgrades and backups |
-| User guide | Users | Bots, approvals and presets, connectors, custom MCP servers, routines, usage, the agent map and Work view |
+| User guide | Users | Bots, approvals and presets, connectors, custom MCP servers, routines, usage, the bot map and Work view |
 | Security and threat model | Users, contributors | What the isolation protects, what it doesn't, and how to report a vulnerability |
 | Architecture overview | Contributors | This plan's architecture, kept current as the code changes |
 | Decision records | Contributors | One numbered record per significant decision: context, options, choice, consequences |
@@ -146,21 +146,21 @@ A manager bot can approve and merge low-risk PRs into `dev`, so the user's atten
 
 ## Architecture overview
 
-One harness process on the agent VM drives unprivileged CLI agents, credentials live on a separate gateway, and every risky call passes the policy engine.
+One harness process on the bot VM drives unprivileged CLI bots, credentials live on a separate gateway, and every risky call passes the policy engine.
 
 ```mermaid
 flowchart TB
   clients["Clients<br/>Web client (PWA) now, native app later"]
-  subgraph vm["Agent VM · LAN blocked"]
+  subgraph vm["Bot VM · LAN blocked"]
     subgraph harness["Harness server · user harness"]
       api["API server<br/>WebSocket, REST"]
       sched["Scheduler<br/>queues, routines"]
-      sess["Session manager<br/>one per agent"]
+      sess["Session manager<br/>one per bot"]
       policy["Policy engine<br/>rules, reviewer"]
       usage["Usage monitor<br/>budget guard"]
       store["Store<br/>SQLite, audit log"]
     end
-    subgraph agents["Agent processes · own Unix user, no sudo"]
+    subgraph bots["Bot processes · own Unix user, no sudo"]
       claude["Claude Code<br/>via Agent SDK"]
       grok["Grok Build<br/>via ACP"]
       hooks["Managed hooks<br/>root-owned, fail closed"]
@@ -170,18 +170,18 @@ flowchart TB
   third["Third-party APIs<br/>GitHub, Notion, custom MCPs"]
   providers["Provider APIs<br/>Anthropic, xAI"]
   clients -- "WebSocket over Tailscale" --> api
-  sess -- spawns --> agents
-  agents -- "permission requests" --> policy
+  sess -- spawns --> bots
+  bots -- "permission requests" --> policy
   harness -- MCP --> gateway
   gateway -- "scoped tokens" --> third
-  agents -- API --> providers
+  bots -- API --> providers
 ```
 
-Clients reach the harness only over Tailscale. Agents send permission requests back to the policy engine and reach third-party services only through the gateway.
+Clients reach the harness only over Tailscale. Bots send permission requests back to the policy engine and reach third-party services only through the gateway.
 
 **One app, two modes.** v1 supports Linux only. Aphelion runs only as the server container, with its protections, and every client connects to it. The server runs on Bun as `aphelion --headless`. The desktop app is Electron wrapping the same web client that the PWA serves. It connects to a server over Tailscale and never bundles or starts one. To use Aphelion on one machine, run the container on that machine and connect the desktop app to it. Electron is the shell because it renders with the same Chromium engine on every Linux distro. The server never loads Electron, so a server needs no GUI libraries.
 
-> Amended by [decision 0007](../decisions/0007-bun-runtime.md) (Bun), [decision 0009](../decisions/0009-electron-desktop-shell.md) (why Electron) and [decision 0017](../decisions/0017-desktop-remote-only.md) (no local mode). The original said: "v1 supports Linux only. The same Aphelion install runs headless when started with `aphelion --headless` (server only, for a VM or an always-on machine) and otherwise opens the desktop app. The desktop app wraps the same web client and either starts a local server or connects to a remote headless instance over Tailscale. In local mode the gateway and agents still run as separate Unix users on the same machine, which is weaker isolation than a separate gateway host, and the client says so. Electron is the default shell because the server already runs on Node, but headless mode must start the Node server without loading Electron, so a server VM doesn't need any GUI libraries."
+> Amended by [decision 0007](../decisions/0007-bun-runtime.md) (Bun), [decision 0009](../decisions/0009-electron-desktop-shell.md) (why Electron) and [decision 0017](../decisions/0017-desktop-remote-only.md) (no local mode). The original said: "v1 supports Linux only. The same Aphelion install runs headless when started with `aphelion --headless` (server only, for a VM or an always-on machine) and otherwise opens the desktop app. The desktop app wraps the same web client and either starts a local server or connects to a remote headless instance over Tailscale. In local mode the gateway and bots still run as separate Unix users on the same machine, which is weaker isolation than a separate gateway host, and the client says so. Electron is the default shell because the server already runs on Node, but headless mode must start the Node server without loading Electron, so a server VM doesn't need any GUI libraries."
 
 ## Components
 
@@ -190,16 +190,16 @@ The harness is one server process with a handful of modules, plus a connector ga
 | Component | Responsibility | Key design choices |
 | --- | --- | --- |
 | API server | Serves clients: commands in, events out | WebSocket for streaming, REST for everything else. Binds to the tailnet only. Device identity from Tailscale, plus a per-device token so a lost phone can be revoked. |
-| Agent registry | Defines each agent | Name, provider, model, instructions, workspace path, policy profile. Stored as YAML in git, loaded into SQLite. |
-| Agent adapters | Talk to the AI CLIs | ~~[ACP](https://agentclientprotocol.com/) client first: Grok via `grok agent stdio`, Claude via an ACP adapter. Fallback: `-p --output-format stream-json` with `--resume`.~~ Each CLI over its vendor's own protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)): Claude Code through the Claude Agent SDK, Codex through `codex app-server`, Grok via `grok agent stdio` ([ACP](https://agentclientprotocol.com/)). One normalized event type out. |
-| Session manager | Owns agent processes | One live process per agent, ~~run as that agent's Unix user~~ run as the shared `aphelion-agent` user and started by the agent runner ([0006](../decisions/0006-shared-agent-user.md), [0016](../decisions/0016-one-docker-container.md)). Restart on crash, resume by session id, kill the whole process tree on cancel. |
-| Queue | Orders work per agent | FIFO per agent, one turn at a time. Pause, resume, cancel, reorder. Survives restarts. |
-| Scheduler | Runs routines | Routine = agent + prompt + schedule + policy profile. Cron expressions in an explicit time zone. Missed-run and overlap policy per routine. Run history kept. |
+| Bot registry | Defines each bot | Name, provider, model, instructions, workspace path, policy profile. Stored as YAML in git, loaded into SQLite. |
+| Bot adapters | Talk to the AI CLIs | ~~[ACP](https://agentclientprotocol.com/) client first: Grok via `grok agent stdio`, Claude via an ACP adapter. Fallback: `-p --output-format stream-json` with `--resume`.~~ Each CLI over its vendor's own protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)): Claude Code through the Claude Agent SDK, Codex through `codex app-server`, Grok via `grok agent stdio` ([ACP](https://agentclientprotocol.com/)). One normalized event type out. |
+| Session manager | Owns bot processes | One live process per bot, ~~run as that bot's Unix user~~ run as the shared `aphelion-bot` user and started by the bot runner ([0006](../decisions/0006-shared-bot-user.md), [0016](../decisions/0016-one-docker-container.md)). Restart on crash, resume by session id, kill the whole process tree on cancel. |
+| Queue | Orders work per bot | FIFO per bot, one turn at a time. Pause, resume, cancel, reorder. Survives restarts. |
+| Scheduler | Runs routines | Routine = bot + prompt + schedule + policy profile. Cron expressions in an explicit time zone. Missed-run and overlap policy per routine. Run history kept. |
 | Usage monitor | Tracks subscription headroom | One collector per provider, polled on a timer, stored as snapshots. Budget guard can pause routines near a cap. |
-| Policy engine | Decides every gated action | Inputs: ~~ACP permission requests~~ each adapter's permission requests ([0034](../decisions/0034-vendor-protocol-per-cli.md)) and hook callbacks. Order: static rules, then reviewer, then you. Rules, reviewer and timeout behavior are configurable per agent, connector and tool. Every decision logged. |
+| Policy engine | Decides every gated action | Inputs: ~~ACP permission requests~~ each adapter's permission requests ([0034](../decisions/0034-vendor-protocol-per-cli.md)) and hook callbacks. Order: static rules, then reviewer, then you. Rules, reviewer and timeout behavior are configurable per bot, connector and tool. Every decision logged. |
 | Reviewer | Second opinion on risky calls | A separate model call that sees only the action and its arguments, never the content that triggered it. No tools of its own. |
-| Connector gateway | Holds third-party credentials | Separate LXC or VM. Runs the native connectors (GitHub first) and any custom MCP servers the user adds, and exposes their tools to agents through the harness MCP endpoint. Scoped tokens, read-only by default, writes routed through the policy engine. |
-| Store | Persists state | SQLite in WAL mode: agents, messages, runs, approvals, usage snapshots, audit log. CLI transcripts stay in the CLIs' own files, referenced by session id. No secrets in the database. |
+| Connector gateway | Holds third-party credentials | Separate LXC or VM. Runs the native connectors (GitHub first) and any custom MCP servers the user adds, and exposes their tools to bots through the harness MCP endpoint. Scoped tokens, read-only by default, writes routed through the policy engine. |
+| Store | Persists state | SQLite in WAL mode: bots, messages, runs, approvals, usage snapshots, audit log. CLI transcripts stay in the CLIs' own files, referenced by session id. No secrets in the database. |
 | Notifier | Gets your attention | Push via ntfy now, APNs/FCM later. Sends only "approval waiting" or "routine failed", never the details. |
 
 ## Client protocol and transport
@@ -217,15 +217,15 @@ Design the protocol once and treat the transport as replaceable: WebSocket over 
 
 | Kind | Name | Carries |
 | --- | --- | --- |
-| Command | `message.send` | agent, text, attachments |
-| Command | `queue.pause` / `queue.resume` / `queue.cancel` | agent, optional item id |
+| Command | `message.send` | bot, text, attachments |
+| Command | `queue.pause` / `queue.resume` / `queue.cancel` | bot, optional item id |
 | Command | `approval.decide` | approval id, allow or deny, optional scope (once / this session) |
 | Command | `routine.run` / `routine.update` | routine id, definition |
-| Command | `work.assign` | issue or PR reference, target agent |
-| Event | `agent.output` | streamed text, tool call start and end, turn complete |
-| Event | `agent.status` | agent, state (idle, thinking, running a tool, waiting for approval, error), current task |
-| Event | `agent.message` | from agent, to agent, thread id, text, hop count |
-| Event | `approval.requested` | approval id, agent, tool, arguments, reviewer verdict, expiry |
+| Command | `work.assign` | issue or PR reference, target bot |
+| Event | `bot.output` | streamed text, tool call start and end, turn complete |
+| Event | `bot.status` | bot, state (idle, thinking, running a tool, waiting for approval, error), current task |
+| Event | `bot.message` | from bot, to bot, thread id, text, hop count |
+| Event | `approval.requested` | approval id, bot, tool, arguments, reviewer verdict, expiry |
 | Event | `approval.resolved` | approval id, decision, who decided |
 | Event | `routine.run` | routine id, status, summary |
 | Event | `usage.snapshot` | provider, window, percent used, reset time |
@@ -243,15 +243,15 @@ A closed native app can only be woken through APNs or FCM, which run through App
 
 ## Security model
 
-Assume every agent can be prompt-injected, so the agents get nothing they could misuse: no root, no credentials, no way to change the rules that gate them.
+Assume every bot can be prompt-injected, so the bots get nothing they could misuse: no root, no credentials, no way to change the rules that gate them.
 
 **Trust boundaries**
 
 - **Hypervisor host and firewall (trusted):** enforces LAN isolation; the VM can't change it. Firewall rules live on the host, outside the VM.
-- **Harness user on the VM (trusted):** owns the server, the policy engine, the database and the CLI configs. Agents can't write to its files.
-- **Agent user (untrusted):** every agent runs as one shared `aphelion-agent` user with no sudo. Agents can read and write each other's workspaces. They can't read or write the harness's config, database, audit log, policy file or managed hooks.
+- **Harness user on the VM (trusted):** owns the server, the policy engine, the database and the CLI configs. Bots can't write to its files.
+- **Bot user (untrusted):** every bot runs as one shared `aphelion-bot` user with no sudo. Bots can read and write each other's workspaces. They can't read or write the harness's config, database, audit log, policy file or managed hooks.
 
-  > Amended by [decision 0006](../decisions/0006-shared-agent-user.md). The original said: "**Agent users (untrusted):** one Unix user per agent, no sudo, write access only to their own home and workspace."
+  > Amended by [decision 0006](../decisions/0006-shared-bot-user.md). The original said: "**Bot users (untrusted):** one Unix user per bot, no sudo, write access only to their own home and workspace."
 
 - **Connector gateway (trusted, separate machine):** the only place OAuth tokens and API keys for third-party services live.
 - **Clients (trusted, revocable):** your laptop and phone, identified by Tailscale plus a per-device token that expires.
@@ -260,16 +260,16 @@ Assume every agent can be prompt-injected, so the agents get nothing they could 
 
 1. Network: the host firewall blocks the LAN and allows only the gateway host; consider an outbound allowlist for the provider APIs.
 2. Credentials: tokens on the gateway, scoped and read-only by default; GitHub branch protection as a backstop.
-3. Harness policy: ~~ACP permission requests~~ each adapter's permission requests ([0034](../decisions/0034-vendor-protocol-per-cli.md)) routed to the policy engine. The harness never starts an agent in a bypass or always-approve mode.
+3. Harness policy: ~~ACP permission requests~~ each adapter's permission requests ([0034](../decisions/0034-vendor-protocol-per-cli.md)) routed to the policy engine. The harness never starts a bot in a bypass or always-approve mode.
 4. CLI hooks: root-owned managed settings (`/etc/claude-code/managed-settings.json`, `/etc/grok/requirements.toml`) with a fail-closed `PreToolUse` hook that calls the policy engine. This catches anything that skips layer 3.
-5. Recovery: VM snapshots and backups of anything an agent can write to.
+5. Recovery: VM snapshots and backups of anything a bot can write to.
 
 **How a gated call is decided**
 
 ```mermaid
 flowchart TB
-  call["Agent tool call or connector call"] --> rules{"Static rules"}
-  rules -- deny --> block["Block the call<br/>agent is told why"]
+  call["Bot tool call or connector call"] --> rules{"Static rules"}
+  rules -- deny --> block["Block the call<br/>bot is told why"]
   rules -- allow --> run["Run the call<br/>exact args approved"]
   rules -- "no rule matches" --> reviewer["Reviewer model<br/>sees tool + args only"]
   reviewer -- "low risk" --> run
@@ -285,13 +285,13 @@ The reviewer can only release low-risk calls. Make destructive actions (deletes,
 
 **Configurable approvals**
 
-The flow above is the default. Every part of it is configurable, so each user decides how much autonomy each agent gets.
+The flow above is the default. Every part of it is configurable, so each user decides how much autonomy each bot gets.
 
 | Setting | Options | Default |
 | --- | --- | --- |
 | Mode preset | Strict (every write asks), Balanced (rules, then reviewer, then the user), Autonomous (only destructive actions ask), Off | Balanced |
-| Scope | Global default, then per agent, per connector, per tool; the most specific setting wins | Global only |
-| Rules | Match on agent, tool, connector and arguments (path globs, branch names, recipients); action is allow, review, ask or deny | Built-in rules per connector |
+| Scope | Global default, then per bot, per connector, per tool; the most specific setting wins | Global only |
+| Rules | Match on bot, tool, connector and arguments (path globs, branch names, recipients); action is allow, review, ask or deny | Built-in rules per connector |
 | Hard floor | Global deny rules that no lower scope or preset can override | Secrets, settings and workflow changes denied |
 | Reviewer | On or off, which model, which risk classes it may release | On, write actions only |
 | Timeout | Per rule: how long to wait, and deny or allow when nobody answers | 15 minutes, then deny |
@@ -299,16 +299,16 @@ The flow above is the default. Every part of it is configurable, so each user de
 | Approvers | Web card, push notification, native app later | Web card + push |
 
 - Rules live in a versioned policy file that the web client edits; both stay in sync.
-- Only an authenticated client can change policy. Agents can never edit it, and every policy change is logged.
-- Off is allowed only for agents with no connectors and a disposable workspace, and the client shows a persistent warning while it's on.
+- Only an authenticated client can change policy. Bots can never edit it, and every policy change is logged.
+- Off is allowed only for bots with no connectors and a disposable workspace, and the client shows a persistent warning while it's on.
 
 ## Credentials and vaults
 
-Every secret goes through one secrets broker on the gateway host. Agents can name a secret but never see its value, and the broker reads from a local encrypted store, 1Password or Bitwarden.
+Every secret goes through one secrets broker on the gateway host. Bots can name a secret but never see its value, and the broker reads from a local encrypted store, 1Password or Bitwarden.
 
 **Secrets broker**
 
-- Runs on the gateway host as its own user. Only connectors and the harness can call it; agents can't.
+- Runs on the gateway host as its own user. Only connectors and the harness can call it; bots can't.
 - Config, logs and the database hold references, never values: `op://AI Agents/GitHub App/private key`, `bws://<secret id>`, `local://github/webhook-secret`.
 - Values live in a `Secret` wrapper type that redacts itself in logs and JSON, and are never serialized.
 - Values are cached in memory with a short TTL, so a rotation in the vault takes effect without a restart.
@@ -326,12 +326,12 @@ Start with the local store and 1Password through its official SDK. Add Bitwarden
 
 **Secure entry, like Grok Bot's secure forms**
 
-- When a connector needs a secret you haven't stored, the client shows a secure form that posts straight to the broker. The value never passes through chat, an agent or the harness database.
+- When a connector needs a secret you haven't stored, the client shows a secure form that posts straight to the broker. The value never passes through chat, a bot or the harness database.
 - The first time a connector asks for a secret, you approve it once or always for that connector, and the decision is logged.
 
 **Website logins (later)**
 
-Grok Bot fills logins through 1Password in its own browser without the agent seeing the password. That needs a browser in the harness, which is out of scope for v1. If you add one, fill credentials at the browser layer with a per-fill approval, never by handing them to the agent.
+Grok Bot fills logins through 1Password in its own browser without the agent seeing the password. That needs a browser in the harness, which is out of scope for v1. If you add one, fill credentials at the browser layer with a per-fill approval, never by handing them to the bot.
 
 **The bootstrap secret**
 
@@ -339,7 +339,7 @@ The broker needs one secret to unlock everything else: the 1Password service acc
 
 ## Native connectors
 
-Connectors are built into the harness, not bought from a third party: each one is a module in the connector gateway that holds its own credentials and exposes tools to agents over MCP, with every call passing the policy engine.
+Connectors are built into the harness, not bought from a third party: each one is a module in the connector gateway that holds its own credentials and exposes tools to bots over MCP, with every call passing the policy engine.
 
 **Connector framework**
 
@@ -347,20 +347,20 @@ Every connector implements the same interface, so GitHub, Forgejo, Notion and Gm
 
 - **Manifest:** id, display name, auth type, and a list of tools. Each tool declares a risk class (read, write or destructive) and the exact provider permission it needs.
 - **Auth flow:** how you connect it from the client (device flow, app install, OAuth web flow), shown as a card in the Connections page.
-- **Credential store:** encrypted at rest on the gateway host, never sent to the VM. Agents only ever see results.
+- **Credential store:** encrypted at rest on the gateway host, never sent to the VM. Bots only ever see results.
 - **Tool handlers:** the code that calls the provider API, returning trimmed, typed results instead of raw API dumps.
 - **Event source (optional):** webhook or polling, so routines can trigger on "new issue" or "PR review requested".
-- **Per-tool policy:** allow, reviewer or ask you, editable per connector and per agent in the Connections page.
+- **Per-tool policy:** allow, reviewer or ask you, editable per connector and per bot in the Connections page.
 
-Agents reach connectors through one MCP endpoint the harness hosts. Each agent session gets its own short-lived bearer token for that endpoint, so the harness knows which agent made each call.
+Bots reach connectors through one MCP endpoint the harness hosts. Each bot session gets its own short-lived bearer token for that endpoint, so the harness knows which bot made each call.
 
 **GitHub connector design**
 
 Use your own private GitHub App, installed only on the repos you choose. The gateway keeps the app's private key and mints a fresh installation token for each call, narrowed to the one repo and the one permission that call needs. Installation tokens expire after one hour and can't exceed what the app was granted.
 
-- **Acting as the app (default):** agent actions show up as the app's bot account, which keeps a clean audit trail separate from your own activity.
+- **Acting as the app (default):** bot actions show up as the app's bot account, which keeps a clean audit trail separate from your own activity.
 - **Acting as you (optional):** a user access token via device flow, for things only your account can do. These expire after 8 hours with a 6-month refresh token, so keep it off unless needed.
-- **Git access:** agents still clone and push with plain git. A git credential helper on the VM asks the harness for a token per operation: fetch gets a read-only token, push goes through the policy engine first. No long-lived git credential ever lands on the VM.
+- **Git access:** bots still clone and push with plain git. A git credential helper on the VM asks the harness for a token per operation: fetch gets a read-only token, push goes through the policy engine first. No long-lived git credential ever lands on the VM.
 - **Events:** start with polling (notifications and repo events every few minutes). Webhooks need a public URL, which means Tailscale Funnel or a relay; add that later if polling is too slow.
 - **Backstops:** branch protection on default branches, and never grant the app Administration, Secrets or Workflows permissions.
 
@@ -373,7 +373,7 @@ Use your own private GitHub App, installed only on the repos you choose. The gat
 | Clone or fetch (credential helper) | read | allow | Contents: read |
 | Create issues, edit labels, assignees and milestones | write | reviewer | Issues: write |
 | Comment on an issue or PR | write | reviewer | Issues or Pull requests: write |
-| Create a branch, push to `agent/*` branches | write | reviewer | Contents: write |
+| Create a branch, push to `bot/*` branches | write | reviewer | Contents: write |
 | Open a pull request | write | reviewer | Pull requests: write |
 | Push to the default branch, merge a PR | destructive | ask you | Contents: write |
 | Close issues, delete branches | destructive | ask you | Issues or Contents: write |
@@ -386,12 +386,12 @@ Issue and project management tools come first, because that's most of what manag
 Any MCP server can be added as a custom connector, such as T3 Code's MCP server or a self-hosted service. It goes through the same gateway, secrets broker and policy engine as the native connectors.
 
 - **Transports:** local stdio servers run on the gateway host under their own Unix user. Remote servers connect over Streamable HTTP, with the gateway acting as the OAuth client when the server requires sign-in.
-- **Credentials:** API keys and tokens come from the secrets broker and are injected as environment variables or headers when the gateway starts or calls the server. Agents never see them.
-- **Tool discovery:** the gateway lists the server's tools in the Connections page, where the user enables tools per agent.
+- **Credentials:** API keys and tokens come from the secrets broker and are injected as environment variables or headers when the gateway starts or calls the server. Bots never see them.
+- **Tool discovery:** the gateway lists the server's tools in the Connections page, where the user enables tools per bot.
 - **Risk classes:** new tools default to "ask". The server's tool annotations (read-only or destructive hints) can suggest a class, but they come from the server, so they're treated as hints, not trusted.
 - **Pinning:** the gateway stores a hash of each tool's name, description and input schema. If a server changes an approved tool, that tool is disabled until the user reviews the change.
-- **Network:** the gateway, not the agent VM, reaches the MCP server. A LAN service like a T3 Code instance only needs a firewall rule from the gateway host, so the agent VM stays isolated.
-- **Scoping:** each custom server can be enabled for specific agents only.
+- **Network:** the gateway, not the bot VM, reaches the MCP server. A LAN service like a T3 Code instance only needs a firewall rule from the gateway host, so the bot VM stays isolated.
+- **Scoping:** each custom server can be enabled for specific bots only.
 
 ## Plugins and themes
 
@@ -399,7 +399,7 @@ The harness is plugin-first. Core features ship as first-party plugins on the sa
 
 **Plugin-first core**
 
-- The core provides only the plugin host, event bus, storage, policy engine and secrets broker. Everything else is a plugin: agent adapters, connectors (GitHub, custom MCP), secret backends, notifiers, routine triggers, reviewers and UI panels.
+- The core provides only the plugin host, event bus, storage, policy engine and secrets broker. Everything else is a plugin: bot adapters, connectors (GitHub, custom MCP), secret backends, notifiers, routine triggers, reviewers and UI panels.
 - Building first-party features on the public API keeps it honest. If GitHub can't be built as a plugin, the API is missing something.
 - The plugin API is versioned with semver from day one, and each plugin declares the API range it supports.
 
@@ -409,28 +409,28 @@ The harness is plugin-first. Core features ship as first-party plugins on the sa
 | --- | --- | --- | --- |
 | Theme | Colors, type, spacing, motion, icons, chat backgrounds, declarative animations | Client | Data only, no code |
 | UI plugin | Panels, message renderers, chat-panel effects and animations, commands | ~~Client~~ Client, installed on the server and downloaded by every client ([0042](../decisions/0042-plugin-server-and-client-parts.md)) | ~~Sandboxed iframe, talks to the app through a message API~~ Always sandboxed: an iframe on web and desktop, a WebView on the phone, talking to the app only through messages ([0042](../decisions/0042-plugin-server-and-client-parts.md)) |
-| Server plugin | Agent adapters, connectors, secret backends, notifiers, triggers, reviewers | Harness or gateway host | Separate process ~~under its own Unix user~~ under the shared `aphelion-plugins` user, started by the plugin runner ([0018](../decisions/0018-shared-plugin-user.md)), JSON-RPC to the host |
+| Server plugin | Bot adapters, connectors, secret backends, notifiers, triggers, reviewers | Harness or gateway host | Separate process ~~under its own Unix user~~ under the shared `aphelion-plugins` user, started by the plugin runner ([0018](../decisions/0018-shared-plugin-user.md)), JSON-RPC to the host |
 
 > Amended by [decision 0042](../decisions/0042-plugin-server-and-client-parts.md). One plugin can have a server part, a client part, or both. The server part runs like a server plugin, and the client part runs like a UI plugin. The original table treated them as separate plugin types.
 
 **Manifest and permissions**
 
 - Every plugin ships a manifest: id, version, supported API range, what it contributes (adapters, connectors, UI slots, settings) and the permissions it needs.
-- Permissions are explicit and shown on install: which events it can read (agent status only, or full chat content), which UI slots it renders in, which secrets it can request, which network hosts it can reach.
+- Permissions are explicit and shown on install: which events it can read (bot status only, or full chat content), which UI slots it renders in, which secrets it can request, which network hosts it can reach.
 - The host enforces them. A plugin only receives the events and APIs it was granted, and server plugins can only reach their declared hosts.
 - Plugins never bypass the approval layer. Tools a plugin adds go through the policy engine like any other.
 
 **UI slots and chat-panel animations**
 
-The web client exposes named slots that themes and UI plugins can fill: chat background, agent avatar, thinking indicator, message decoration, tool-call card, approval card, sidebar item, status bar and full panels.
+The web client exposes named slots that themes and UI plugins can fill: chat background, bot avatar, thinking indicator, message decoration, tool-call card, approval card, sidebar item, status bar and full panels.
 
-- Animations react to agent state events: idle, thinking, running a tool, waiting for approval, error and done. An avatar that animates while its agent thinks needs only the agent-status permission, not chat content.
-- Two ways to animate. Themes can bind declarative animations (CSS keyframes, Lottie or Rive files) to agent states with no code, so they're safe to install. UI plugins can run code in a sandboxed iframe layer for full control, such as canvas or WebGL effects.
+- Animations react to bot state events: idle, thinking, running a tool, waiting for approval, error and done. An avatar that animates while its bot thinks needs only the bot-status permission, not chat content.
+- Two ways to animate. Themes can bind declarative animations (CSS keyframes, Lottie or Rive files) to bot states with no code, so they're safe to install. UI plugins can run code in a sandboxed iframe layer for full control, such as canvas or WebGL effects.
 - Guardrails: animations respect the system reduced-motion setting, pause when the tab is hidden, and the client can throttle or disable a slot that drops frames. State is never shown only through animation.
 
 **Theme system**
 
-- Built on design tokens: surfaces, text, accents, status colors, per-agent identity colors, typography, radius, spacing, shadows and motion (durations and easing).
+- Built on design tokens: surfaces, text, accents, status colors, per-bot identity colors, typography, radius, spacing, shadows and motion (durations and easing).
 - A theme is a package: a token file, optional scoped CSS for slots, fonts, icons, images and animation assets, with light and dark variants together.
 - Components use only tokens, never raw values, enforced by lint, so every theme reaches every screen.
 - Themes hot-reload in dev mode, and a contrast check warns when text isn't readable.
@@ -440,7 +440,7 @@ The web client exposes named slots that themes and UI plugins can fill: chat bac
 
 - Install from npm, a git URL or a local folder. A lockfile pins versions and checksums.
 - Signed releases, and a permission diff shown on every update.
-- A starter template, dev mode with hot reload, and a playground page that previews a theme across every screen and agent state.
+- A starter template, dev mode with hot reload, and a playground page that previews a theme across every screen and bot state.
 - A public plugin and theme gallery can come after v1.
 
 **Decisions to make**
@@ -453,31 +453,31 @@ The web client exposes named slots that themes and UI plugins can fill: chat bac
 | Plugin distribution | npm, git, own registry | npm and git first |
 | Theme format | JSON tokens plus CSS, CSS only | JSON tokens plus optional scoped CSS |
 
-## Agent collaboration and work views
+## Bot collaboration and work views
 
-Agents can message each other and hand off tasks, the user can see every agent's state on a live map, and pull requests and issues from connected repos show up inside the app.
+Bots can message each other and hand off tasks, the user can see every bot's state on a live map, and pull requests and issues from connected repos show up inside the app.
 
-**Agent-to-agent messaging**
+**Bot-to-bot messaging**
 
-- The harness gives every agent three built-in tools over its MCP endpoint: list agents, send a message, and hand off a task (a message that expects a result back).
-- Messages land in the recipient's queue, marked as coming from an agent rather than the user, and appear in both agents' chats as a linked thread.
-- Who can message whom is policy: a per-agent allowlist, plus a global setting for whether handoffs need approval. By default agents can message each other freely, and a handoff that starts new work goes through the reviewer.
-- **Safety limits:** an agent message is untrusted input, exactly like a web page. It can't approve anything, it can't change the recipient's permissions, and the recipient's own policy still gates every action it takes.
-- **Loop limits:** each thread carries a hop count and a budget. A thread stops and asks the user after a set number of hops (default 6) or when two agents ping-pong without progress, and routine budgets count agent-triggered work.
+- The harness gives every bot three built-in tools over its MCP endpoint: list bots, send a message, and hand off a task (a message that expects a result back).
+- Messages land in the recipient's queue, marked as coming from a bot rather than the user, and appear in both bots' chats as a linked thread.
+- Who can message whom is policy: a per-bot allowlist, plus a global setting for whether handoffs need approval. By default bots can message each other freely, and a handoff that starts new work goes through the reviewer.
+- **Safety limits:** a bot message is untrusted input, exactly like a web page. It can't approve anything, it can't change the recipient's permissions, and the recipient's own policy still gates every action it takes.
+- **Loop limits:** each thread carries a hop count and a budget. A thread stops and asks the user after a set number of hops (default 6) or when two bots ping-pong without progress, and routine budgets count bot-triggered work.
 
-**Agent map**
+**Bot map**
 
-- A live graph view: one node per agent, colored by state (cyan pulse while working, amber while waiting for approval, coral on error, muted when idle), with the current task as a caption.
-- Edges show recent messages and handoffs between agents, animated while a thread is active; routines appear as small nodes attached to the agent they run.
-- Clicking a node opens that agent's chat; clicking an edge opens the thread. The map is a UI slot, so plugins and themes can restyle it.
+- A live graph view: one node per bot, colored by state (cyan pulse while working, amber while waiting for approval, coral on error, muted when idle), with the current task as a caption.
+- Edges show recent messages and handoffs between bots, animated while a thread is active; routines appear as small nodes attached to the bot they run.
+- Clicking a node opens that bot's chat; clicking an edge opens the thread. The map is a UI slot, so plugins and themes can restyle it.
 
 **Pull requests and issues**
 
-- A Work view lists pull requests and issues from every connected repo (GitHub first, Forgejo later), filterable by repo, author, label and state, with agent-created items marked.
-- Pull request rows show checks, review state and which agent opened them; issue rows show labels and assignees.
-- **Assign to agent:** any issue or PR can be handed to an agent from the Work view, which starts a task with the item as context.
+- A Work view lists pull requests and issues from every connected repo (GitHub first, Forgejo later), filterable by repo, author, label and state, with bot-created items marked.
+- Pull request rows show checks, review state and which bot opened them; issue rows show labels and assignees.
+- **Assign to bot:** any issue or PR can be handed to a bot from the Work view, which starts a task with the item as context.
 - v1 is read-only for the user: reviewing, approving and merging happen on GitHub through a link, so the app never needs the user's own GitHub permissions.
-- Data comes from the same connectors agents use, through read-only tools, and refreshes by polling (webhooks later).
+- Data comes from the same connectors bots use, through read-only tools, and refreshes by polling (webhooks later).
 
 ## Visual design
 
@@ -486,7 +486,7 @@ The default theme is Oxide-inspired but lighter: graphite instead of black in da
 **Direction**
 
 - Dense, precise and technical, with a nod to terminals and ASCII art in empty states and loading patterns.
-- Neon is rare: cyan marks the active agent, a running tool, focus and live status. It is never a large fill. A soft glow appears in dark mode only, and only on live elements.
+- Neon is rare: cyan marks the active bot, a running tool, focus and live status. It is never a large fill. A soft glow appears in dark mode only, and only on live elements.
 - Light and dark mode ship together. The default follows the system setting, with a manual toggle.
 
 **Core palette tokens**
@@ -509,7 +509,7 @@ The default theme is Oxide-inspired but lighter: graphite instead of black in da
 | warning | #F5C451 | #A86B00 | Waiting for approval |
 | danger | #FF6B6B | #C8372D | Denied, errors, destructive actions |
 
-Light mode uses a deeper cyan for text and lines because neon cyan on white isn't readable. Per-agent identity colors come from a separate muted set of eight hues, never the accent.
+Light mode uses a deeper cyan for text and lines because neon cyan on white isn't readable. Per-bot identity colors come from a separate muted set of eight hues, never the accent.
 
 **Typography**
 
@@ -524,22 +524,22 @@ Light mode uses a deeper cyan for text and lines because neon cyan on white isn'
 
 **Layout: three panes**
 
-- Left sidebar (about 240px): agents with status dots (cyan pulse while working, amber while waiting for approval), then routines, connections and repos.
-- Center: switches between three views. Chat shows tool calls as compact mono cards and approval cards inline with an amber edge. Map shows every agent and how they're talking to each other. Work shows pull requests and issues from connected repos.
+- Left sidebar (about 240px): bots with status dots (cyan pulse while working, amber while waiting for approval), then routines, connections and repos.
+- Center: switches between three views. Chat shows tool calls as compact mono cards and approval cards inline with an amber edge. Map shows every bot and how they're talking to each other. Work shows pull requests and issues from connected repos.
 - Right panel (about 320px, collapsible): tabs for Activity, Approvals, Files and Usage.
 - A command palette (Ctrl+K) reaches every action from the keyboard.
 - On a phone the panes collapse to one, with the right panel as a sheet.
 
 ## Development stages
 
-Ten stages, each ending in something usable. Approvals come in stage 2 and the native GitHub connector in stage 3, before any agent touches a real account. Each stage maps to a GitHub milestone, each deliverable to one or more issues, and the exit criterion is the milestone's acceptance test. Every stage starts with a written plan and closes with its docs updated.
+Ten stages, each ending in something usable. Approvals come in stage 2 and the native GitHub connector in stage 3, before any bot touches a real account. Each stage maps to a GitHub milestone, each deliverable to one or more issues, and the exit criterion is the milestone's acceptance test. Every stage starts with a written plan and closes with its docs updated.
 
 Stages 0 to 4 form the v0.1 internal alpha, stages 5 to 8 complete v1.0, and stage 9 comes later. The issue-level breakdown is in Issue breakdown.
 
 1. **Stage 0: Foundations**
-   - Deliverable: TypeScript monorepo (server, web client, shared protocol types) on GitHub with CI and protected main and dev branches, secrets broker with the local encrypted store and one vault backend, VM users (`harness`, one per agent, no sudo), headless CLI mode with a systemd unit, health endpoint, SQLite schema with migrations, plugin host with manifest loader and a versioned plugin API (v0), docs site with decision-record and planning templates.
+   - Deliverable: TypeScript monorepo (server, web client, shared protocol types) on GitHub with CI and protected main and dev branches, secrets broker with the local encrypted store and one vault backend, VM users (`harness`, one per bot, no sudo), headless CLI mode with a systemd unit, health endpoint, SQLite schema with migrations, plugin host with manifest loader and a versioned plugin API (v0), docs site with decision-record and planning templates.
    - Exit: the service starts on boot and answers `/health` from a client over Tailscale.
-2. **Stage 1: One agent, end to end**
+2. **Stage 1: One bot, end to end**
    - Deliverable: Claude adapter as the first first-party plugin (~~ACP, with stream-json fallback~~ the Claude Agent SDK, [0034](../decisions/0034-vendor-protocol-per-cli.md)), session manager, message history, a bare CLI or one-page client.
    - Exit: a conversation survives a server restart and resumes in the same CLI session.
 3. **Stage 2: Approvals**
@@ -547,12 +547,12 @@ Stages 0 to 4 form the v0.1 internal alpha, stages 5 to 8 complete v1.0, and sta
    - Exit: a denied `rm -rf` is blocked, a `git push` waits for your decision, and both appear in the audit log.
 4. **Stage 3: Connector framework and GitHub**
    - Deliverable: gateway host (LXC), connector plugin interface, encrypted credential store, harness MCP endpoint with per-session tokens, GitHub App connector with per-call scoped tokens, git credential helper, custom MCP server registration, per-tool policies.
-   - Exit: an agent reads a repo and opens a PR from an `agent/*` branch, the PR waits for approval, and no GitHub credential exists on the VM.
-5. **Stage 4: Multiple agents and Grok**
-   - Deliverable: Grok adapter, agent registry, per-agent queues with pause, resume and cancel, agent-to-agent messaging and handoffs with loop limits.
-   - Exit: a Claude agent and a Grok agent run in parallel and share the GitHub connector; cancel kills the whole process tree; one agent hands a task to the other and gets the result back.
+   - Exit: a bot reads a repo and opens a PR from a `bot/*` branch, the PR waits for approval, and no GitHub credential exists on the VM.
+5. **Stage 4: Multiple bots and Grok**
+   - Deliverable: Grok adapter, bot registry, per-bot queues with pause, resume and cancel, bot-to-bot messaging and handoffs with loop limits.
+   - Exit: a Claude bot and a Grok bot run in parallel and share the GitHub connector; cancel kills the whole process tree; one bot hands a task to the other and gets the result back.
 6. **Stage 5: Web client and desktop app**
-   - Deliverable: PWA and Electron desktop shell (same UI, local or remote server) with sidebar, chat, approval cards, Connections page (connect, scope, per-tool policy), reconnect with event replay, theme engine with design tokens, UI slots and sandboxed UI plugins, agent map, pull request and issue views, plus one example animated-avatar plugin.
+   - Deliverable: PWA and Electron desktop shell (same UI, local or remote server) with sidebar, chat, approval cards, Connections page (connect, scope, per-tool policy), reconnect with event replay, theme engine with design tokens, UI slots and sandboxed UI plugins, bot map, pull request and issue views, plus one example animated-avatar plugin.
    - Exit: chat, approvals and connections all work from a phone browser, and a second theme restyles every screen with no code changes.
 7. **Stage 6: Routines and schedules**
    - Deliverable: scheduler, routine definitions, connector event triggers (GitHub polling), missed-run and overlap policies, run history, failure notifications via ntfy.
@@ -572,7 +572,7 @@ Stages 0 to 4 form the v0.1 internal alpha, stages 5 to 8 complete v1.0, and sta
 These apply to every stage, so each stage's issues should include them rather than leaving them for the end.
 
 - **Testing:** recorded event streams as adapter contract tests, unit tests for every policy rule and preset, and an end-to-end test per stage exit criterion.
-- **Configuration:** one versioned config directory (agents, policy, routines, connectors) that can live in git, with schema validation and migrations.
+- **Configuration:** one versioned config directory (bots, policy, routines, connectors) that can live in git, with schema validation and migrations.
 - **Logging and audit:** structured logs with secret redaction, and an append-only audit log of every approval, policy change and connector call.
 - **Packaging and releases:** signed builds, a changelog, and an update path for both the headless server and the desktop app.
 - **Backups:** one command to export and restore the database, config and plugin lockfile.
@@ -598,7 +598,7 @@ The biggest risks are things outside the project's code: CLI changes, subscripti
 
 **Processes and scheduling**
 
-- Kill process groups, not PIDs, or agents leave orphaned shells and dev servers behind. systemd cgroups help.
+- Kill process groups, not PIDs, or bots leave orphaned shells and dev servers behind. systemd cgroups help.
 - Decide what happens to missed runs after downtime (skip, run once, run all) and to overlapping runs (skip, queue).
 - Store schedules with an IANA time zone; DST shifts cron times otherwise.
 - Routines are the easiest way to burn a weekly cap overnight. Budget guard before the second routine.
@@ -614,8 +614,8 @@ The biggest risks are things outside the project's code: CLI changes, subscripti
 **Clients and storage**
 
 - iOS suspends background sockets quickly; replay on reconnect and push for anything urgent.
-- Logs and transcripts capture secrets agents print. Redact before storing, and never put tokens in SQLite.
-- The VM firewall must allow the provider APIs and the gateway host, or agents fail in confusing ways.
+- Logs and transcripts capture secrets bots print. Redact before storing, and never put tokens in SQLite.
+- The VM firewall must allow the provider APIs and the gateway host, or bots fail in confusing ways.
 
 ## Open decisions
 
@@ -631,7 +631,7 @@ Each has a recommended default so stage 0 can start now; the first two matter mo
 | Reviewer model | Small hosted model via API key, local model on your own GPU | Small hosted model; revisit local once the rules are stable ([0029](../decisions/0029-hosted-reviewer-model.md)) |
 | Web client stack | SolidJS, React, Svelte; Tailwind for styling | ~~SolidJS + Tailwind~~ Decided: React + Tailwind ([0008](../decisions/0008-react-and-tailwind.md)) |
 | Connector gateway | Native connectors, off-the-shelf MCP proxy (hoophq mcpproxy, Arbitus) | Native connectors, GitHub first (see Native connectors) ([0030](../decisions/0030-native-connectors.md)) |
-| Agent privileges | Keep root in the VM, unprivileged users | Unprivileged users; the gate only holds if agents can't edit it ([0031](../decisions/0031-unprivileged-agents.md), amended by [0006](../decisions/0006-shared-agent-user.md): one shared agent user) |
+| Bot privileges | Keep root in the VM, unprivileged users | Unprivileged users; the gate only holds if bots can't edit it ([0031](../decisions/0031-unprivileged-bots.md), amended by [0006](../decisions/0006-shared-bot-user.md): one shared bot user) |
 | Native app stack | Tauri mobile, React Native, Swift and Kotlin | Decide at stage 9 ([0032](../decisions/0032-native-app-stack-deferred.md)) |
 
 ## Sources
@@ -668,8 +668,8 @@ Issue-sized tasks for every milestone, each with acceptance criteria and depende
 
 | Release | Milestones | Goal |
 | --- | --- | --- |
-| v0.1 internal alpha | M0 to M4 | Headless server, approvals, GitHub and custom MCP connectors, Claude and Grok agents that can message each other |
-| v1.0 | M5 to M8 | Web client and desktop app, agent map, PR and issue views, plugins and themes, routines, usage, reviewer, more connectors |
+| v0.1 internal alpha | M0 to M4 | Headless server, approvals, GitHub and custom MCP connectors, Claude and Grok bots that can message each other |
+| v1.0 | M5 to M8 | Web client and desktop app, bot map, PR and issue views, plugins and themes, routines, usage, reviewer, more connectors |
 | Later | M9 | Native app, push notifications, WebRTC |
 
 - **Titles:** prefix with the milestone, for example "[M3] GitHub App connector". IDs such as M3-04 are used for dependencies.
@@ -695,28 +695,28 @@ Issue-sized tasks for every milestone, each with acceptance criteria and depende
 | M0-04 | Monorepo scaffold | ~~pnpm workspaces~~ Bun workspaces ([0007](../decisions/0007-bun-runtime.md)) (server, client, protocol, plugin-sdk, cli), strict TypeScript, lint, Vitest; GitHub Actions green on lint, typecheck and test | M0-00 |
 | M0-05 | Repo hygiene and MIT license | LICENSE (MIT), README, CONTRIBUTING, SECURITY.md with a private reporting channel; issue and PR templates that ask for the plan link and docs touched; protected main and dev branches, code owners for security-sensitive paths, and the label set | M0-04 |
 | M0-16 | Docs site and decision records | Starlight site in `docs/` built in CI with a link check; decision-record template; this plan imported as `docs/plan` and its decisions written up as the first records | M0-04 |
-| M0-06 | Config directory and schema | Versioned layout for agents, policy, routines and connectors; invalid config fails with a clear error; one migration tested | M0-04 |
+| M0-06 | Config directory and schema | Versioned layout for bots, policy, routines and connectors; invalid config fails with a clear error; one migration tested | M0-04 |
 | M0-07 | SQLite store and migrations | WAL mode, migration runner, migration test in CI | M0-04 |
 | M0-08 | Structured logging and audit log | Redaction test proves secrets never reach logs; append-only audit table | M0-07 |
 | M0-09 | Protocol package v0 | Command and event types, sequence numbers, replay from a cursor, idempotent command ids, `v: 1` on every frame; replay test; protocol spec generated into the docs | M0-04, M0-16 |
 | M0-10 | API server skeleton | HTTP and WebSocket bound to a configured interface; `/health`; per-device tokens; unauthenticated sockets rejected | M0-09 |
 | M0-11 | CLI and headless mode | `aphelion --headless`, `--version` and `config check`, following M0-03's finding | M0-03, M0-10 |
-| M0-12 | Linux install script and systemd unit | Creates the ~~harness user and agent users~~ `harness` and `aphelion-agent` users ([0006](../decisions/0006-shared-agent-user.md)) without sudo, sets directory permissions, installs a hardened unit; service survives a reboot; install guide written | ~~M0-11~~ M0-11, M0-18 ([0035](../decisions/0035-codex-login-sandbox-approvals.md)) |
+| M0-12 | Linux install script and systemd unit | Creates the ~~harness user and bot users~~ `harness` and `aphelion-bot` users ([0006](../decisions/0006-shared-bot-user.md)) without sudo, sets directory permissions, installs a hardened unit; service survives a reboot; install guide written | ~~M0-11~~ M0-11, M0-18 ([0035](../decisions/0035-codex-login-sandbox-approvals.md)) |
 | M0-13 | Plugin host v0 | Manifest schema, API-range check, one process per plugin over JSON-RPC, permission grants stored and enforced; a sample plugin passes and an out-of-range plugin is refused; API reference generated into the docs | M0-04, M0-07, M0-16 |
 | M0-14 | Secrets broker v0 | Secret wrapper, reference syntax, local age-encrypted store, bootstrap secret via systemd-creds; test proves values never land in logs or the database | M0-08 |
 | M0-15 | 1Password backend plugin | Resolves op:// references with a read-only service account through the official SDK | M0-13, M0-14 |
 
 M0-16 sits out of numeric order so that every existing ID, and every reference to it in later milestones, stays the same.
 
-## M1 · One agent end to end (v0.1)
+## M1 · One bot end to end (v0.1)
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
 | M1-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M1 (scope, design notes, risks, open questions), reviewed before other work starts | none |
-| M1-01 | Agent adapter contract | Plugin interface that emits normalized events: text delta, tool start and end, permission request, turn end, error, usage | M0-13 |
+| M1-01 | Bot adapter contract | Plugin interface that emits normalized events: text delta, tool start and end, permission request, turn end, error, usage | M0-13 |
 | M1-02 | Claude adapter plugin (~~ACP~~ Agent SDK) | Streams a full turn with tool calls through the Claude Agent SDK, using the auth path from M0-01 ([0034](../decisions/0034-vendor-protocol-per-cli.md)) | M1-01, M0-01 |
-| M1-03 | ~~Claude stream-json fallback~~ Closed as not planned: the Agent SDK is the stream-json protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)) | ~~`-p --output-format stream-json --verbose --resume` behind the same contract, switchable per agent~~ | M1-01 |
-| M1-04 | Session manager | One process per agent ~~under its own Unix user~~ as the shared `aphelion-agent` user ([0006](../decisions/0006-shared-agent-user.md)); restart on crash; resume by session id and working directory; cancel kills the whole process group | M1-02, M0-12 |
+| M1-03 | ~~Claude stream-json fallback~~ Closed as not planned: the Agent SDK is the stream-json protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)) | ~~`-p --output-format stream-json --verbose --resume` behind the same contract, switchable per bot~~ | M1-01 |
+| M1-04 | Session manager | One process per bot ~~under its own Unix user~~ as the shared `aphelion-bot` user ([0006](../decisions/0006-shared-bot-user.md)); restart on crash; resume by session id and working directory; cancel kills the whole process group | M1-02, M0-12 |
 | M1-05 | Message history | Turns and events persisted; a client that reconnects gets the missed events replayed | M1-04, M0-09 |
 | M1-06 | Minimal test client | CLI chat against the API that shows streaming text and tool events | M0-10, M1-05 |
 | M1-07 | Adapter contract tests | Recorded event streams for each adapter replayed in CI | M1-02 (~~M1-03~~, closed by [0034](../decisions/0034-vendor-protocol-per-cli.md)) |
@@ -726,10 +726,10 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
 | M2-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M2 (scope, design notes, risks, open questions), reviewed before other work starts | none |
-| M2-01 | Policy model and file format | Rules match on agent, tool, connector and arguments; actions are allow, review, ask and deny; presets, scopes and a hard floor; schema-validated | M0-06 |
+| M2-01 | Policy model and file format | Rules match on bot, tool, connector and arguments; actions are allow, review, ask and deny; presets, scopes and a hard floor; schema-validated | M0-06 |
 | M2-02 | Policy engine | Tests cover most-specific-wins, the hard floor and every preset | M2-01 |
 | M2-03 | Approval lifecycle | Requests bound to a hash of the exact tool and arguments; pending, decided and expired states; timeout defaults to deny; grant lengths (once, session, timed, always) | M2-02, M0-07 |
-| M2-04 | ~~ACP~~ Adapter permission routing | Adapter permission requests go to the policy engine ([0034](../decisions/0034-vendor-protocol-per-cli.md)); agents never start in a bypass or always-approve mode | M2-03, M1-02 |
+| M2-04 | ~~ACP~~ Adapter permission routing | Adapter permission requests go to the policy engine ([0034](../decisions/0034-vendor-protocol-per-cli.md)); bots never start in a bypass or always-approve mode | M2-03, M1-02 |
 | M2-05 | Managed-hook backstop | Root-owned managed settings for Claude and Grok install a fail-closed `PreToolUse` hook that calls the engine over a local socket, and blocks when the harness is down | M2-03 |
 | M2-06 | Approval protocol and test client | `approval.requested` and `approval.resolved` events and the `approval.decide` command; decisions work from the test client | M2-03, M1-06 |
 | M2-07 | Policy change control | Only authenticated clients can change policy; every change is audited | M2-01, M0-08 |
@@ -741,26 +741,26 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M3-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M3 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M3-01 | Gateway service | Runs on a separate host or as a separate local user; authenticated channel to the harness; hosts the secrets broker | M0-14 |
 | M3-02 | Connector plugin contract | Manifest with tools, risk classes and provider permissions; auth flow; handlers; optional event source | M0-13 |
-| M3-03 | Harness MCP endpoint | One endpoint per agent session with a short-lived bearer token; aggregates connector tools; every call goes through the policy engine | M3-02, M2-04 |
+| M3-03 | Harness MCP endpoint | One endpoint per bot session with a short-lived bearer token; aggregates connector tools; every call goes through the policy engine | M3-02, M2-04 |
 | M3-04 | GitHub App connector | App ID and key reference in config; per-call installation tokens scoped to one repo and one permission; tools and default policy from the main plan | M3-01, M3-03 |
-| M3-05 | Git credential helper | Fetch gets a read-only token and push goes through approval; a test proves no long-lived credential exists on the agent VM | M3-04 |
-| M3-06 | Custom MCP servers | stdio and Streamable HTTP; secret injection; tool discovery; new tools default to ask; hash pinning disables a changed tool; per-agent enablement | M3-03 |
+| M3-05 | Git credential helper | Fetch gets a read-only token and push goes through approval; a test proves no long-lived credential exists on the bot VM | M3-04 |
+| M3-06 | Custom MCP servers | stdio and Streamable HTTP; secret injection; tool discovery; new tools default to ask; hash pinning disables a changed tool; per-bot enablement | M3-03 |
 | M3-07 | Secure secret entry | Form posts straight to the broker; the value never appears in chat, logs or the harness database | M3-01 |
 | M3-08 | Work data API | Read-only GitHub queries for pull requests (checks, reviews, author) and issues (labels, assignees), cached and polled, exposed to clients as `work.updated` events | M3-04 |
 
-## M4 · Multiple agents, Grok and agent messaging (v0.1)
+## M4 · Multiple bots, Grok and bot messaging (v0.1)
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
 | M4-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M4 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M4-01 | Grok adapter plugin | `grok agent stdio` behind the adapter contract, using the auth path from M0-02 | M1-01, M0-02 |
-| M4-02 | Agent registry | Agents defined in config and synced to the database; create, edit and archive | M0-06 |
-| M4-03 | Per-agent queues | Pause, resume, cancel and reorder; queues survive a restart | M1-04 |
-| M4-04 | Parallel agents with limits | Agents run concurrently with per-agent CPU and memory limits (systemd scopes) | M4-03 |
-| M4-05 | Agent status events | `agent.status` emitted on every state change (idle, thinking, running a tool, waiting for approval, error) with the current task | M4-03, M2-03 |
-| M4-06 | Agent messaging tools | Built-in MCP tools to list agents, send a message and hand off a task; messages land in the recipient's queue marked as from an agent; `agent.message` events | M3-03, M4-03 |
-| M4-07 | Messaging policy and loop limits | Per-agent allowlist; handoffs gated by policy; agent messages can't approve or change permissions; threads stop and ask the user after the hop limit (default 6) or a detected ping-pong | M4-06, M2-02 |
-| M4-08 | v0.1 end-to-end test | Claude and Grok agents share the GitHub connector; one hands a task to the other and gets the result back; an approval round trip and a cancel both pass in CI | M4-01, M4-07, M3-04 |
+| M4-02 | Bot registry | Bots defined in config and synced to the database; create, edit and archive | M0-06 |
+| M4-03 | Per-bot queues | Pause, resume, cancel and reorder; queues survive a restart | M1-04 |
+| M4-04 | Parallel bots with limits | Bots run concurrently with per-bot CPU and memory limits (systemd scopes) | M4-03 |
+| M4-05 | Bot status events | `bot.status` emitted on every state change (idle, thinking, running a tool, waiting for approval, error) with the current task | M4-03, M2-03 |
+| M4-06 | Bot messaging tools | Built-in MCP tools to list bots, send a message and hand off a task; messages land in the recipient's queue marked as from a bot; `bot.message` events | M3-03, M4-03 |
+| M4-07 | Messaging policy and loop limits | Per-bot allowlist; handoffs gated by policy; bot messages can't approve or change permissions; threads stop and ask the user after the hop limit (default 6) or a detected ping-pong | M4-06, M2-02 |
+| M4-08 | v0.1 end-to-end test | Claude and Grok bots share the GitHub connector; one hands a task to the other and gets the result back; an approval round trip and a cancel both pass in CI | M4-01, M4-07, M3-04 |
 
 ## M5 · Web client and desktop app (v1.0)
 
@@ -769,16 +769,16 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M5-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M5 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M5-01 | Client shell | ~~SolidJS and Tailwind~~ React and Tailwind ([0008](../decisions/0008-react-and-tailwind.md)); three-pane layout that collapses to one pane on phones; PWA manifest; reconnect with event replay | M0-09 |
 | M5-02 | Theme engine and default theme | Token schema; default theme from Visual design; light, dark and follow-system; token lint; contrast check | M5-01 |
-| M5-03 | Chat view | Streaming text, mono tool-call cards, inline approval cards, linked agent-to-agent threads | M5-01, M2-06, M4-06 |
+| M5-03 | Chat view | Streaming text, mono tool-call cards, inline approval cards, linked bot-to-bot threads | M5-01, M2-06, M4-06 |
 | M5-04 | Right panel | Activity, Approvals, Files and Usage tabs | M5-03 |
-| M5-05 | Agent map | Live graph of agents colored by state, edges for active messages and handoffs, routines as attached nodes; click opens the chat or thread | M5-02, M4-05, M4-06 |
-| M5-06 | Work view | Pull requests and issues from connected repos with filters, checks and review state; agent-created items marked; links out to GitHub | M5-01, M3-08 |
-| M5-07 | Assign to agent | Any issue or PR can be sent to an agent from the Work view, starting a task with the item as context (`work.assign`) | M5-06, M4-03 |
+| M5-05 | Bot map | Live graph of bots colored by state, edges for active messages and handoffs, routines as attached nodes; click opens the chat or thread | M5-02, M4-05, M4-06 |
+| M5-06 | Work view | Pull requests and issues from connected repos with filters, checks and review state; bot-created items marked; links out to GitHub | M5-01, M3-08 |
+| M5-07 | Assign to bot | Any issue or PR can be sent to a bot from the Work view, starting a task with the item as context (`work.assign`) | M5-06, M4-03 |
 | M5-08 | Connections page | Connect GitHub, register custom MCP servers, edit per-tool policy | M3-06, M5-01 |
 | M5-09 | Policy editor | Presets, rules and messaging allowlists editable in the UI and kept in sync with the policy file | M2-07, M4-07, M5-01 |
 | M5-10 | Command palette | Ctrl+K reaches every action | M5-01 |
 | M5-11 | UI slots and plugin sandbox | Named slots including the map; sandboxed iframes with a message API; status-only and chat-content permissions enforced | M5-02, M0-13 |
-| M5-12 | Declarative theme animations | CSS keyframes and Lottie bound to agent states; reduced motion respected; animations pause when hidden | M5-11 |
+| M5-12 | Declarative theme animations | CSS keyframes and Lottie bound to bot states; reduced motion respected; animations pause when hidden | M5-11 |
 | M5-13 | Plugin and theme install flow | Install from npm, git or a local folder; lockfile with checksums; permission prompt and diff on update | M0-13, M5-01 |
 | M5-14 | Example plugins | Animated avatar plugin, and a second theme that restyles every screen with no code changes | M5-12, M5-13 |
 | M5-15 | Electron desktop shell | Local server mode and remote connect mode; local mode shows the weaker-isolation notice; AppImage and .deb builds | M5-01, M0-11 |
@@ -802,14 +802,14 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M7-01 | Usage collector contract | Snapshots per provider: window, percent used, reset time | M0-13 |
 | M7-02 | Claude collector | Reads status-line rate limits, with the usage endpoint as an optional fallback; degrades gracefully when either breaks | M7-01 |
 | M7-03 | Grok collector | Estimates from token counts, with manual calibration | M7-01 |
-| M7-04 | Usage panel and budget guard | Usage tab in the right panel; routines and agent handoffs skip with a notification above a threshold | M7-02, M6-01, M5-04 |
+| M7-04 | Usage panel and budget guard | Usage tab in the right panel; routines and bot handoffs skip with a notification above a threshold | M7-02, M6-01, M5-04 |
 
 ## M8 · Reviewer and more connectors (v1.0)
 
 | ID | Issue | Acceptance criteria | Depends on |
 | --- | --- | --- | --- |
 | M8-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M8 (scope, design notes, risks, open questions), reviewed before other work starts | none |
-| M8-01 | Reviewer plugin | A model call that sees only the tool and its arguments; configurable model and releasable risk classes; reviews agent handoffs | M2-02, M4-07 |
+| M8-01 | Reviewer plugin | A model call that sees only the tool and its arguments; configurable model and releasable risk classes; reviews bot handoffs | M2-02, M4-07 |
 | M8-02 | Forgejo connector | Same tool set, policy model and Work view support as GitHub | M3-02, M5-06 |
 | M8-03 | Notion connector (read-only first) | Read tools first; writes default to ask | M3-02 |
 | M8-04 | Gmail connector (read-only first) | Read and search first; sending defaults to ask | M3-02 |
@@ -823,4 +823,4 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M9-01 | Native app shell | Same protocol over Tailscale; stack chosen in an opening spike | M5-01 |
 | M9-02 | Push via APNs and FCM | Content-free pings; the app fetches details over Tailscale | M9-01 |
 | M9-03 | WebRTC transport | Only if Tailscale on the phone becomes a blocker; carries the same protocol | M9-01 |
-| M9-04 | Shared agent channels | Group threads with more than two agents, on top of the messaging policy | M4-07 |
+| M9-04 | Shared bot channels | Group threads with more than two bots, on top of the messaging policy | M4-07 |

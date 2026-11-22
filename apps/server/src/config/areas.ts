@@ -33,28 +33,28 @@ const id = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/, {
     "must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter",
 });
 
-const agent = z.strictObject({
+const bot = z.strictObject({
   name: id.describe(
-    "Unique agent name. Also the name of the agent's folder (decision 0010).",
+    "Unique bot name. Also the name of the bot's folder (decision 0010).",
   ),
-  provider: id.describe("The agent CLI that runs the agent."),
+  provider: id.describe("The bot CLI that runs the bot."),
   model: z
     .string()
     .min(1, { error: "must not be empty" })
     .describe("The model the provider runs."),
   connectors: z
     .array(id)
-    .describe("Ids of the connectors the agent may use. Can be empty."),
-  policyProfile: id.describe("The approval profile the agent's actions pass."),
+    .describe("Ids of the connectors the bot may use. Can be empty."),
+  policyProfile: id.describe("The approval profile the bot's actions pass."),
   folder: z
     .string()
     .regex(/^\//, { error: "must be an absolute path" })
     .describe(
-      "Absolute path of the agent's folder. Normally the agent's name under /var/lib/aphelion-agents.",
+      "Absolute path of the bot's folder. Normally the bot's name under /var/lib/aphelion-bots.",
     ),
 });
 
-const agents = z.array(agent).superRefine((list, context) => {
+const bots = z.array(bot).superRefine((list, context) => {
   const seen = new Map<string, number>();
   list.forEach(({ name }, index) => {
     const first = seen.get(name);
@@ -65,7 +65,7 @@ const agents = z.array(agent).superRefine((list, context) => {
     context.addIssue({
       code: "custom",
       path: [index, "name"],
-      message: `duplicates agents[${String(first)}].name "${name}"`,
+      message: `duplicates bots[${String(first)}].name "${name}"`,
     });
   });
 });
@@ -79,13 +79,13 @@ const ipAddress = z
   );
 
 export const configAreas = {
-  agents: defineArea({
-    file: "agents.yaml",
+  bots: defineArea({
+    file: "bots.yaml",
     description:
-      "What each agent is allowed to do. Instructions live in the agent's folder, not here (decision 0010).",
+      "What each bot is allowed to do. Instructions live in the bot's folder, not here (decision 0010).",
     migrations: [],
     fields: {
-      agents: agents.describe("One entry per agent. Names must be unique."),
+      bots: bots.describe("One entry per bot. Names must be unique."),
     },
   }),
   policy: defineArea({

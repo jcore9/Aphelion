@@ -4,7 +4,7 @@
 - Date: 2026-11-22. Sources were read and every test ran on this date (UTC).
 - Tested with: Codex CLI 0.169.0 (and 0.171.0 where marked), `@agentclientprotocol/codex-acp` 2.7.0 and 2.9.0, `@agentclientprotocol/sdk` 2.9.1, Bun 1.4.5, Docker 29.10.0, `ubuntu:26.04`, on a Debian 13 host
 - Prototype: `spikes/M0-17/` on the [`spike/M0-17-codex-headless-prototype`](https://github.com/jcore9/Aphelion/tree/spike/M0-17-codex-headless-prototype/spikes/M0-17) branch, with the run logs in `runs/`. That branch is never merged.
-- Decision: [0024](../decisions/0024-codex-third-agent-cli.md). This finding settles nothing. It stops for the owner on three questions, listed at the end.
+- Decision: [0024](../decisions/0024-codex-third-bot-cli.md). This finding settles nothing. It stops for the owner on three questions, listed at the end.
 
 ## Summary
 
@@ -121,7 +121,7 @@ The modes are hard-coded in `src/AgentMode.ts` (read in the 2.9.0 bundle). `agen
 
 ### 6. Can root-owned managed config pin it
 
-Mostly yes (measured). The container ran as uid 10001 with a root-owned, mode 644 `/etc/codex/requirements.toml` on a read-only root. The agent got "Permission denied" writing it.
+Mostly yes (measured). The container ran as uid 10001 with a root-owned, mode 644 `/etc/codex/requirements.toml` on a read-only root. The bot got "Permission denied" writing it.
 
 | Setting in `requirements.toml` | Result |
 | --- | --- |
@@ -149,10 +149,10 @@ Auto-update. Requirements turn off the startup check. The npm package can't upda
 
 ### 7. Does it run in the hardened container
 
-Codex runs. Its sandbox doesn't (measured). The flags were `--read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001`, with tmpfs at `/tmp` and the agent home.
+Codex runs. Its sandbox doesn't (measured). The flags were `--read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10001`, with tmpfs at `/tmp` and the bot home.
 
 - **The sandbox can't start.** `codex sandbox -- true` failed with "bwrap: No permissions to create a new namespace". It failed the same way with Codex's bundled bwrap and with the `bubblewrap` package. The host allows unprivileged user namespaces (`kernel.unprivileged_userns_clone = 1`).
-- **Docker's seccomp profile is the cause.** With only `--security-opt seccomp=unconfined` added, the sandbox started and blocked a write to the agent home ("Read-only file system").
+- **Docker's seccomp profile is the cause.** With only `--security-opt seccomp=unconfined` added, the sandbox started and blocked a write to the bot home ("Read-only file system").
 - **With the sandbox required, commands fail.** Every approved command that would run in the sandbox failed with exit 1. Only escalated commands, which run outside the sandbox after approval, succeeded. `apply_patch` and MCP calls still worked. Approvals still reached the client, and the hook still ran.
 - **Login inside the container is not determined.** This run was forbidden to log in. The [auth docs](https://learn.chatgpt.com/docs/auth) document `codex login --device-auth` for headless machines, and `cli_auth_credentials_store = "file"` stores `auth.json` under `CODEX_HOME`.
 
@@ -171,7 +171,7 @@ Egress, measured on a Docker `--internal` network, where the only way out was a 
 
 **This stops for the owner.** The two ways forward each change decision 0016's security model:
 
-1. Give the agent container a seccomp profile that allows unprivileged user namespaces, so Codex's sandbox runs inside the container.
+1. Give the bot container a seccomp profile that allows unprivileged user namespaces, so Codex's sandbox runs inside the container.
 2. Allow `danger-full-access` in `requirements.toml`, so commands run unsandboxed with `untrusted` approvals and the managed hook. The container is then the only boundary.
 
 ### 8. Resume and usage
@@ -189,7 +189,7 @@ Usage:
 ## Questions for the owner
 
 1. **Terms.** Should Codex run on your ChatGPT login under the guardrails of decision 0019, or on an API key, or stay out? OpenAI's terms don't cover this case, and its auth docs recommend API keys for automation.
-2. **Container sandbox.** Should the agent container get a seccomp profile that allows user namespaces, so Codex's sandbox runs? Or should Codex run unsandboxed (`danger-full-access`), with `untrusted` approvals and the fail-closed managed hook, and the container as the only boundary? Either way, it becomes a decision record.
+2. **Container sandbox.** Should the bot container get a seccomp profile that allows user namespaces, so Codex's sandbox runs? Or should Codex run unsandboxed (`danger-full-access`), with `untrusted` approvals and the fail-closed managed hook, and the container as the only boundary? Either way, it becomes a decision record.
 3. **`untrusted` retirement.** M2-04's "every call asks" rests on `untrusted`, which OpenAI is retiring, and on the managed hook. Is a pinned Codex version plus the hook an acceptable basis? Or should Codex wait until OpenAI ships a supported way to ask for every call?
 
 If the owner says yes to the first and picks an option for the second, M4-10 speaks app-server directly. That needs a decision record that amends "ACP first" for Codex.
@@ -200,10 +200,10 @@ If the owner says yes to the first and picks an option for the second, M4-10 spe
 | --- | --- |
 | [M4-10](https://github.com/jcore9/Aphelion/issues/114) | Waits on the three owner questions. If they're answered yes: speak `codex app-server` JSON-RPC directly, not `codex-acp`, with a decision record that amends "ACP first" for Codex. Pin the `codex` binary. Start every thread with `approvalPolicy: "untrusted"` and `approvalsReviewer: "user"`. Answer approvals with `accept`, `decline` or `cancel` only, never `acceptForSession` or `acceptWithExecpolicyAmendment`. Map "hook denied, no item" and "declined" onto one event. |
 | [M2-04](https://github.com/jcore9/Aphelion/issues/30) | Codex sends three request types to the policy engine: `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` and `mcpServer/elicitation/request`. MCP tools marked `readOnlyHint` never ask, so the engine sees them only through the hook. |
-| [M2-05](https://github.com/jcore9/Aphelion/issues/31) | The Codex managed hook is required. Write it to fail closed by itself: catch every error, keep a deadline shorter than Codex's `timeout`, and exit 2. Ship `/etc/codex/requirements.toml` with the settings from question 6, plus `allowed_web_search_modes = []`. Keep the agent from writing `$CODEX_HOME/rules`, because a user `allow` rule silences `untrusted`. |
+| [M2-05](https://github.com/jcore9/Aphelion/issues/31) | The Codex managed hook is required. Write it to fail closed by itself: catch every error, keep a deadline shorter than Codex's `timeout`, and exit 2. Ship `/etc/codex/requirements.toml` with the settings from question 6, plus `allowed_web_search_modes = []`. Keep the bot from writing `$CODEX_HOME/rules`, because a user `allow` rule silences `untrusted`. |
 | [M0-12](https://github.com/jcore9/Aphelion/issues/14) | Unchanged in M0. M4-10 adds the pinned `codex` binary and the root-owned `/etc/codex` files, and either the seccomp profile or `danger-full-access`, depending on question 2. |
 | [M1-01](https://github.com/jcore9/Aphelion/issues/19) | No change expected. App-server items map onto the contract's tool, permission, turn-end and usage events. |
 | [M1-07](https://github.com/jcore9/Aphelion/issues/25) | M4-10 records an app-server stream for the contract tests. `checks/mock_responses.py` on the prototype branch can produce one without a login. |
 | [M7-00](https://github.com/jcore9/Aphelion/issues/74) | The Codex collector reads `account/rateLimits/updated` and `thread/tokenUsage/updated` from app-server. |
-| [0022](../decisions/0022-agent-network-boundary.md) option 2 | The egress allowlist adds `api.openai.com`, `chatgpt.com` and `auth.openai.com`. It leaves out `api.github.com` and `codeload.github.com`, which the image doesn't need once updates are off. |
-| Install guide (M0-12, then M4-10) | Sign in with `codex login --device-auth` as `aphelion-agent`, with `cli_auth_credentials_store = "file"`. This step is untested. |
+| [0022](../decisions/0022-bot-network-boundary.md) option 2 | The egress allowlist adds `api.openai.com`, `chatgpt.com` and `auth.openai.com`. It leaves out `api.github.com` and `codeload.github.com`, which the image doesn't need once updates are off. |
+| Install guide (M0-12, then M4-10) | Sign in with `codex login --device-auth` as `aphelion-bot`, with `cli_auth_credentials_store = "file"`. This step is untested. |

@@ -72,11 +72,11 @@ const byFieldName: Case[] = [
       pwd: "plain-value-4i",
       inputTokens: 1200,
       secretRef: "op://vault/item",
-      cacheKey: "agents:list",
+      cacheKey: "bots:list",
       bypass: true,
     },
     secret: "plain-value-4",
-    kept: '"inputTokens":1200,"secretRef":"op://vault/item","cacheKey":"agents:list","bypass":true',
+    kept: '"inputTokens":1200,"secretRef":"op://vault/item","cacheKey":"bots:list","bypass":true',
   },
   {
     name: "a whole object under a sensitive name",

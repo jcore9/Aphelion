@@ -5,7 +5,7 @@
 - Decided by: project owner
 - Answers: the three questions for the owner in the [M0-18 finding](../spikes/M0-18-namespaces.md#questions-for-the-owner)
 - Amends: [0035](0035-codex-login-sandbox-approvals.md) (the sandbox and seccomp parts), [0016](0016-one-docker-container.md) (cancel)
-- Keeps: [0006](0006-shared-agent-user.md)
+- Keeps: [0006](0006-shared-bot-user.md)
 
 ## Context
 
@@ -20,7 +20,7 @@ Four terms, in plain words:
 
 What the spike found ([full finding](../spikes/M0-18-namespaces.md)):
 
-- **It can be done.** The agent runner can start each bot in its own namespaces, and a bot then sees only its own folder. Claude Code, Codex and Grok all start inside one.
+- **It can be done.** The bot runner can start each bot in its own namespaces, and a bot then sees only its own folder. Claude Code, Codex and Grok all start inside one.
 - **The profile is small.** Docker's default seccomp profile needs one added rule with five system calls: `clone`, `unshare`, `mount`, `umount2` and `pivot_root`.
 - **A private `/proc` has a price.** Docker hides parts of `/proc`. The kernel then refuses to give a bot a fresh one. The only fix is `--security-opt systempaths=unconfined`, which unhides those parts for every process in the container.
 - **The two CLI sandboxes need more.** Codex's and Claude Code's own sandboxes need network namespaces. Those put the kernel's firewall code within reach of every process in the container.
@@ -65,7 +65,7 @@ Mounting brings another class of bugs into reach if `mount` is allowed: CVE-2022
 
 On 2026-11-22 the owner chose:
 
-1. **No per-bot isolation.** Bots stay shared, as [0006](0006-shared-agent-user.md) says.
+1. **No per-bot isolation.** Bots stay shared, as [0006](0006-shared-bot-user.md) says.
 2. **No `systempaths=unconfined`.** Bots don't get a private `/proc`. The container keeps Docker's hidden paths.
 3. **No network namespaces.** The container gets no custom seccomp profile at all.
 4. **The container goes back to Docker's default seccomp profile, and Codex runs without its own sandbox.** Codex's sandbox needs network namespaces, so it can't run, and nothing else needs the extra system calls.
@@ -73,10 +73,10 @@ On 2026-11-22 the owner chose:
 Codex's commands are protected by these layers instead:
 
 - the hardened container ([0016](0016-one-docker-container.md)): read-only root, no capabilities, `no-new-privileges`, process and memory limits;
-- shared bots with no per-bot isolation ([0006](0006-shared-agent-user.md)), and the four fixed users that keep config, secrets and plugins out of reach;
+- shared bots with no per-bot isolation ([0006](0006-shared-bot-user.md)), and the four fixed users that keep config, secrets and plugins out of reach;
 - Aphelion's approvals: the `untrusted` policy on a pinned Codex version, with every escalation request going to the owner ([0035](0035-codex-login-sandbox-approvals.md));
 - the managed hook, which fails closed;
-- the proxy and the host firewall ([0022](0022-agent-network-boundary.md)).
+- the proxy and the host firewall ([0022](0022-bot-network-boundary.md)).
 
 ## Consequences
 
@@ -99,13 +99,13 @@ If either test fails, M4-10 stops and the owner decides again. 0045 doesn't clai
 
 - **The `untrusted` policy.** Shell commands and file changes ask the adapter. The adapter sends ordinary approval requests to the policy engine. Approvals are answered with `accept`, `decline` or `cancel` only.
 - **The managed hook.** It makes a separate policy check before each local tool call, whether or not Codex would have asked. It fails closed, with a deadline shorter than Codex's own timeout.
-- **A protected rules folder.** M0-17 found that a user `allow` rule in `$CODEX_HOME/rules` silences the prompts, including for an escalated command. So the agent can't write `$CODEX_HOME/rules`, as in 0035. With the sandbox off, nothing but file permissions and the runner's setup stops it, so M4-10 tests this too.
+- **A protected rules folder.** M0-17 found that a user `allow` rule in `$CODEX_HOME/rules` silences the prompts, including for an escalated command. So the bot can't write `$CODEX_HOME/rules`, as in 0035. With the sandbox off, nothing but file permissions and the runner's setup stops it, so M4-10 tests this too.
 
 **Escalation requests.** An escalation request is Codex asking to run a command outside its sandbox. With no sandbox there is nothing to leave, so Codex should rarely send one. The rule from 0035 stands unchanged: escalation requests always go to the owner, with the exact command, and only the owner can approve one. No policy rule and no reviewer model may approve it. M4-10's tests keep covering this. Other requests go to the policy engine, as the owner's rules decide.
 
-**What the owner gives up.** In 0035, a sandbox stood between a Codex command and the container's files. Now a command that gets approved can write anywhere the `aphelion-agent` user can, including other bots' folders and its own login files. If the approvals work as intended, what reaches the owner is each escalation request and whatever the policy engine passes on. A prompt-injected Codex that asks for a harmful command is stopped only if the policy engine or the owner declines it.
+**What the owner gives up.** In 0035, a sandbox stood between a Codex command and the container's files. Now a command that gets approved can write anywhere the `aphelion-bot` user can, including other bots' folders and its own login files. If the approvals work as intended, what reaches the owner is each escalation request and whatever the policy engine passes on. A prompt-injected Codex that asks for a harmful command is stopped only if the policy engine or the owner declines it.
 
-**This record keeps [0006](0006-shared-agent-user.md).** All bots share the `aphelion-agent` user. 0006 needs no "Amended by" line.
+**This record keeps [0006](0006-shared-bot-user.md).** All bots share the `aphelion-bot` user. 0006 needs no "Amended by" line.
 
 **It changes three issues.** Each gets an amendment note that links this record.
 
@@ -121,7 +121,7 @@ If either test fails, M4-10 stops and the owner decides again. 0045 doesn't clai
 - **`bwrap --die-with-parent` without a PID namespace.** It left 4 of 5 processes alive in the spike's `q6-kill.txt`. It also needs the namespace calls the default profile blocks. Rejected.
 - **Walking the bot's child processes.** The runner finds each descendant and kills it. A process can fork between the walk and the kill, so this can miss processes.
 
-M1-04 measures these and picks one. Its cancel test must start a process that leaves its process group, and no process may stay alive after cancel. If no option meets that, the owner decides in a decision record whether to accept the leftover risk. [Decision 0016](0016-one-docker-container.md)'s line, "cancel kills the agent's whole process group", is amended by this record and stays wrong until then.
+M1-04 measures these and picks one. Its cancel test must start a process that leaves its process group, and no process may stay alive after cancel. If no option meets that, the owner decides in a decision record whether to accept the leftover risk. [Decision 0016](0016-one-docker-container.md)'s line, "cancel kills the bot's whole process group", is amended by this record and stays wrong until then.
 
 **Costs of the rejected design that no longer apply.** The AppArmor profile on Ubuntu hosts and the uid 0 rule for `systempaths` were documented or inferred, not measured, so they were never confirmed costs. The single-file login mount problem was measured, and it no longer applies. Codex's rename-based login saves keep working on `$CODEX_HOME` as today.
 
@@ -131,6 +131,6 @@ M1-04 measures these and picks one. Its cancel test must start a process that le
 
 - the owner wants bots kept apart from each other, for example once bots serve other people or a plugin runs untrusted bots. The spike's prototype is the starting point;
 - the exit-test VM or a later spike shows a way to isolate bots without network namespaces or `systempaths=unconfined`;
-- bots move to their own container ([0022](0022-agent-network-boundary.md) option 2). A profile then applies to that container only, and not to the server or the broker;
+- bots move to their own container ([0022](0022-bot-network-boundary.md) option 2). A profile then applies to that container only, and not to the server or the broker;
 - Codex ships a sandbox that doesn't need network namespaces;
 - a Codex incident shows that the approvals and the container are not enough.

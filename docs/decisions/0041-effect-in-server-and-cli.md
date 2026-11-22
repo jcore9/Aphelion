@@ -10,7 +10,7 @@
 
 ## Context
 
-The server is a long-running program. It starts an HTTP server, a database, agent processes and a secrets broker. It must stop each of them cleanly, retry the ones that fail, and never leak a secret into a log. Plain TypeScript can do all of that, but each piece needs hand-written code: a class for each error, a loop for each retry, a shutdown list, a wrapper for each secret.
+The server is a long-running program. It starts an HTTP server, a database, bot processes and a secrets broker. It must stop each of them cleanly, retry the ones that fail, and never leak a secret into a log. Plain TypeScript can do all of that, but each piece needs hand-written code: a class for each error, a loop for each retry, a shutdown list, a wrapper for each secret.
 
 [Effect](https://effect.website) is a TypeScript library that provides those pieces in one consistent style. The owner looked at how T3 Code uses it. T3 Code is the app that runs this project's agents. The T3 Code release on the dev box (0.1.12) ships `effect` 4.1.5. [Decision 0034](0034-vendor-protocol-per-cli.md) cites the same install for how T3 drives each agent CLI.
 
@@ -52,7 +52,7 @@ The server and the CLI use Effect. Each Effect module is adopted when a real iss
 
 **Likely candidates.** These are the modules the next issues are likely to use. Each issue decides for itself, and none is required by this record.
 
-- Tagged errors and `Effect.retry` with a Schedule. Agent processes, the database and network calls all fail in ways that call for a retry or a timeout.
+- Tagged errors and `Effect.retry` with a Schedule. Bot processes, the database and network calls all fail in ways that call for a retry or a timeout.
 - Services and Layers. The plan names the swappable edges of the server: the store, the process spawner and the HTTP server ([decision 0007](0007-bun-runtime.md)). A service is the interface, and a Layer is the adapter behind it.
 - `Redacted`, as a possible base for M0-14a's `Secret` ([#103](https://github.com/jcore9/Aphelion/issues/103)). If M0-14a chooses it, Aphelion adds two things on top. The logger's `maskSecretValue` hook from [#129](https://github.com/jcore9/Aphelion/pull/129) masks the value. A `Secret` also refuses to be written into the database or sent over a process pipe, and fails loudly when code tries.
 - `@effect/platform-bun`'s HTTP server, as a candidate for M0-10a ([#97](https://github.com/jcore9/Aphelion/issues/97)).

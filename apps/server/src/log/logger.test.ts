@@ -13,10 +13,10 @@ function capture(options: LoggerOptions = {}) {
 
 test("writes one JSON object per line with time, level and message first", () => {
   const { log, lines } = capture();
-  log.info("agent started", { agentId: "triage", attempt: 2 });
+  log.info("bot started", { botId: "triage", attempt: 2 });
 
   expect(lines).toEqual([
-    '{"time":"2026-11-22T10:00:00.000Z","level":"info","msg":"agent started","agentId":"triage","attempt":2}',
+    '{"time":"2026-11-22T10:00:00.000Z","level":"info","msg":"bot started","botId":"triage","attempt":2}',
   ]);
 });
 
@@ -94,7 +94,7 @@ test("accepts only fixed text as a message, at compile time", () => {
 
   log.info("user signed in", { user });
   log.warn(flag ? "cache cold" : "cache warm");
-  log.error(`agent ${name} stopped`);
+  log.error(`bot ${name} stopped`);
   // @ts-expect-error A message held in a variable isn't fixed text.
   log.debug(user);
   // @ts-expect-error A template with a value in it isn't fixed text.

@@ -1,14 +1,14 @@
 version: 1
-agents:
+bots:
   - name: chief-of-staff
     provider: claude
     model: claude-opus-5-5
     connectors: [github]
     policyProfile: manager
-    folder: /var/lib/aphelion-agents/chief-of-staff
+    folder: /var/lib/aphelion-bots/chief-of-staff
   - name: triage
     provider: grok
     model: grok-4.7
     connectors: []
     policyProfile: default
-    folder: /var/lib/aphelion-agents/triage
+    folder: /var/lib/aphelion-bots/triage

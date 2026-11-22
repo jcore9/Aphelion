@@ -14,7 +14,7 @@ import { formatIssue } from "./issues";
 import { checkConfigPermissions, type Lstat, type Owner } from "./permissions";
 
 const files = [
-  "agents.yaml",
+  "bots.yaml",
   "policy.yaml",
   "routines.yaml",
   "connectors.yaml",
@@ -52,7 +52,7 @@ test("accepts a 0750 directory with 0640 files owned by the server", async () =>
 });
 
 test("accepts files at 0644, the mode git checks out", async () => {
-  await chmod(join(dir, "agents.yaml"), 0o644);
+  await chmod(join(dir, "bots.yaml"), 0o644);
   expect(await check()).toEqual([]);
 });
 

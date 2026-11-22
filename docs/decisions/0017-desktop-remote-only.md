@@ -7,7 +7,7 @@
 
 ## Context
 
-[Decision 0016](0016-one-docker-container.md) kept a desktop local mode that ran the server directly as the desktop user, with a banner saying approvals were advisory. That breaks the plan's first principle, that agents are untrusted and enforcement lives outside their reach. Every protection Aphelion has depends on the server running in its container.
+[Decision 0016](0016-one-docker-container.md) kept a desktop local mode that ran the server directly as the desktop user, with a banner saying approvals were advisory. That breaks the plan's first principle, that bots are untrusted and enforcement lives outside their reach. Every protection Aphelion has depends on the server running in its container.
 
 ## Options
 

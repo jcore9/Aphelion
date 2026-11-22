@@ -27,7 +27,7 @@ Terms used on this page:
 
 ## Why not mount the socket
 
-Mounting `tailscaled.sock` into the container would make `whois` work. It would also give every process in the container read access to the LocalAPI, because the socket's mode is `0666`. Agents run in the same container ([decision 0022](../decisions/0022-agent-network-boundary.md)). Read access shows the tailnet's devices, their addresses and their owners. A prompt-injected agent should not see that. So this PR doesn't do it.
+Mounting `tailscaled.sock` into the container would make `whois` work. It would also give every process in the container read access to the LocalAPI, because the socket's mode is `0666`. Bots run in the same container ([decision 0022](../decisions/0022-bot-network-boundary.md)). Read access shows the tailnet's devices, their addresses and their owners. A prompt-injected bot should not see that. So this PR doesn't do it.
 
 ## What M0 ships instead
 
@@ -43,6 +43,6 @@ This is the minimum that decision 0013 sets.
 | Option | What it needs |
 | --- | --- |
 | A small host program that answers `whois` for the server, over a pipe that the init hands over ([decision 0021](../decisions/0021-container-init-and-secret-handoff.md)) | A program outside the container. The server sends only an address and gets back a device name. |
-| Mount the socket inside a folder that only the server's user can enter | Agents can't reach it. The server can read all of the LocalAPI, not only `whois`. |
+| Mount the socket inside a folder that only the server's user can enter | Bots can't reach it. The server can read all of the LocalAPI, not only `whois`. |
 | Tailscale's web API with an API key | A secret in the broker, and network access to Tailscale's servers |
 | Run the server as its own tailnet device with `tsnet` | The server joins the tailnet itself. A large change to how Aphelion is deployed. |

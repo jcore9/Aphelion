@@ -13,7 +13,7 @@ The M0 plan asks M0-04 to choose a linter, either ESLint with typescript-eslint 
 The lint config carries more than style. It enforces boundaries that decisions depend on:
 
 - [Decision 0007](0007-bun-runtime.md) allows Bun-only APIs only in adapter modules, and allows only web-standard APIs in `protocol` and `plugin-sdk`.
-- [Decision 0022](0022-agent-network-boundary.md) bans file reads under the agents root outside the no-follow helper. M4-02 writes that rule.
+- [Decision 0022](0022-bot-network-boundary.md) bans file reads under the bots root outside the no-follow helper. M4-02 writes that rule.
 - M5-02 bans raw style values in components.
 
 The linter therefore needs path-scoped bans on imports and globals, type-aware rules for async code, and a stable API for custom rules.

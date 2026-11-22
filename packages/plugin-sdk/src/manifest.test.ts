@@ -25,7 +25,7 @@ const full = {
     events: ["approval.requested"],
     secrets: ["op://AI Agents/Weather/api-key"],
     network: ["api.weather.example"],
-    uiSlots: ["agent.sidebar"],
+    uiSlots: ["bot.sidebar"],
   },
   contributes: {
     secretSchemes: ["op"],
@@ -215,7 +215,7 @@ describe("parsePluginManifest", () => {
 
   test("treats UI slots as a permission, not a contribution", () => {
     expect(
-      issuesOf({ ...minimal, contributes: { uiSlots: ["agent.sidebar"] } }),
+      issuesOf({ ...minimal, contributes: { uiSlots: ["bot.sidebar"] } }),
     ).toEqual([{ field: "contributes", message: "has an unknown field" }]);
   });
 
@@ -338,13 +338,13 @@ describe("permissions and contributions by side", () => {
     ["contributes.secretSchemes", { contributes: { secretSchemes: ["op"] } }],
   ];
   const clientOnlyLists: [string, unknown][] = [
-    ["permissions.uiSlots", { permissions: { uiSlots: ["agent.sidebar"] } }],
+    ["permissions.uiSlots", { permissions: { uiSlots: ["bot.sidebar"] } }],
     [
       "contributes.screens",
       { contributes: { screens: [{ id: "issues", title: "Issues" }] } },
     ],
   ];
-  const either = { permissions: { events: ["agent.status"] } };
+  const either = { permissions: { events: ["bot.status"] } };
 
   test.each(serverOnly)("refuses %s without a server part", (field, lists) => {
     expect(issuesOf({ ...clientOnly, ...(lists as object) })).toEqual([

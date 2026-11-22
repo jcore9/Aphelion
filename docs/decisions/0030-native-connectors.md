@@ -7,7 +7,7 @@
 
 ## Context
 
-Agents reach third-party services only through the connector gateway, which holds the credentials. The plan's Native connectors section designs the connector interface: a manifest with a risk class per tool, an auth flow, an encrypted credential store, tool handlers, an optional event source, and a policy per tool.
+Bots reach third-party services only through the connector gateway, which holds the credentials. The plan's Native connectors section designs the connector interface: a manifest with a risk class per tool, an auth flow, an encrypted credential store, tool handlers, an optional event source, and a policy per tool.
 
 ## Options
 

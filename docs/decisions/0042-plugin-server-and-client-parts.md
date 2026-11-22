@@ -58,7 +58,7 @@ The owner weighed these questions on 2026-11-22.
 | | None. A client part talks only to the app. | Hosts granted to the client part |
 | --- | --- | --- |
 | Where data can go | Only to the app, and from there through the server part | Straight from a device to any granted host |
-| Network rules | The server part's traffic leaves from the container, under [decision 0022](0022-agent-network-boundary.md) | Traffic leaves from each device, outside the container's rules, the approval layer and the audit log |
+| Network rules | The server part's traffic leaves from the container, under [decision 0022](0022-bot-network-boundary.md) | Traffic leaves from each device, outside the container's rules, the approval layer and the audit log |
 | MCP servers | Reached from the server part, through the approval layer | Reached from the device, with no approval |
 | Cost | A client part that shows remote data needs a server part to fetch it | One way less to fetch data, and a second network policy to enforce on every client |
 
@@ -89,21 +89,21 @@ The owner decided six things:
 
   | List | Needs | Why |
   | --- | --- | --- |
-  | `permissions.events` | either part | The server part gets events from the plugin host, and the client part through the app's messages. An animated avatar needs only agent status. |
+  | `permissions.events` | either part | The server part gets events from the plugin host, and the client part through the app's messages. An animated avatar needs only bot status. |
   | `permissions.secrets` | a server part | The host uses each secret on the server, for the server part. No part receives a value. |
   | `permissions.network` | a server part | A client part has no network access. |
   | `permissions.uiSlots` | a client part | Only a client part can show anything in the app. |
   | `contributes.secretSchemes` | a server part | Secret backends run on the server, next to the secrets broker. |
 
   A non-empty list that needs a missing part is refused with a fixed reason, `needs a server part` or `needs a client part`. An empty list is allowed with either part. One table in the SDK drives the parser's check, the `PluginManifest` type and the JSON Schema rules. Its type allows only three values per list (server, client, or both), so it can't hold a list that no part may use.
-- **A grant is per plugin, not per part.** When a plugin has both parts, events it is granted can go to either part. Putting a permission list inside each part would let the owner grant chat content to the server part and only agent status to the client part. That is a breaking change to the manifest, and it can come later if a plugin needs it.
+- **A grant is per plugin, not per part.** When a plugin has both parts, events it is granted can go to either part. Putting a permission list inside each part would let the owner grant chat content to the server part and only bot status to the client part. That is a breaking change to the manifest, and it can come later if a plugin needs it.
 - **Migration from 0.1.0:** `entry` becomes `server.entry`, and `api` becomes `^0.2.0`. The [manifest reference](../reference/plugin-manifest.md#changes) says so.
 
 ### MCP servers
 
 The owner asked whether a client part could use an MCP server. It can't, whether the MCP server is local or remote. A plugin that uses an MCP server does so from its server part. The MCP server's host goes in `permissions.network`, and each tool call goes through the approval layer like any other tool call. A client part that needs the result asks the app, and the app gets it from the server part.
 
-The reason is that a client part sees what the app shows it, which can include chat content. With its own network access, it could send that content from the device to any host. That traffic would skip the container's network rules ([decision 0022](0022-agent-network-boundary.md)), the approval layer and the audit log.
+The reason is that a client part sees what the app shows it, which can include chat content. With its own network access, it could send that content from the device to any host. That traffic would skip the container's network rules ([decision 0022](0022-bot-network-boundary.md)), the approval layer and the audit log.
 
 ### The files served to devices
 
@@ -118,9 +118,9 @@ A check that a served file is inside the plugin's folder doesn't prove that its 
 - **[0008](0008-react-and-tailwind.md)** put UI plugins in sandboxed iframes. This record keeps that, extends it to the phone as a WebView, and removes the plan's in-page exception for first-party plugins.
 - **[0017](0017-desktop-remote-only.md)** makes every client connect-only. Serving client parts from the server keeps it that way: a client installs nothing, and a new device gets every plugin when it first connects.
 - **[0018](0018-shared-plugin-user.md)** starts server plugins in the plugin runner, as `aphelion-plugins`, and says plugins never see secret values directly. Only the server part runs there. A client part never runs in the container, so it adds no process and no user. "They request them through the host" now means that a plugin asks the host to use a secret, not to hand it over.
-- **[0020](0020-1password-grok-bot-style.md)** has the broker inject a value into a consumer's request, environment or headers. For a plugin, the host injects it only into the operation it makes for the plugin. It never goes into the plugin's environment or into a message to the plugin. 0020's grants per item, consumer and agent still apply.
+- **[0020](0020-1password-grok-bot-style.md)** has the broker inject a value into a consumer's request, environment or headers. For a plugin, the host injects it only into the operation it makes for the plugin. It never goes into the plugin's environment or into a message to the plugin. 0020's grants per item, consumer and bot still apply.
 - **[0021](0021-container-init-and-secret-handoff.md)** runs plugins from their installed package folders. The client part's files live in the same folder, which plugin code can't write. The server reads the files from there to serve them.
-- **[0022](0022-agent-network-boundary.md)** requires a device token on every server endpoint except `/health`. Client parts are served through that authenticated API, so only a paired device can download them. A client part adds no traffic from the container, because it runs on the device and has no network access.
+- **[0022](0022-bot-network-boundary.md)** requires a device token on every server endpoint except `/health`. Client parts are served through that authenticated API, so only a paired device can download them. A client part adds no traffic from the container, because it runs on the device and has no network access.
 - **The plan's `Secret` wrapper** redacts itself in logs and JSON and is never serialized. Under this record, a value stays in that wrapper inside the host and the broker. It never crosses a plugin's channel, so the wrapper never needs to be serialized for a plugin.
 
 ## Consequences

@@ -20,7 +20,7 @@ const approval = {
   actor: { kind: "device", id: "laptop" },
   action: "approval.decide",
   outcome: "allowed",
-  agentId: "triage",
+  botId: "triage",
   sessionId: "s-1",
   requestId: "r-1",
   detail: { tool: "git push", remote: "origin" },
@@ -36,7 +36,7 @@ test("appends an entry and reads it back with every field", () => {
     actor_id: "laptop",
     action: "approval.decide",
     outcome: "allowed",
-    agent_id: "triage",
+    bot_id: "triage",
     session_id: "s-1",
     request_id: "r-1",
   });
@@ -60,7 +60,7 @@ test("stores an actor with no id, and leaves unrelated ids empty", () => {
   expect(db.all("SELECT * FROM audit_log WHERE id = ?", [id])).toMatchObject([
     {
       actor_id: null,
-      agent_id: null,
+      bot_id: null,
       session_id: null,
       request_id: null,
       detail: "{}",
@@ -131,10 +131,10 @@ test("redacts secrets in every text column, and keeps ordinary ids", () => {
   const db = openDatabase();
   const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
   appendAudit(db, {
-    actor: { kind: "agent", id: token },
+    actor: { kind: "bot", id: token },
     action: `secret.read ${token}`,
     outcome: "denied",
-    agentId: token,
+    botId: token,
     sessionId: token,
     requestId: `Bearer abc123def456ghi`,
   });
@@ -148,12 +148,12 @@ test("redacts secrets in every text column, and keeps ordinary ids", () => {
   expect(rows[0]).toMatchObject({
     actor_id: "[REDACTED]",
     action: "secret.read [REDACTED]",
-    agent_id: "[REDACTED]",
+    bot_id: "[REDACTED]",
     request_id: "Bearer [REDACTED]",
   });
   expect(rows[1]).toMatchObject({
     actor_id: "laptop",
-    agent_id: "triage",
+    bot_id: "triage",
     session_id: "s-1",
     request_id: "r-1",
   });
@@ -250,10 +250,10 @@ test("masks a registered secret value in every free-text column, key and number"
   maskSecretValue("Audit7rQ-live-value");
   maskSecretValue("86753090");
   appendAudit(db, {
-    actor: { kind: "agent", id: "Audit7rQ-live-value" },
+    actor: { kind: "bot", id: "Audit7rQ-live-value" },
     action: "secret.read Audit7rQ-live-value",
     outcome: "succeeded",
-    agentId: "a Audit7rQ-live-value",
+    botId: "a Audit7rQ-live-value",
     sessionId: "s Audit7rQ-live-value",
     requestId: "r Audit7rQ-live-value",
     detail: { "Audit7rQ-live-value": 1, pin: 86753090, tool: "git push" },
@@ -263,11 +263,11 @@ test("masks a registered secret value in every free-text column, key and number"
   expect(JSON.stringify(row)).not.toContain("Audit7rQ-live-value");
   expect(JSON.stringify(row)).not.toContain("86753090");
   expect(row).toMatchObject({
-    actor_kind: "agent",
+    actor_kind: "bot",
     actor_id: "[REDACTED]",
     action: "secret.read [REDACTED]",
     outcome: "succeeded",
-    agent_id: "a [REDACTED]",
+    bot_id: "a [REDACTED]",
     session_id: "s [REDACTED]",
     request_id: "r [REDACTED]",
   });

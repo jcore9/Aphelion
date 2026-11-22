@@ -1,9 +1,9 @@
-# 0034. Each agent CLI is driven over its vendor's own protocol
+# 0034. Each bot CLI is driven over its vendor's own protocol
 
 - Status: Accepted
 - Date: 2026-11-22
 - Decided by: project owner
-- Amends: [0027](0027-acp-first-adapters.md) (ACP first, for Claude Code and Codex), [0019](0019-cli-subscription-use.md) ("the official ACP adapter"), [0024](0024-codex-third-agent-cli.md) (the Codex transport), [0028](0028-policy-engine-in-harness.md) (the policy engine's inputs), and the plan's Agent adapters, Policy engine, Enforcement layers, Stages, Open decisions and Issue breakdown
+- Amends: [0027](0027-acp-first-adapters.md) (ACP first, for Claude Code and Codex), [0019](0019-cli-subscription-use.md) ("the official ACP adapter"), [0024](0024-codex-third-bot-cli.md) (the Codex transport), [0028](0028-policy-engine-in-harness.md) (the policy engine's inputs), and the plan's Bot adapters, Policy engine, Enforcement layers, Stages, Open decisions and Issue breakdown
 
 ## Context
 
@@ -40,7 +40,7 @@ Still unknown, for M1-02:
 - **The bundled binary.** The SDK's optional dependency `@anthropic-ai/claude-agent-sdk-linux-x64` holds a 364 MB copy of Claude Code. The image must leave it out and set `pathToClaudeCodeExecutable` every time, or the SDK runs that copy instead of the pinned one.
 - **Version pairing.** SDK 0.3.330 pairs with Claude Code 2.1.330. The SDK's docs say some options, such as `mcpServersDelivery: "initialize"`, need the bundled CLI version or newer. M1-02 pins the two together.
 - **Managed settings.** `/etc/claude-code/` doesn't exist on this box, so this turn didn't test whether `settingSources: []` still loads root-owned managed settings.
-- **Inside the container.** Running as `aphelion-agent` under the hardening from [decision 0016](0016-one-docker-container.md), deny answers, `resume` after a restart, and Bun's peer dependencies (`@anthropic-ai/sdk`, `@modelcontextprotocol/sdk` and Zod 4) in a plugin folder.
+- **Inside the container.** Running as `aphelion-bot` under the hardening from [decision 0016](0016-one-docker-container.md), deny answers, `resume` after a restart, and Bun's peer dependencies (`@anthropic-ai/sdk`, `@modelcontextprotocol/sdk` and Zod 4) in a plugin folder.
 - **The default mode.** Not known for the bare SDK. M0-01 found that the ACP wrapper started in `auto` where that mode is available, and the direct run here set `default` explicitly. The adapter always passes `default`, and the managed settings disable `auto` and `bypassPermissions`. M1-02 checks what the SDK does with no `permissionMode`.
 
 ## Options
@@ -74,7 +74,7 @@ Rules that follow:
 
 - **[0027](0027-acp-first-adapters.md)** stays for Grok and is amended for Claude and Codex.
 - **[0019](0019-cli-subscription-use.md)**'s first guardrail now reads as "the official, unmodified CLIs, driven through each vendor's own SDK or protocol, at pinned versions". The Agent SDK is Anthropic's own package and runs the unmodified `claude` binary, so the guardrail holds. The Agent SDK overview says third-party developers may not "offer claude.ai login or rate limits for their products" without approval (quoted in M0-01). Aphelion offers neither, because the owner signs in to their own CLI.
-- **[0024](0024-codex-third-agent-cli.md)** said "the official ACP adapter if the spike picks one". The spike didn't pick one, and M4-10 speaks app-server directly.
+- **[0024](0024-codex-third-bot-cli.md)** said "the official ACP adapter if the spike picks one". The spike didn't pick one, and M4-10 speaks app-server directly.
 - **[0028](0028-policy-engine-in-harness.md)**'s inputs are each adapter's permission requests and the hook callbacks, not only ACP requests.
 - **The plan's Sources** keep the ACP links for Grok. The Agent SDK and app-server docs join them when M1-02 and M4-10 land.
 

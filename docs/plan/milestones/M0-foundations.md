@@ -6,13 +6,13 @@
 - Status: Approved and merged in [#92](https://github.com/jcore9/Aphelion/pull/92) on 2026-11-21. Decisions 0005 to 0018 settle every open question. In progress.
 - Last updated: 2026-11-21
 
-M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no agents. It also answers five questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
+M0 builds the ground everything else stands on: the repo, the docs, the config, the store, the protocol, the API server, the headless service, the plugin host and the secrets broker. It ships no bots. It also answers five questions, as written spikes, that decide how M1 and M4 run the AI CLIs at all.
 
 ## Exit criterion
 
 The service starts on boot and answers `/health` from a client over Tailscale.
 
-That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers everything up to it (the server answers `/health`, unauthenticated sockets are rejected, the image builds, the Compose file validates, and inside the container `aphelion-agent` can't read the server's or the broker's files), and the full test is run by hand on a VM using the steps in [Exit test](#exit-test). Its output goes into the retro note.
+That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers everything up to it (the server answers `/health`, unauthenticated sockets are rejected, the image builds, the Compose file validates, and inside the container `aphelion-bot` can't read the server's or the broker's files), and the full test is run by hand on a VM using the steps in [Exit test](#exit-test). Its output goes into the retro note.
 
 ## Scope
 
@@ -25,7 +25,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-02] | Spike: Grok headless billing | spike, server | M0-00 |
 | [M0-03] | Spike: headless without Electron | spike, desktop | M0-00 |
 | [M0-17] | Spike: Codex headless on a ChatGPT login | spike, server | M0-00 |
-| [M0-18] | Spike: per-agent isolation with user namespaces | spike, security, **risk/security** | M0-00 |
+| [M0-18] | Spike: per-bot isolation with user namespaces | spike, security, **risk/security** | M0-00 |
 | [M0-04] | Monorepo scaffold | chore | M0-03 |
 | [M0-05] | Repo hygiene and MIT license | chore, security, **risk/security** | M0-04 |
 | [M0-16] | Docs site and decision records | docs | M0-04 |
@@ -44,7 +44,7 @@ Seven of the eighteen work issues carry `risk/security`, so their PRs get a full
 
 ### Out of scope
 
-- Agents, adapters and sessions (M1). M0-01, M0-02, M0-17 and M0-18 only answer questions; they don't build adapters.
+- Bots, adapters and sessions (M1). M0-01, M0-02, M0-17 and M0-18 only answer questions; they don't build adapters.
 - Policy rules and approvals (M2). M0 builds the audit table that M2 writes to, not the policy engine.
 - The gateway host (M3). The secrets broker is built so it can move there, but in M0 it runs on the same machine (see [Q4](#q4-where-the-secrets-broker-runs-before-the-gateway-exists)).
 - Any client UI beyond `curl` and the test client in M1.
@@ -93,9 +93,9 @@ The critical path is M0-03, M0-04, M0-16, M0-09, M0-10, M0-11, M0-12. M0-04 wait
 
 M0-01 and M0-02 block nothing inside M0. They block [M1-02] and [M4-01], and their answers can change the shape of M1, M4 and M7, which is why they run first instead of at the start of M1.
 
-M0-17 blocks nothing inside M0 either. It blocks [M4-10], the Codex adapter ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)).
+M0-17 blocks nothing inside M0 either. It blocks [M4-10], the Codex adapter ([decision 0024](../../decisions/0024-codex-third-bot-cli.md)).
 
-M0-18 was added on 2026-11-22 by [decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md). It depends only on M0-00, so it belongs to wave 1 and can start now. It blocks [M0-12], the container image, because the image's seccomp profile (the list of system calls the container may make) and its host setup depend on what the spike finds. It also blocks [M1-04], the session manager, because the answer decides how each agent is started. An unfinished M0-18 can therefore delay the exit test.
+M0-18 was added on 2026-11-22 by [decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md). It depends only on M0-00, so it belongs to wave 1 and can start now. It blocks [M0-12], the container image, because the image's seccomp profile (the list of system calls the container may make) and its host setup depend on what the spike finds. It also blocks [M1-04], the session manager, because the answer decides how each bot is started. An unfinished M0-18 can therefore delay the exit test.
 
 M0-18 is settled. The owner answered its questions on 2026-11-22, and [decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md) records the answers: bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox. No seccomp profile ships, so M0-12 and [M4-10] have none to carry. How [M1-04] cancels a bot is still open, because a process group misses processes that leave it. Decision 0045 lists the options.
 
@@ -158,7 +158,7 @@ If a dependency fails on Bun, or the hardening can't hold with three users in on
 
 ### M0-17: Codex headless on a ChatGPT login
 
-[Decision 0024](../../decisions/0024-codex-third-agent-cli.md) makes OpenAI's Codex CLI a third agent CLI, on the owner's own ChatGPT login. The adapter is built later, in [M4-10]. This spike answers first whether Codex can run here at all. The issue lists what was found on 2026-11-21 under each question, as a starting point.
+[Decision 0024](../../decisions/0024-codex-third-bot-cli.md) makes OpenAI's Codex CLI a third bot CLI, on the owner's own ChatGPT login. The adapter is built later, in [M4-10]. This spike answers first whether Codex can run here at all. The issue lists what was found on 2026-11-21 under each question, as a starting point.
 
 The answers are in the [M0-17 finding](../../spikes/M0-17-codex-headless.md).
 
@@ -170,7 +170,7 @@ Questions:
 4. Do OpenAI's current terms allow driving it from a self-hosted harness for one person's own use? Quote them with dates, and stop if they're unclear.
 5. Can Codex send a permission request for every tool call, with no bypass, `never`, full-access or Auto-review mode? With the `on-request` policy, commands that the sandbox allows run without asking. M2-04 depends on this.
 6. Can a root-owned `/etc/codex/requirements.toml` pin the approval policy, the sandbox, the login method and a managed hook that fails closed, and can auto-update be turned off? M2-05 depends on this.
-7. Does it run as `aphelion-agent` in the hardened container, with egress only through `HTTPS_PROXY` and `NO_PROXY` ([decision 0022](../../decisions/0022-agent-network-boundary.md))? Does Codex's own sandbox start there, and which hosts does Codex need?
+7. Does it run as `aphelion-bot` in the hardened container, with egress only through `HTTPS_PROXY` and `NO_PROXY` ([decision 0022](../../decisions/0022-bot-network-boundary.md))? Does Codex's own sandbox start there, and which hosts does Codex need?
 8. Does session resume work after a restart, and does the stream report how much of the subscription's usage allowance is used, for M7?
 
 What changes depending on the answer:
@@ -185,26 +185,26 @@ What changes depending on the answer:
 | The terms don't allow it, or are unclear | Stop. The owner decides, and decision 0024 is revisited. |
 | Codex's own sandbox can't start in the container | The finding says whether to run Codex with its sandbox off, with the container as the boundary and approvals still on. If that changes the security model, it becomes a decision record. |
 
-### M0-18: per-agent isolation with user namespaces
+### M0-18: per-bot isolation with user namespaces
 
-[Decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md) planned to let the container create user namespaces ([decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md) reversed that). A user namespace is a Linux feature that changes how the kernel treats user IDs and privileges: a process can look like root inside it and stay an ordinary user outside. Codex's sandbox needs one. Other kinds of namespace give a process a private view of the file system (mount namespace) or of the process list (PID namespace). Isolating an agent would combine these. The owner asked whether the same feature could isolate each agent from the others, in place of one Unix user per agent ([decision 0006](../../decisions/0006-shared-agent-user.md)). The full question list is in [issue #124][M0-18]. The answers are in the [M0-18 finding](../../spikes/M0-18-namespaces.md). The owner's choices are in [decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md): the isolation works, but the owner declined it, and the plan stays with shared bots and Docker's default seccomp profile.
+[Decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md) planned to let the container create user namespaces ([decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md) reversed that). A user namespace is a Linux feature that changes how the kernel treats user IDs and privileges: a process can look like root inside it and stay an ordinary user outside. Codex's sandbox needs one. Other kinds of namespace give a process a private view of the file system (mount namespace) or of the process list (PID namespace). Isolating a bot would combine these. The owner asked whether the same feature could isolate each bot from the others, in place of one Unix user per bot ([decision 0006](../../decisions/0006-shared-bot-user.md)). The full question list is in [issue #124][M0-18]. The answers are in the [M0-18 finding](../../spikes/M0-18-namespaces.md). The owner's choices are in [decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md): the isolation works, but the owner declined it, and the plan stays with shared bots and Docker's default seccomp profile.
 
 Questions:
 
-1. Can the agent runner start each agent in its own user and mount namespace, inside the hardened container from [decision 0016](../../decisions/0016-one-docker-container.md)?
+1. Can the bot runner start each bot in its own user and mount namespace, inside the hardened container from [decision 0016](../../decisions/0016-one-docker-container.md)?
 2. Do Claude Code, Grok Build and Codex run in such a namespace, with their logins and egress only through `HTTPS_PROXY` and `NO_PROXY`? Does Codex's own sandbox still start inside it?
 3. Does AppArmor on Ubuntu 26.04 block it, and is the fix scoped to the container or to the whole host?
 4. What does the seccomp profile add to Docker's default, and what kernel attack surface comes with it?
-5. Could namespaces end the shared-folder risk that decision 0006 accepted, without one Unix user per agent?
-6. Do the "ready for option 2" rules from [decision 0022](../../decisions/0022-agent-network-boundary.md) still hold, including cancel and kill reaching the agent's whole process tree?
+5. Could namespaces end the shared-folder risk that decision 0006 accepted, without one Unix user per bot?
+6. Do the "ready for option 2" rules from [decision 0022](../../decisions/0022-bot-network-boundary.md) still hold, including cancel and kill reaching the bot's whole process tree?
 
 What changes depending on the answer:
 
 | Finding | Consequence |
 | --- | --- |
-| Per-agent isolation works for all three CLIs, and the profile adds only what `bwrap` needs | The owner is asked in a new decision record, which amends 0006 once approved. Only then does M1-04 start agents in their own namespaces. M0-12 ships the profile and any AppArmor change, in place of M4-10. |
+| Per-bot isolation works for all three CLIs, and the profile adds only what `bwrap` needs | The owner is asked in a new decision record, which amends 0006 once approved. Only then does M1-04 start bots in their own namespaces. M0-12 ships the profile and any AppArmor change, in place of M4-10. |
 | Codex's sandbox starts, but isolation fails for some CLI | 0006 stands. The profile serves Codex only, and the finding names the CLI that fails. |
-| Codex's sandbox fails inside an agent's namespace | The finding says whether the namespace can stand in for Codex's sandbox. A change to decision 0035 becomes a decision record. |
+| Codex's sandbox fails inside a bot's namespace | The finding says whether the namespace can stand in for Codex's sandbox. A change to decision 0035 becomes a decision record. |
 | The profile needs more than the namespace and mount calls | Stop. The owner decides whether decision 0035's profile stands. |
 | AppArmor blocks it, and only a host-wide change fixes it | Stop. The owner decides whether the install guide makes that change. |
 | It breaks a "ready for option 2" rule | The finding proposes a runner design that keeps the rule, or the owner decides. |
@@ -221,7 +221,7 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-16, docs site.** Starlight in the `docs` workspace, built in CI with a link check (for example the `starlight-links-validator` plugin). It moves this plan, the imported [plan](../aphelion-plan.md) and the decision records into the site, adds the decision-record template in the same format as those records, and writes up the plan's remaining decisions, numbered after the records that already exist. It updates the plan text that decisions 0006 to 0009 amend. It also adds the M1-00 to M9-00 rows to the plan's Issue breakdown ([decision 0001](../../decisions/0001-planning-issue-per-milestone.md)).
 
-**M0-06, config directory.** One versioned directory for agents, policy, routines and connectors, which can be a git repo. Each file carries a `version` field, and a migration moves it forward. Agents can never write to it; its location and owner depend on [Q6](#q6-where-the-config-directory-lives). **DR:** the schema library, which needs to export JSON Schema so the docs and editors can use it.
+**M0-06, config directory.** One versioned directory for bots, policy, routines and connectors, which can be a git repo. Each file carries a `version` field, and a migration moves it forward. Bots can never write to it; its location and owner depend on [Q6](#q6-where-the-config-directory-lives). **DR:** the schema library, which needs to export JSON Schema so the docs and editors can use it.
 
 **M0-07, SQLite store.** WAL mode, forward-only numbered migrations, and a migration test in CI. The database file is owned by the harness user with mode 0600. **DR:** the driver: `bun:sqlite` inside the store adapter, or a portable driver. Either way it sits behind the store interface ([decision 0007](../../decisions/0007-bun-runtime.md)).
 
@@ -237,8 +237,8 @@ These are starting points for each issue's PR, not final designs. Where an issue
 
 **M0-12, container image, Compose file and host unit.** Rewritten by [decision 0016](../../decisions/0016-one-docker-container.md). The image is built on Ubuntu LTS and contains:
 
-- the users `harness`, `aphelion-agent`, `aphelion-secrets` and `aphelion-plugins` ([decision 0018](../../decisions/0018-shared-plugin-user.md)), with fixed UIDs and no sudo;
-- the server binary, the broker, the agent runner and the plugin runner;
+- the users `harness`, `aphelion-bot`, `aphelion-secrets` and `aphelion-plugins` ([decision 0018](../../decisions/0018-shared-plugin-user.md)), with fixed UIDs and no sudo;
+- the server binary, the broker, the bot runner and the plugin runner;
 - pinned versions of the Claude Code and Grok Build CLIs, and git;
 - the managed CLI settings and hooks, owned by root on a read-only root filesystem.
 
@@ -248,7 +248,7 @@ A minimal init starts the four processes as their users. A fifth volume holds `/
 
 **M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), and a local store encrypted with the `age-encryption` package. The broker runs inside the container as `aphelion-secrets`, behind a Unix socket that only `harness` can open ([decisions 0012 and 0016](../../decisions/0016-one-docker-container.md)). The bootstrap secret comes from the host's `LoadCredentialEncrypted=` as a Compose secret readable only by `aphelion-secrets`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file.
 
-**M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. It works like Grok Bot's 1Password integration: per-item approval, 30-day grants, revocation, and values never shown to agents ([decision 0020](../../decisions/0020-1password-grok-bot-style.md)). The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
+**M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. It works like Grok Bot's 1Password integration: per-item approval, 30-day grants, revocation, and values never shown to bots ([decision 0020](../../decisions/0020-1password-grok-bot-style.md)). The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
 
 ## Keeping it extensible
 
@@ -259,7 +259,7 @@ The isolation in this milestone (users, runners, the container) must not leak in
 3. **First-party features are plugins on the same public API.** The 1Password backend ([M0-15]) is the first, built from the starter template. If it needs something the SDK doesn't offer, the SDK gets it; there's no private back door. M1's Claude adapter is the second.
 4. **One manifest declares everything.** What a plugin contributes and what it needs (events, secrets, network hosts, UI slots, screens) lives in its manifest. The host reads permissions from there, and there's no other registration step.
 5. **Versioned from day one.** The plugin API follows semver, each plugin declares the API range it supports, the reference is generated from the types ([M0-13d]), and a breaking change gets `risk/breaking` and a migration note.
-6. **Named extension points.** Each kind of plugin (agent adapter, connector, secret backend, notifier, trigger, reviewer, usage collector) gets one interface in `plugin-sdk` when its milestone starts; M0 defines the secret backend interface. Inside the server, the swappable edges (store, process spawner, HTTP server) sit behind interfaces too ([decision 0007](../../decisions/0007-bun-runtime.md)). Only the server and the CLI use the Effect library, and plugin authors never need it ([decision 0041](../../decisions/0041-effect-in-server-and-cli.md)).
+6. **Named extension points.** Each kind of plugin (bot adapter, connector, secret backend, notifier, trigger, reviewer, usage collector) gets one interface in `plugin-sdk` when its milestone starts; M0 defines the secret backend interface. Inside the server, the swappable edges (store, process spawner, HTTP server) sit behind interfaces too ([decision 0007](../../decisions/0007-bun-runtime.md)). Only the server and the CLI use the Effect library, and plugin authors never need it ([decision 0041](../../decisions/0041-effect-in-server-and-cli.md)).
 7. **A fast inner loop.** Dev mode mounts a local plugin folder into the container and reloads it on change ([M0-13e]).
 8. **A server part, a client part, or both.** The manifest declares each part a plugin has. A client part is installed on the server, served to every client, always sandboxed and has no network access. No plugin sees a secret's value: it asks the host to use the secret for it ([decision 0042](../../decisions/0042-plugin-server-and-client-parts.md)).
 
@@ -287,15 +287,15 @@ M0-12 is a candidate for a split once M0-03 lands: (a) the image and the init, (
 | --- | --- | --- |
 | A spike finds that a subscription path doesn't work, or that the terms don't allow it | M1, M4 and M7 change shape | Spikes run first; a "no" or an unclear answer stops for the owner. |
 | The bot account has the Write role before branch protection exists | It could push to `dev` or `main` directly | M0-05 (b) goes first in wave 3 ([decision 0005](../../decisions/0005-bot-account-authors-prs.md)). |
-| All agents share one Unix user | A prompt-injected agent can read or damage other agents' workspaces | Accepted by design ([decision 0006](../../decisions/0006-shared-agent-user.md)). Snapshots, backups and git are the recovery path, and the threat model says so. |
+| All bots share one Unix user | A prompt-injected bot can read or damage other bots' workspaces | Accepted by design ([decision 0006](../../decisions/0006-shared-bot-user.md)). Snapshots, backups and git are the recovery path, and the threat model says so. |
 | Three users in one container can't hold the hardening (read-only root, minimal capabilities) | M0-12 and M1-04 change shape | M0-03 tests the init and the hardening before M0-04 starts. |
 | An SDK the project needs doesn't work on Bun | Parts of M0, M1 and M3 can't run as planned | M0-03 tests each one before M0-04 commits to Bun; a failure goes to the owner ([decision 0007](../../decisions/0007-bun-runtime.md)). |
 | M0-16 moves docs into the Starlight content folder | The plan links in every issue body break | M0-16 keeps `docs/plan/aphelion-plan.md` resolving, or updates the issue bodies in the same PR. |
 | Docker's daemon runs as root, so a container escape reaches the host | Weaker than rootless Podman would be | Hardened Compose file, no Docker socket mount, no one in the `docker` group, the plan's LAN firewall on the hypervisor ([decision 0016](../../decisions/0016-one-docker-container.md)). |
 | The exit test needs a real VM, a reboot and Tailscale | CI can't prove the exit criterion | CI covers the parts it can; the rest is the scripted manual run below. |
 | The spikes need real Claude Pro or Max, SuperGrok and ChatGPT logins on a VM | Wave 1 can't start without them | Listed under [What I need from you](#what-i-need-from-you). |
-| Codex asks only for what its sandbox blocks, or OpenAI's terms don't cover a self-hosted harness | M4-10 changes shape, or Codex stays out | M0-17 answers both before M4-10 starts; a "no" or an unclear answer stops for the owner ([decision 0024](../../decisions/0024-codex-third-agent-cli.md)). |
-| A custom seccomp profile would expose more kernel code to every process in the container | A kernel bug becomes reachable from a prompt-injected agent | Not taken. The owner kept Docker's default profile and ran Codex without its own sandbox ([decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md)). Codex is held by the hardened container, shared bots, `untrusted` approvals with escalations to the owner, the fail-closed hook, the proxy and the host firewall. |
+| Codex asks only for what its sandbox blocks, or OpenAI's terms don't cover a self-hosted harness | M4-10 changes shape, or Codex stays out | M0-17 answers both before M4-10 starts; a "no" or an unclear answer stops for the owner ([decision 0024](../../decisions/0024-codex-third-bot-cli.md)). |
+| A custom seccomp profile would expose more kernel code to every process in the container | A kernel bug becomes reachable from a prompt-injected bot | Not taken. The owner kept Docker's default profile and ran Codex without its own sandbox ([decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md)). Codex is held by the hardened container, shared bots, `untrusted` approvals with escalations to the owner, the fail-closed hook, the proxy and the host firewall. |
 | Seven security-sensitive issues in one milestone | Heavy review load | The splits above keep each of those PRs small. |
 
 ## Open questions
@@ -308,7 +308,7 @@ All eight are settled; each answer links to its decision record.
 
 ### Q2. How the harness starts processes as other Unix users
 
-**Answered in [decision 0006](../../decisions/0006-shared-agent-user.md):** all agents share one `aphelion-agent` user and can read and write each other's workspaces, while the harness, config and approval layer stay out of their reach. An agent runner inside the container starts agents on the server's request, so the server never needs root ([decision 0016](../../decisions/0016-one-docker-container.md)). Manager agents change other agents' definitions only through built-in tools that go through approvals.
+**Answered in [decision 0006](../../decisions/0006-shared-bot-user.md):** all bots share one `aphelion-bot` user and can read and write each other's workspaces, while the harness, config and approval layer stay out of their reach. A bot runner inside the container starts bots on the server's request, so the server never needs root ([decision 0016](../../decisions/0016-one-docker-container.md)). Manager bots change other bots' definitions only through built-in tools that go through approvals.
 
 ### Q3. Which Linux distros v1 supports
 
@@ -324,19 +324,19 @@ All eight are settled; each answer links to its decision record.
 
 ### Q6. Where the config directory lives
 
-**Answered in [decision 0014](../../decisions/0014-filesystem-layout.md):** config in `/etc/aphelion/`, state in `/var/lib/aphelion/`, agent folders in `/var/lib/aphelion-agents/`, and the broker's store in `/var/lib/aphelion-secrets/`, each with fixed owners and modes that `config check` enforces.
+**Answered in [decision 0014](../../decisions/0014-filesystem-layout.md):** config in `/etc/aphelion/`, state in `/var/lib/aphelion/`, bot folders in `/var/lib/aphelion-bots/`, and the broker's store in `/var/lib/aphelion-secrets/`, each with fixed owners and modes that `config check` enforces.
 
 ### Q7. A live 1Password test in CI
 
 **Answered in [decision 0015](../../decisions/0015-1password-ci-mock.md):** a mocked SDK in CI; a live run by hand with its output in the PR, repeated on every SDK version bump.
 
-### Q8. How agent users are added after install
+### Q8. How bot users are added after install
 
-**Obsolete:** with one shared agent user ([decision 0006](../../decisions/0006-shared-agent-user.md)), a new agent needs no new Unix user.
+**Obsolete:** with one shared bot user ([decision 0006](../../decisions/0006-shared-bot-user.md)), a new bot needs no new Unix user.
 
 ### Q9. Which user server plugins run as inside the container
 
-**Answered in [decision 0018](../../decisions/0018-shared-plugin-user.md):** one shared `aphelion-plugins` user, with a plugin runner that accepts requests only from `harness`. Each plugin gets its own data folder, and the host's permission grants limit what each plugin can reach. The image has four users in total, however many agents or plugins are added.
+**Answered in [decision 0018](../../decisions/0018-shared-plugin-user.md):** one shared `aphelion-plugins` user, with a plugin runner that accepts requests only from `harness`. Each plugin gets its own data folder, and the host's permission grants limit what each plugin can reach. The image has four users in total, however many bots or plugins are added.
 
 ## What I need from you
 
@@ -353,7 +353,7 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 2. Check that `systemctl is-enabled aphelion` reports `enabled`, then reboot.
 3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`. The same request to the host's LAN address fails.
 4. A WebSocket opened without a token is closed; one opened with a token from `aphelion device add` is accepted.
-5. Inside the container: none of the four users has sudo. `aphelion-plugins` can't read `/etc/aphelion/`, `/var/lib/aphelion/`, `/var/lib/aphelion-secrets/` or the agent folders. `aphelion-agent` can't read `/etc/aphelion/`, `/var/lib/aphelion/` or `/var/lib/aphelion-secrets/`, can't write the managed hooks, and can't connect to the broker's socket or start agents through the runner.
+5. Inside the container: none of the four users has sudo. `aphelion-plugins` can't read `/etc/aphelion/`, `/var/lib/aphelion/`, `/var/lib/aphelion-secrets/` or the bot folders. `aphelion-bot` can't read `/etc/aphelion/`, `/var/lib/aphelion/` or `/var/lib/aphelion-secrets/`, can't write the managed hooks, and can't connect to the broker's socket or start bots through the runner.
 6. `docker inspect` shows a read-only root filesystem, `no-new-privileges`, only the expected capabilities, and no Docker socket mount.
 7. The output of each step goes into the retro note.
 
@@ -371,7 +371,7 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 | Plugin API reference (generated) | M0-13d |
 | Plugin guide: "Write your first server plugin" | M0-13e |
 | Install guide for the headless server (Docker, Compose, `aphelion.service`) | M0-12 |
-| Security and threat model (first draft: users, shared agent workspaces, secrets, bind address) | M0-12, M0-14 |
+| Security and threat model (first draft: users, shared bot workspaces, secrets, bind address) | M0-12, M0-14 |
 | Architecture overview, kept current | Every PR that changes it |
 | Changelog | The M0 release PR |
 

@@ -1,12 +1,12 @@
 # Config reference
 
-The server reads its config from `/etc/aphelion/` ([decision 0014](../decisions/0014-filesystem-layout.md)). Code that runs in development passes another directory to `loadConfig`. Agents can't read or write this directory. They change agent entries only through the agent management tools ([decision 0010](../decisions/0010-agent-folders.md)).
+The server reads its config from `/etc/aphelion/` ([decision 0014](../decisions/0014-filesystem-layout.md)). Code that runs in development passes another directory to `loadConfig`. Bots can't read or write this directory. They change bot entries only through the bot management tools ([decision 0010](../decisions/0010-bot-folders.md)).
 
 ## Layout
 
 ```
 /etc/aphelion/          owner harness, mode 0750 or tighter
-  agents.yaml           what each agent is allowed to do
+  bots.yaml           what each bot is allowed to do
   policy.yaml           approval rules (no fields yet, M2-01)
   routines.yaml         routines (no fields yet, M6-02)
   connectors.yaml       connector settings (no fields yet, M3)
@@ -35,7 +35,7 @@ Every file is at version 1, and no migrations exist yet.
 
 ## Owners and modes
 
-`checkConfigPermissions` refuses a config directory that agents could read or write. `aphelion config check` calls it (M0-11).
+`checkConfigPermissions` refuses a config directory that bots could read or write. `aphelion config check` calls it (M0-11).
 
 | Path | Must be | Owner and group | Mode no looser than |
 | --- | --- | --- | --- |
@@ -49,25 +49,25 @@ The files may be `0644`, the mode git checks files out with, because only the se
 Each error names the file, then the line and column where the parser found it, then the field. The line and column are left out when the file has no such position, for example when a field is missing from the top level.
 
 ```
-/etc/aphelion/agents.yaml:5:12: agents[0].model: Invalid input: expected string, received number
+/etc/aphelion/bots.yaml:5:12: bots[0].model: Invalid input: expected string, received number
 ```
 
 | Cause | Example message |
 | --- | --- |
-| YAML syntax | `agents.yaml:4:1: Sequence item without - indicator` |
-| A key twice in one mapping | `agents.yaml:2:1: Map keys must be unique` |
-| Aliases that expand without limit | `agents.yaml: Excessive alias count indicates a resource exhaustion attack` |
-| A missing file | ``agents.yaml: is missing. Create it with the line `version: 1`.`` |
-| An empty file | `agents.yaml: must be a YAML mapping with a version field` |
-| No `version` | `agents.yaml: version: is required` |
-| A version newer than the server reads | `agents.yaml:1:10: version: must be a whole number from 1 to 1, the newest version this Aphelion reads` |
-| A missing field | `agents.yaml:3:5: agents[0].model: is required` |
-| An unknown field | `agents.yaml:9:12: agents[0].modle: unknown field` |
-| A name that can't be a folder name | `agents.yaml:3:11: agents[0].name: must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter` |
+| YAML syntax | `bots.yaml:4:1: Sequence item without - indicator` |
+| A key twice in one mapping | `bots.yaml:2:1: Map keys must be unique` |
+| Aliases that expand without limit | `bots.yaml: Excessive alias count indicates a resource exhaustion attack` |
+| A missing file | ``bots.yaml: is missing. Create it with the line `version: 1`.`` |
+| An empty file | `bots.yaml: must be a YAML mapping with a version field` |
+| No `version` | `bots.yaml: version: is required` |
+| A version newer than the server reads | `bots.yaml:1:10: version: must be a whole number from 1 to 1, the newest version this Aphelion reads` |
+| A missing field | `bots.yaml:3:5: bots[0].model: is required` |
+| An unknown field | `bots.yaml:9:12: bots[0].modle: unknown field` |
+| A name that can't be a folder name | `bots.yaml:3:11: bots[0].name: must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter` |
 | An address that isn't an IP address | `server.yaml:2:10: address: must be an IPv4 or IPv6 address, such as 0.0.0.0` |
 | A port outside 1 to 65535 | `server.yaml:3:7: port: must be from 1 to 65535` |
-| A relative folder | `agents.yaml:8:13: agents[0].folder: must be an absolute path` |
-| Two agents with one name | `agents.yaml:9:11: agents[1].name: duplicates agents[0].name "triage"` |
+| A relative folder | `bots.yaml:8:13: bots[0].folder: must be an absolute path` |
+| Two bots with one name | `bots.yaml:9:11: bots[1].name: duplicates bots[0].name "triage"` |
 | A directory mode looser than 0750 | `/etc/aphelion: has mode 0755, which is looser than 0750` |
 | A file that group or others can write | `/etc/aphelion/policy.yaml: has mode 0664, which is looser than 0644` |
 | A config file that is a symlink | `/etc/aphelion/policy.yaml: must be a regular file, not a symlink` |
@@ -75,14 +75,14 @@ Each error names the file, then the line and column where the parser found it, t
 
 ## JSON Schema for editors
 
-Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config): [`agents.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/agents.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/server.schema.json). The schemas describe the current version. To get completion and checks in an editor that runs the YAML language server, add a first line that points at the schema:
+Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config): [`bots.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/bots.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/server.schema.json). The schemas describe the current version. To get completion and checks in an editor that runs the YAML language server, add a first line that points at the schema:
 
 ```yaml
-# yaml-language-server: $schema=../path/to/agents.schema.json
+# yaml-language-server: $schema=../path/to/bots.schema.json
 version: 1
 ```
 
-JSON Schema can't express one rule: agent names must be unique within `agents.yaml`. Only the server checks it.
+JSON Schema can't express one rule: bot names must be unique within `bots.yaml`. Only the server checks it.
 
 ## Fields
 
@@ -94,20 +94,20 @@ bun --bun vitest run -u apps/server/src/config
 
 <!-- Generated from apps/server/src/config/areas.ts. Regenerate: bun --bun vitest run -u apps/server/src/config -->
 
-### `agents.yaml`, version 1
+### `bots.yaml`, version 1
 
-What each agent is allowed to do. Instructions live in the agent's folder, not here (decision 0010).
+What each bot is allowed to do. Instructions live in the bot's folder, not here (decision 0010).
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `version` | `1` | yes | The file's format version. Aphelion migrates older ones. |
-| `agents` | list of objects | yes | One entry per agent. Names must be unique. |
-| `agents[].name` | string | yes | Unique agent name. Also the name of the agent's folder (decision 0010). |
-| `agents[].provider` | string | yes | The agent CLI that runs the agent. |
-| `agents[].model` | string | yes | The model the provider runs. |
-| `agents[].connectors` | list of strings | yes | Ids of the connectors the agent may use. Can be empty. |
-| `agents[].policyProfile` | string | yes | The approval profile the agent's actions pass. |
-| `agents[].folder` | string | yes | Absolute path of the agent's folder. Normally the agent's name under /var/lib/aphelion-agents. |
+| `bots` | list of objects | yes | One entry per bot. Names must be unique. |
+| `bots[].name` | string | yes | Unique bot name. Also the name of the bot's folder (decision 0010). |
+| `bots[].provider` | string | yes | The bot CLI that runs the bot. |
+| `bots[].model` | string | yes | The model the provider runs. |
+| `bots[].connectors` | list of strings | yes | Ids of the connectors the bot may use. Can be empty. |
+| `bots[].policyProfile` | string | yes | The approval profile the bot's actions pass. |
+| `bots[].folder` | string | yes | Absolute path of the bot's folder. Normally the bot's name under /var/lib/aphelion-bots. |
 
 ### `policy.yaml`, version 1
 

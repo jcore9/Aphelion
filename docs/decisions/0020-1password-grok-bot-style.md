@@ -25,7 +25,7 @@ That product doesn't fit Aphelion v1:
 
 ## Options
 
-1. Build the same experience on 1Password's generally available service accounts: per-item approval, 30-day expiry, revocation, and values never shown to agents.
+1. Build the same experience on 1Password's generally available service accounts: per-item approval, 30-day expiry, revocation, and values never shown to bots.
 2. Wait for 1Password for Agents partner access.
 3. Keep M0-15 as planned: a service account plus one approval per connector the first time.
 
@@ -33,17 +33,17 @@ That product doesn't fit Aphelion v1:
 
 Option 1.
 
-**Connecting.** A read-only 1Password service account, limited to one vault (for example "AI Agents"), is the broker's bootstrap secret ([0016](0016-one-docker-container.md), M0-14c). Its token is entered on the host and never passes through chat, an agent or the server's database.
+**Connecting.** A read-only 1Password service account, limited to one vault (for example "AI Agents"), is the broker's bootstrap secret ([0016](0016-one-docker-container.md), M0-14c). Its token is entered on the host and never passes through chat, a bot or the server's database.
 
-**Asking.** The first time a consumer needs an item, the broker refuses the read and the server raises an approval. A consumer is a connector, plugin or custom MCP server acting for a named agent. The approval names:
+**Asking.** The first time a consumer needs an item, the broker refuses the read and the server raises an approval. A consumer is a connector, plugin or custom MCP server acting for a named bot. The approval names:
 
-- the agent the request is for, and the connector or plugin asking;
+- the bot the request is for, and the connector or plugin asking;
 - the item, by its 1Password title and vault, never its value;
 - the tool call or action that needs it.
 
-**Granting.** The owner picks **Allow for 30 days** (the default, matching Grok Bot), **Allow once**, or **Deny**. A grant covers one consumer, one agent and one item, so a new agent or a new item asks again.
+**Granting.** The owner picks **Allow for 30 days** (the default, matching Grok Bot), **Allow once**, or **Deny**. A grant covers one consumer, one bot and one item, so a new bot or a new item asks again.
 
-**Using.** The broker resolves the value inside its own process and injects it into the consumer's request, environment or headers. Agents never receive it ([0012](0012-secrets-broker-process.md)).
+**Using.** The broker resolves the value inside its own process and injects it into the consumer's request, environment or headers. Bots never receive it ([0012](0012-secrets-broker-process.md)).
 
 **Revoking.** The owner can list grants, revoke any one, or disconnect 1Password. Disconnecting deletes the service-account token and every grant. Grants expire on their own after 30 days. Every grant, use, expiry and revocation goes to the audit log.
 
@@ -51,7 +51,7 @@ Option 1.
 
 ## Consequences
 
-- The plan's "approve once or always per connector" becomes per item, per consumer and per agent, with a 30-day default. That's more prompts at first and none for 30 days after.
+- The plan's "approve once or always per connector" becomes per item, per consumer and per bot, with a 30-day default. That's more prompts at first and none for 30 days after.
 - In M0 there are no approval cards yet. M0-15 builds the grant model, refuses anything ungranted, and takes grant decisions through the CLI. M2-06 turns them into `approval.requested` events, and the M5 Connections page lists and revokes them.
-- The service account can read everything in its one vault, so the owner keeps only what agents may use in that vault. The install guide says so.
+- The service account can read everything in its one vault, so the owner keeps only what bots may use in that vault. The install guide says so.
 - If 1Password opens a general agent-credential API, this record is revisited.
