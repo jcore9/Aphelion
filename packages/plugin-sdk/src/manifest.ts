@@ -20,7 +20,7 @@ const versionError = "must be a semver version, such as 1.0.0";
 
 const version = text(256)
   .regex(
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$/,
+    /^(0|[1-9]\d{0,14})\.(0|[1-9]\d{0,14})\.(0|[1-9]\d{0,14})(-(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$/,
     { error: versionError, abort: true },
   )
   .refine((value) => valid(value) !== null, { error: versionError });
@@ -46,7 +46,7 @@ const dottedName = text(128).regex(
 );
 
 const secretReference = text(1024).regex(
-  /^[a-z][a-z0-9+.-]*:\/\/[ -~\u00a0-\uffff]+$/,
+  /^[a-z][a-z0-9+.-]*:\/\/[\p{L}\p{M}\p{N}\p{P}\p{S} ]+$/u,
   {
     error: "must be a secret reference, such as op://vault/item/field",
   },

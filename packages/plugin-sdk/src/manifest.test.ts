@@ -66,6 +66,7 @@ const versionCases = {
     "1.0.0-0",
     "1.0.0-0a.1",
     "1.0.0-rc.1+001",
+    "999999999999999.0.0",
   ],
   refused: [
     "1.0",
@@ -76,7 +77,34 @@ const versionCases = {
     "1.0.0-rc.01",
     "1.0.0-",
     "1.0.0+",
+    "9007199254740992.0.0",
+    "1000000000000000.0.0",
+    "0.9007199254740992.0",
   ],
+};
+
+const secretCases = {
+  accepted: [
+    "op://AI Agents/Wetter Zürich/credential",
+    "bws://3f2a/api-key",
+    "op://vault/\u{1F511} key/field",
+    "op://vault/cafe\u0301/field",
+  ],
+  refused: [
+    ["Cc", "op://vault/item\nfield"],
+    ["Cc", "op://vault/item\u0000"],
+    ["Cc", "op://vault/item\u007f"],
+    ["Cc", "op://vault/item\u0085"],
+    ["Cf", "op://vault/\u202eitem"],
+    ["Cf", "op://vault/it\u200bem"],
+    ["Zl", "op://vault/item\u2028"],
+    ["Zp", "op://vault/item\u2029"],
+    ["Zs", "op://vault/item\u00a0x"],
+    ["Zs", "op://vault/item\u3000x"],
+    ["Cs", "op://vault/item\ud800"],
+    ["Co", "op://vault/item\ue000"],
+    ["Cn", "op://vault/item\uffff"],
+  ].map(([, reference]) => reference ?? ""),
 };
 
 function issuesOf(data: unknown) {
@@ -161,20 +189,31 @@ describe("parsePluginManifest", () => {
     ]);
   });
 
-  test.each([
-    ["op://AI Agents/Wetter Zürich/credential", true],
-    ["bws://3f2a/api-key", true],
-    ["op://vault/item\nfield", false],
-    ["op://vault/item\u0000", false],
-    ["op://vault/item\u007f", false],
-    ["op://vault/item\u0085", false],
-  ])("checks the secret reference %j", (reference, accepted) => {
-    const result = parsePluginManifest({
-      ...minimal,
-      permissions: { secrets: [reference] },
-    });
-    expect(result.ok).toBe(accepted);
-  });
+  test.each(secretCases.accepted)(
+    "accepts the secret reference %j",
+    (reference) => {
+      expect(
+        parsePluginManifest({
+          ...minimal,
+          permissions: { secrets: [reference] },
+        }).ok,
+      ).toBe(true);
+    },
+  );
+
+  test.each(secretCases.refused)(
+    "refuses the secret reference %j",
+    (reference) => {
+      expect(
+        issuesOf({ ...minimal, permissions: { secrets: [reference] } }),
+      ).toEqual([
+        {
+          field: "permissions.secrets[0]",
+          message: "must be a secret reference, such as op://vault/item/field",
+        },
+      ]);
+    },
+  );
 
   test("refuses a manifest that is not an object", () => {
     expect(issuesOf([])).toEqual([{ message: "must be an object" }]);
@@ -309,16 +348,32 @@ function jsonSchema() {
   });
 }
 
+type JsonSchema = {
+  pattern?: string;
+  properties?: Record<string, JsonSchema>;
+  items?: JsonSchema;
+};
+
 test.each([
-  ["entry", entryCases],
-  ["version", versionCases],
+  ["entry", entryCases, (schema: JsonSchema) => schema.properties?.["entry"]],
+  [
+    "version",
+    versionCases,
+    (schema: JsonSchema) => schema.properties?.["version"],
+  ],
+  [
+    "permissions.secrets",
+    secretCases,
+    (schema: JsonSchema) =>
+      schema.properties?.["permissions"]?.properties?.["secrets"]?.items,
+  ],
 ] as const)(
   "the JSON Schema pattern for %s agrees with the parser",
-  (field, cases) => {
-    const property = (jsonSchema().properties?.[field] ?? {}) as {
-      pattern?: string;
-    };
-    const pattern = new RegExp(property.pattern ?? "");
+  (_field, cases, select) => {
+    const pattern = new RegExp(
+      select(jsonSchema() as JsonSchema)?.pattern ?? "",
+      "u",
+    );
     expect(cases.accepted.filter((value) => !pattern.test(value))).toEqual([]);
     expect(cases.refused.filter((value) => pattern.test(value))).toEqual([]);
   },
