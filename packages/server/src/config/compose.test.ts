@@ -65,6 +65,43 @@ describe("accepts", () => {
     expect(check(text)).toEqual([]);
   });
 
+  test("a bridge network in NAT mode, with other driver options", () => {
+    const text = [
+      withPorts('"100.71.226.67:7400:7400"'),
+      "networks:",
+      "  default:",
+      "    driver: bridge",
+      "    driver_opts:",
+      "      com.docker.network.bridge.name: aphelion0",
+      "      com.docker.network.bridge.gateway_mode_ipv4: nat",
+      "      com.docker.network.bridge.gateway_mode_ipv6: nat",
+    ].join("\n");
+    expect(check(text)).toEqual([]);
+  });
+
+  test("JSON from docker compose config --format json, read like YAML", () => {
+    const resolved = {
+      name: "aphelion",
+      services: {
+        aphelion: {
+          image: "aphelion",
+          ports: [
+            {
+              mode: "ingress",
+              host_ip: "100.71.226.67",
+              target: 7400,
+              published: "7400",
+              protocol: "tcp",
+            },
+          ],
+        },
+      },
+      networks: { default: { name: "aphelion_default" } },
+    };
+    expect(check(JSON.stringify(resolved, null, 2))).toEqual([]);
+    expect(check(JSON.stringify(resolved))).toEqual([]);
+  });
+
   test("tailnet ports shared through a YAML merge key", () => {
     const text = [
       "x-ports: &ports",
@@ -142,6 +179,67 @@ describe("refuses", () => {
     expect(check(text)).toEqual([
       `compose.yaml:9:5: networks.outside: is the host's network, which publishes every port on every host address. ${fix}`,
       `compose.yaml:12:5: networks.other: is the host's network, which publishes every port on every host address. ${fix}`,
+    ]);
+  });
+
+  test.each([
+    ["gateway_mode_ipv4", "routed"],
+    ["gateway_mode_ipv4", "nat-unprotected"],
+    ["gateway_mode_ipv6", "routed"],
+    ["gateway_mode_ipv6", "nat-unprotected"],
+  ])("a bridge network with %s: %s", (option, mode) => {
+    const text = [
+      withPorts('"100.71.226.67:7400:7400"'),
+      "networks:",
+      "  default:",
+      "    driver_opts:",
+      `      com.docker.network.bridge.${option}: ${mode}`,
+    ].join("\n");
+    expect(check(text)).toEqual([
+      `compose.yaml:9:52: networks.default.driver_opts.com.docker.network.bridge.${option}: is "${mode}", which lets other machines reach the container directly, whatever host address its ports name. Leave it at "nat", the default.`,
+    ]);
+  });
+
+  test.each(["macvlan", "ipvlan", "overlay"])(
+    "a network with the %s driver",
+    (driver) => {
+      const text = [
+        withPorts('"100.71.226.67:7400:7400"'),
+        "networks:",
+        "  default:",
+        `    driver: ${driver}`,
+      ].join("\n");
+      expect(check(text)).toEqual([
+        "compose.yaml:8:13: networks.default.driver: is not bridge. The check vouches only for ports published through a bridge network in NAT mode.",
+      ]);
+    },
+  );
+
+  test("a network defined outside the file", () => {
+    const text = [
+      withPorts('"100.71.226.67:7400:7400"'),
+      "networks:",
+      "  default:",
+      "    external: true",
+      "    name: shared",
+    ].join("\n");
+    expect(check(text)).toEqual([
+      "compose.yaml:8:15: networks.default.external: is defined outside this file, so the check can't see its driver or options.",
+    ]);
+  });
+
+  test("the same refusals in JSON as in YAML", () => {
+    const json = JSON.stringify(
+      {
+        services: {
+          aphelion: { image: "aphelion", ports: ["0.0.0.0:7400:7400"] },
+        },
+      },
+      null,
+      2,
+    );
+    expect(check(json)).toEqual([
+      `compose.yaml:6:9: services.aphelion.ports[0]: publishes the port on 0.0.0.0, which isn't a tailnet address (100.64.0.0/10). ${fix}`,
     ]);
   });
 

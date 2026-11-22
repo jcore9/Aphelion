@@ -19,6 +19,8 @@ const composeFile = z.looseObject(
           .looseObject({
             name: z.unknown().optional(),
             driver: z.unknown().optional(),
+            external: z.unknown().optional(),
+            driver_opts: z.record(z.string(), z.unknown()).optional(),
           })
           .nullable(),
       )
@@ -44,6 +46,10 @@ const howToFix =
   'Publish it only on the host\'s tailnet address, such as "100.71.226.67:7400:7400" (decision 0022).';
 const otherContainer =
   "shares the network of a container outside this file, so the check can't see which ports it publishes.";
+const gatewayModes = [
+  "com.docker.network.bridge.gateway_mode_ipv4",
+  "com.docker.network.bridge.gateway_mode_ipv6",
+];
 const everyPort = `which publishes every port on every host address. ${howToFix}`;
 
 function hasVariable(value: unknown): boolean {
@@ -108,9 +114,34 @@ export function checkComposePorts(file: string, text: string): ConfigIssue[] {
     const path = ["networks", name];
     if (hasVariable(name) || hasVariable(network))
       return [at(path, notResolved)];
-    return network?.name === "host" || network?.driver === "host"
-      ? [at(path, `is the host's network, ${everyPort}`)]
-      : [];
+    if (network === null) return [];
+    if (network.name === "host" || network.driver === "host") {
+      return [at(path, `is the host's network, ${everyPort}`)];
+    }
+    if (network.external !== undefined && network.external !== false) {
+      return [
+        at(
+          [...path, "external"],
+          "is defined outside this file, so the check can't see its driver or options.",
+        ),
+      ];
+    }
+    if (network.driver !== undefined && network.driver !== "bridge") {
+      return [
+        at(
+          [...path, "driver"],
+          "is not bridge. The check vouches only for ports published through a bridge network in NAT mode.",
+        ),
+      ];
+    }
+    return Object.entries(network.driver_opts ?? {})
+      .filter(([key, value]) => gatewayModes.includes(key) && value !== "nat")
+      .map(([key, value]) =>
+        at(
+          [...path, "driver_opts", key],
+          `is ${JSON.stringify(value)}, which lets other machines reach the container directly, whatever host address its ports name. Leave it at "nat", the default.`,
+        ),
+      );
   });
 
   const serviceIssues = Object.entries(services).flatMap(([name, service]) => {
