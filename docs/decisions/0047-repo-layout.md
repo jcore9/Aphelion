@@ -14,7 +14,7 @@ Some words used below:
 - An **app** is a program someone runs: the server, the desktop app or the phone app.
 - A **package** is code that apps share, such as the message formats.
 
-Until now every workspace sat in `packages/`: `server`, `cli`, `client`, `protocol` and `plugin-sdk`. On 2026-11-22 the owner said they see Aphelion as separate apps and chose this layout:
+Until now every code workspace sat in `packages/`: `server`, `cli`, `client`, `protocol` and `plugin-sdk`. The docs site is a workspace too, in `docs/`, and it stays there. On 2026-11-22 the owner said they see Aphelion as separate apps and chose this layout:
 
 ```
 apps/
