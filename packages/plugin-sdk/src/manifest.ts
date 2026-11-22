@@ -1,7 +1,7 @@
 import { satisfies, valid, validRange } from "semver";
 import { z } from "zod";
 
-export const pluginApiVersion = "0.2.0";
+export const pluginApiVersion = "0.2.1";
 
 export const pluginManifestFile = "aphelion-plugin.json";
 
@@ -61,6 +61,42 @@ const scheme = text(32).regex(/^[a-z][a-z0-9+.-]*$/, {
   error: "must be a reference scheme without ://, such as op",
 });
 
+const visible = "\\p{L}\\p{N}\\p{P}\\p{S}";
+const visibleOrMark = `${visible}\\p{M}`;
+
+const title = text(64).regex(
+  new RegExp(
+    `^\\p{M}*[${visible}]([${visibleOrMark} ]*[${visibleOrMark}])?$`,
+    "u",
+  ),
+  {
+    error:
+      "must be visible text that doesn't start or end with a space, such as Issues and PRs",
+  },
+);
+
+const iconName = text(64).regex(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/, {
+  error: "must be an icon name, such as git-pull-request",
+});
+
+const menuOrderRange = "must be from 0 to 999";
+
+const screen = z.strictObject({
+  id: id.describe("The screen's id, unique within the plugin."),
+  title: title.describe("The screen's name in the app's menu."),
+  icon: iconName
+    .optional()
+    .describe("The icon next to the title, from the app's icon set."),
+  menuOrder: z
+    .int()
+    .min(0, { error: menuOrderRange })
+    .max(999, { error: menuOrderRange })
+    .optional()
+    .describe(
+      "Where the screen goes in the menu. Lower numbers come first, and screens without one come last.",
+    ),
+});
+
 const list = <Item extends z.ZodType>(item: Item, description: string) =>
   z.array(item).default([]).describe(description);
 
@@ -81,6 +117,10 @@ const contributions = {
   secretSchemes: list(
     scheme,
     "Secret reference schemes the plugin resolves as a secret backend. The values it returns go only to the secrets broker.",
+  ),
+  screens: list(
+    screen,
+    "Full pages the plugin's client part draws, each with an entry in the app's menu. They appear when the plugin is installed, with no grant.",
   ),
 };
 
@@ -103,6 +143,7 @@ const sidesFor = {
   },
   contributes: {
     secretSchemes: ["server"],
+    screens: ["client"],
   },
 } as const satisfies {
   permissions: Record<PermissionKind, Sides>;
@@ -173,7 +214,7 @@ export const pluginManifestSchema = z
       return;
     }
     for (const { group, kind, side } of oneSideRules) {
-      const lists: Record<string, string[]> = manifest[group];
+      const lists: Record<string, readonly unknown[]> = manifest[group];
       if (lists[kind]?.length && !present.includes(side)) {
         context.issues.push({
           code: "custom",
@@ -183,6 +224,18 @@ export const pluginManifestSchema = z
         });
       }
     }
+    const seen = new Set<string>();
+    manifest.contributes.screens.forEach((screen, index) => {
+      if (seen.has(screen.id)) {
+        context.issues.push({
+          code: "custom",
+          path: ["contributes", "screens", index, "id"],
+          message: "must be unique within the plugin",
+          input: screen.id,
+        });
+      }
+      seen.add(screen.id);
+    });
   })
   .meta({
     title: pluginManifestFile,
@@ -204,31 +257,40 @@ export const pluginManifestSchema = z
 
 type PluginPart = { readonly entry: string };
 
+type ParsedManifest = z.output<typeof pluginManifestSchema>;
+
+type ItemOf<Lists, Kind> = Kind extends keyof Lists
+  ? Lists[Kind] extends readonly (infer Item)[]
+    ? Item
+    : never
+  : never;
+
 type ListsFor<
-  Kinds extends Record<string, Sides>,
+  Group extends keyof typeof sidesFor,
   Present extends PluginSide,
 > = {
-  readonly [Kind in keyof Kinds]: [
-    Extract<Kinds[Kind][number], Present>,
+  readonly [Kind in keyof (typeof sidesFor)[Group]]: [
+    Extract<((typeof sidesFor)[Group][Kind] & Sides)[number], Present>,
   ] extends [never]
     ? readonly never[]
-    : readonly string[];
+    : readonly Readonly<ItemOf<ParsedManifest[Group], Kind>>[];
 };
 
 type ManifestWith<Present extends PluginSide> = Readonly<
-  Omit<
-    z.output<typeof pluginManifestSchema>,
-    PluginSide | "permissions" | "contributes"
-  > & { [Side in Present]: PluginPart } & {
+  Omit<ParsedManifest, PluginSide | "permissions" | "contributes"> & {
+    [Side in Present]: PluginPart;
+  } & {
     [Side in Exclude<PluginSide, Present>]?: never;
   } & {
-    permissions: ListsFor<(typeof sidesFor)["permissions"], Present>;
-    contributes: ListsFor<(typeof sidesFor)["contributes"], Present>;
+    permissions: ListsFor<"permissions", Present>;
+    contributes: ListsFor<"contributes", Present>;
   }
 >;
 
 export type PluginManifest =
   ManifestWith<"server"> | ManifestWith<"client"> | ManifestWith<PluginSide>;
+
+export type PluginScreen = PluginManifest["contributes"]["screens"][number];
 
 export type ManifestIssue = { field?: string; message: string };
 
@@ -268,7 +330,8 @@ function reason(data: unknown, problem: z.core.$ZodIssue): string {
     case "invalid_format":
       return problem.message;
     case "too_big":
-      return `must be at most ${String(problem.maximum)} characters`;
+    case "too_small":
+      return problem.message;
     case "unrecognized_keys":
       return "has an unknown field";
     case "invalid_type":

@@ -5,6 +5,7 @@
 - Decided by: project owner
 - Proposed by: the M0-13a follow-up PR ([#135](https://github.com/jcore9/Aphelion/issues/135))
 - Answers: [#135](https://github.com/jcore9/Aphelion/issues/135), the plan's open decision "UI plugin isolation", and the design gap the security review of [#136](https://github.com/jcore9/Aphelion/pull/136) found
+- Amended by: [its own amendment](#amendment-plugin-screens) from [#138](https://github.com/jcore9/Aphelion/issues/138) (plugins can add screens, with no grant)
 - Amends: [0038](0038-plugin-manifest-and-api-range.md) (the single `entry` field, and the plugin API version), [0020](0020-1password-grok-bot-style.md) (how a plugin uses a secret), the plan's [Plugin types](../plan/aphelion-plan.md#plugins-and-themes) table and its "UI plugin isolation" default
 
 ## Context
@@ -134,3 +135,16 @@ A check that a served file is inside the plugin's folder doesn't prove that its 
 - The install flow ([#65](https://github.com/jcore9/Aphelion/issues/65), M5-13) installs and grants a plugin once, on the server, and hashes the client part's files at install time. Clients install nothing.
 - The phone app needs a WebView that speaks the same message API as the iframe and blocks network access the same way, so a client part runs there unchanged. [Decision 0032](0032-native-app-stack-deferred.md) leaves the phone app's stack to M9, and that choice must support this.
 - Revisit per-part permission lists when a plugin with both parts needs chat content on the server and only status on the client.
+
+## Amendment: plugin screens
+
+- Date: 2026-11-22
+- Decided by: project owner
+- Answers: [#138](https://github.com/jcore9/Aphelion/issues/138)
+
+The owner decided two more things:
+
+1. **A plugin can add whole screens.** A screen is a full page with an entry in the app's menu, in the web app, the desktop app and the phone app. The plugin's client part draws it, in the sandbox this record describes. The owner's example is a GitHub plugin with a screen of your issues and pull requests, whose data its server part fetches.
+2. **A screen appears when its plugin is installed, with no separate approval**, unlike a UI slot. A screen can only show what its plugin can already reach, and that still goes through the plugin's granted permissions: its server part, its network hosts and its secret operations. The owner can turn a screen off later.
+
+The [manifest reference](../reference/plugin-manifest.md#screens) describes the `contributes.screens` field.

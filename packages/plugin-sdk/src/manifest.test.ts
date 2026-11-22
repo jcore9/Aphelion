@@ -29,6 +29,10 @@ const full = {
   },
   contributes: {
     secretSchemes: ["op"],
+    screens: [
+      { id: "forecast", title: "Forecast", icon: "cloud-sun", menuOrder: 10 },
+      { id: "alerts", title: "Alerts" },
+    ],
   },
 };
 
@@ -112,6 +116,39 @@ const secretCases = {
   ].map(([, reference]) => reference ?? ""),
 };
 
+const titleCases = {
+  accepted: [
+    "Issues and PRs",
+    "Wetter Zürich",
+    "\u{1F4CB} Board",
+    "A",
+    "Café",
+    "cafe\u0301",
+  ],
+  refused: [
+    "",
+    " ",
+    " Issues",
+    "Issues ",
+    "Issues\nand PRs",
+    "Issues\tPRs",
+    "Iss\u200bues",
+    "\u202eIssues",
+    "Issues\u00a0PRs",
+    "Issues\u2028",
+    "\u034f",
+    "\ufe0f",
+    "\u0301\u0301",
+    "\u034f \u034f",
+    "\ufe0f ",
+  ],
+};
+
+const iconCases = {
+  accepted: ["git-pull-request", "cloud", "h1", "arrow-2"],
+  refused: ["Git", "git_pull", "-git", "git-", "git--pr", "1git", "", "git pr"],
+};
+
 function issuesOf(data: unknown) {
   const result = parsePluginManifest(data);
   if (result.ok) throw new Error("expected the manifest to be refused");
@@ -125,7 +162,7 @@ describe("parsePluginManifest", () => {
       manifest: {
         ...minimal,
         permissions: { events: [], secrets: [], network: [], uiSlots: [] },
-        contributes: { secretSchemes: [] },
+        contributes: { secretSchemes: [], screens: [] },
       },
     });
   });
@@ -302,6 +339,10 @@ describe("permissions and contributions by side", () => {
   ];
   const clientOnlyLists: [string, unknown][] = [
     ["permissions.uiSlots", { permissions: { uiSlots: ["agent.sidebar"] } }],
+    [
+      "contributes.screens",
+      { contributes: { screens: [{ id: "issues", title: "Issues" }] } },
+    ],
   ];
   const either = { permissions: { events: ["agent.status"] } };
 
@@ -350,6 +391,13 @@ describe("permissions and contributions by side", () => {
         contributes: { secretSchemes: [] },
       }).ok,
     ).toBe(true);
+    expect(
+      parsePluginManifest({
+        ...minimal,
+        permissions: { uiSlots: [] },
+        contributes: { screens: [] },
+      }).ok,
+    ).toBe(true);
   });
 
   test("names every list that needs a missing part", () => {
@@ -368,7 +416,10 @@ describe("permissions and contributions by side", () => {
 
   test("the manifest type has no variant without a part, or with secrets on a client part", () => {
     const lists = { events: [], secrets: [], network: [], uiSlots: [] };
-    const base = { ...identity, contributes: { secretSchemes: [] } };
+    const base = {
+      ...identity,
+      contributes: { secretSchemes: [], screens: [] },
+    };
     const valid: PluginManifest[] = [
       { ...base, server: minimal.server, permissions: lists },
       { ...base, client: clientOnly.client, permissions: lists },
@@ -381,7 +432,19 @@ describe("permissions and contributions by side", () => {
       client: clientOnly.client,
       permissions: { ...lists, secrets: ["op://v/i/f"] },
     };
-    expect([...valid, neither, secretsOnClient]).toHaveLength(4);
+    // @ts-expect-error only a client part can draw screens
+    const screensOnServer: PluginManifest = {
+      ...base,
+      server: minimal.server,
+      permissions: lists,
+      contributes: {
+        secretSchemes: [],
+        screens: [{ id: "issues", title: "Issues" }],
+      },
+    };
+    expect([...valid, neither, secretsOnClient, screensOnServer]).toHaveLength(
+      5,
+    );
   });
 
   test("a parsed manifest's lists can't be changed after the check", () => {
@@ -390,6 +453,121 @@ describe("permissions and contributions by side", () => {
     // @ts-expect-error a parsed manifest's lists are read-only
     const secrets: string[] = result.manifest.permissions.secrets;
     expect(secrets).toEqual([]);
+  });
+});
+
+describe("screens", () => {
+  const withScreens = (...screens: unknown[]) => ({
+    ...clientOnly,
+    contributes: { screens },
+  });
+  const issues = { id: "issues", title: "Issues and PRs" };
+
+  test("accepts a screen with only an id and a title", () => {
+    expect(parsePluginManifest(withScreens(issues))).toEqual({
+      ok: true,
+      manifest: {
+        ...clientOnly,
+        permissions: { events: [], secrets: [], network: [], uiSlots: [] },
+        contributes: { secretSchemes: [], screens: [issues] },
+      },
+    });
+  });
+
+  test("accepts a screen with an icon and a menu position", () => {
+    const screen = { ...issues, icon: "git-pull-request", menuOrder: 0 };
+    expect(parsePluginManifest(withScreens(screen)).ok).toBe(true);
+  });
+
+  test.each([
+    ["id", { title: "Issues" }],
+    ["title", { id: "issues" }],
+  ])("needs a screen's %s", (field, screen) => {
+    expect(issuesOf(withScreens(screen))).toEqual([
+      { field: `contributes.screens[0].${field}`, message: "is required" },
+    ]);
+  });
+
+  test("refuses an unknown field in a screen", () => {
+    expect(issuesOf(withScreens({ ...issues, url: "https://x" }))).toEqual([
+      { field: "contributes.screens[0]", message: "has an unknown field" },
+    ]);
+  });
+
+  test.each(["Issues", "1issues", "issues_prs", ""])(
+    "refuses the screen id %j",
+    (id) => {
+      expect(issuesOf(withScreens({ ...issues, id }))).toEqual([
+        {
+          field: "contributes.screens[0].id",
+          message:
+            "must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter",
+        },
+      ]);
+    },
+  );
+
+  test("refuses two screens with the same id", () => {
+    expect(
+      issuesOf(withScreens(issues, { id: "issues", title: "Other" })),
+    ).toEqual([
+      {
+        field: "contributes.screens[1].id",
+        message: "must be unique within the plugin",
+      },
+    ]);
+  });
+
+  test("accepts two screens with different ids and the same title", () => {
+    expect(
+      parsePluginManifest(withScreens(issues, { ...issues, id: "prs" })).ok,
+    ).toBe(true);
+  });
+
+  test.each(titleCases.accepted)("accepts the title %j", (title) => {
+    expect(parsePluginManifest(withScreens({ ...issues, title })).ok).toBe(
+      true,
+    );
+  });
+
+  test.each(titleCases.refused)("refuses the title %j", (title) => {
+    expect(issuesOf(withScreens({ ...issues, title }))).toEqual([
+      {
+        field: "contributes.screens[0].title",
+        message:
+          "must be visible text that doesn't start or end with a space, such as Issues and PRs",
+      },
+    ]);
+  });
+
+  test.each(iconCases.accepted)("accepts the icon %j", (icon) => {
+    expect(parsePluginManifest(withScreens({ ...issues, icon })).ok).toBe(true);
+  });
+
+  test.each(iconCases.refused)("refuses the icon %j", (icon) => {
+    expect(issuesOf(withScreens({ ...issues, icon }))).toEqual([
+      {
+        field: "contributes.screens[0].icon",
+        message: "must be an icon name, such as git-pull-request",
+      },
+    ]);
+  });
+
+  test.each([0, 500, 999])("accepts the menu position %j", (menuOrder) => {
+    expect(parsePluginManifest(withScreens({ ...issues, menuOrder })).ok).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    [-1, "must be from 0 to 999"],
+    [1000, "must be from 0 to 999"],
+    [1.5, "has the wrong type"],
+    ["1", "has the wrong type"],
+  ])("refuses the menu position %j", (menuOrder, message) => {
+    expect(issuesOf(withScreens({ ...issues, menuOrder }))).toEqual([
+      { field: "contributes.screens[0].menuOrder", message },
+    ]);
   });
 });
 
@@ -473,6 +651,22 @@ describe("length limits", () => {
       32,
       (text) => ({ ...minimal, contributes: { secretSchemes: [text] } }),
     ],
+    [
+      "contributes.screens[0].title",
+      64,
+      (text) => ({
+        ...clientOnly,
+        contributes: { screens: [{ id: "issues", title: text }] },
+      }),
+    ],
+    [
+      "contributes.screens[0].icon",
+      64,
+      (text) => ({
+        ...clientOnly,
+        contributes: { screens: [{ id: "issues", title: "I", icon: text }] },
+      }),
+    ],
   ];
 
   test.each(cases)(
@@ -494,9 +688,14 @@ function jsonSchema() {
 
 type JsonSchema = {
   pattern?: string;
+  maxLength?: number;
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
 };
+
+const screenField = (field: string) => (schema: JsonSchema) =>
+  schema.properties?.["contributes"]?.properties?.["screens"]?.items
+    ?.properties?.[field];
 
 test.each([
   [
@@ -522,6 +721,8 @@ test.each([
     (schema: JsonSchema) =>
       schema.properties?.["permissions"]?.properties?.["secrets"]?.items,
   ],
+  ["screen titles", titleCases, screenField("title")],
+  ["screen icons", iconCases, screenField("icon")],
 ] as const)(
   "the JSON Schema pattern for %s agrees with the parser",
   (_field, cases, select) => {
@@ -533,6 +734,51 @@ test.each([
     expect(cases.refused.filter((value) => pattern.test(value))).toEqual([]);
   },
 );
+
+describe("length limits count characters the way JSON Schema does", () => {
+  const emoji = (count: number) => "\u{1F4CB}".repeat(count);
+  test.each([
+    [
+      "$schema",
+      2048,
+      (schema: JsonSchema) => schema.properties?.["$schema"],
+      emoji,
+      (value: string) => ({ ...minimal, $schema: value }),
+    ],
+    [
+      "permissions.secrets[0]",
+      1024,
+      (schema: JsonSchema) =>
+        schema.properties?.["permissions"]?.properties?.["secrets"]?.items,
+      (count: number) => `op://${emoji(count - 5)}`,
+      (value: string) => ({ ...minimal, permissions: { secrets: [value] } }),
+    ],
+    [
+      "contributes.screens[0].title",
+      64,
+      screenField("title"),
+      emoji,
+      (value: string) => ({
+        ...clientOnly,
+        contributes: { screens: [{ id: "issues", title: value }] },
+      }),
+    ],
+  ] as const)(
+    "%s allows %i characters of any width",
+    (field, max, select, make, build) => {
+      const fits = make(max);
+      const tooLong = make(max + 1);
+      const schemaMax = select(jsonSchema() as JsonSchema)?.maxLength;
+      expect(schemaMax).toBe(max);
+      expect(Array.from(fits)).toHaveLength(max);
+      expect(fits.length).toBeGreaterThan(max);
+      expect(parsePluginManifest(build(fits)).ok).toBe(true);
+      expect(issuesOf(build(tooLong))).toEqual([
+        { field, message: `must be at most ${String(max)} characters` },
+      ]);
+    },
+  );
+});
 
 test("plugin-manifest.schema.json matches the schema", async () => {
   const schema = jsonSchema();

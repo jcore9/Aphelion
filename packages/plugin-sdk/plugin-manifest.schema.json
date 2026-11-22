@@ -117,6 +117,44 @@
             "maxLength": 32,
             "pattern": "^[a-z][a-z0-9+.-]*$"
           }
+        },
+        "screens": {
+          "default": [],
+          "description": "Full pages the plugin's client part draws, each with an entry in the app's menu. They appear when the plugin is installed, with no grant.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                "description": "The screen's id, unique within the plugin."
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^\\p{M}*[\\p{L}\\p{N}\\p{P}\\p{S}]([\\p{L}\\p{N}\\p{P}\\p{S}\\p{M} ]*[\\p{L}\\p{N}\\p{P}\\p{S}\\p{M}])?$",
+                "description": "The screen's name in the app's menu."
+              },
+              "icon": {
+                "description": "The icon next to the title, from the app's icon set.",
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              },
+              "menuOrder": {
+                "description": "Where the screen goes in the menu. Lower numbers come first, and screens without one come last.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -236,6 +274,30 @@
       "then": {
         "required": [
           "server"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contributes": {
+            "properties": {
+              "screens": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "screens"
+            ]
+          }
+        },
+        "required": [
+          "contributes"
+        ]
+      },
+      "then": {
+        "required": [
+          "client"
         ]
       }
     }
