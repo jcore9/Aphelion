@@ -34,7 +34,7 @@ This manifest is for a made-up plugin that posts weather alerts. A test loads it
 | `api` | string | yes | The plugin-API versions the plugin supports, as an npm semver range. At most 256 characters. See [The API range](#the-api-range). |
 | `entry` | string | yes | The module the host starts, as a plain relative path inside the plugin's folder, such as `dist/index.js`. See [The entry path](#the-entry-path). At most 1024 characters. |
 | `permissions.events` | list of strings | no | Events the plugin receives. Each is words joined by dots, such as `approval.requested`, at most 128 characters. |
-| `permissions.secrets` | list of strings | no | Secret references the plugin asks the host to resolve, such as `op://vault/item/field`, at most 1024 characters. The plugin never reads a secret store itself. |
+| `permissions.secrets` | list of strings | no | Secret references the plugin asks the host to resolve, such as `op://vault/item/field`, at most 1024 characters. Spaces and non-ASCII letters are allowed, control characters aren't. The plugin never reads a secret store itself. |
 | `permissions.network` | list of strings | no | Lowercase hostnames the plugin connects to, such as `api.github.com`, at most 253 characters. No scheme, port or path. |
 | `permissions.uiSlots` | list of strings | no | UI slots the plugin shows content in. Each is words joined by dots, such as `agent.sidebar`, at most 128 characters. |
 | `contributes.secretSchemes` | list of strings | no | Secret reference schemes the plugin resolves as a secret backend, such as `op`, at most 32 characters. See [Secret backends](#secret-backends). |

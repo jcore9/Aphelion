@@ -46,7 +46,7 @@ const dottedName = text(128).regex(
 );
 
 const secretReference = text(1024).regex(
-  /^[a-z][a-z0-9+.-]*:\/\/[^\u0000-\u001f\u007f]+$/,
+  /^[a-z][a-z0-9+.-]*:\/\/[ -~\u00a0-\uffff]+$/,
   {
     error: "must be a secret reference, such as op://vault/item/field",
   },

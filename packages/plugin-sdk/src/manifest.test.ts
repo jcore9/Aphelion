@@ -161,6 +161,21 @@ describe("parsePluginManifest", () => {
     ]);
   });
 
+  test.each([
+    ["op://AI Agents/Wetter Zürich/credential", true],
+    ["bws://3f2a/api-key", true],
+    ["op://vault/item\nfield", false],
+    ["op://vault/item\u0000", false],
+    ["op://vault/item\u007f", false],
+    ["op://vault/item\u0085", false],
+  ])("checks the secret reference %j", (reference, accepted) => {
+    const result = parsePluginManifest({
+      ...minimal,
+      permissions: { secrets: [reference] },
+    });
+    expect(result.ok).toBe(accepted);
+  });
+
   test("refuses a manifest that is not an object", () => {
     expect(issuesOf([])).toEqual([{ message: "must be an object" }]);
   });
