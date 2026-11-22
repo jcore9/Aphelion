@@ -4,11 +4,11 @@
 - Date: 2026-11-21
 - Tested with: Grok Build 1.0.92, `@agentclientprotocol/sdk` 2.9.1, Bun 1.4.5, Debian 13
 - Prototype: `spikes/M0-03/checks/acp-probe.ts` on the [`spike/M0-03-headless-on-bun`](https://github.com/jcore9/Aphelion/tree/spike/M0-03-headless-on-bun/spikes/M0-03) branch. That branch is never merged.
-- Decision: [0019](https://github.com/jcore9/Aphelion/blob/dev/docs/decisions/0019-cli-subscription-use.md) (in [#108](https://github.com/jcore9/Aphelion/pull/108))
+- Decision: [0019](../decisions/0019-cli-subscription-use.md)
 
 ## Summary
 
-`grok agent stdio` speaks ACP and runs a full turn with tool calls on the owner's cached Grok login, with no `XAI_API_KEY`. It sends a permission request for each command, and resume works after a restart. xAI's docs don't say whether headless use draws on the subscription's weekly pool, and the terms page couldn't be read. The owner decided to proceed on the subscription ([decision 0019](https://github.com/jcore9/Aphelion/blob/dev/docs/decisions/0019-cli-subscription-use.md)).
+`grok agent stdio` speaks ACP and runs a full turn with tool calls on the owner's cached Grok login, with no `XAI_API_KEY`. It sends a permission request for each command, and resume works after a restart. xAI's docs don't say whether headless use draws on the subscription's weekly pool, and the terms page couldn't be read. The owner decided to proceed on the subscription ([decision 0019](../decisions/0019-cli-subscription-use.md)).
 
 M4-01 can go ahead as planned.
 
@@ -38,7 +38,7 @@ Not stated. The [headless guide](https://docs.x.ai/build/cli/headless-scripting)
 
 ### 4. Do the terms allow it
 
-Not determined. `https://x.ai/legal/terms-of-service` returned HTTP 403 to the fetch, and no docs page addresses self-hosted personal use. The owner decided to proceed ([decision 0019](https://github.com/jcore9/Aphelion/blob/dev/docs/decisions/0019-cli-subscription-use.md)).
+Not determined. `https://x.ai/legal/terms-of-service` returned HTTP 403 to the fetch, and no docs page addresses self-hosted personal use. The owner decided to proceed ([decision 0019](../decisions/0019-cli-subscription-use.md)).
 
 ### 5. Permissions, auto-update and managed settings
 
