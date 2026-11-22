@@ -4,7 +4,7 @@ Last updated Nov 21, 2026
 
 This is a living document. It grows as decisions are made, and once the repo exists, the decisions it records move into decision records under `docs/`.
 
-> **Amendments.** This plan was imported unchanged under [decision 0004](../decisions/0004-import-plan-with-m0-plan.md). Later decision records change parts of it. Each changed passage links the record that changed it. In tables, the original text is struck through next to the new text. In prose, an "Amended by" note follows the new text and quotes the original. Text with no mark is the plan as imported.
+> **Amendments.** This plan was imported unchanged under [decision 0004](../decisions/0004-import-plan-with-m0-plan.md). Later decision records change parts of it. Each changed passage links the record that changed it. In tables, the original text is struck through next to the new text. In prose, an "Amended by" note follows the new text and quotes the original. Text with no mark is the plan as imported, except that [decision 0039](../decisions/0039-bots-not-agents.md) renamed "agent" to "bot" throughout, without marks.
 
 ## Goals and scope
 
