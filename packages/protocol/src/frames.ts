@@ -7,15 +7,31 @@ const token = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, {
   error: "must be 1 to 64 letters, digits, hyphens or underscores",
 });
 
-export const commandId = token.brand<"CommandId">();
+export const commandId = token.brand<"CommandId">().meta({
+  id: "CommandId",
+  description:
+    "Names one command. The client picks it, and a retry sends the same id.",
+});
 export type CommandId = z.infer<typeof commandId>;
 
-export const streamId = token.brand<"StreamId">();
+export const streamId = token.brand<"StreamId">().meta({
+  id: "StreamId",
+  description:
+    "Names one event stream. A server that restarts starts a new stream.",
+});
 export type StreamId = z.infer<typeof streamId>;
 
 const seq = z.int().nonnegative();
 
-export const cursor = z.strictObject({ stream: streamId, seq });
+export const cursor = z
+  .strictObject({
+    stream: streamId.describe("The stream that the position is in."),
+    seq: seq.describe("The last sequence number the client has seen."),
+  })
+  .meta({
+    id: "Cursor",
+    description: "A position in an event stream.",
+  });
 export type Cursor = z.infer<typeof cursor>;
 
 export const errorCodes = ["malformed", "unsupported-version"] as const;
@@ -59,13 +75,16 @@ export type ServerFrame = ResultFrame | EventFrame | ResyncFrame | ErrorFrame;
 
 function envelope<Type extends string, Shape extends z.ZodRawShape>(
   type: Type,
+  description: string,
   shape: Shape,
 ) {
-  return z.strictObject({
-    v: z.literal(version),
-    type: z.literal(type),
-    ...shape,
-  });
+  return z
+    .strictObject({
+      v: z.literal(version).describe("The protocol version."),
+      type: z.literal(type).describe("The frame type."),
+      ...shape,
+    })
+    .describe(description);
 }
 
 function byName<Spec>(
@@ -80,40 +99,52 @@ function byName<Spec>(
 }
 
 const commandFrame = byName(commands, (name, spec) =>
-  envelope("command", {
-    id: commandId,
-    name: z.literal(name),
-    payload: spec.payload,
+  envelope("command", "Asks the server to run a command.", {
+    id: commandId.describe("The client picks it. A retry sends the same id."),
+    name: z.literal(name).describe("The command to run."),
+    payload: spec.payload.describe("The command's input."),
   }),
 );
 
 const resultFrame = byName(commands, (name, spec) =>
-  envelope("result", {
-    id: commandId,
-    name: z.literal(name),
-    result: spec.result,
+  envelope("result", "Answers a command that succeeded.", {
+    id: commandId.describe("The id of the command this frame answers."),
+    name: z.literal(name).describe("The command that ran."),
+    result: spec.result.describe("The command's output."),
   }),
 );
 
 const eventFrames = byName(events, (name, payload) =>
-  envelope("event", { seq: seq.positive(), name: z.literal(name), payload }),
+  envelope("event", "Tells every client that something happened.", {
+    seq: seq.positive().describe("The event's number in the stream."),
+    name: z.literal(name).describe("The kind of event."),
+    payload: payload.describe("What happened."),
+  }),
 );
 
 export const eventFrame = eventFrames as unknown as z.ZodType<EventFrame>;
 
 export const clientFrame = z.discriminatedUnion("type", [
   commandFrame,
-  envelope("resume", { cursor: cursor.nullable() }),
+  envelope("resume", "Asks for the events the client missed.", {
+    cursor: cursor
+      .nullable()
+      .describe("The client's position, or null when it has none."),
+  }),
 ]) as unknown as z.ZodType<ClientFrame>;
 
 export const serverFrame = z.discriminatedUnion("type", [
   resultFrame,
   eventFrames,
-  envelope("resync", { cursor }),
-  envelope("error", {
-    code: z.enum(errorCodes),
-    message: z.string(),
-    id: commandId.optional(),
+  envelope("resync", "Tells a client that it can't catch up.", {
+    cursor: cursor.describe("Where the client continues after it reloads."),
+  }),
+  envelope("error", "Rejects a frame.", {
+    code: z.enum(errorCodes).describe("Why the frame was rejected."),
+    message: z.string().describe("Fixed text that is safe to log."),
+    id: commandId
+      .optional()
+      .describe("The rejected command's id, when it had a valid one."),
   }),
 ]) as unknown as z.ZodType<ServerFrame>;
 

@@ -2,7 +2,7 @@
 
 The server and every client, such as the web app or the desktop app, talk over one connection. Each message on it is a *frame*, a small JSON object. A client sends *commands*, which ask the server to do something. The server sends back *results*, and it also sends *events*, which tell every client that something happened. `@aphelion/protocol` defines the frames and the logic that both sides share. It uses only web-standard APIs, so the same code runs in Bun, Node and the browser. Relative imports end in `.ts`, so Node 24 loads the source files directly. `web-packages-on-node.test.ts` checks that in a real Node process. [Decision 0037](../decisions/0037-protocol-frames-in-zod.md) explains how the frames are described and validated.
 
-M0-09b replaces this page with a spec generated from the schemas.
+[The protocol spec](protocol-spec.md) lists every frame type with its fields, every command and event with its payload, the shared types and the error codes. A test generates that page from the schemas and fails CI when the committed page is out of date. This page explains how the pieces work together.
 
 ## Code
 
@@ -12,39 +12,27 @@ M0-09b replaces this page with a spec generated from the schemas.
 | `packages/protocol/src/frames.ts` | The frame schemas and types, `parseClientFrame`, `parseServerFrame` and `encodeFrame` |
 | `packages/protocol/src/event-log.ts` | `EventLog`, which numbers events and answers a reconnect |
 | `packages/protocol/src/command-ledger.ts` | `CommandLedger`, which applies each command id once |
+| `packages/protocol/src/spec.ts` | `renderSpec` and `schemaFiles`, which turn the schemas into the protocol spec and the JSON Schema files |
 
 ## Frames
 
 Every frame is a JSON object with `v: 1` and a `type`. A frame with any other `v`, or with a field the frame type doesn't define, is rejected.
 
-A client sends these frames:
+A client sends `command` frames and `resume` frames. The server answers a command with a `result` frame, and it sends `event`, `resync` and `error` frames.
 
-| `type` | Fields | Meaning |
-| --- | --- | --- |
-| `command` | `id`, `name`, `payload` | Run the command `name`. The client picks `id`. |
-| `resume` | `cursor`, or `null` | Send the events after `cursor`. A client with no cursor sends `null`. |
+To add a command or an event, add one entry to `commands` or `events` in `registry.ts`. Give each field a `.describe()` text, because the spec shows it. The frame unions, the parsers and the types pick the entry up from there. Then regenerate the spec and the JSON Schema files:
 
-The server sends these frames:
+```sh
+bun --bun vitest run -u packages/protocol
+```
 
-| `type` | Fields | Meaning |
-| --- | --- | --- |
-| `result` | `id`, `name`, `result` | The command `id` succeeded. |
-| `event` | `seq`, `name`, `payload` | Event number `seq` happened. |
-| `resync` | `cursor` | The client can't catch up from its cursor. It reloads its state and continues from `cursor`. |
-| `error` | `code`, `message`, and `id` when the error belongs to a command | A frame was rejected. |
+The test fails in CI until the regenerated files are committed.
+
+## Errors
 
 The error codes are `malformed` and `unsupported-version`. `malformed` covers text that isn't JSON, an unknown frame type, an unknown command or event name, and a payload that doesn't match its schema. `unsupported-version` means that `v` isn't 1. When a rejected frame has a valid command `id`, the error carries it, so the client knows which command failed.
 
 An error `message` is fixed text. For bad JSON it is `frame is not valid JSON`, and for another version it is `unsupported frame version; expected v 1`. For a frame with the wrong shape, it is the path of each bad field and a fixed reason, such as `cursor.seq: out of range` or `unknown field`. It never repeats a field name or a value that the sender chose, so it is safe to log.
-
-## Commands and events in M0
-
-| Kind | Name | Payload | Result |
-| --- | --- | --- | --- |
-| Command | `ping` | `{}` | `{}` |
-| Event | `notice` | `{ "message": string }` | |
-
-To add a command or an event, add one entry to `commands` or `events` in `registry.ts`. The frame unions, the parsers and the types pick it up from there.
 
 ## Sequence numbers and replay
 

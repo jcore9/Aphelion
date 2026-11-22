@@ -14,10 +14,14 @@ function realNode(): string {
 }
 
 function runOnNode(script: string, ...args: string[]): unknown {
+  return runOnNodeIn(import.meta.dirname, script, ...args);
+}
+
+function runOnNodeIn(cwd: string, script: string, ...args: string[]): unknown {
   const output = execFileSync(
     realNode(),
     ["--input-type=module", "--no-warnings", "-e", script, ...args],
-    { cwd: import.meta.dirname, encoding: "utf8" },
+    { cwd, encoding: "utf8" },
   );
   return JSON.parse(output);
 }
@@ -42,6 +46,29 @@ test("the protocol package loads and parses a frame in plain Node", () => {
     bun: null,
     parsed: { ok: true, frame: { v: 1, type: "resume", cursor: null } },
   });
+});
+
+test("the protocol package exports its frame JSON Schemas to plain Node", () => {
+  const script = `
+    const schemas = [];
+    for (const file of ["client-frame.schema.json", "server-frame.schema.json"]) {
+      const { default: schema } = await import("@aphelion/protocol/" + file, { with: { type: "json" } });
+      schemas.push({ $schema: schema.$schema, title: schema.title });
+    }
+    console.log(JSON.stringify(schemas));
+  `;
+  expect(
+    runOnNodeIn(join(import.meta.dirname, "packages/protocol"), script),
+  ).toEqual([
+    {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      title: "ClientFrame",
+    },
+    {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      title: "ServerFrame",
+    },
+  ]);
 });
 
 test("the plugin SDK loads in plain Node and accepts the docs' example manifest", () => {
