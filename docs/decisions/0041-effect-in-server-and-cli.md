@@ -60,7 +60,7 @@ The server and the CLI use Effect. Each Effect module is adopted when a real iss
 
 1. **One pinned version.** `effect` and every `@effect/*` package use one exact version, and they change together in one PR. No `^` ranges. This is Aphelion's own rule, to keep the packages in step. The packages' peer ranges, such as `effect ^4.1.5`, allow newer versions and don't force it.
 2. **Bun-only packages stay in adapters.** `@effect/platform-bun` and `@effect/sql-sqlite-bun` call Bun-only APIs inside. They count as Bun APIs under [decision 0007](0007-bun-runtime.md) and [decision 0023](0023-scaffold-toolchain.md). Import them only from `packages/server/src/adapters/` and `packages/cli/src/adapters/`. The lint rule bans them everywhere else, and `lint-boundaries.test.ts` checks that. Plain `effect` imports are allowed in the rest of `server` and `cli`. The lint rule also bans `effect`, `effect/*` and `@effect/*` in `protocol`, `plugin-sdk` and `client`, which is the scope rule enforced. The ban covers `.ts`, `.tsx`, `.js`, `.mjs` and `.cjs` files, and static, dynamic, template-literal and re-export forms. A dynamic import whose path is a variable, such as `import(name)`, can't be checked by lint. That is a known gap, and code review has to catch it.
-3. **Zod stays where it is.** `protocol` and `plugin-sdk` keep Zod, because they stay plain. For the server's own code, whether to use Effect's `Schema` or Zod is **not decided here**. It is an open question for the owner, listed below.
+3. **Zod stays where it is.** `protocol` and `plugin-sdk` keep Zod, because they stay plain. The server's own code uses Zod too, by the owner's decision at the end of this record.
 4. **Explain Effect in the PR.** Every PR that adds Effect code explains its Effect parts in plain words under **How to review**: what each service is, which errors can happen, and what a Layer wires together. A reviewer who has never seen `pipe` or `Effect.gen` must be able to follow the PR from that section.
 
 ## What was measured
@@ -92,4 +92,10 @@ One more fact from the probe. `effect` 4 ships its HTTP router and its CLI parse
 
 ## Open question for the owner
 
-**Effect `Schema` or Zod for the server's own validation.** The server's config is validated with Zod today ([decision 0025](0025-config-schema-and-format.md)). Effect has its own schema library. Using it would give one library for the server's checks and errors. Keeping Zod would give one style across the server and the packages that share it. T3 carries both. This record does not choose. A config PR can move to Effect and keep its Zod validation, so nothing forces the choice now. The owner decides when a PR needs to validate something new in the server.
+**Closed: see the owner decision below.**
+
+~~**Effect `Schema` or Zod for the server's own validation.** The server's config is validated with Zod today ([decision 0025](0025-config-schema-and-format.md)). Effect has its own schema library. Using it would give one library for the server's checks and errors. Keeping Zod would give one style across the server and the packages that share it. T3 carries both. This record does not choose. A config PR can move to Effect and keep its Zod validation, so nothing forces the choice now. The owner decides when a PR needs to validate something new in the server.~~
+
+### Owner decision, 2026-11-22
+
+The owner closed this question. **The server's own validation uses Zod**, the same as `protocol`, `plugin-sdk` and the config loader. Effect's `Schema` module isn't used for validation. Effect still handles the server's errors, services and Layers. M0-10a ([#97](https://github.com/jcore9/Aphelion/issues/97)) is the first PR under this rule. It checks `server.yaml` and the Compose file with Zod.
