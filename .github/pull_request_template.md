@@ -6,13 +6,21 @@ Closes #
 
 ## What changed
 
-<!-- What a reviewer needs to know, and the choices the owner should check. -->
+<!-- What this does for Aphelion, in plain words, then the choices the owner should check. Explain any TypeScript, web or tooling term the first time you use it. -->
+
+## How to review
+
+<!-- The owner is not a TypeScript or web developer. Name the few files that matter, in reading order. For each one, give its path and line range, say in plain words what it does, and say what to check there. Then list what is safe to skim, such as `bun.lock`, generated files and tests that repeat the code's cases. -->
+
+1. `path/to/file.ts` lines N to M: what it does, and what to check.
+
+Safe to skim:
 
 ## How it was tested
 
 <!-- The tests you added and the commands you ran. Add screenshots for UI changes. -->
 
-- [ ] `bun run lint`, `bun run typecheck` and `bun run test` pass.
+- [ ] `bun run lint`, `bun run typecheck`, `bun run test` and `bun run docs` pass.
 
 ## Docs touched
 
