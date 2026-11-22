@@ -1,0 +1,55 @@
+# docs/branch-protection.md explains these rules and which paths are guesses.
+
+# Every path, until manager bots start approving PRs into dev.
+* @jcore9
+
+# Who reviews and what CI runs.
+/.github/CODEOWNERS @jcore9
+/.github/rulesets/ @jcore9
+/.github/workflows/ @jcore9
+/.github/actions/ @jcore9
+/.github/dependabot.yml @jcore9
+package.json @jcore9
+/bun.lock @jcore9
+/bunfig.toml @jcore9
+
+# The lint and type boundaries (decision 0023).
+/eslint.config.ts @jcore9
+/lint-boundaries.test.ts @jcore9
+/vitest.config.ts @jcore9
+tsconfig*.json @jcore9
+
+# Bun-only adapters (decision 0007).
+/packages/server/src/adapters/ @jcore9
+/packages/cli/src/adapters/ @jcore9
+
+# Guessed future homes. Most match a folder name in any package.
+secrets/ @jcore9
+broker/ @jcore9
+plugin-host/ @jcore9
+grants/ @jcore9
+auth/ @jcore9
+devices/ @jcore9
+policy/ @jcore9
+/packages/server/**/hooks/ @jcore9
+gateway/ @jcore9
+/packages/plugin-sdk/src/manifest* @jcore9
+
+# Future image, Compose file, host unit and install script (M0-12).
+Dockerfile* @jcore9
+/.dockerignore @jcore9
+compose*.yaml @jcore9
+compose*.yml @jcore9
+docker-compose*.yaml @jcore9
+docker-compose*.yml @jcore9
+*.service @jcore9
+install*.sh @jcore9
+managed-settings.json @jcore9
+requirements.toml @jcore9
+/deploy/ @jcore9
+
+# What the owner always approves.
+/docs/decisions/ @jcore9
+/docs/plan/ @jcore9
+/SECURITY.md @jcore9
+/LICENSE @jcore9

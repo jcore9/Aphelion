@@ -8,6 +8,10 @@ These are plain Markdown files until M0-16 builds them into a Starlight site.
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
 
+## Working on the repository
+
+- [Branch protection](branch-protection.md): how changes reach `dev` and `main`, and why.
+
 ## Spike findings
 
 Each spike answers its questions in writing before anything builds on it. Prototype code stays on its `spike/` branch and is never merged.
