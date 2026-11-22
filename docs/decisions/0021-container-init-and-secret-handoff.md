@@ -1,6 +1,6 @@
 # 0021. The container's init is tini plus setpriv, and the bootstrap secret arrives on stdin
 
-- Status: Proposed (approved when this PR merges)
+- Status: Accepted (approved by merging #111 on 2026-11-22)
 - Date: 2026-11-21
 - Proposed by: orchestrator, from the [M0-03 finding](../spikes/M0-03-headless-on-bun.md)
 - Amended by: [0022](0022-agent-network-boundary.md) (runner channels use init-created pipes, not `SO_PEERCRED`)
