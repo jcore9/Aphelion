@@ -9,12 +9,14 @@
     "./devices": "./src/devices/index.ts",
     "./http": "./src/http/index.ts",
     "./log": "./src/log/index.ts",
+    "./plugins": "./src/plugins/index.ts",
     "./secrets": "./src/secrets/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aphelion/plugin-sdk": "workspace:*",
     "@aphelion/protocol": "workspace:*",
     "@effect/platform-bun": "4.1.5",
     "effect": "4.1.5",
