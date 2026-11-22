@@ -1,0 +1,20 @@
+### sharedrw
+[nested-bwrap-noproc] exit=1 :: bwrap: open /proc/3/ns/ns failed: No such file or directory 
+[nested-bwrap-proc] exit=1 :: bwrap: open /proc/3/ns/ns failed: No such file or directory 
+[nested-bwrap-net] exit=1 :: bwrap: open /proc/3/ns/ns failed: No such file or directory 
+[nested-bwrap-claude-style] exit=1 :: bwrap: open /proc/3/ns/ns failed: No such file or directory 
+### nopid
+[nested-bwrap-noproc] exit=0 ::  
+[nested-bwrap-proc] exit=1 :: bwrap: Can't mount proc on /newroot/proc: Operation not permitted 
+[nested-bwrap-net] exit=0 ::  
+[nested-bwrap-claude-style] exit=1 :: bwrap: Can't mount proc on /newroot/proc: Operation not permitted 
+### fresh (systempaths=unconfined)
+[nested-bwrap-noproc] exit=0 ::  
+[nested-bwrap-proc] exit=0 ::  
+[nested-bwrap-net] exit=0 ::  
+[nested-bwrap-claude-style] exit=0 ::  
+### fresh, profile without CLONE_NEWNET
+[nested-bwrap-noproc] exit=0 ::  
+[nested-bwrap-proc] exit=0 ::  
+[nested-bwrap-net] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.De
+[nested-bwrap-claude-style] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.De

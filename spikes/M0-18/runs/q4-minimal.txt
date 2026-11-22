@@ -1,0 +1,35 @@
+##### userns-full
+[botwrap-sharedrw] exit=0 ::  
+[botwrap-shared-netns-off] exit=0 ::  
+[bwrap-unshare-net] exit=0 ::  
+[nested-bwrap] exit=1 :: bwrap: open /proc/3/ns/ns failed: No such file or directory 
+##### userns-nosetns
+[botwrap-sharedrw] exit=0 ::  
+[botwrap-shared-netns-off] exit=0 ::  
+[bwrap-unshare-net] exit=0 ::  
+[nested-bwrap] exit=1 :: bwrap: open /proc/3/ns/ns failed: No such file or directory 
+##### userns-nonet
+[botwrap-sharedrw] exit=0 ::  
+[botwrap-shared-netns-off] exit=0 ::  
+[bwrap-unshare-net] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <fi
+[nested-bwrap] exit=1 :: bwrap: open /proc/3/ns/ns failed: No such file or directory 
+##### userns-nosetns-nonet
+[botwrap-sharedrw] exit=0 ::  
+[botwrap-shared-netns-off] exit=0 ::  
+[bwrap-unshare-net] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <fi
+[nested-bwrap] exit=1 :: bwrap: open /proc/3/ns/ns failed: No such file or directory 
+##### userns-nopivot
+[botwrap-sharedrw] exit=1 :: bwrap: pivot_root: Operation not permitted 
+[botwrap-shared-netns-off] exit=1 :: bwrap: pivot_root: Operation not permitted 
+[bwrap-unshare-net] exit=1 :: bwrap: pivot_root: Operation not permitted 
+[nested-bwrap] exit=1 :: bwrap: pivot_root: Operation not permitted 
+##### userns-noumount
+[botwrap-sharedrw] exit=1 :: bwrap: unmount old root: Operation not permitted 
+[botwrap-shared-netns-off] exit=1 :: bwrap: unmount old root: Operation not permitted 
+[bwrap-unshare-net] exit=1 :: bwrap: unmount old root: Operation not permitted 
+[nested-bwrap] exit=1 :: bwrap: unmount old root: Operation not permitted 
+##### userns-onlyclone
+[botwrap-sharedrw] exit=1 :: bwrap: Failed to make / slave: Operation not permitted 
+[botwrap-shared-netns-off] exit=1 :: bwrap: Failed to make / slave: Operation not permitted 
+[bwrap-unshare-net] exit=1 :: bwrap: Failed to make / slave: Operation not permitted 
+[nested-bwrap] exit=1 :: bwrap: Failed to make / slave: Operation not permitted 

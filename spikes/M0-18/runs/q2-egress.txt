@@ -1,0 +1,19 @@
+env inside the bot: https_proxy=http://m018-proxy:3128 NO_PROXY=localhost,127.0.0.1 HTTPS_PROXY=http://m018-proxy:3128 
+[curl-via-proxy] exit=0 :: 200 
+[curl-direct] exit=6 :: curl: (6) Could not resolve host: example.com 000 
+[claude-via-proxy] exit=1 :: API Error: 405 Example Domain 
+[codex-via-proxy] exit=1 :: Reading additional input from stdin... OpenAI Codex v0.171.0 -------- workdir: /var/lib/aphelion-agents/a/workspace model: gpt-6.2-sol provider: m approval: never sandbox: read-only reasoning effort: 
+[grok-via-proxy] exit=1 :: Error: Internal error: {   "message": "API error (status 405 Method Not Allowed): Request failed (HTTP 405).",   "http_status": 405 } 
+15:56:48 CONNECT example.com:443
+15:56:48 CONNECT example.com:443
+15:56:48 CONNECT api.github.com:443
+15:56:48 CONNECT example.com:443
+15:56:48 CONNECT codeload.github.com:443
+15:56:49 CONNECT example.com:443
+15:56:49 CONNECT example.com:443
+15:56:50 CONNECT example.com:443
+15:56:52 CONNECT example.com:443
+15:56:55 CONNECT example.com:443
+15:56:55 CONNECT example.com:443
+15:56:55 CONNECT example.com:443
+15:56:55 CONNECT example.com:443

@@ -1,0 +1,10 @@
+[/opt/cli/claude/bin/claude.exe --version where=fresh] exit=0 :: 2.1.330 (Claude Code) 
+[/opt/cli/codex/bin/codex --version where=fresh] exit=0 :: codex-cli 0.171.0 
+[env GROK_SANDBOX=off /opt/cli/grok/bin/grok version where=fresh] exit=0 :: grok 1.0.92 (b06756fd6256) 
+[/opt/cli/codex/bin/codex login status where=fresh] exit=1 :: Not logged in 
+[/opt/cli/claude/bin/claude.exe auth status where=fresh] exit=1 :: {   "loggedIn": false,   "authMethod": "none",   "apiProvider": "firstParty",   "analyticsDisabled": false,   "projectsDirectory": "/var/lib/aphelion-agents/a/home/.claude/projects",   "configDirector
+[/opt/cli/claude/bin/claude.exe --version where=sharedrw] exit=0 :: 2.1.330 (Claude Code) 
+[/opt/cli/codex/bin/codex --version where=sharedrw] exit=0 :: codex-cli 0.171.0 
+[env GROK_SANDBOX=off /opt/cli/grok/bin/grok version where=sharedrw] exit=0 :: grok 1.0.92 (b06756fd6256) 
+[/opt/cli/codex/bin/codex login status where=sharedrw] exit=1 :: Not logged in 
+[/opt/cli/claude/bin/claude.exe auth status where=sharedrw] exit=1 :: {   "loggedIn": false,   "authMethod": "none",   "apiProvider": "firstParty",   "analyticsDisabled": false,   "projectsDirectory": "/var/lib/aphelion-agents/a/home/.claude/projects",   "configDirector

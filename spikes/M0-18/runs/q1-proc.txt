@@ -1,0 +1,7 @@
+masked /proc paths seen by the container:
+/proc/bus proc;/proc/fs proc;/proc/irq proc;/proc/sys proc;/proc/sysrq-trigger proc;/proc/acpi tmpfs;/proc/asound tmpfs;/proc/interrupts devtmpfs;/proc/kcore devtmpfs;/proc/keys devtmpfs;/proc/scsi tmpfs;/proc/timer_list devtmpfs;
+
+[bwrap-pid-proc] exit=1 :: bwrap: Can't mount proc on /newroot/proc: Operation not permitted 
+masked /proc paths seen by the container:
+
+[bwrap-pid-proc] exit=0 :: 4 

@@ -1,0 +1,56 @@
+##### systempaths=default user=0
+as 0: CapEff: 00000000000000c0
+  /proc/kcore read=yes write=yes mount=devtmpfs rw,nosuid,relatime
+  /proc/keys read=yes write=yes mount=devtmpfs rw,nosuid,relatime
+  /proc/timer_list read=yes write=yes mount=devtmpfs rw,nosuid,relatime
+  /proc/sched_debug read=no write=no mount=
+  /proc/interrupts read=yes write=yes mount=devtmpfs rw,nosuid,relatime
+  /proc/sysrq-trigger read=no write=no mount=proc ro,nosuid,nodev,noexec,relatime
+  /proc/sys/kernel/core_pattern read=yes write=no mount=
+  /proc/sys/kernel/modprobe read=yes write=no mount=
+  /proc/sys/vm/drop_caches read=no write=no mount=
+  /sys/firmware read=yes write=no mount=tmpfs ro,relatime
+  /sys/devices/virtual/powercap read=yes write=no mount=tmpfs ro,relatime
+  /sys/kernel/security read=yes write=no mount=
+##### systempaths=default user=10001
+as 10001: CapEff: 0000000000000000
+  /proc/kcore read=yes write=yes mount=devtmpfs rw,nosuid,relatime
+  /proc/keys read=yes write=yes mount=devtmpfs rw,nosuid,relatime
+  /proc/timer_list read=yes write=yes mount=devtmpfs rw,nosuid,relatime
+  /proc/sched_debug read=no write=no mount=
+  /proc/interrupts read=yes write=yes mount=devtmpfs rw,nosuid,relatime
+  /proc/sysrq-trigger read=no write=no mount=proc ro,nosuid,nodev,noexec,relatime
+  /proc/sys/kernel/core_pattern read=yes write=no mount=
+  /proc/sys/kernel/modprobe read=yes write=no mount=
+  /proc/sys/vm/drop_caches read=no write=no mount=
+  /sys/firmware read=yes write=no mount=tmpfs ro,relatime
+  /sys/devices/virtual/powercap read=yes write=no mount=tmpfs ro,relatime
+  /sys/kernel/security read=yes write=no mount=
+##### systempaths=unconfined--security-opt systempaths=unconfined user=0
+as 0: CapEff: 00000000000000c0
+  /proc/kcore read=no write=no mount=
+  /proc/keys read=yes write=no mount=
+  /proc/timer_list read=no write=no mount=
+  /proc/sched_debug read=no write=no mount=
+  /proc/interrupts read=yes write=no mount=
+  /proc/sysrq-trigger read=no write=no mount=
+  /proc/sys/kernel/core_pattern read=yes write=no mount=
+  /proc/sys/kernel/modprobe read=yes write=no mount=
+  /proc/sys/vm/drop_caches read=no write=no mount=
+  /sys/firmware read=yes write=no mount=
+  /sys/devices/virtual/powercap read=yes write=no mount=
+  /sys/kernel/security read=yes write=no mount=
+##### systempaths=unconfined--security-opt systempaths=unconfined user=10001
+as 10001: CapEff: 0000000000000000
+  /proc/kcore read=no write=no mount=
+  /proc/keys read=yes write=no mount=
+  /proc/timer_list read=no write=no mount=
+  /proc/sched_debug read=no write=no mount=
+  /proc/interrupts read=yes write=no mount=
+  /proc/sysrq-trigger read=no write=no mount=
+  /proc/sys/kernel/core_pattern read=yes write=no mount=
+  /proc/sys/kernel/modprobe read=yes write=no mount=
+  /proc/sys/vm/drop_caches read=no write=no mount=
+  /sys/firmware read=yes write=no mount=
+  /sys/devices/virtual/powercap read=yes write=no mount=
+  /sys/kernel/security read=yes write=no mount=

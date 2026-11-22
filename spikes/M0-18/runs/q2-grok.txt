@@ -1,0 +1,12 @@
+[grok version where=direct] exit=1 :: warning: sandbox could not be applied: Landlock not available. Requires Linux kernel 5.13+ with Landlock enabled.. The 'strict' profile is not in effect. error: could not apply the 'strict' sandbox profile; see the warning above for the cause. Refusing to start with its protections missing. 
+[grok doctor where=direct] exit=0 ::   ? terminal version             unavailable 
+[grok inspect where=direct] exit=1 :: warning: sandbox could not be applied: Landlock not available. Requires Linux kernel 5.13+ with Landlock enabled.. The 'strict' profile is not in effect. error: could not apply the 'strict' sandbox profile; see the warning above for the cause. Refusing to start with its protections missing. 
+[landlock where=direct] landlock ABI -1 errno 95
+[grok version where=fresh] exit=1 :: warning: sandbox could not be applied: Landlock not available. Requires Linux kernel 5.13+ with Landlock enabled.. The 'strict' profile is not in effect. error: could not apply the 'strict' sandbox profile; see the warning above for the cause. Refusing to start with its protections missing. 
+[grok doctor where=fresh] exit=0 ::   ? terminal version             unavailable 
+[grok inspect where=fresh] exit=1 :: warning: sandbox could not be applied: Landlock not available. Requires Linux kernel 5.13+ with Landlock enabled.. The 'strict' profile is not in effect. error: could not apply the 'strict' sandbox profile; see the warning above for the cause. Refusing to start with its protections missing. 
+[landlock where=fresh] landlock ABI -1 errno 95
+[grok version where=direct] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[grok doctor where=direct] exit=0 ::   ? terminal version             unavailable 
+[grok inspect where=direct] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[landlock where=direct] landlock ABI -1 errno 95

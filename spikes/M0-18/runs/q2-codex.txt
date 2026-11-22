@@ -1,0 +1,22 @@
+### default profile
+[codex sandbox where=direct] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+### userns-full
+[codex sandbox where=direct] exit=0 :: in-sandbox WROTE-CWD touch: cannot touch '/var/lib/aphelion-agents/a/home/x': Read-only file system HOME-WRITE-BLOCKED PermissionError: [Errno 1] Operation not permitted 
+[codex sandbox where=fresh] exit=0 :: in-sandbox WROTE-CWD touch: cannot touch '/var/lib/aphelion-agents/a/home/x': Read-only file system HOME-WRITE-BLOCKED PermissionError: [Errno 1] Operation not permitted 
+[codex sandbox where=sharedrw] exit=0 :: in-sandbox WROTE-CWD touch: cannot touch '/var/lib/aphelion-agents/a/home/x': Read-only file system HOME-WRITE-BLOCKED PermissionError: [Errno 1] Operation not permitted 
+[codex sandbox where=nopid] exit=0 :: in-sandbox WROTE-CWD touch: cannot touch '/var/lib/aphelion-agents/a/home/x': Read-only file system HOME-WRITE-BLOCKED PermissionError: [Errno 1] Operation not permitted 
+### userns-nosetns
+[codex sandbox where=direct] exit=0 :: in-sandbox WROTE-CWD touch: cannot touch '/var/lib/aphelion-agents/a/home/x': Read-only file system HOME-WRITE-BLOCKED PermissionError: [Errno 1] Operation not permitted 
+[codex sandbox where=fresh] exit=0 :: in-sandbox WROTE-CWD touch: cannot touch '/var/lib/aphelion-agents/a/home/x': Read-only file system HOME-WRITE-BLOCKED PermissionError: [Errno 1] Operation not permitted 
+[codex sandbox where=sharedrw] exit=0 :: in-sandbox WROTE-CWD touch: cannot touch '/var/lib/aphelion-agents/a/home/x': Read-only file system HOME-WRITE-BLOCKED PermissionError: [Errno 1] Operation not permitted 
+[codex sandbox where=nopid] exit=0 :: in-sandbox WROTE-CWD touch: cannot touch '/var/lib/aphelion-agents/a/home/x': Read-only file system HOME-WRITE-BLOCKED PermissionError: [Errno 1] Operation not permitted 
+### userns-nonet
+[codex sandbox where=direct] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[codex sandbox where=fresh] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[codex sandbox where=sharedrw] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[codex sandbox where=nopid] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+### userns-nosetns-nonet
+[codex sandbox where=direct] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[codex sandbox where=fresh] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[codex sandbox where=sharedrw] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[codex sandbox where=nopid] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 

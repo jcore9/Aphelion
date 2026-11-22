@@ -1,0 +1,42 @@
+##### default
+== who: uid=10001(aphelion-agent) gid=10001(aphelion-agent) groups=10001(aphelion-agent)
+CapEff:	0000000000000000 CapBnd:	00000000000000c0 NoNewPrivs:	1 Seccomp:	2 
+[unshare-U] exit=1 :: unshare: unshare failed: Operation not permitted 
+[unshare-Ur-caps] exit=1 :: unshare: unshare failed: Operation not permitted 
+[unshare-Um] exit=1 :: unshare: unshare failed: Operation not permitted 
+[unshare-Ump-proc] exit=1 :: unshare: unshare failed: Operation not permitted 
+[unshare-Un] exit=1 :: unshare: unshare failed: Operation not permitted 
+[bwrap-minimal] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[bwrap-pid-proc] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[bwrap-pid-noproc] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[bwrap-dev] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[bwrap-net] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+[bwrap-all-try] exit=1 :: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>. 
+##### userns-full
+== who: uid=10001(aphelion-agent) gid=10001(aphelion-agent) groups=10001(aphelion-agent)
+CapEff:	0000000000000000 CapBnd:	00000000000000c0 NoNewPrivs:	1 Seccomp:	2 
+[unshare-U] exit=0 ::  
+[unshare-Ur-caps] exit=0 :: CapEff:	000001ffffffffff 
+[unshare-Um] exit=0 ::  
+[unshare-Ump-proc] exit=1 :: unshare: mount /proc failed: Operation not permitted 
+[unshare-Un] exit=0 ::  
+[bwrap-minimal] exit=0 ::  
+[bwrap-pid-proc] exit=1 :: bwrap: Can't mount proc on /newroot/proc: Operation not permitted 
+[bwrap-pid-noproc] exit=0 ::  
+[bwrap-dev] exit=0 ::  
+[bwrap-net] exit=0 ::  
+[bwrap-all-try] exit=0 ::  
+##### unconfined
+== who: uid=10001(aphelion-agent) gid=10001(aphelion-agent) groups=10001(aphelion-agent)
+CapEff:	0000000000000000 CapBnd:	00000000000000c0 NoNewPrivs:	1 Seccomp:	2 
+[unshare-U] exit=0 ::  
+[unshare-Ur-caps] exit=0 :: CapEff:	000001ffffffffff 
+[unshare-Um] exit=0 ::  
+[unshare-Ump-proc] exit=1 :: unshare: mount /proc failed: Operation not permitted 
+[unshare-Un] exit=0 ::  
+[bwrap-minimal] exit=0 ::  
+[bwrap-pid-proc] exit=1 :: bwrap: Can't mount proc on /newroot/proc: Operation not permitted 
+[bwrap-pid-noproc] exit=0 ::  
+[bwrap-dev] exit=0 ::  
+[bwrap-net] exit=0 ::  
+[bwrap-all-try] exit=0 ::  

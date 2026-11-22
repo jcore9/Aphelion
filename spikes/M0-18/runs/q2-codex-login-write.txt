@@ -1,0 +1,4 @@
+[single-file-bind] exit=1 :: Reading API key from stdin... Error logging in: Resource busy (os error 16) 
+    shared file now: {"OPENAI_API_KEY":"sk-old-dummy","auth_mode":"apikey"}
+[symlink-to-bound-folder] exit=0 :: Reading API key from stdin... API key saved. Authentication is checked when you send a request. lrwxrwxrwx 1 aphelion-agent aphelion-agent 55 Nov 22 15:54 /var/lib/aphelion-agents/a/home/.codex/auth.json -> /var/lib/ 
+    shared file now: {  "auth_mode": "apikey",  "OPENAI_API_KEY": "sk-m018-dummy-not-a-key"}; folder: auth.json auth.json.lock 

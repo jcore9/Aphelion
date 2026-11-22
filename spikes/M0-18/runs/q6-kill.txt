@@ -1,0 +1,16 @@
+[plain child, no namespaces] sleeps before=5, after SIGKILL of the started process=4
+[bwrap, pid namespace, --die-with-parent (botwrap.sh)] sleeps before=5, after SIGKILL of the started process=0
+[bwrap, pid namespace, no --die-with-parent] sleeps before=5, after SIGKILL of the started process=5
+[bwrap, no pid namespace, --die-with-parent] sleeps before=5, after SIGKILL of the started process=4
+[bwrap, no pid namespace, no --die-with-parent] sleeps before=5, after SIGKILL of the started process=5
+[the runner (a shell that started botwrap.sh) is killed] sleeps before=5 after=0
+[SIGKILL to bwrap's process group] sleeps before=5 after=0
+### fresh /proc
+[plain child, no namespaces] sleeps before=5, after SIGKILL of the started process=4
+[bwrap, pid namespace, --die-with-parent (botwrap.sh)] sleeps before=5, after SIGKILL of the started process=0
+[bwrap, pid namespace, no --die-with-parent] sleeps before=5, after SIGKILL of the started process=5
+[bwrap, no pid namespace, --die-with-parent] sleeps before=5, after SIGKILL of the started process=4
+[bwrap, no pid namespace, no --die-with-parent] sleeps before=5, after SIGKILL of the started process=5
+[the runner (a shell that started botwrap.sh) is killed] sleeps before=5 after=0
+[SIGKILL to bwrap's process group] sleeps before=5 after=0
+[no namespaces, SIGKILL to the process group] sleeps before=5 after=2

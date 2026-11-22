@@ -1,0 +1,9 @@
+[file-read] exit=0 :: {"dummy":"m018-not-a-credential","v":1} 
+[file-write-inplace] exit=0 :: {"dummy":"m018","v":2} 
+[file-rename-over] exit=1 :: mv: cannot move '/var/lib/aphelion-agents/a/home/.codex/auth.json.tmp' to '/var/lib/aphelion-agents/a/home/.codex/auth.json': Device or resource busy 
+[file-rename-python] exit=1 :: Traceback (most recent call last):   File "<string>", line 1, in <module>     import os;open('/var/lib/aphelion-agents/a/home/.codex/auth.json.tmp','w').write('{"v":3}');os.replace('/var/lib/aphelion-
+[file-unlink] exit=1 :: rm: cannot remove '/var/lib/aphelion-agents/a/home/.codex/auth.json': Device or resource busy 
+[dir-rename-over] exit=0 :: {"v":4} 
+[dir-lock] exit=0 :: flock ok 
+outside after the bot ran: {"v":4}  owner=10001:10001
+[bot-b-sees-shared] exit=0 :: . .. b 

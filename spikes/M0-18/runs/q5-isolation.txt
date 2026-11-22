@@ -1,0 +1,53 @@
+== proc mode: shared
+runner sees bot b's sleep as container pid 10
+[a-ls-root] exit=0 :: a 
+[a-read-own] exit=0 :: secret-of-a 
+[a-read-b] exit=1 :: cat: /var/lib/aphelion-agents/b/workspace/secret: No such file or directory 
+[a-caps] exit=0 :: CapEff:	0000000000000000 NoNewPrivs:	1 uid=10001(aphelion-agent) gid=10001(aphelion-agent) groups=10001(aphelion-agent) 
+[a-ps-count] exit=0 :: 10 
+[a-via-proc-root] exit=1 :: cat: /proc/10/root/var/lib/aphelion-agents/b/workspace/secret: Permission denied 
+[a-via-proc-environ] exit=0 :: sh: 1: cannot open /proc/10/environ: Permission denied 
+[a-kill-b-pid] exit=1 :: kill: (10): No such process 
+[a-pidfd-signal-b] exit=0 :: OSError: [Errno 22] Invalid argument 
+[a-see-server] exit=0 :: ls: cannot open file '/proc/1/root/etc': Permission denied bash /opt/spike/q5-isolation.sh shared  
+[mgr-granted-b] exit=0 :: b mgr secret-of-b wrote 
+[mgr-read-a] exit=1 :: cat: /var/lib/aphelion-agents/a/workspace/secret: No such file or directory 
+[a-abstract-sock] exit=0 :: abstract socket bound in shared netns 
+[a-nested-userns] exit=1 :: unshare: cannot open /proc/self/uid_map: Read-only file system 
+[a-umount-escape] exit=1 :: unshare: cannot open /proc/self/uid_map: Read-only file system 
+
+== proc mode: sharedrw
+runner sees bot b's sleep as container pid 10
+[a-ls-root] exit=0 :: a 
+[a-read-own] exit=0 :: secret-of-a 
+[a-read-b] exit=1 :: cat: /var/lib/aphelion-agents/b/workspace/secret: No such file or directory 
+[a-caps] exit=0 :: CapEff:	0000000000000000 NoNewPrivs:	1 uid=10001(aphelion-agent) gid=10001(aphelion-agent) groups=10001(aphelion-agent) 
+[a-ps-count] exit=0 :: 10 
+[a-via-proc-root] exit=1 :: cat: /proc/10/root/var/lib/aphelion-agents/b/workspace/secret: Permission denied 
+[a-via-proc-environ] exit=0 :: sh: 1: cannot open /proc/10/environ: Permission denied 
+[a-kill-b-pid] exit=1 :: kill: (10): No such process 
+[a-pidfd-signal-b] exit=0 :: OSError: [Errno 22] Invalid argument 
+[a-see-server] exit=0 :: ls: cannot open file '/proc/1/root/etc': Permission denied bash /opt/spike/q5-isolation.sh sharedrw  
+[mgr-granted-b] exit=0 :: b mgr secret-of-b wrote 
+[mgr-read-a] exit=1 :: cat: /var/lib/aphelion-agents/a/workspace/secret: No such file or directory 
+[a-abstract-sock] exit=0 :: abstract socket bound in shared netns 
+[a-nested-userns] exit=0 ::  
+[a-umount-escape] exit=0 :: umount: /var/lib/aphelion-agents/a: not mounted. a bin dev etc lib lib64 opt proc sbin tmp usr var  
+
+== proc mode: fresh
+runner sees bot b's sleep as container pid 10
+[a-ls-root] exit=0 :: a 
+[a-read-own] exit=0 :: secret-of-a 
+[a-read-b] exit=1 :: cat: /var/lib/aphelion-agents/b/workspace/secret: No such file or directory 
+[a-caps] exit=0 :: CapEff:	0000000000000000 NoNewPrivs:	1 uid=10001(aphelion-agent) gid=10001(aphelion-agent) groups=10001(aphelion-agent) 
+[a-ps-count] exit=0 :: 4 
+[a-via-proc-root] exit=1 :: cat: /proc/10/root/var/lib/aphelion-agents/b/workspace/secret: No such file or directory 
+[a-via-proc-environ] exit=0 :: sh: 1: cannot open /proc/10/environ: No such file 
+[a-kill-b-pid] exit=1 :: kill: (10): No such process 
+[a-pidfd-signal-b] exit=0 :: FileNotFoundError: [Errno 2] No such file or directory: '/proc/10' 
+[a-see-server] exit=0 :: /proc/1/root/etc bwrap --unshare-user --unshare-pid --unshare-ipc --unshare-uts --unshare-cgroup-try --die-with-parent --new-session --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/
+[mgr-granted-b] exit=0 :: b mgr secret-of-b wrote 
+[mgr-read-a] exit=1 :: cat: /var/lib/aphelion-agents/a/workspace/secret: No such file or directory 
+[a-abstract-sock] exit=0 :: abstract socket bound in shared netns 
+[a-nested-userns] exit=0 ::  
+[a-umount-escape] exit=0 :: umount: /var/lib/aphelion-agents/a: not mounted. a bin dev etc lib lib64 opt proc sbin tmp usr var  
