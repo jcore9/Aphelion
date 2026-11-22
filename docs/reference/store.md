@@ -26,6 +26,8 @@ To get an ID or a count back from a write, use `RETURNING` with `all`.
 
 Every connection uses WAL mode, enforces foreign keys and waits up to 5 seconds for a write lock. The adapter creates the database file with mode 0600, and SQLite gives the `-wal` and `-shm` files the same mode.
 
+`openSqlite` takes the path of a database file and nothing else. It refuses the names that SQLite reads as something other than a file: the empty string (a temporary database), `:memory:` (a database held in memory), and any name that starts with `file:` (a URI, a web-address-style name that can carry options). It throws `SqlitePathError` before it creates anything on disk. The server always stores its data in a file, and an in-memory database can't use WAL mode.
+
 ## Add a migration
 
 1. Create `packages/server/src/store/migrations/NNNN-<name>.ts`, with `NNNN` the next version number:

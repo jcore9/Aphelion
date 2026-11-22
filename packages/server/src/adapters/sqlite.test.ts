@@ -1,15 +1,19 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, onTestFinished, test } from "vitest";
-import { openSqlite } from "./sqlite";
+import { openSqlite, SqlitePathError } from "./sqlite";
 
-function databasePath(): string {
+function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "aphelion-sqlite-"));
   onTestFinished(() => {
     rmSync(dir, { recursive: true });
   });
-  return join(dir, "aphelion.db");
+  return dir;
+}
+
+function databasePath(): string {
+  return join(tempDir(), "aphelion.db");
 }
 
 function mode(path: string): number {
@@ -78,5 +82,24 @@ test("enforces foreign keys", () => {
   expect(() => {
     db.run("INSERT INTO child (parent_id) VALUES (?)", [2]);
   }).toThrow(/FOREIGN KEY/);
+  db.close();
+});
+
+test.each(["", ":memory:", "file:aphelion.db", "file::memory:?cache=shared"])(
+  "rejects the special name %j without creating a file",
+  (name) => {
+    const before = readdirSync(process.cwd());
+
+    expect(() => openSqlite(name)).toThrow(SqlitePathError);
+    expect(readdirSync(process.cwd())).toEqual(before);
+  },
+);
+
+test("accepts a file name that contains a colon", () => {
+  const path = join(tempDir(), "aphelion:memory:.db");
+  const db = openSqlite(path);
+
+  expect(mode(path)).toBe(0o600);
+  expect(db.all("PRAGMA journal_mode")).toEqual([{ journal_mode: "wal" }]);
   db.close();
 });
