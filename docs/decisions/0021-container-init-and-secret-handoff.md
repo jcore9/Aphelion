@@ -3,6 +3,7 @@
 - Status: Proposed (approved when this PR merges)
 - Date: 2026-11-21
 - Proposed by: orchestrator, from the [M0-03 finding](../spikes/M0-03-headless-on-bun.md)
+- Amended by: [0022](0022-agent-network-boundary.md) (runner channels use init-created pipes, not `SO_PEERCRED`)
 - Amends: [0016](0016-one-docker-container.md) (the init tool, and how the bootstrap secret reaches the broker), [0018](0018-shared-plugin-user.md) (how plugins run)
 
 ## Context

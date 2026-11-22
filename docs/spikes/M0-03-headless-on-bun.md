@@ -92,14 +92,28 @@ With `bun --bun vitest run` and `pool: "threads"` (measured, Vitest 5.1.1).
 
 Not tested, because it needs root on the host: installing the unit, starting it on boot, and a reboot. The exit test in M0-12 covers them.
 
+## Review findings
+
+After this finding was written, two independent adversarial reviewers (Claude Haiku 5.5 and Grok 4.7 Fast) tried to break the design with real runs, and every finding was rerun before it was kept. File and secret isolation held. These four did not, and [decision 0022](../decisions/0022-agent-network-boundary.md) answers them:
+
+| Finding | Evidence (measured) |
+| --- | --- |
+| Agents aren't blocked from the LAN | As `aphelion-agent`, one connect each succeeded to `10.0.0.1:80`, `10.0.0.133:22`, `100.71.226.67:22`, `100.93.139.95:22`, `172.17.0.1:22` and `1.1.1.1:443` |
+| Every container user reaches the server API on loopback | `127.0.0.1:7400/health` returned `200` to uids 10002 and 10004 |
+| The server follows symlinks that agents plant | An agent's `instructions.md` linked to `/etc/aphelion/policy.json`: the agent got `Permission denied`, and the server read the policy. Opening with `O_NOFOLLOW` returned `ELOOP`. |
+| Node and Bun can't read socket peer credentials | `net.Socket` on Node 24 and Bun 1.4.5 exposes only `_getpeername` |
+
 ## Downstream changes
 
-These apply once decision 0021 is approved.
+These apply once decisions 0021 and 0022 are approved.
 
 | Issue | Change |
 | --- | --- |
 | [M0-04](https://github.com/jcore9/Aphelion/issues/5) | Run tests with `bun --bun vitest run`, with `pool: "threads"` in the Vitest config. |
 | [M0-12](https://github.com/jcore9/Aphelion/issues/14) | Use `tini` plus a `setpriv --init-groups` launcher. Hand the root-only bootstrap secret to the broker on stdin. Wait for the tailnet address in `ExecStartPre`. Ship the `bun` runtime for plugins. |
 | [M0-14c](https://github.com/jcore9/Aphelion/issues/105) | The broker reads the bootstrap secret from stdin, not from a file mounted for its user. |
-| [M0-13b](https://github.com/jcore9/Aphelion/issues/100) | Plugins run as `bun <entry>` from their installed package folder. Don't rely on `SO_PEERCRED` until a mechanism is confirmed. |
-| [M1-04](https://github.com/jcore9/Aphelion/issues/22) | Same caution about `SO_PEERCRED` for the agent runner's channel. |
+| [M0-13b](https://github.com/jcore9/Aphelion/issues/100) | Plugins run as `bun <entry>` from their installed package folder. The plugin runner channel uses init-created pipes, not `SO_PEERCRED`. |
+| [M1-04](https://github.com/jcore9/Aphelion/issues/22) | Talk to the agent runner over init-created pipes, through one framed message channel. Never signal agent PIDs or read `/proc` directly. Set agent egress only through `HTTPS_PROXY` and `NO_PROXY`. |
+| [M0-12](https://github.com/jcore9/Aphelion/issues/14) (network) | Install the `DOCKER-USER` rules for a pinned bridge network. The exit test repeats the six connects and requires the first five to fail. |
+| [M0-10b](https://github.com/jcore9/Aphelion/issues/98) | Require a device token on every endpoint except `/health`, including from `127.0.0.1`. |
+| [M4-02](https://github.com/jcore9/Aphelion/issues/45) | Read agent files only through the no-follow helper. A lint rule bans other reads under the agents root. |

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-21
 - Decided by: project owner
+- Amended by: [decision 0022](0022-agent-network-boundary.md) (the plugin runner channel uses init-created pipes, not `SO_PEERCRED`)
 - Answers: M0 plan, Q9
 - Amends: the plan's Plugin types table ("separate process under its own Unix user"), [0016](0016-one-docker-container.md) (the users in the image)
 

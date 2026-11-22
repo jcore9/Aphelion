@@ -39,3 +39,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0017](decisions/0017-desktop-remote-only.md) | The desktop app only connects to a server; it never runs one | Accepted |
 | [0018](decisions/0018-shared-plugin-user.md) | Server plugins share one user and are started by a plugin runner | Accepted |
 | [0021](decisions/0021-container-init-and-secret-handoff.md) | The container's init is tini plus setpriv, and the bootstrap secret arrives on stdin | Proposed |
+| [0022](decisions/0022-agent-network-boundary.md) | The host firewall blocks the container from the LAN, with a path to a separate agents container | Proposed |
