@@ -85,16 +85,16 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0033](decisions/0033-docs-site-in-place.md) | The docs site reads the Markdown files where they are, and takes each page title from its first heading | Accepted |
 | [0034](decisions/0034-vendor-protocol-per-cli.md) | Each bot CLI is driven over its vendor's own protocol | Accepted |
 | [0035](decisions/0035-codex-login-sandbox-approvals.md) | Codex runs on the owner's ChatGPT login, with its own sandbox in the container and `untrusted` approvals on a pinned version | Accepted |
-| [0036](decisions/0036-logging-library.md) | The server writes its own JSON logs, with no logging library | Proposed |
+| [0036](decisions/0036-logging-library.md) | The server writes its own JSON logs, with no logging library | Accepted |
 | [0037](decisions/0037-protocol-frames-in-zod.md) | Protocol frames are Zod 4 schemas, and the TypeScript types come from them | Accepted |
-| [0038](decisions/0038-plugin-manifest-and-api-range.md) | A plugin's manifest is `aphelion-plugin.json`, checked with Zod 4, and its API range is checked with the `semver` package | Proposed |
-| [0039](decisions/0039-bots-not-agents.md) | Aphelion's bots are called bots, not agents, in the code, the docs and the issues | Proposed |
-| [0040](decisions/0040-protocol-spec-generator.md) | A test renders the protocol spec and the frame JSON Schemas from the Zod schemas, and fails when the committed files are stale | Proposed |
+| [0038](decisions/0038-plugin-manifest-and-api-range.md) | A plugin's manifest is `aphelion-plugin.json`, checked with Zod 4, and its API range is checked with the `semver` package | Accepted |
+| [0039](decisions/0039-bots-not-agents.md) | Aphelion's bots are called bots, not agents, in the code, the docs and the issues | Accepted |
+| [0040](decisions/0040-protocol-spec-generator.md) | A test renders the protocol spec and the frame JSON Schemas from the Zod schemas, and fails when the committed files are stale | Accepted |
 | [0041](decisions/0041-effect-in-server-and-cli.md) | The server and the CLI use the Effect library, and nothing else does | Accepted |
 | [0042](decisions/0042-plugin-server-and-client-parts.md) | A plugin has a server part, a client part or both, and its client part is installed on the server, served to every client and always sandboxed | Accepted |
-| [0043](decisions/0043-http-server-on-effect-platform-bun.md) | The server listens through `@effect/platform-bun`'s HTTP server, in an adapter | Proposed |
-| [0044](decisions/0044-secret-type.md) | `Secret` is a small class of Aphelion's own, modelled on Effect's `Redacted`, and it throws when serialized | Proposed |
+| [0043](decisions/0043-http-server-on-effect-platform-bun.md) | The server listens through `@effect/platform-bun`'s HTTP server, in an adapter | Accepted |
+| [0044](decisions/0044-secret-type.md) | `Secret` is a small class of Aphelion's own, modelled on Effect's `Redacted`, and it throws when serialized | Accepted |
 | [0045](decisions/0045-no-bot-namespaces-default-seccomp.md) | Bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox | Accepted |
-| [0046](decisions/0046-plugin-runner-kills-process-trees.md) | The plugin runner adopts every process its plugins leave behind, and freezes then kills a plugin's whole process tree | Proposed |
-| [0047](decisions/0047-repo-layout.md) | The code is split into apps and shared packages, and the server and its CLI are one package in `apps/server` | Proposed |
+| [0046](decisions/0046-plugin-runner-kills-process-trees.md) | The plugin runner adopts every process its plugins leave behind, and freezes then kills a plugin's whole process tree | Accepted |
+| [0047](decisions/0047-repo-layout.md) | The code is split into apps and shared packages, and the server and its CLI are one package in `apps/server` | Accepted |
 | [0048](decisions/0048-cli-on-node-parseargs.md) | The aphelion command reads its command line with Node's parseArgs, and Docker's Compose output reaches config check through standard input | Proposed |

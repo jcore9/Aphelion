@@ -1,6 +1,6 @@
 # 0043. The server listens through `@effect/platform-bun`'s HTTP server, in an adapter
 
-- Status: Proposed
+- Status: Accepted (approved by merging #137 on 2026-11-22)
 - Date: 2026-11-22
 - Proposed by: the M0-10a PR ([#97](https://github.com/jcore9/Aphelion/issues/97))
 - Answers: [decision 0041](0041-effect-in-server-and-cli.md) names `@effect/platform-bun`'s HTTP server as a candidate for M0-10a, and leaves the choice to that PR
