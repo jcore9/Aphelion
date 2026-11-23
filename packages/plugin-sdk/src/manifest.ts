@@ -2,7 +2,7 @@ import { satisfies, valid, validRange } from "semver";
 import { z } from "zod";
 
 /** The plugin API version that this SDK and the host run. A manifest's `api` range must include it. */
-export const pluginApiVersion = "0.2.1";
+export const pluginApiVersion = "0.2.2";
 
 /** The name of the manifest file in a plugin's folder. */
 export const pluginManifestFile = "aphelion-plugin.json";
@@ -32,6 +32,14 @@ const apiRange = text(256).refine(
     range.split("||").every((part) => part.trim() !== "") &&
     validRange(range) !== null,
   { error: "must be an npm semver range, such as ^0.2.0" },
+);
+
+const repository = text(140).regex(
+  /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/,
+  {
+    error:
+      "must be a GitHub repository as owner/name, such as octo-org/weather-plugin",
+  },
 );
 
 const entry = text(1024).regex(
@@ -194,6 +202,11 @@ export const pluginManifestSchema = z
     api: apiRange.describe(
       "The plugin-API versions the plugin supports, as an npm semver range.",
     ),
+    repository: repository
+      .optional()
+      .describe(
+        "The GitHub repository, as owner/name, whose releases update the plugin.",
+      ),
     server: part(
       "The part the plugin runner starts on the server, in its own process.",
     ),

@@ -19,6 +19,7 @@ const clientOnly = { ...identity, client: { entry: "dist/client.js" } };
 
 const full = {
   ...minimal,
+  repository: "octo-org/weather-plugin",
   $schema: "./node_modules/@aphelion/plugin-sdk/plugin-manifest.schema.json",
   client: { entry: "dist/client.js" },
   permissions: {
@@ -141,6 +142,40 @@ const titleCases = {
     "\u0301\u0301",
     "\u034f \u034f",
     "\ufe0f ",
+  ],
+};
+
+const repositoryCases = {
+  accepted: [
+    "octo-org/weather-plugin",
+    "jcore9-bot/aphelion-test-plugin",
+    "a/b",
+    "Octo/My.Plugin_2",
+    "o/.github",
+    "o/..x",
+    "o/-",
+    `${"a".repeat(39)}/${"b".repeat(100)}`,
+  ],
+  refused: [
+    "https://github.com/octo-org/weather-plugin",
+    "github.com/octo-org/weather-plugin",
+    "git@github.com:octo-org/weather-plugin.git",
+    "octo-org",
+    "octo-org/",
+    "/weather-plugin",
+    "octo-org/weather-plugin/",
+    "octo-org/weather/plugin",
+    "-octo/weather-plugin",
+    "octo_org/weather-plugin",
+    "octo.org/weather-plugin",
+    "o/.",
+    "o/..",
+    "o/weather plugin",
+    "o/weather\nplugin",
+    "o/wetter-zürich",
+    `${"a".repeat(40)}/b`,
+    `a/${"b".repeat(101)}`,
+    "",
   ],
 };
 
@@ -311,6 +346,31 @@ describe("parsePluginManifest", () => {
       },
     ]);
   });
+
+  test("accepts a manifest without a repository", () => {
+    const result = parsePluginManifest(minimal);
+    expect(result.ok && result.manifest.repository).toBeUndefined();
+  });
+
+  test.each(repositoryCases.accepted)(
+    "accepts the repository %j",
+    (repository) => {
+      expect(parsePluginManifest({ ...minimal, repository }).ok).toBe(true);
+    },
+  );
+
+  test.each(repositoryCases.refused)(
+    "refuses the repository %j",
+    (repository) => {
+      expect(issuesOf({ ...minimal, repository })).toEqual([
+        {
+          field: "repository",
+          message:
+            "must be a GitHub repository as owner/name, such as octo-org/weather-plugin",
+        },
+      ]);
+    },
+  );
 
   describe.each(["server", "client"])("the %s entry", (side) => {
     test.each(entryCases.accepted)("accepts %j", (entry) => {
@@ -626,6 +686,7 @@ describe("length limits", () => {
       (text) => ({ ...identity, client: { entry: `${text}.js` } }),
     ],
     ["$schema", 2048, (text) => ({ ...minimal, $schema: text })],
+    ["repository", 140, (text) => ({ ...minimal, repository: `o/${text}` })],
     [
       "permissions.events[0]",
       128,
@@ -720,6 +781,11 @@ test.each([
     secretCases,
     (schema: JsonSchema) =>
       schema.properties?.["permissions"]?.properties?.["secrets"]?.items,
+  ],
+  [
+    "repository",
+    repositoryCases,
+    (schema: JsonSchema) => schema.properties?.["repository"],
   ],
   ["screen titles", titleCases, screenField("title")],
   ["screen icons", iconCases, screenField("icon")],

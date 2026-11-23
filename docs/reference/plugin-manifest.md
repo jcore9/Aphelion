@@ -13,7 +13,8 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
   "$schema": "./node_modules/@aphelion/plugin-sdk/plugin-manifest.schema.json",
   "id": "weather-alerts",
   "version": "1.2.0",
-  "api": "^0.2.1",
+  "api": "^0.2.2",
+  "repository": "octo-org/weather-alerts",
   "server": { "entry": "dist/server.js" },
   "client": { "entry": "dist/client.js" },
   "permissions": {
@@ -38,6 +39,7 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
 | `id` | string | yes | Unique plugin id. 1 to 63 lowercase letters, digits or hyphens, starting with a letter. |
 | `version` | string | yes | The plugin's own version, in strict [semver](https://semver.org/) form, such as `1.2.0` or `2.0.0-rc.1`. No `v` prefix, and no leading zeros in a number, so `1.0.0-rc.01` is refused. Each of the first three numbers has at most 15 digits. At most 256 characters. |
 | `api` | string | yes | The plugin-API versions the plugin supports, as an npm semver range. At most 256 characters. See [The API range](#the-api-range). |
+| `repository` | string | no | The GitHub repository whose releases update the plugin, as `owner/name`, such as `octo-org/weather-alerts`. Not a URL. The owner is 1 to 39 letters, digits or hyphens, starting with a letter or digit. The name is 1 to 100 letters, digits, `.`, `_` or `-`, and can't be `.` or `..`. Without it, the plugin can't be updated from a release. See [Publish a release](../guides/write-your-first-server-plugin.md#publish-a-release). |
 | `server` | object | at least one of `server` and `client` | The plugin's server part. The plugin runner starts it on the server, in its own process. See [Server and client parts](#server-and-client-parts). |
 | `server.entry` | string | yes, in `server` | The file the plugin runner starts, as a plain relative path inside the plugin's folder, such as `dist/server.js`. See [The entry path](#the-entry-path). At most 1024 characters. |
 | `client` | object | at least one of `server` and `client` | The plugin's client part. Every client downloads it from the server and runs it in a sandbox. See [Server and client parts](#server-and-client-parts). |
@@ -113,17 +115,17 @@ This check reads the text only. When the server loads or serves a part, it must 
 
 ## The API range
 
-The plugin API has its own [semver](https://semver.org/) version, `pluginApiVersion` in `@aphelion/plugin-sdk`. It is `0.2.1` today. [Changes](#changes) lists what changed in each version. The version changes like this:
+The plugin API has its own [semver](https://semver.org/) version, `pluginApiVersion` in `@aphelion/plugin-sdk`. It is `0.2.2` today. [Changes](#changes) lists what changed in each version. The version changes like this:
 
 - A change that could break a plugin raises the major version. Before 1.0.0, it raises the minor version instead, so 0.1.x to 0.2.0 is a breaking change.
 - A change that adds to the API raises the minor version, or the patch version before 1.0.0.
 
-A plugin's `api` field says which versions it supports, using the range syntax from [npm's semver documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json#dependencies), the same syntax as `dependencies` in `package.json`. Write `^0.2.1` to accept 0.2.1 and any later 0.2.x.
+A plugin's `api` field says which versions it supports, using the range syntax from [npm's semver documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json#dependencies), the same syntax as `dependencies` in `package.json`. Write `^0.2.2` to accept 0.2.2 and any later 0.2.x.
 
 When the host loads a plugin, it checks its own `pluginApiVersion` against the plugin's `api` range:
 
-- If the range includes the host's version, the plugin loads. The range `*` includes every version. It skips the compatibility check, so a plugin that uses it may break without warning when Aphelion upgrades the plugin API. Prefer a range such as `^0.2.1`.
-- If it doesn't, the host refuses the plugin with `api: doesn't include plugin API 0.2.1, which this host runs`.
+- If the range includes the host's version, the plugin loads. The range `*` includes every version. It skips the compatibility check, so a plugin that uses it may break without warning when Aphelion upgrades the plugin API. Prefer a range such as `^0.2.2`.
+- If it doesn't, the host refuses the plugin with `api: doesn't include plugin API 0.2.2, which this host runs`.
 - If the range is longer than 256 characters, the manifest is invalid, with `api: must be at most 256 characters`. The parser checks the length first, and never hands a longer range to `semver`.
 - If the range isn't valid semver range syntax, the manifest is invalid, with `api: must be an npm semver range, such as ^0.2.0`. A range that is blank, or has a blank part between `||` signs, counts as invalid, because npm would read the blank as "any version".
 
@@ -168,9 +170,15 @@ The parser checks a value already read from JSON. The plugin runner (M0-13b) own
 | A field of the wrong type | `permissions.events` | `has the wrong type` |
 | A bad value | `permissions.network[0]` | `must be a lowercase hostname, such as api.github.com` |
 | A value that is too long | `server.entry` | `must be at most 1024 characters` |
-| An out-of-range plugin | `api` | `doesn't include plugin API 0.2.1, which this host runs` |
+| An out-of-range plugin | `api` | `doesn't include plugin API 0.2.2, which this host runs` |
 
 ## Changes
+
+### 0.2.2
+
+Adds the optional `repository` field, which names the GitHub repository whose releases update the plugin. The field is optional, so it adds to the API, and the patch version goes up. A 0.2.1 manifest is still valid and means the same. `@aphelion/plugin-sdk` also exports `releaseArchiveName` and `releaseBundleName`, the names of the two files a release must hold.
+
+- A plugin with `repository` should set `api` to `^0.2.2`. A 0.2.1 host refuses it with `has an unknown field`, because the host checks the manifest's fields before the range.
 
 ### 0.2.1
 
