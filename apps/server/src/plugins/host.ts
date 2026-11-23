@@ -11,6 +11,7 @@ import {
   Clock,
   Context,
   Data,
+  Deferred,
   Effect,
   Fiber,
   Layer,
@@ -79,6 +80,10 @@ export class PluginHost extends Context.Service<
       approval?: Approval,
     ) => Effect.Effect<StartOutcome, PluginRefused>;
     readonly stop: (id: string) => Effect.Effect<void>;
+    readonly waitFor: (
+      id: string,
+      until: (state: LifecycleState) => boolean,
+    ) => Effect.Effect<LifecycleState | undefined>;
     readonly publish: (
       event: PluginEvent,
     ) => Effect.Effect<void, MessageNotSent>;
@@ -101,9 +106,15 @@ interface SecretOperation {
 
 type ServerManifest = Extract<PluginManifest, { server: object }>;
 
+interface Waiter {
+  readonly until: (state: LifecycleState) => boolean;
+  readonly done: Deferred.Deferred<LifecycleState>;
+}
+
 type SlotInput =
   | LifecycleEvent
-  | { readonly type: "line"; readonly run: number; readonly line: string };
+  | { readonly type: "line"; readonly run: number; readonly line: string }
+  | ({ readonly type: "wait" } & Waiter);
 
 interface Slot {
   readonly id: string;
@@ -120,7 +131,11 @@ interface Slot {
   floodedRun: number | undefined;
   blockedRun: number | undefined;
   operation: { fiber?: Fiber.Fiber<void> } | undefined;
+  readonly waiters: Set<Waiter>;
 }
+
+const isStopped = (state: LifecycleState) =>
+  state.state === "stopped" || state.state === "installed";
 
 const maxPendingInputMessages = 4096;
 const pendingCost = (line: string) => 2 * line.length + 256;
@@ -361,11 +376,22 @@ export const pluginHostLayer = (options: HostOptions) =>
           }
         });
 
+      const settleWaiters = (slot: Slot) =>
+        Effect.forEach(
+          [...slot.waiters].filter((waiter) => waiter.until(slot.state)),
+          (waiter) => {
+            slot.waiters.delete(waiter);
+            return Deferred.succeed(waiter.done, slot.state);
+          },
+          { discard: true },
+        );
+
       const apply = (slot: Slot, event: LifecycleEvent) =>
         Effect.gen(function* () {
           const before = slot.state;
           const next = step(before, event, policy);
           slot.state = next.state;
+          yield* settleWaiters(slot);
           if (
             before.state === "running" &&
             next.state.state !== "running" &&
@@ -439,6 +465,10 @@ export const pluginHostLayer = (options: HostOptions) =>
         });
 
       const handle = (slot: Slot, input: SlotInput) => {
+        if (input.type === "wait") {
+          slot.waiters.add(input);
+          return settleWaiters(slot);
+        }
         if (input.type !== "line") return apply(slot, input);
         slot.pending.bytes -= pendingCost(input.line);
         slot.pending.messages--;
@@ -585,6 +615,7 @@ export const pluginHostLayer = (options: HostOptions) =>
               floodedRun: undefined,
               blockedRun: undefined,
               operation: undefined,
+              waiters: new Set(),
             };
             slots.set(created.id, created);
             yield* Queue.take(created.mailbox).pipe(
@@ -627,6 +658,15 @@ export const pluginHostLayer = (options: HostOptions) =>
           }
         });
 
+      const waitFor = (id: string, until: Waiter["until"]) =>
+        Effect.gen(function* () {
+          const slot = slots.get(id);
+          if (!slot) return undefined;
+          const done = yield* Deferred.make<LifecycleState>();
+          yield* Queue.offer(slot.mailbox, { type: "wait", until, done });
+          return yield* Deferred.await(done);
+        });
+
       return PluginHost.of({
         start,
         stop: (id) =>
@@ -635,9 +675,11 @@ export const pluginHostLayer = (options: HostOptions) =>
             if (!slot) return Effect.void;
             slot.blockedRun = slot.state.run;
             return Queue.offer(slot.mailbox, { type: "stop" }).pipe(
+              Effect.andThen(waitFor(id, isStopped)),
               Effect.asVoid,
             );
           }),
+        waitFor,
         publish,
         status: (id) => Effect.sync(() => slots.get(id)?.state),
       });
