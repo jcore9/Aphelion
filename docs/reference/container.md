@@ -113,7 +113,7 @@ sudo docker compose exec -T --user harness aphelion aphelion device list
 
 The container joins a bridge network named `aphelion`. Its host interface is `aphelion0`, its subnet is `172.30.73.0/24`, and it has no IPv6. Set `APHELION_SUBNET` in `deploy/.env` if that subnet is in use on your network.
 
-The server listens on port 7400 on every address inside the container. The Compose file publishes the port only on the host's tailnet address, which `APHELION_TAILNET_ADDRESS` sets. [`aphelion config check --compose -`](cli.md#checking-the-compose-file) refuses any other address.
+The server listens on port 7400 on every address inside the container, `0.0.0.0`. The Compose file publishes the port only on the host's tailnet address, which `APHELION_TAILNET_ADDRESS` sets. [`aphelion config check --compose -`](cli.md#checking-the-compose-file) refuses any other host address. It also refuses a `server.yaml` with another address or port, because the firewall below lets connections in only on port 7400.
 
 The host firewall keeps the container away from the LAN, and the LAN away from the container ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`deploy/host/firewall`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/firewall) installs two chains in iptables' `mangle` table:
 
