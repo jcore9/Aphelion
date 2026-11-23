@@ -252,7 +252,11 @@ A minimal init starts the four processes as their users. A fifth volume holds `/
 
 **M0-14, secrets broker v0.** The `Secret` wrapper, the reference syntax (`op://`, `bws://`, `local://`), and a local store encrypted with the `age-encryption` package. The broker runs inside the container as `aphelion-secrets`, behind a Unix socket that only `harness` can open ([decisions 0012 and 0016](../../decisions/0016-one-docker-container.md)). The bootstrap secret comes from the host's `LoadCredentialEncrypted=` as a Compose secret readable only by `aphelion-secrets`. The test uses a canary secret value and checks that it never appears in the logs or anywhere in the database file.
 
+> Amended by [decision 0050](../../decisions/0050-bootstrap-key-is-the-store-key.md). The bootstrap secret is the local store's age key. Compose mounts it readable only by root, and the launcher passes it to the broker as standard input ([decision 0021](../../decisions/0021-container-init-and-secret-handoff.md)).
+
 **M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. It works like Grok Bot's 1Password integration: per-item approval, 30-day grants, revocation, and values never shown to bots ([decision 0020](../../decisions/0020-1password-grok-bot-style.md)). The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
+
+> Amended by [decision 0050](../../decisions/0050-bootstrap-key-is-the-store-key.md). The service account token is not the bootstrap secret. M0-15 decides where the token lives, for example as a `local://` entry.
 
 ## Keeping it extensible
 
@@ -353,7 +357,7 @@ All eight are settled; each answer links to its decision record.
 
 Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu-lts.md)) with Docker Engine, the Compose plugin and Tailscale:
 
-1. Follow the install guide: install `aphelion.service`, store the bootstrap secret with `systemd-creds`, and start the service.
+1. Follow the install guide: run `host/install`, which installs `aphelion.service` and creates the bootstrap key with `systemd-creds`, make the recovery copy, and start the service.
 2. Check that `systemctl is-enabled aphelion` reports `enabled`, then reboot.
 3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`. The same request to the host's LAN address fails.
 4. A WebSocket opened without a token is closed; one opened with a token from `aphelion device add` is accepted.

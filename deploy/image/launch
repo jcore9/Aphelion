@@ -53,14 +53,12 @@ check_dir /run/aphelion-secrets aphelion-secrets:harness 2710
 [[ $(stat -c '%a' /run/aphelion-secrets) == 2710 ]] ||
   refuse "/run/aphelion-secrets must have mode 2710"
 
-broker_input=/dev/null
-if [[ -e $bootstrap ]]; then
-  [[ -f $bootstrap && $(stat -L -c '%u' "$bootstrap") == 0 ]] ||
-    refuse "$bootstrap must be a regular file owned by root"
-  (((8#$(stat -L -c '%a' "$bootstrap") & 8#077) == 0)) ||
-    refuse "$bootstrap must not be readable by group or others"
-  broker_input=$bootstrap
-fi
+[[ -e $bootstrap ]] ||
+  refuse "$bootstrap is missing. Start Aphelion with systemctl, which loads the bootstrap key"
+[[ -f $bootstrap && $(stat -L -c '%u' "$bootstrap") == 0 ]] ||
+  refuse "$bootstrap must be a regular file owned by root"
+(((8#$(stat -L -c '%a' "$bootstrap") & 8#077) == 0)) ||
+  refuse "$bootstrap must not be readable by group or others"
 
 stopping=0
 trap 'stopping=1' TERM INT
@@ -76,7 +74,7 @@ rm -r "$pipes"
 (
   close_pipes
   exec "${drop[@]}" --reuid=aphelion-secrets --regid=aphelion-secrets -- \
-    /usr/local/bin/aphelion-secrets <"$broker_input"
+    /usr/local/bin/aphelion-secrets <"$bootstrap"
 ) &
 broker=$!
 

@@ -42,13 +42,19 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
    sudo host/install
    ```
 
-5. Start the service.
+   The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens it. The bootstrap key unlocks it ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
+
+   The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a whole key, the script stops and leaves the file and the service as they are.
+
+5. Make a recovery copy of the bootstrap key, as [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) describes. Do it before you store any secret. If the host's disk fails, this copy is the only way to read the store on a new host.
+
+6. Start the service.
 
    ```sh
    sudo systemctl start aphelion
    ```
 
-6. From another device on the tailnet, check that the server answers. Replace the address with the host's tailnet address.
+7. From another device on the tailnet, check that the server answers. Replace the address with the host's tailnet address.
 
    ```sh
    curl http://100.71.226.67:7400/health
@@ -56,7 +62,7 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
    You should see `{"status":"ok"}`.
 
-7. Add a device token for your first client. The command prints the token once.
+8. Add a device token for your first client. The command prints the token once.
 
    ```sh
    sudo docker compose exec -T --user harness aphelion aphelion device add laptop
@@ -64,9 +70,64 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
 Run every `docker compose` command in this guide from `/opt/aphelion/deploy`, so Compose finds the Compose file and `.env`.
 
+## Keep a recovery copy of the bootstrap key
+
+The bootstrap key is the only key to the secrets store. If the host's disk is lost, the key is lost with it, and so is every secret in the store. On a host with a TPM, a security chip on the motherboard, the key may also be tied to that chip, so a new machine can't decrypt the old file.
+
+1. Print the key. The command shows the key on screen, so make sure that nobody can see your screen.
+
+   ```sh
+   sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap -
+   ```
+
+   You should see one line that starts with `AGE-SECRET-KEY-1`.
+
+2. Store the line in your password manager, apart from any backup of the server.
+3. Clear the terminal with `clear`.
+
+## Restore on new hardware
+
+Put the bootstrap key on the new host before you run `host/install`, so that the script keeps it.
+
+1. Create the folder for the key.
+
+   ```sh
+   sudo install -d -m 0700 /etc/credstore.encrypted
+   ```
+
+2. Start `systemd-creds`, which reads the key from your keyboard.
+
+   ```sh
+   sudo sh -c 'umask 077 && systemd-creds encrypt --name=bootstrap - /etc/credstore.encrypted/aphelion-bootstrap'
+   ```
+
+3. Paste the key from your password manager, press Enter, and then press Ctrl-D. The key never enters your shell history, because you paste it into `systemd-creds` and not into a command.
+4. Check that the whole key arrived. The command counts the lines that look like a whole key, without showing the key. You should see `1`. If you see `0`, repeat steps 2 and 3.
+
+   ```sh
+   sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap - | grep -cEx 'AGE-SECRET-KEY-1[0-9A-Z]{58}'
+   ```
+
+5. Follow [Install](#install) from step 1.
+
+The key alone restores nothing. The secrets themselves are in the `secrets` volume, and this guide has no tested way yet to back up a volume and restore it on another host. The broker refuses to start if the key doesn't match a store it finds, and the log then shows `The bootstrap key does not match this secrets store`.
+
+## Start a fresh store after an older install
+
+Before [#105](https://github.com/jcore9/Aphelion/issues/105), the store kept its key in plain text in a file called `identity.agekey`, inside the `secrets` volume. The broker now refuses to start while that file exists. It logs `The secrets store holds a plain-text key from before the host credential`.
+
+No install from before #105 holds real secrets, so there is no tool to move that key. Delete the old store and let the broker start an empty one. This deletes every secret in it. Run these commands from `/opt/aphelion/deploy`. `docker compose down` removes the stopped container, which still holds the volume, and keeps the volumes.
+
+```sh
+sudo systemctl stop aphelion
+sudo docker compose down
+sudo docker volume rm aphelion_secrets
+sudo systemctl start aphelion
+```
+
 ## What the service does
 
-[`aphelion.service`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/aphelion.service) starts at boot after Docker and Tailscale. It also starts whenever Docker starts, and stops when Docker stops. Before each start, [`host/preflight`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/preflight) does three things:
+[`aphelion.service`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/aphelion.service) starts at boot after Docker and Tailscale. It also starts whenever Docker starts, and stops when Docker stops. It decrypts the bootstrap key into `/run/credentials/aphelion.service/bootstrap`, a folder in memory that only root can read, and Compose gives that file to the container. Before each start, [`host/preflight`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/preflight) does three things:
 
 1. It waits up to 120 seconds for `APHELION_TAILNET_ADDRESS` to appear on the tailnet interface, `tailscale0`. Docker can't publish a port on an address that doesn't exist yet.
 2. It installs the [host firewall](../reference/container.md#network) again. Firewall rules don't survive a reboot, so every start installs them.
@@ -74,7 +135,7 @@ Run every `docker compose` command in this guide from `/opt/aphelion/deploy`, so
 
 If any step fails, the service doesn't start. Then the service runs `docker compose up` in the foreground. If the container stops with an error, systemd starts it again after 10 seconds.
 
-Always start the server with `systemctl`. A plain `docker compose up` skips the firewall step.
+Always start the server with `systemctl`. A plain `docker compose up` skips the firewall step and has no bootstrap key, so the container stops.
 
 ## Install a plugin
 
@@ -135,12 +196,12 @@ cd /opt/aphelion
 sudo git pull --ff-only
 cd deploy
 sudo docker compose build
+sudo host/install
 sudo systemctl restart aphelion
 ```
 
-The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
+`host/install` installs the new unit file and keeps the existing bootstrap key. If the service then stops and the log shows `The secrets store holds a plain-text key from before the host credential`, see [Start a fresh store after an older install](#start-a-fresh-store-after-an-older-install). The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
 
 ## Not covered yet
 
-- The bootstrap secret, stored with `systemd-creds` and loaded with `LoadCredentialEncrypted=`, comes with [#105](https://github.com/jcore9/Aphelion/issues/105).
 - AI tools such as Claude Code come from a list in [#155](https://github.com/jcore9/Aphelion/issues/155).

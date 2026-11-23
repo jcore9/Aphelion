@@ -1,3 +1,4 @@
+import { closeSync, readSync } from "node:fs";
 import { chmod, lstat, readFile } from "node:fs/promises";
 import {
   createServer,
@@ -5,9 +6,10 @@ import {
   type ServerResponse,
 } from "node:http";
 import { join } from "node:path";
+import { generateIdentity } from "age-encryption";
 import { z } from "zod";
 import { createLogger } from "../log";
-import { openLocalStore } from "./local-store";
+import { LocalStoreRefusal, openLocalStore } from "./local-store";
 import { parseSecretReference } from "./reference";
 import { Secret } from "./secret";
 
@@ -15,6 +17,7 @@ const brokerUid = 10003;
 const socketDirectory = "/run/aphelion-secrets";
 const storeDirectory = "/var/lib/aphelion-secrets";
 const maxRequestBytes = 64 * 1024;
+const maxKeyBytes = 1024;
 const requestSchema = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("read"), ref: z.string() }),
   z.strictObject({
@@ -23,6 +26,19 @@ const requestSchema = z.discriminatedUnion("op", [
     value: z.string(),
   }),
 ]);
+
+class BrokerRefusal extends Error {
+  override name = "BrokerRefusal";
+
+  constructor(
+    readonly reason:
+      | "The secrets broker takes no arguments except --new-key"
+      | "The bootstrap key is missing from standard input"
+      | "The bootstrap key is longer than 1 KiB",
+  ) {
+    super(reason);
+  }
+}
 
 const logger = createLogger({
   write: (line) => process.stderr.write(`${line}\n`),
@@ -93,10 +109,45 @@ async function handleRequest(
   }
 }
 
-async function run(): Promise<void> {
+function readBootstrapKey(): Secret {
+  const buffer = Buffer.alloc(maxKeyBytes + 1);
+  let length = 0;
+  try {
+    for (;;) {
+      const read = readSync(0, buffer, length, buffer.length - length, null);
+      if (read === 0) break;
+      length += read;
+      if (length > maxKeyBytes) {
+        throw new BrokerRefusal("The bootstrap key is longer than 1 KiB");
+      }
+    }
+    const key = buffer.toString("utf8", 0, length).trim();
+    if (key === "") {
+      throw new BrokerRefusal(
+        "The bootstrap key is missing from standard input",
+      );
+    }
+    return Secret.make(key, { label: "bootstrap key" });
+  } finally {
+    buffer.fill(0);
+    closeSync(0);
+  }
+}
+
+async function run(args: readonly string[]): Promise<void> {
+  if (args.length === 1 && args[0] === "--new-key") {
+    process.stdout.write(`${await generateIdentity()}\n`);
+    return;
+  }
+  if (args.length > 0) {
+    throw new BrokerRefusal(
+      "The secrets broker takes no arguments except --new-key",
+    );
+  }
   if (process.platform !== "linux" || process.getuid?.() !== brokerUid) {
     throw new Error("The secrets broker requires its Linux service account");
   }
+  const key = readBootstrapKey();
   process.umask(0o077);
   const groups = await readFile("/etc/group", "utf8");
   const harnessGid = /^harness:[^:\n]*:([0-9]+):/m.exec(groups)?.[1];
@@ -110,7 +161,7 @@ async function run(): Promise<void> {
     throw new Error("Unsafe broker socket directory");
   }
 
-  const store = await openLocalStore(storeDirectory);
+  const store = await openLocalStore(storeDirectory, key);
   const path = join(socketDirectory, "broker.sock");
   const server = createServer(
     { requestTimeout: 5_000, headersTimeout: 5_000 },
@@ -159,8 +210,13 @@ async function run(): Promise<void> {
 }
 
 try {
-  await run();
-} catch {
-  logger.error("Secrets broker startup failed");
+  await run(process.argv.slice(2));
+} catch (error) {
+  logger.error(
+    "Secrets broker startup failed",
+    error instanceof LocalStoreRefusal || error instanceof BrokerRefusal
+      ? { reason: error.reason }
+      : {},
+  );
   process.exitCode = 1;
 }

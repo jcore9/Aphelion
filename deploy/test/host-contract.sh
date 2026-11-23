@@ -34,6 +34,19 @@ problems=$(systemd-analyze verify /opt/aphelion/deploy/host/aphelion.service 2>&
 [[ -z $problems ]] || fail "systemd-analyze found problems in aphelion.service: $problems"
 pass "systemd-analyze accepts aphelion.service"
 
+credential=$(sed -n 's/^LoadCredentialEncrypted=bootstrap://p' /opt/aphelion/deploy/host/aphelion.service)
+grep -qx "readonly credential=$credential" /opt/aphelion/deploy/host/install ||
+  fail "install creates the bootstrap key somewhere other than $credential"
+grep -qF 'file: ${CREDENTIALS_DIRECTORY:-/run/credentials/aphelion.service}/bootstrap' /opt/aphelion/deploy/compose.yaml ||
+  fail "compose.yaml doesn't read the bootstrap credential aphelion.service loads"
+key=AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+install -d -m 0700 "$(dirname "$credential")"
+(umask 077 && printf '%s\n' "$key" | systemd-creds encrypt --name=bootstrap - "$credential" 2>/dev/null)
+[[ $(stat -c %a "$credential") == 600 ]] || fail "the encrypted bootstrap key has mode $(stat -c %a "$credential")"
+! grep -qF "$key" "$credential" || fail "the encrypted bootstrap key holds the key in plain text"
+[[ $(systemd-creds decrypt --name=bootstrap "$credential" - 2>/dev/null) == "$key" ]] ||
+  fail "the bootstrap key didn't decrypt under the name the unit loads"
+pass "the unit, install and compose.yaml agree on the bootstrap credential, and it round-trips through systemd-creds"
 
 namespace() {
   local name=$1 inside=$2 outside=$3 peer=$4 link=${5:-v-$1}

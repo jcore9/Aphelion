@@ -97,6 +97,8 @@ docker compose --profile '*' config \
 
 `set -o pipefail` makes the whole line fail when `docker compose config` fails, for example on a syntax error, instead of reporting only the check's result.
 
+`docker compose run` mounts the bootstrap key that `aphelion.service` decrypts, so the line works only while the service runs. When the service is stopped, the run fails because the key file doesn't exist. The service runs the line itself before every start.
+
 The service is named `aphelion` in [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.yaml), and `aphelion.service` runs this line before every start ([what the service does](../guides/install.md#what-the-service-does)). `--compose FILE` reads a file that holds the same output instead. The check refuses input with no services, such as an empty file or `{}`, because that can't be the output for Aphelion's Compose file.
 
 ## `aphelion device add NAME`

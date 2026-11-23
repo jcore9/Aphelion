@@ -104,3 +104,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0047](decisions/0047-repo-layout.md) | The code is split into apps and shared packages, and the server and its CLI are one package in `apps/server` | Accepted |
 | [0048](decisions/0048-cli-on-node-parseargs.md) | The aphelion command reads its command line with Node's parseArgs, and Docker's Compose output reaches config check through standard input | Proposed |
 | [0049](decisions/0049-ai-tools-installed-from-a-list.md) | The container image ships no AI tool, and the owner installs AI tools from a list | Proposed |
+| [0050](decisions/0050-bootstrap-key-is-the-store-key.md) | The host's bootstrap credential is the local store's age key | Proposed |

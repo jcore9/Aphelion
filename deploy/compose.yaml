@@ -26,6 +26,7 @@ services:
       - secrets:/var/lib/aphelion-secrets
       - plugin-data:/var/lib/aphelion-plugins
       - ./plugins:/opt/aphelion/plugins:ro
+    secrets: [bootstrap]
     networks: [aphelion]
     stop_grace_period: 45s
     restart: "no"
@@ -40,6 +41,10 @@ networks:
     ipam:
       config:
         - subnet: ${APHELION_SUBNET:-172.30.73.0/24}
+
+secrets:
+  bootstrap:
+    file: ${CREDENTIALS_DIRECTORY:-/run/credentials/aphelion.service}/bootstrap
 
 volumes:
   config:

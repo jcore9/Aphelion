@@ -105,7 +105,9 @@ cat >"$scratch/plugins/contract-probe/checks.json" <<'EOF'
 ]
 EOF
 chmod -R a+rX,go-w "$scratch/plugins"
-as_root bash -c 'rm /scratch/secrets/bootstrap && printf bootstrap-canary >/scratch/secrets/bootstrap && chmod 0400 /scratch/secrets/bootstrap'
+as_root bash -c 'rm /scratch/secrets/bootstrap && aphelion-secrets --new-key >/scratch/secrets/bootstrap && chmod 0400 /scratch/secrets/bootstrap'
+key=$(as_root cat /scratch/secrets/bootstrap)
+[[ $key == AGE-SECRET-KEY-1* ]] || fail "aphelion-secrets --new-key printed no age identity"
 
 "${compose[@]}" config | "${compose[@]}" run --rm -T --user harness "$service" \
   aphelion config check --compose - >/dev/null ||
@@ -128,7 +130,7 @@ since=0
 wait_for_log() {
   local text=$1 tries
   for ((tries = 0; tries < 300; tries++)); do
-    if "${compose[@]}" logs --no-color --since "$since" 2>&1 | grep -qF "$text"; then return 0; fi
+    if "${compose[@]}" logs --no-color --since "$since" 2>&1 | grep -F "$text" >/dev/null; then return 0; fi
     sleep 0.1
   done
   fail "the log never showed: $text"
@@ -146,7 +148,7 @@ pass "a plugin started at boot as aphelion-plugins and was refused everything ou
 [[ $(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}' "$container") == 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"] 1024' ]] ||
   fail "docker inspect shows different hardening: $(docker inspect --format '{{json .HostConfig}}' "$container")"
 (($(docker inspect --format '{{.HostConfig.Memory}}' "$container") > 0)) || fail "no memory limit"
-if docker inspect --format '{{json .Mounts}}' "$container" | grep -q docker.sock; then
+if docker inspect --format '{{json .Mounts}}' "$container" | grep docker.sock >/dev/null; then
   fail "the Docker socket is mounted"
 fi
 pass "read-only root, no-new-privileges, only SETUID, SETGID and KILL, limits set, no Docker socket"
@@ -183,7 +185,9 @@ docker exec --privileged "$container" bash -euo pipefail -c '
     [[ -n ${pid_of[$role]:-} ]] || { echo "no $role process"; exit 1; }
   done
   [[ $(awk "/^Groups:/ {print \$2, \$3}" "/proc/${pid_of[server]}/status") == "10001 10002" ]] || { echo "the server lost its bot group"; exit 1; }
-  [[ $(readlink "/proc/${pid_of[broker]}/fd/0") == /run/secrets/bootstrap ]] || { echo "the broker did not get the bootstrap file on stdin"; exit 1; }
+  for fd in "/proc/${pid_of[broker]}"/fd/*; do
+    [[ $(readlink "$fd") != /run/secrets/bootstrap ]] || { echo "the broker still holds the bootstrap file"; exit 1; }
+  done
   ! compgen -G "/run/aphelion-launch.*" >/dev/null || { echo "the pipe folder is still there"; exit 1; }
   pipe() { stat -L -c %i "/proc/$1/fd/$2"; }
   requests=$(pipe "${pid_of[server]}" 4)
@@ -198,6 +202,12 @@ docker exec --privileged "$container" bash -euo pipefail -c '
   done
 ' || fail "a process runs with the wrong user, privileges or pipes"
 pass "each process runs as its own user with no capabilities, NoNewPrivs and seccomp; only the server and runner hold the pipe"
+
+docker exec --user aphelion-secrets "$container" bash -euo pipefail -c '
+  [[ $(stat -c %a /var/lib/aphelion-secrets/recipient.pub) == 600 ]]
+  [[ ! -e /var/lib/aphelion-secrets/identity.agekey ]]
+' || fail "the secrets volume holds a key file, or no recipient.pub"
+pass "the secrets volume holds the store's public key and no private key"
 
 probe() {
   local user=$1 checks=$2
@@ -280,7 +290,7 @@ started=$SECONDS
 [[ $(docker inspect --format '{{.State.ExitCode}}' "$container") == 0 ]] || fail "a clean stop exited non-zero"
 ((SECONDS - started < 40)) || fail "the clean stop took $((SECONDS - started)) seconds"
 for text in "the launcher is stopping" '"msg":"server stopping"'; do
-  "${compose[@]}" logs --no-color 2>&1 | grep -qF "$text" || fail "the stop never logged: $text"
+  "${compose[@]}" logs --no-color 2>&1 | grep -F "$text" >/dev/null || fail "the stop never logged: $text"
 done
 pass "docker compose stop stops every process and exits 0"
 
@@ -304,3 +314,17 @@ sleep 1
 "${compose[@]}" start >/dev/null 2>&1 || true
 wait_for_log '/run/secrets/bootstrap must not be readable by group or others, so the container stops'
 pass "the launcher refuses a bootstrap file that others can read"
+
+missing=$(docker run --rm --network none --read-only --cap-drop ALL --cap-add SETUID --cap-add SETGID \
+  --tmpfs /run:mode=0755 --tmpfs /run/aphelion-secrets:uid=10003,gid=10001,mode=2710 "$image" 2>&1) &&
+  fail "the container started without the bootstrap file"
+grep -qF '/run/secrets/bootstrap is missing. Start Aphelion with systemctl, which loads the bootstrap key, so the container stops' <<<"$missing" ||
+  fail "the container stopped without the bootstrap file for another reason: $missing"
+pass "the launcher refuses to start without the bootstrap file"
+
+logs=$("${compose[@]}" logs --no-color 2>&1) || fail "docker compose logs failed: $logs"
+[[ -n $logs ]] || fail "docker compose logs printed nothing"
+if grep -F -- "$key" <<<"$logs" >/dev/null; then
+  fail "the bootstrap key reached a container log"
+fi
+pass "the bootstrap key appears in no container log"

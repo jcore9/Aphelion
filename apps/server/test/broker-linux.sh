@@ -17,6 +17,9 @@ for account in harness aphelion-bot aphelion-plugins; do
 done
 install -d -o aphelion-secrets -g harness -m 2710 /run/aphelion-secrets
 install -d -o aphelion-secrets -g aphelion-secrets -m 0700 /var/lib/aphelion-secrets
+(umask 077 && /broker --new-key >/bootstrap && /broker --new-key >/other-key)
+chmod 0400 /bootstrap /other-key
+grep -qEx 'AGE-SECRET-KEY-1[0-9A-Z]{58}' /bootstrap
 
 as_user() {
   local account=$1
@@ -26,7 +29,7 @@ as_user() {
 
 start_broker() {
   setpriv --reuid aphelion-secrets --regid aphelion-secrets --init-groups --inh-caps=-all \
-    /broker >>/broker.log 2>&1 &
+    /broker </bootstrap >>/broker.log 2>&1 &
   broker=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
     if [[ "$(stat -c '%a' /run/aphelion-secrets/broker.sock 2>/dev/null)" == 660 ]]; then
@@ -52,7 +55,7 @@ trap 'if [[ -n "${broker:-}" ]]; then kill -TERM "$broker" 2>/dev/null || true; 
 chgrp aphelion-bot /run/aphelion-secrets
 chmod 2710 /run/aphelion-secrets
 if timeout 5s setpriv --reuid aphelion-secrets --regid aphelion-secrets --init-groups --inh-caps=-all \
-    /broker >>/broker.log 2>&1; then
+    /broker </bootstrap >>/broker.log 2>&1; then
   echo "The broker accepted the bot group on its socket directory" >&2
   exit 1
 else
@@ -64,14 +67,13 @@ chgrp harness /run/aphelion-secrets
 chmod 2710 /run/aphelion-secrets
 start_broker
 as_user harness bun /check/broker-probe.mjs write
-for account in harness aphelion-bot aphelion-plugins; do
-  as_user "$account" test ! -r /var/lib/aphelion-secrets/identity.agekey
-done
+test ! -e /var/lib/aphelion-secrets/identity.agekey
+[[ $(stat -c '%U %a' /var/lib/aphelion-secrets/recipient.pub) == "aphelion-secrets 600" ]]
 for account in aphelion-bot aphelion-plugins; do
   as_user "$account" bun /check/broker-probe.mjs denied
   echo "$account received EACCES"
 done
-if as_user aphelion-secrets /broker >>/broker.log 2>&1; then
+if as_user aphelion-secrets /broker </bootstrap >>/broker.log 2>&1; then
   echo "A second broker started on the same socket" >&2
   exit 1
 fi
@@ -80,7 +82,32 @@ stop_broker
 start_broker
 as_user harness bun /check/broker-probe.mjs read
 stop_broker
+
+refused() {
+  local input=$1 reason=$2
+  : >/refused.log
+  if as_user aphelion-secrets /broker <"$input" >/refused.log 2>&1; then
+    echo "The broker started with $input on standard input" >&2
+    exit 1
+  fi
+  grep -qF "\"msg\":\"Secrets broker startup failed\",\"reason\":\"$reason\"" /refused.log || {
+    cat /refused.log >&2
+    exit 1
+  }
+  cat /refused.log >>/broker.log
+}
+refused /dev/null "The bootstrap key is missing from standard input"
+refused /other-key "The bootstrap key does not match this secrets store"
+test ! -e /run/aphelion-secrets/broker.sock
+echo "the broker refused an empty standard input and a key that doesn't match the store"
+
 grep -q 'Secrets broker startup failed' /broker.log
+for secret in "$(cat /bootstrap)" "$(cat /other-key)"; do
+  if grep -arF -- "$secret" /broker.log /var/lib/aphelion-secrets >/dev/null; then
+    echo "A bootstrap key reached a broker log or store file" >&2
+    exit 1
+  fi
+done
 status=0
 grep -ar 'broker-canary-' /broker.log /var/lib/aphelion-secrets >/dev/null || status=$?
 case "$status" in
