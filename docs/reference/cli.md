@@ -136,7 +136,7 @@ The command connects to `plugin-dev.sock` in the state folder. It asks the serve
 | `ID crashed after the handshake. If its start() failed, the server log says why.` | The run that just finished the handshake crashed before the next reload. A stop you asked for does not print this. Standard error. |
 | `Refused: REASON` | The server didn't reload. The reason says why, for example that the folder isn't approved or that the manifest changed. The command keeps watching. Standard error. |
 
-The command exits with code 1 and a message if the server has no dev socket. It runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
+The command exits with code 1 and a message if the server has no dev socket. If the server closes the connection, for example when it restarts, the command prints `aphelion: the server closed the dev connection` and exits with code 1. Otherwise it runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
 
 ## `aphelion device add NAME`
 

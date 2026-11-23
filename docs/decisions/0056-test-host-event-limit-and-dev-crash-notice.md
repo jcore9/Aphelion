@@ -46,4 +46,5 @@ The owner chose option 1 in both cases.
 
 - A plugin test that published an event over 1 MiB now fails. It never worked in production.
 - The dev socket's messages carry a type, so the command can tell a crash notice from the reply to its request. The command and the server ship in the same image, so no older client reads it.
+- The server starts watching for the crash right after it sends the reply. If the plugin crashes and a requested stop, such as the service stopping, arrives in that same instant, the stop wins and no notice is printed. Someone asked for that stop, so nothing is lost.
 - Revisit the notice if the SDK ever tells the host when `start` has finished. The command could then say so directly.

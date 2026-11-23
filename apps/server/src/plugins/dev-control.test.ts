@@ -24,11 +24,17 @@ const logger = createLogger({ level: "error", write: () => undefined });
 
 function fakeRunner(exitAfterReady: boolean) {
   const starts: number[] = [];
+  let reply: (message: RunnerReply) => Effect.Effect<void> = () =>
+    Effect.die("the fake runner hasn't started");
+  const exit = (plugin: string, run: number) =>
+    Effect.suspend(() =>
+      reply({ type: "exited", plugin, run, code: 1, signal: null }),
+    );
   const layer = Layer.effect(
     RunnerLink,
     Effect.gen(function* () {
       const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
-      const reply = (message: RunnerReply) =>
+      reply = (message: RunnerReply) =>
         Queue.offer(incoming, message).pipe(Effect.asVoid);
       return {
         incoming,
@@ -79,7 +85,7 @@ function fakeRunner(exitAfterReady: boolean) {
       };
     }),
   );
-  return { layer, starts };
+  return { layer, starts, exit };
 }
 
 let base: string;
@@ -130,7 +136,10 @@ const setup = Effect.gen(function* () {
 });
 
 const withHost = <A, E>(
-  test: (starts: number[]) => Effect.Effect<A, E, PluginHost>,
+  test: (
+    starts: number[],
+    exit: (plugin: string, run: number) => Effect.Effect<void>,
+  ) => Effect.Effect<A, E, PluginHost>,
   options?: {
     readonly exitAfterReady?: boolean;
     readonly policy?: RestartPolicy;
@@ -140,7 +149,7 @@ const withHost = <A, E>(
   const hostLayer = options?.policy
     ? pluginHostLayer({ logger, policy: options.policy })
     : pluginHostLayer({ logger });
-  return test(runner.starts).pipe(
+  return test(runner.starts, runner.exit).pipe(
     Effect.provide(
       hostLayer.pipe(
         Layer.provide(runner.layer),
@@ -554,6 +563,29 @@ describe("a crash after the dev handshake", () => {
             }),
           ),
         { exitAfterReady: true },
+      ),
+  );
+
+  it.live(
+    "sends the notice when the run crashes after the client has its reply",
+    () =>
+      withHost((_, exit) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { folder, approve, handle } = yield* setup;
+            yield* approve;
+            const { io, request } = yield* open(folder, handle);
+            io.send(request);
+            expect(yield* io.wait(0)).toEqual([runningReply]);
+            yield* Effect.sleep("100 millis");
+            expect(io.lines()).toEqual([runningReply]);
+            const mark = io.mark();
+            yield* exit("weather", 1);
+            expect(yield* io.wait(mark)).toEqual([
+              { type: "crashed", plugin: "weather" },
+            ]);
+          }),
+        ),
       ),
   );
 

@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
@@ -238,5 +239,77 @@ describe("aphelion plugin dev", () => {
           ]);
         }),
       ),
+  );
+  it.live("keeps waiting for the reply when a crash notice arrives first", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const stateDir = yield* Effect.promise(() =>
+          mkdtemp(join(base, "state-")),
+        );
+        const folder = join(stateDir, "plugin");
+        yield* Effect.promise(async () => {
+          await mkdir(folder);
+          await writeFile(join(folder, "server.mjs"), "one");
+        });
+        const running = {
+          type: "reloaded",
+          plugin: "weather",
+          state: "running",
+        };
+        let requests = 0;
+        let held: Socket | undefined;
+        const send = (socket: Socket, message: unknown) =>
+          socket.write(`${JSON.stringify(message)}\n`);
+        const server = createServer((socket) => {
+          socket.on("data", () => {
+            requests++;
+            if (requests === 2) {
+              send(socket, { type: "crashed", plugin: "weather" });
+              held = socket;
+            } else {
+              send(socket, running);
+            }
+          });
+        });
+        yield* Effect.acquireRelease(
+          Effect.promise(
+            () =>
+              new Promise<void>((done) => {
+                server.listen(join(stateDir, devSocketFile), done);
+              }),
+          ),
+          () =>
+            Effect.promise(
+              () =>
+                new Promise((done) => {
+                  server.close(done);
+                  held?.destroy();
+                }),
+            ),
+        );
+        const { out, err, layer } = capture();
+        const watching = yield* pluginDev({
+          stateDir,
+          folder,
+          every: "10 millis",
+        }).pipe(Effect.provide(layer), Effect.forkChild);
+        yield* until(() => out.length === 2);
+        yield* Effect.promise(() =>
+          writeFile(join(folder, "server.mjs"), "two"),
+        );
+        yield* until(() => err.length === 1);
+        yield* Effect.promise(() =>
+          writeFile(join(folder, "server.mjs"), "three"),
+        );
+        yield* Effect.sleep("200 millis");
+        expect(requests).toBe(2);
+        if (held) send(held, running);
+        yield* until(() => requests === 3 && out.length === 4);
+        yield* Fiber.interrupt(watching);
+        expect(err).toEqual([
+          "weather crashed after the handshake. If its start() failed, the server log says why.",
+        ]);
+      }),
+    ),
   );
 });

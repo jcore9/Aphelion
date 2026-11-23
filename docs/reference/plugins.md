@@ -182,7 +182,7 @@ aphelion plugin dev /opt/aphelion/dev-plugin
 
 `plugin dev` asks the server to reload the plugin, then checks the folder about every half second and asks again after each change settles. It prints each answer at once. The handshake is the plugin's answer to `initialize`, which the SDK sends before it calls your `start`. When the plugin finished the handshake, the line on standard output is `Reloaded weather: the handshake finished.` When the plugin is in any other state, the line on standard error is `Reloaded weather, but it isn't running: crashed. The server log says why.`, with that run's state in place of `crashed`.
 
-If that run then crashes before the next reload, the command prints one more line on standard error: `weather crashed after the handshake. If its start() failed, the server log says why.` A stop you asked for does not print that line. Another reload, `aphelion plugin stop`, and stopping the service are all stops you asked for. Ctrl-C stops watching. The last run keeps running under the server.
+If that run then crashes before the next reload, the command prints one more line on standard error: `weather crashed after the handshake. If its start() failed, the server log says why.` A stop you asked for, such as another reload or stopping the service, does not print that line. Ctrl-C stops watching. The last run keeps running under the server.
 
 Each reload stops the plugin, waits until it has stopped, reads the approval and the manifest again, and starts a new run through the runner. The runner checks the folder as on any other start, and the plugin runs as `aphelion-plugins` with its approved grants. Reloads run one at a time. The server refuses, with a reason:
 
