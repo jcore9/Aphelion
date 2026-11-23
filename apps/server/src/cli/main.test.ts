@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
 import {
   chmod,
@@ -12,6 +13,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Readable, Writable } from "node:stream";
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 const main = join(import.meta.dirname, "main.ts");
@@ -191,4 +193,62 @@ test("config check --compose - reads a pipe", async () => {
   expect(stdout).toBe(
     "Config OK, and the Compose file publishes ports only on the tailnet.\n",
   );
+}, 20_000);
+
+test("aphelion --headless starts installed plugins through the runner pipe", async () => {
+  const folder = join(root, "probe-plugin");
+  await mkdir(folder);
+  const manifest = JSON.stringify({
+    id: "probe",
+    version: "1.0.0",
+    api: "^0.2.0",
+    server: { entry: "index.js" },
+    permissions: {},
+  });
+  await writeFile(join(folder, "aphelion-plugin.json"), manifest);
+  const digest = createHash("sha256").update(manifest).digest("hex");
+  const approval = createHash("sha256")
+    .update(JSON.stringify([folder, digest]))
+    .digest("hex");
+  const install = start([
+    "plugin",
+    "install",
+    folder,
+    "--approve",
+    approval,
+    "--state-dir",
+    stateDir,
+  ]);
+  expect(await install.exited).toBe(0);
+
+  const child = spawn(
+    process.execPath,
+    [main, "--headless", ...dirs(), "--plugin-runner-fds", "3,4"],
+    { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let requests = "";
+  child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+  const replies = child.stdio[3] as Writable;
+  (child.stdio[4] as Readable).on(
+    "data",
+    (chunk: Buffer) => (requests += chunk.toString()),
+  );
+  const exited = new Promise((resolve) => child.on("close", resolve));
+  try {
+    await waitFor(() => requests.includes("\n"));
+    expect(JSON.parse(requests.split("\n")[0] ?? "")).toEqual({
+      type: "start",
+      plugin: "probe",
+      run: 1,
+      folder,
+      entry: "index.js",
+    });
+    expect(stdout).toContain('"msg":"plugin host started","installed":1');
+    replies.end();
+    await waitFor(() => stdout.includes("the plugin runner's pipe closed"));
+  } finally {
+    child.kill("SIGTERM");
+  }
+  expect(await exited).toBe(130);
 }, 20_000);

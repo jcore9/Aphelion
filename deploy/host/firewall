@@ -1,0 +1,49 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly bridge=${APHELION_BRIDGE:-aphelion0}
+readonly forward=APHELION-FORWARD
+readonly input=APHELION-INPUT
+readonly blocked=(
+  0.0.0.0/8
+  10.0.0.0/8
+  100.64.0.0/10
+  127.0.0.0/8
+  169.254.0.0/16
+  172.16.0.0/12
+  192.168.0.0/16
+  224.0.0.0/4
+  240.0.0.0/4
+)
+
+iptables -n -L DOCKER-USER >/dev/null 2>&1 || {
+  echo "firewall: Docker's DOCKER-USER chain is missing. Start Docker with its default iptables firewall first." >&2
+  exit 1
+}
+
+for chain in "$forward" "$input"; do
+  iptables -N "$chain" 2>/dev/null || iptables -F "$chain"
+done
+
+iptables -A "$forward" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+for range in "${blocked[@]}"; do
+  iptables -A "$forward" -d "$range" -j DROP
+done
+iptables -A "$forward" -j RETURN
+
+iptables -A "$input" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+iptables -A "$input" -j DROP
+
+iptables -C DOCKER-USER -i "$bridge" -j "$forward" 2>/dev/null ||
+  iptables -I DOCKER-USER 1 -i "$bridge" -j "$forward"
+iptables -C INPUT -i "$bridge" -j "$input" 2>/dev/null ||
+  iptables -I INPUT 1 -i "$bridge" -j "$input"
+
+if ip6tables -n -L INPUT >/dev/null 2>&1; then
+  for chain in INPUT FORWARD; do
+    ip6tables -C "$chain" -i "$bridge" -j DROP 2>/dev/null ||
+      ip6tables -I "$chain" 1 -i "$bridge" -j DROP
+  done
+fi
+
+echo "firewall: traffic from $bridge to private, tailnet and host addresses is dropped"

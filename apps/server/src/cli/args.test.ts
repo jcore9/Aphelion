@@ -28,11 +28,26 @@ describe("accepted command lines", () => {
         kind: "headless",
         configDir: defaultConfigDir,
         stateDir: defaultStateDir,
+        pluginRunnerFds: undefined,
       },
     ],
     [
       ["--headless", "--config-dir", "/c", "--state-dir=/s"],
-      { kind: "headless", configDir: "/c", stateDir: "/s" },
+      {
+        kind: "headless",
+        configDir: "/c",
+        stateDir: "/s",
+        pluginRunnerFds: undefined,
+      },
+    ],
+    [
+      ["--headless", "--plugin-runner-fds", "3,4"],
+      {
+        kind: "headless",
+        configDir: defaultConfigDir,
+        stateDir: defaultStateDir,
+        pluginRunnerFds: { replies: 3, requests: 4 },
+      },
     ],
     [
       ["config", "check"],
@@ -141,6 +156,22 @@ describe("refused command lines", () => {
     [["--nope"], "unknown option --nope"],
     [["device", "revoke", "--aph_dev_0123456789abcdef_x"], "unknown option"],
     [["config", "check", "--compose"], "--compose needs a value"],
+    [
+      ["--headless", "--plugin-runner-fds", "3"],
+      "--plugin-runner-fds must be two file descriptor numbers, such as 3,4",
+    ],
+    [
+      ["--headless", "--plugin-runner-fds", "0,1"],
+      "--plugin-runner-fds must name descriptors from 3 up",
+    ],
+    [
+      ["--headless", "--plugin-runner-fds", "3,3"],
+      "--plugin-runner-fds must name two different descriptors",
+    ],
+    [
+      ["config", "check", "--plugin-runner-fds", "3,4"],
+      '--plugin-runner-fds isn\'t an option of "config check"',
+    ],
   ])("%j", (argv, message) => {
     expect(refused(argv)).toContain(message);
     expect(refused(argv)).not.toContain("aph_dev_");

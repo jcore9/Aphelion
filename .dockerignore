@@ -1,0 +1,14 @@
+*
+!package.json
+!bun.lock
+!bunfig.toml
+!tsconfig.base.json
+!apps/server/package.json
+!apps/server/src
+!packages/*/package.json
+!packages/plugin-sdk/src
+!packages/protocol/src
+!docs/package.json
+!docs/reference/config/example
+!deploy/image
+**/*.test.ts

@@ -244,6 +244,8 @@ These are starting points for each issue's PR, not final designs. Where an issue
 - pinned versions of the Claude Code and Grok Build CLIs, and git;
 - the managed CLI settings and hooks, owned by root on a read-only root filesystem.
 
+> Amended by [decision 0049](../../decisions/0049-ai-tools-installed-from-a-list.md). The image ships no AI tool. The owner installs AI tools from a list, which [#155](https://github.com/jcore9/Aphelion/issues/155) builds. [The container](../../reference/container.md) describes what #14 built.
+
 A minimal init starts the four processes as their users. A fifth volume holds `/var/lib/aphelion-plugins/`. The paths from [decision 0014](../../decisions/0014-filesystem-layout.md) are volumes with fixed owners and modes. The Compose file carries the hardening from decision 0016, publishes the port only on the tailnet address, and never mounts the Docker socket. The host side is a short script plus a guide that installs `aphelion.service`, which starts Compose on boot and passes in the bootstrap secret. **DR:** the init tool, informed by M0-03. The install guide ships in the same PR.
 
 **M0-13, plugin host v0.** One process per plugin, JSON-RPC over stdio, a manifest schema in `plugin-sdk`, an API-range check, and permission grants stored in SQLite and enforced by the host, which only forwards the events and APIs a plugin was granted. Server plugins run on Bun. They run as the shared `aphelion-plugins` user, started by a plugin runner that accepts requests only from `harness`, with one data folder per plugin ([decision 0018](../../decisions/0018-shared-plugin-user.md)). **DR:** the API reference generator.

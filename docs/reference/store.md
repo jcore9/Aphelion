@@ -64,6 +64,9 @@ Bun opens a `file:` name as an ordinary file today, so the last rule is a precau
 | --- | --- | --- |
 | 1 | `audit-log` | The append-only `audit_log` table ([logging and the audit log](logging.md#the-audit-log)) |
 | 2 | `devices` | The `devices` table of device tokens ([device tokens](devices.md#how-the-server-stores-a-token)) |
+| 3 | `audit-bot-id` | Renames `audit_log.agent_id` to `bot_id` ([decision 0039](../decisions/0039-bots-not-agents.md)) |
+| 4 | `plugin-grants` | The `plugin_grants` table of approved plugin permissions ([permissions](plugins.md#permissions)) |
+| 5 | `plugin-installs` | The `plugin_installs` table: one row per approved plugin, with its folder and manifest digest. The server starts each one at boot. |
 
 ## Rules
 

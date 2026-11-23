@@ -1,0 +1,42 @@
+#!/bin/bash
+set -euo pipefail
+
+if (($# != 6)); then
+  cat >&2 <<'USAGE'
+usage: network-check LAN_GATEWAY:PORT HOST_LAN:PORT HOST_TAILNET:PORT TAILNET_PEER:PORT BRIDGE_GATEWAY:PORT INTERNET:PORT
+
+Connects to each target as aphelion-bot inside the running container.
+The first five must fail and the last must succeed.
+USAGE
+  exit 2
+fi
+
+cd "$(dirname "$0")/.."
+failed=0
+
+reaches() {
+  docker compose exec -T --user aphelion-bot aphelion \
+    timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "${1%:*}" "${1##*:}" 2>/dev/null
+}
+
+for target in "${@:1:5}"; do
+  if reaches "$target"; then
+    echo "FAIL  $target is reachable from the container"
+    failed=1
+  else
+    echo "ok    $target is blocked"
+  fi
+done
+if reaches "$6"; then
+  echo "ok    $6 is reachable"
+else
+  echo "FAIL  $6 isn't reachable, so the container has no internet"
+  failed=1
+fi
+if docker compose exec -T --user aphelion-bot aphelion getent hosts api.anthropic.com >/dev/null; then
+  echo "ok    names resolve inside the container"
+else
+  echo "FAIL  names don't resolve inside the container"
+  failed=1
+fi
+exit "$failed"

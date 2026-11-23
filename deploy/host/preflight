@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+readonly address=${APHELION_TAILNET_ADDRESS:-}
+readonly wait_seconds=${APHELION_TAILNET_WAIT:-120}
+
+if [[ ! $address =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+  echo "preflight: set APHELION_TAILNET_ADDRESS in deploy/.env to this host's tailnet IPv4 address, in 100.64.0.0/10" >&2
+  exit 1
+fi
+
+until ip -4 -o address show | grep -qF " inet $address/"; do
+  if ((SECONDS >= wait_seconds)); then
+    echo "preflight: $address didn't appear within $wait_seconds seconds. Is Tailscale up?" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+host/firewall
+
+docker compose --profile '*' config |
+  docker compose run --rm -T --user harness aphelion aphelion config check --compose -

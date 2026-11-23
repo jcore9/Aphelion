@@ -1,0 +1,21 @@
+[Unit]
+Description=Aphelion headless server
+Documentation=https://github.com/jcore9/Aphelion/blob/dev/docs/guides/install.md
+Requires=docker.service
+After=docker.service tailscaled.service network-online.target
+Wants=tailscaled.service network-online.target
+PartOf=docker.service
+
+[Service]
+Type=exec
+WorkingDirectory=/opt/aphelion/deploy
+EnvironmentFile=/opt/aphelion/deploy/.env
+ExecStartPre=/opt/aphelion/deploy/host/preflight
+ExecStart=/usr/bin/docker compose up --no-build --abort-on-container-exit --exit-code-from aphelion
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=300s
+TimeoutStopSec=90s
+
+[Install]
+WantedBy=multi-user.target

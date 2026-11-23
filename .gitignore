@@ -3,3 +3,5 @@ dist/
 coverage/
 *.tsbuildinfo
 .astro/
+deploy/.env
+deploy/plugins/

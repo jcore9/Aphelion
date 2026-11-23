@@ -15,6 +15,7 @@
   "scripts": {
     "build": "bun build --compile src/cli/main.ts --outfile dist/aphelion",
     "build:broker": "bun build --compile src/secrets/broker-main.ts --outfile dist/aphelion-secrets",
+    "build:plugin-runner": "bun build --target=bun src/plugins/runner-main.ts --outfile dist/plugin-runner.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
