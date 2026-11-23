@@ -1,8 +1,37 @@
 # Secrets
 
-The server holds every secret value, such as an API key or a password, inside a `Secret`. Config files, logs and the database hold only a secret reference, such as `op://AI Agents/GitHub App/private key`, which names where the value lives. [Decision 0044](../decisions/0044-secret-type.md) explains why `Secret` is built the way it is.
+The server and the secrets broker hold secret values, such as an API key or a password, inside a `Secret`. Config files, logs and the database hold only a secret reference, such as `op://AI Agents/GitHub App/private key`, which names where the value lives. [Decision 0044](../decisions/0044-secret-type.md) explains why `Secret` is built the way it is.
 
-Only the server holds `Secret` values. Plugins never see a secret's value ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)), so `Secret` lives in `apps/server`, not in `plugin-sdk`.
+Plugins never see a secret's value ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)), so `Secret` lives in `apps/server`, not in `plugin-sdk`.
+
+## Local secrets broker
+
+The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003). Build its executable with `bun run --filter @aphelion/server build:broker`. The executable is `apps/server/dist/aphelion-secrets`. Container startup is tracked in [#14](https://github.com/jcore9/Aphelion/issues/14). Delivery of the bootstrap credential is tracked in [#105](https://github.com/jcore9/Aphelion/issues/105).
+
+| Path | Owner and mode | Purpose |
+| --- | --- | --- |
+| `/run/aphelion-secrets/` | `aphelion-secrets:harness`, `2710` | Gives members of the private `harness` group permission to reach the socket. The set-group-ID bit makes the socket inherit that group. |
+| `/run/aphelion-secrets/broker.sock` | `aphelion-secrets:harness`, `0660` | The broker creates the socket at startup. The service accounts for bots and plugins are outside the `harness` group. |
+| `/var/lib/aphelion-secrets/` | `aphelion-secrets`, `0700` | The persistent store. The broker creates the age private key and encrypted entries with mode `0600`. |
+
+Init provisions the directories before starting the broker. Their parent directories must be writable only by trusted system users. After an unclean stop, init may remove a leftover socket once it confirms that the previous broker has exited. The broker checks the socket directory group against the local `harness` group in `/etc/group`. It refuses to replace an existing socket at startup.
+
+The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. The encrypted record includes a format version and the reference path. A read fails if the stored path differs from the requested path. If the key is missing and entries exist, startup fails.
+
+For a ciphertext-only backup, copy only the final entry files whose names consist of 64 lowercase hexadecimal digits followed by `.age`. A copy of the whole directory can contain the private key, including in temporary files left by an interrupted first startup. Keep the matching key in a separately protected recovery copy.
+
+### Socket protocol
+
+The socket accepts HTTP `POST /v1/local` with a UTF-8 JSON body of at most 64 KiB. A request has an `op` and a `ref`. A write also has a string `value`. All references must use `local://`.
+
+| Operation | Example body | Success response |
+| --- | --- | --- |
+| Write | `{"op":"write","ref":"local://github/webhook-secret","value":"example"}` | `204`, empty body |
+| Read | `{"op":"read","ref":"local://github/webhook-secret"}` | `200`, the value as a JSON string |
+
+An invalid request returns `400`. An unknown endpoint or missing entry returns `404`. A broker error returns `500` with an empty body. A request that exceeds the size limit closes the connection. Error logs contain fixed messages. The plaintext value crosses the socket only when the harness writes or reads it.
+
+The Linux contract test builds the executable, runs it as `aphelion-secrets` in Docker, and connects as each service account. It checks that `harness` reads a value after restart and that `aphelion-bot` and `aphelion-plugins` get a permission error from Linux. It also scans the broker logs and store files for the test value.
 
 ## Code
 

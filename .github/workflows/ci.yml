@@ -30,3 +30,5 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run ${{ matrix.task }}
+      - if: matrix.task == 'test'
+        run: bash apps/server/test/broker-linux.sh
