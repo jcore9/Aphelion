@@ -19,6 +19,13 @@ for target in "$@"; do
   }
 done
 
+for target in "$@"; do
+  timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "${target%:*}" "${target##*:}" 2>/dev/null || {
+    echo "network-check: the host itself can't connect to $target. Pick an address and an open port that the host reaches, so a timeout from the container means the firewall dropped it." >&2
+    exit 2
+  }
+done
+
 cd "$(dirname "$0")/.."
 in_container() {
   docker compose exec -T --user aphelion-bot aphelion "$@"

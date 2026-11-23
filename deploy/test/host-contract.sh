@@ -107,15 +107,24 @@ iptables -N DOCKER-USER
 if /opt/aphelion/deploy/host/firewall >/dev/null 2>&1; then
   fail "the firewall ran with a DOCKER-USER chain that FORWARD doesn't use"
 fi
+iptables -A FORWARD -j ACCEPT
 iptables -A FORWARD -j DOCKER-USER
+if /opt/aphelion/deploy/host/firewall >/dev/null 2>&1; then
+  fail "the firewall ran with a FORWARD rule above Docker's jump"
+fi
+iptables -D FORWARD -j ACCEPT
 /opt/aphelion/deploy/host/firewall >/dev/null
 first=$(iptables -S; ip6tables -S)
 /opt/aphelion/deploy/host/firewall >/dev/null
 [[ $(iptables -S; ip6tables -S) == "$first" ]] || fail "a second run changed the rules"
-if iptables -S | grep -q -- -NEXT; then
-  fail "a temporary chain was left behind"
-fi
-pass "the firewall needs a live DOCKER-USER chain, and a second run changes nothing"
+iptables -E APHELION-FORWARD APHELION-FORWARD-N99999
+iptables -N APHELION-INPUT-N88888
+iptables -A APHELION-INPUT-N88888 -j RETURN
+iptables -I INPUT 1 -i aphelion0 -j APHELION-INPUT
+/opt/aphelion/deploy/host/firewall >/dev/null
+[[ $(iptables -S; ip6tables -S) == "$first" ]] ||
+  fail "a run after an interrupted one, or after older rules, left a different rule set"
+pass "the firewall needs Docker's jump first in FORWARD, a second run changes nothing, and it recovers from an interrupted run"
 
 expect closed bot 10.9.0.2 80
 expect closed bot 10.9.0.1 22
