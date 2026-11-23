@@ -377,7 +377,7 @@ export async function renderPluginApi(
     ...(reference.assets.length > 0
       ? [
           "## Files",
-          `The package also exports these files.`,
+          "The package also exports these files.",
           reference.assets
             .map(
               ({ specifier, path }) =>
