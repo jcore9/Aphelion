@@ -1,8 +1,10 @@
 import { satisfies, valid, validRange } from "semver";
 import { z } from "zod";
 
+/** The plugin API version that this SDK and the host run. A manifest's `api` range must include it. */
 export const pluginApiVersion = "0.2.1";
 
+/** The name of the manifest file in a plugin's folder. */
 export const pluginManifestFile = "aphelion-plugin.json";
 
 const text = (max: number) =>
@@ -124,7 +126,9 @@ const contributions = {
   ),
 };
 
+/** The names of the lists in a manifest's `permissions`. */
 export type PermissionKind = keyof typeof permissions;
+/** The names of the lists in a manifest's `contributes`. */
 export type ContributionKind = keyof typeof contributions;
 
 type PluginSide = "server" | "client";
@@ -174,6 +178,10 @@ const part = (description: string) =>
     .optional()
     .describe(description);
 
+/**
+ * The Zod schema for `aphelion-plugin.json`, whose fields [the plugin manifest reference](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/plugin-manifest.md) lists.
+ * It fills in empty lists but doesn't check the API range, as `parsePluginManifest` does.
+ */
 export const pluginManifestSchema = z
   .strictObject({
     $schema: text(2048)
@@ -287,13 +295,25 @@ type ManifestWith<Present extends PluginSide> = Readonly<
   }
 >;
 
+/**
+ * A manifest that `parsePluginManifest` accepted, read-only and with every list filled in.
+ * A list that needs a part the plugin doesn't have is typed as empty, such as `uiSlots` for a plugin with only a server part.
+ */
 export type PluginManifest =
   ManifestWith<"server"> | ManifestWith<"client"> | ManifestWith<PluginSide>;
 
+/** A full page that a plugin's client part adds to the app's menu, from `contributes.screens`. */
 export type PluginScreen = PluginManifest["contributes"]["screens"][number];
 
-export type ManifestIssue = { field?: string; message: string };
+/** One problem that `parsePluginManifest` found. */
+export type ManifestIssue = {
+  /** The field with the problem, such as `permissions.network[0]`. It is missing when the problem is with the whole manifest. */
+  field?: string;
+  /** What is wrong with the field, such as `is required`. */
+  message: string;
+};
 
+/** The result of `parsePluginManifest`. It holds the manifest when `ok` is `true`, and the problems when `ok` is `false`. */
 export type ManifestResult =
   | { ok: true; manifest: PluginManifest }
   | { ok: false; issues: ManifestIssue[] };
@@ -350,6 +370,7 @@ function schemaIssues(data: unknown, error: z.ZodError): ManifestIssue[] {
   );
 }
 
+/** Checks the parsed JSON of `aphelion-plugin.json`, including its API range. It returns the problems instead of throwing. */
 export function parsePluginManifest(data: unknown): ManifestResult {
   const parsed = pluginManifestSchema.safeParse(data);
   if (!parsed.success) {
