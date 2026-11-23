@@ -335,7 +335,9 @@ Grok Bot fills logins through 1Password in its own browser without the agent see
 
 **The bootstrap secret**
 
-The broker needs one secret to unlock everything else: the 1Password service account token or the Bitwarden access token. Store it with systemd encrypted credentials (`systemd-creds`, loaded with `LoadCredentialEncrypted=`). On a VM with a vTPM it can be bound to the TPM; without one it is bound to a host key. Keep it out of env files and shell history, and rotate it on a schedule.
+The broker needs one secret to unlock everything else: the age key of its local encrypted store. Provider tokens, such as the 1Password service account token, are kept apart from it. Store it with systemd encrypted credentials (`systemd-creds`, loaded with `LoadCredentialEncrypted=`). On a VM with a vTPM it can be bound to the TPM; without one it is bound to a host key. Keep it out of env files and shell history. Rotation waits until after M0.
+
+> Amended by [decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md). The original said: "The broker needs one secret to unlock everything else: the 1Password service account token or the Bitwarden access token. Store it with systemd encrypted credentials (`systemd-creds`, loaded with `LoadCredentialEncrypted=`). On a VM with a vTPM it can be bound to the TPM; without one it is bound to a host key. Keep it out of env files and shell history, and rotate it on a schedule."
 
 ## Native connectors
 

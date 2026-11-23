@@ -6,19 +6,50 @@ Plugins never see a secret's value ([decision 0042](../decisions/0042-plugin-ser
 
 ## Local secrets broker
 
-The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003). Build its executable with `bun run --filter @aphelion/server build:broker`. The executable is `apps/server/dist/aphelion-secrets`. In the container, the [launcher](container.md#how-the-processes-start) starts it. If `/run/secrets/bootstrap` exists, the launcher opens it as root and gives it to the broker as standard input. Delivery of the bootstrap credential to that file, and its use by the broker, are tracked in [#105](https://github.com/jcore9/Aphelion/issues/105).
+The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003). Build its executable with `bun run --filter @aphelion/server build:broker`. The executable is `apps/server/dist/aphelion-secrets`. In the container, the [launcher](container.md#how-the-processes-start) starts it.
+
+### The bootstrap key
+
+The store's key is an age identity, a line that starts with `AGE-SECRET-KEY-1`. It is the bootstrap key, and only the host keeps it ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)). It travels this way:
+
+1. `deploy/host/install` makes the key once and seals it with `systemd-creds` in `/etc/credstore.encrypted/aphelion-bootstrap`.
+2. At each start, `aphelion.service` decrypts it with `LoadCredentialEncrypted=` into `/run/credentials/aphelion.service/bootstrap`. That folder is in memory and readable only by root.
+3. Compose mounts the file at `/run/secrets/bootstrap` in the container.
+4. The launcher opens the file as root and gives it to the broker as standard input.
+5. The broker reads at most 1 KiB, trims spaces and line breaks from both ends, and closes standard input. The broker then no longer holds the file.
+
+The broker wraps the key in a `Secret`, so the logger masks it. The key never reaches an environment variable, a command line or the volume.
+
+`aphelion-secrets --new-key` prints a new age identity and a line break, and exits. It runs as any user. The host install uses it. Any other argument is refused.
 
 | Path | Owner and mode | Purpose |
 | --- | --- | --- |
 | `/run/aphelion-secrets/` | `aphelion-secrets:harness`, `2710` | Gives members of the private `harness` group permission to reach the socket. The set-group-ID bit makes the socket inherit that group. |
 | `/run/aphelion-secrets/broker.sock` | `aphelion-secrets:harness`, `0660` | The broker creates the socket at startup. The service accounts for bots and plugins are outside the `harness` group. |
-| `/var/lib/aphelion-secrets/` | `aphelion-secrets`, `0700` | The persistent store. The broker creates the age private key and encrypted entries with mode `0600`. |
+| `/var/lib/aphelion-secrets/` | `aphelion-secrets`, `0700` | The persistent store. It holds no private key. |
+| `/var/lib/aphelion-secrets/<64 hex digits>.age` | `aphelion-secrets`, `0600` | One encrypted entry per local reference. |
+| `/var/lib/aphelion-secrets/recipient.pub` | `aphelion-secrets`, `0600` | The store's public key, which starts with `age1`. It isn't secret. The broker writes it on the first start. |
 
 The parent folders of these paths must be writable only by root. In the container, `/run/aphelion-secrets/` is a fresh in-memory folder that Docker creates with this owner and mode at every start, so no socket is left over from an earlier run. The launcher checks its owner and mode before it starts the broker. The broker checks the socket directory group against the local `harness` group in `/etc/group`. It refuses to replace an existing socket at startup.
 
-The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. The encrypted record includes a format version and the reference path. A read fails if the stored path differs from the requested path. If the key is missing and entries exist, startup fails.
+The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. The encrypted record includes a format version and the reference path. A read fails if the stored path differs from the requested path.
 
-For a ciphertext-only backup, copy only the final entry files whose names consist of 64 lowercase hexadecimal digits followed by `.age`. A copy of the whole directory can contain the private key, including in temporary files left by an interrupted first startup. Keep the matching key in a separately protected recovery copy.
+To back up the store, copy the entry files and `recipient.pub`. The folder holds no key, so a copy of it alone decrypts nothing. Keep the [recovery copy of the key](../guides/install.md#keep-a-recovery-copy-of-the-bootstrap-key) apart from the backup.
+
+### Startup refusals
+
+At startup the broker checks the key against the store. When a check fails, the broker exits with code 1 and logs `Secrets broker startup failed` with one of these fixed reasons. The reason never contains the key.
+
+| Reason | When |
+| --- | --- |
+| `The bootstrap key is missing from standard input` | Standard input was empty, or held only spaces and line breaks. |
+| `The bootstrap key is longer than 1 KiB` | Standard input held more than 1024 bytes. |
+| `The bootstrap key is not a valid age identity` | The key isn't an age identity. |
+| `The secrets store holds a plain-text key from before the host credential` | `identity.agekey` is still in the store. [Move a store made before #105](../guides/install.md#move-a-store-made-before-105) explains what to do. |
+| `The bootstrap key does not match this secrets store` | `recipient.pub` holds another public key. Or `recipient.pub` is missing, and the key can't decrypt an existing entry. |
+| `The secrets broker takes no arguments except --new-key` | The broker was started with another argument. |
+
+If `recipient.pub` is missing and entries exist, as after restoring a backup of only the entries, the broker decrypts one entry to prove the key matches. Then it writes `recipient.pub`. Other startup failures, such as a folder with the wrong owner or mode, log `Secrets broker startup failed` with no reason.
 
 ### Socket protocol
 
@@ -31,7 +62,7 @@ The socket accepts HTTP `POST /v1/local` with a UTF-8 JSON body of at most 64 Ki
 
 An invalid request returns `400`. An unknown endpoint or missing entry returns `404`. A broker error returns `500` with an empty body. A request that exceeds the size limit closes the connection. Error logs contain fixed messages. The plaintext value crosses the socket only when the harness writes or reads it.
 
-The Linux contract test builds the executable, runs it as `aphelion-secrets` in Docker, and connects as each service account. It checks that `harness` reads a value after restart and that `aphelion-bot` and `aphelion-plugins` get a permission error from Linux. It also scans the broker logs and store files for the test value.
+The Linux contract test builds the executable, runs it as `aphelion-secrets` in Docker, and connects as each service account. It feeds the broker a key from `--new-key` on standard input, as the launcher does. It checks that `harness` reads a value after restart and that `aphelion-bot` and `aphelion-plugins` get a permission error from Linux. It checks that the store holds `recipient.pub` and no `identity.agekey`. It checks that the broker refuses an empty standard input and another key, each with its reason. It also scans the broker logs and store files for the test value and for both keys.
 
 ## Code
 
@@ -39,9 +70,11 @@ The Linux contract test builds the executable, runs it as `aphelion-secrets` in 
 | --- | --- |
 | `apps/server/src/secrets/secret.ts` | The `Secret` class and its errors |
 | `apps/server/src/secrets/reference.ts` | `parseSecretReference` and the reasons it gives |
+| `apps/server/src/secrets/local-store.ts` | The local encrypted store and its startup refusals |
+| `apps/server/src/secrets/broker-main.ts` | The broker process: `--new-key`, reading the key, and the socket |
 | `apps/server/src/secrets/canary.test.ts` | The test that a canary value never reaches the logs or the database files |
 
-Server code imports both from `@aphelion/server/secrets`.
+Server code imports `Secret` and `parseSecretReference` from `@aphelion/server/secrets`.
 
 ## Make, read and wipe a secret
 
