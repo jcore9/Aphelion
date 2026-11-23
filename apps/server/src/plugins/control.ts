@@ -1,7 +1,7 @@
 import { chmod, lstat, realpath, unlink } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { isAbsolute } from "node:path";
-import { Effect, Fiber, Option, Semaphore } from "effect";
+import { Duration, Effect, Fiber, Option, Semaphore } from "effect";
 import { z } from "zod";
 import type { Logger } from "../log";
 import { approvalFor, type InstallRecord } from "./approvals";
@@ -15,6 +15,7 @@ export const maxControlLineBytes = 64 * 1024;
 export const devModeOff = "dev mode is off";
 export const noServerPart = (plugin: string) =>
   `${plugin} has no server part to run`;
+export const restartWatch: Duration.Input = "10 seconds";
 
 export const controlRequestSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -52,6 +53,7 @@ export interface ControlResult {
 export interface ControlOptions {
   readonly devFolder: string | undefined;
   readonly installs: () => readonly InstallRecord[];
+  readonly restartWatch?: Duration.Input;
 }
 
 const refuse = (reason: string): ControlReply => ({ type: "refused", reason });
@@ -91,6 +93,22 @@ export const pluginControl = (options: ControlOptions) =>
           Effect.catchTag("RunnerClosed", () => Effect.succeed(undefined)),
         );
 
+    const watchRunning = (plugin: string, running: LifecycleState) =>
+      host
+        .waitFor(
+          plugin,
+          (state) => state.run !== running.run || state.state !== "running",
+        )
+        .pipe(
+          Effect.timeoutOption(options.restartWatch ?? restartWatch),
+          Effect.map((left) =>
+            Option.isSome(left) && left.value !== undefined
+              ? left.value
+              : running,
+          ),
+          Effect.catchTag("RunnerClosed", () => Effect.succeed(running)),
+        );
+
     const startSettled = (
       record: InstallRecord,
       dev: string | undefined,
@@ -122,9 +140,13 @@ export const pluginControl = (options: ControlOptions) =>
           );
         }
         const settled = waited.success;
-        const seen = Option.isSome(settled)
+        const reached = Option.isSome(settled)
           ? settled.value
           : yield* host.status(id);
+        const seen =
+          type === "restarted" && reached?.state === "running"
+            ? yield* watchRunning(id, reached)
+            : reached;
         const reply: ControlReply = {
           type,
           plugin: id,

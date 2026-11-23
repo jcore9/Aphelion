@@ -1,6 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { join } from "node:path";
-import { Data, Effect, Option } from "effect";
+import { Data, Duration, Effect, Option } from "effect";
 import {
   controlReplySchema,
   controlSocketFile,
@@ -13,6 +13,7 @@ export class ControlUnreachable extends Data.TaggedError(
 ) {}
 
 const unreachable = new Set(["ENOENT", "ECONNREFUSED"]);
+const replySeconds = 90;
 
 export const connectControl = (path: string) =>
   Effect.acquireRelease(
@@ -80,10 +81,12 @@ export const restartPlugin = (stateDir: string, plugin: string) =>
     const line = yield* firstLine(
       connected.success,
       JSON.stringify({ type: "restart", plugin }),
-    ).pipe(Effect.timeoutOption("60 seconds"));
+    ).pipe(Effect.timeoutOption(Duration.seconds(replySeconds)));
     if (Option.isNone(line)) {
       return yield* Effect.fail(
-        new Error("the server didn't answer within 60 seconds"),
+        new Error(
+          `the server didn't answer within ${String(replySeconds)} seconds`,
+        ),
       );
     }
     let data: unknown;

@@ -4,7 +4,7 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
-import { Cause, Effect, Exit, Layer, Queue, Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, Queue, Scope } from "effect";
 import { afterAll, beforeAll, describe } from "vitest";
 import { createLogger } from "../log";
 import {
@@ -401,26 +401,28 @@ const installed = (folder: string) =>
   });
 
 describe("plugin restarts", () => {
-  const restartSetup = Effect.gen(function* () {
-    const { folder } = yield* setup;
-    const records = [yield* installed(folder)];
-    const handle = yield* pluginControl({
-      devFolder: undefined,
-      installs: () => records,
+  const restartSetup = (watch: string = "20 millis") =>
+    Effect.gen(function* () {
+      const { folder } = yield* setup;
+      const records = [yield* installed(folder)];
+      const handle = yield* pluginControl({
+        devFolder: undefined,
+        installs: () => records,
+        restartWatch: watch,
+      });
+      const send = (request: object) =>
+        handle(JSON.stringify(request)).pipe(
+          Effect.map((result) => result.reply),
+        );
+      return { folder, send };
     });
-    const send = (request: object) =>
-      handle(JSON.stringify(request)).pipe(
-        Effect.map((result) => result.reply),
-      );
-    return { folder, send };
-  });
 
   it.live(
     "restart starts the approved version with dev mode off, and reload says dev mode is off",
     () =>
       withHost((starts) =>
         Effect.gen(function* () {
-          const { folder, send } = yield* restartSetup;
+          const { folder, send } = yield* restartSetup();
           expect(yield* send({ type: "restart", plugin: "weather" })).toEqual({
             type: "restarted",
             plugin: "weather",
@@ -449,7 +451,7 @@ describe("plugin restarts", () => {
     () =>
       withHost((starts) =>
         Effect.gen(function* () {
-          const { folder, send } = yield* restartSetup;
+          const { folder, send } = yield* restartSetup();
           const code = join(folder, "index.js");
           yield* Effect.promise(() => writeFile(code, "changed"));
           expect(yield* send({ type: "restart", plugin: "weather" })).toEqual({
@@ -463,6 +465,30 @@ describe("plugin restarts", () => {
             plugin: "weather",
             state: "running",
           });
+        }),
+      ),
+  );
+
+  it.live(
+    "restart answers with the state a run leaves running for within the watch",
+    () =>
+      withHost((starts, exit) =>
+        Effect.gen(function* () {
+          const { send } = yield* restartSetup("5 seconds");
+          const restart = { type: "restart", plugin: "weather" };
+          const reply = yield* Effect.forkChild(send(restart));
+          const host = yield* PluginHost;
+          for (let tries = 0; tries < 600; tries++) {
+            if ((yield* host.status("weather"))?.state === "running") break;
+            yield* Effect.sleep("5 millis");
+          }
+          yield* exit("weather", 1);
+          expect(yield* Fiber.join(reply)).toEqual({
+            type: "restarted",
+            plugin: "weather",
+            state: "crashed",
+          });
+          expect(starts).toEqual([1]);
         }),
       ),
   );
