@@ -6,6 +6,7 @@
   "workspaces": [
     "apps/*",
     "packages/*",
+    "templates/*",
     "docs"
   ],
   "scripts": {
@@ -13,7 +14,8 @@
     "format": "bun --bun prettier --write .",
     "typecheck": "tsc --noEmit && bun run --filter '@aphelion/*' typecheck",
     "test": "bun --bun vitest run",
-    "docs": "bun run --filter @aphelion/docs build"
+    "docs": "bun run --filter @aphelion/docs build",
+    "create:plugin": "bun scripts/create-plugin.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -3,6 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "plugin-manifest.schema.json"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./runtime": "./src/run-plugin.ts",
@@ -14,11 +19,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@types/semver": "7.8.0",
     "semver": "7.8.6",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "26.6.6",
-    "@types/semver": "7.8.0"
+    "@types/node": "26.6.6"
   }
 }
