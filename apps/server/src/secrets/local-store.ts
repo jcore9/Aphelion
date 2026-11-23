@@ -15,7 +15,14 @@ import {
   generateIdentity,
   identityToRecipient,
 } from "age-encryption";
+import { z } from "zod";
 import { Secret } from "./secret";
+
+const entrySchema = z.strictObject({
+  version: z.literal(1),
+  path: z.string(),
+  value: z.string(),
+});
 
 function hasCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
@@ -114,15 +121,22 @@ export async function openLocalStore(directory: string) {
     async read(name: string): Promise<Secret | undefined> {
       const encrypted = await readPrivateFile(entryPath(name), uid);
       if (!encrypted) return undefined;
-      const value: unknown = JSON.parse(
+      const plaintext: unknown = JSON.parse(
         await decrypter.decrypt(encrypted, "text"),
       );
-      if (typeof value !== "string")
+      const entry = entrySchema.safeParse(plaintext);
+      if (!entry.success || entry.data.path !== name) {
         throw new Error("Invalid local secret entry");
-      return Secret.make(value);
+      }
+      return Secret.make(entry.data.value);
     },
     async write(name: string, value: Secret): Promise<void> {
-      const encrypted = await encrypter.encrypt(JSON.stringify(value.reveal()));
+      const entry = {
+        version: 1,
+        path: name,
+        value: value.reveal(),
+      } satisfies z.infer<typeof entrySchema>;
+      const encrypted = await encrypter.encrypt(JSON.stringify(entry));
       await publish(directory, entryPath(name), encrypted, rename);
     },
   };

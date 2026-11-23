@@ -16,7 +16,9 @@ The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003)
 
 Init provisions the directories before starting the broker. Their parent directories must be writable only by trusted system users. After an unclean stop, init may remove a leftover socket once it confirms that the previous broker has exited. The broker checks the socket directory group against the local `harness` group in `/etc/group`. It refuses to replace an existing socket at startup.
 
-The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. Backups that include `identity.agekey` can decrypt entries, so they need the same access restrictions as the store. If the key is missing and entries exist, startup fails.
+The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. The encrypted record includes a format version and the reference path. A read fails if the stored path differs from the requested path. If the key is missing and entries exist, startup fails.
+
+For a ciphertext-only backup, copy only the final entry files whose names consist of 64 lowercase hexadecimal digits followed by `.age`. A copy of the whole directory can contain the private key, including in temporary files left by an interrupted first startup. Keep the matching key in a separately protected recovery copy.
 
 ### Socket protocol
 

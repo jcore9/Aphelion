@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   unlink,
@@ -83,6 +85,30 @@ describe("local secret store", () => {
       }
     },
   );
+
+  it("rejects a valid encrypted entry restored under another reference", async () => {
+    const store = await openLocalStore(directory);
+    const otherName = "test/other-key";
+    const entryPath = (reference: string) =>
+      join(
+        directory,
+        `${createHash("sha256").update(reference).digest("hex")}.age`,
+      );
+    await write(store, "restore-canary");
+
+    await rename(entryPath(name), entryPath(otherName));
+    await expect(store.read(otherName)).rejects.toThrow(
+      "Invalid local secret entry",
+    );
+
+    await rename(entryPath(otherName), entryPath(name));
+    const restored = await store.read(name);
+    try {
+      expect(restored?.reveal()).toBe("restore-canary");
+    } finally {
+      restored?.wipe();
+    }
+  });
 
   it("refuses unsafe permissions and refuses to replace a missing identity", async () => {
     await chmod(directory, 0o750);
