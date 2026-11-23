@@ -34,10 +34,6 @@ problems=$(systemd-analyze verify /opt/aphelion/deploy/host/aphelion.service 2>&
 [[ -z $problems ]] || fail "systemd-analyze found problems in aphelion.service: $problems"
 pass "systemd-analyze accepts aphelion.service"
 
-if /opt/aphelion/deploy/host/firewall >/dev/null 2>&1; then
-  fail "the firewall ran without Docker's DOCKER-USER chain"
-fi
-pass "the firewall refuses to run without Docker's DOCKER-USER chain"
 
 namespace() {
   local name=$1 inside=$2 outside=$3 peer=$4 link=${5:-v-$1}
@@ -103,28 +99,23 @@ expect open lan 100.100.5.1 7400
 expect open lan 172.30.73.2 7400
 pass "without the rules, the bot reaches all six targets, and the LAN reaches the published port"
 
-iptables -N DOCKER-USER
-if /opt/aphelion/deploy/host/firewall >/dev/null 2>&1; then
-  fail "the firewall ran with a DOCKER-USER chain that FORWARD doesn't use"
-fi
-iptables -A FORWARD -j ACCEPT
-iptables -A FORWARD -j DOCKER-USER
-if /opt/aphelion/deploy/host/firewall >/dev/null 2>&1; then
-  fail "the firewall ran with a FORWARD rule above Docker's jump"
-fi
-iptables -D FORWARD -j ACCEPT
+iptables -I FORWARD 1 -j ACCEPT
+iptables -I INPUT 1 -j ACCEPT
+rules() { iptables -t mangle -S; ip6tables -t mangle -S; }
 /opt/aphelion/deploy/host/firewall >/dev/null
-first=$(iptables -S; ip6tables -S)
+first=$(rules)
 /opt/aphelion/deploy/host/firewall >/dev/null
-[[ $(iptables -S; ip6tables -S) == "$first" ]] || fail "a second run changed the rules"
-iptables -E APHELION-FORWARD APHELION-FORWARD-N99999
-iptables -N APHELION-INPUT-N88888
-iptables -A APHELION-INPUT-N88888 -j RETURN
-iptables -I INPUT 1 -i aphelion0 -j APHELION-INPUT
+[[ $(rules) == "$first" ]] || fail "a second run changed the rules"
+iptables -t mangle -E APHELION-FORWARD APHELION-FORWARD-N99999
+iptables -t mangle -N APHELION-INPUT-N88888
+iptables -t mangle -A APHELION-INPUT-N88888 -j RETURN
+iptables -t mangle -N APHELION-FORWARD-NEXT
+iptables -t mangle -I FORWARD 1 -j APHELION-FORWARD-NEXT
+iptables -t mangle -I INPUT 1 -i aphelion0 -j APHELION-INPUT
 /opt/aphelion/deploy/host/firewall >/dev/null
-[[ $(iptables -S; ip6tables -S) == "$first" ]] ||
+[[ $(rules) == "$first" ]] ||
   fail "a run after an interrupted one, or after older rules, left a different rule set"
-pass "the firewall needs Docker's jump first in FORWARD, a second run changes nothing, and it recovers from an interrupted run"
+pass "a second run changes nothing, and a run after an interrupted one or after older rules ends the same"
 
 expect closed bot 10.9.0.2 80
 expect closed bot 10.9.0.1 22
@@ -132,7 +123,7 @@ expect closed bot 100.100.5.1 22
 expect closed bot 100.100.5.2 22
 expect closed bot 172.30.73.1 22
 expect open bot 203.0.113.2 443
-pass "the bot namespace reaches only the internet: the LAN, the host, the tailnet and the bridge are dropped"
+pass "the bot reaches only the internet, even with accept-all rules first in the filter table, as Tailscale and ufw add"
 
 expect open peer 100.100.5.1 7400
 expect closed lan 100.100.5.1 7400

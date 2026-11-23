@@ -7,7 +7,7 @@ The install was tested in parts on Debian 13 with Docker 29.10 and Compose 5.8 o
 ## What you need
 
 - Ubuntu 26.04 LTS ([decision 0011](../decisions/0011-ubuntu-lts.md)).
-- Docker Engine and the Compose plugin, installed from [Docker's Ubuntu repository](https://docs.docker.com/engine/install/ubuntu/). Keep Docker's default iptables firewall. The host firewall needs Docker's `DOCKER-USER` chain, and the nftables firewall in Docker doesn't have one.
+- Docker Engine and the Compose plugin, installed from [Docker's Ubuntu repository](https://docs.docker.com/engine/install/ubuntu/). Keep Docker's default iptables firewall. The host firewall was tested only with it.
 - Tailscale, signed in. `tailscale ip -4` prints the host's tailnet address.
 - `git`, and an account with `sudo`.
 
@@ -113,7 +113,7 @@ sudo host/network-check 10.0.0.1:80 10.0.0.133:22 100.71.226.67:22 100.93.139.95
 
 The script first connects to each target from the host itself, and stops if one doesn't answer. Pick targets with an open port. The first five must then print `blocked`, which means the connection from the container timed out because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The script exits with code 1 if any check fails, and with code 2 if a target is malformed or the container isn't running.
 
-Other tools that change Docker's `DOCKER-USER` chain or the `INPUT` chain can break the boundary. Run the check again after you change the host's firewall.
+Other tools that change iptables' `mangle` table can break the boundary. Run the check again after you change the host's firewall.
 
 ## Logs
 
