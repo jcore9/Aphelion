@@ -72,9 +72,15 @@ export interface TestHost {
   registerSecretOperation(name: string, operation: FakeSecretOperation): void;
   /** Starts the plugin and resolves when its `start` has finished, or rejects when `start` fails. A test host starts one plugin only. */
   start(plugin: ServerPlugin): Promise<void>;
-  /** Sends an event to the plugin and resolves when its handler has finished. It sends nothing when the plugin isn't running, hasn't subscribed, or isn't granted the event. */
+  /**
+   * Sends an event to the plugin and resolves when its handler has finished.
+   * It sends nothing and resolves at once when the plugin isn't running, hasn't subscribed, or isn't granted the event, and from the moment `stop` is called.
+   */
   publish(name: string, data: unknown): Promise<void>;
-  /** Sends `shutdown` and resolves when the plugin has run its cleanup and stopped. */
+  /**
+   * Sends `shutdown` and resolves when the plugin has stopped. The SDK first waits up to 3 seconds for handlers that are still running, then runs the plugin's cleanup.
+   * A second call resolves when the first one does.
+   */
   stop(): Promise<void>;
   /** The messages that the plugin and the SDK logged, in order. */
   readonly logs: readonly string[];
@@ -187,6 +193,7 @@ export function createTestHost(manifestData: unknown): TestHost {
   let grants: readonly Grant[] = [];
   let running = false;
   let run: Promise<void> | undefined;
+  let stopping: Promise<void> | undefined;
 
   const allows = (kind: Grant["kind"], name: string) => {
     const declared: readonly string[] = manifest.permissions[kind];
@@ -254,6 +261,7 @@ export function createTestHost(manifestData: unknown): TestHost {
   };
 
   const receive = async (line: string) => {
+    if (stopping) return;
     const parsed = rpcMessageSchema.safeParse(JSON.parse(line));
     if (!parsed.success) return;
     const message = parsed.data;
@@ -317,11 +325,16 @@ export function createTestHost(manifestData: unknown): TestHost {
       toPlugin.pushLine(line);
       await delivered.promise;
     },
-    async stop() {
-      if (!run) return;
-      toPlugin.push(notification(methods.shutdown));
-      await run.catch(() => undefined);
-      toPlugin.end();
+    stop() {
+      if (!run) return Promise.resolve();
+      const stopped = run.catch(() => undefined);
+      stopping ??= (async () => {
+        running = false;
+        toPlugin.push(notification(methods.shutdown));
+        await stopped;
+        toPlugin.end();
+      })();
+      return stopping;
     },
     logs,
     calls,

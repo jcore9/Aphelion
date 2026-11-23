@@ -63,7 +63,24 @@ The host has a similar limit the other way. If more than about 16 MiB, or more t
 | --- | --- | --- | --- |
 | `initialize` | request | `{ "api": "<host plugin API>", "plugin": "<id>" }` | Reply with any result, such as `{}`, within 10 seconds after the host sends it. The host counts the plugin as running only after this reply. An error reply counts as a crash. |
 | `event` | notification | `{ "name": "<event>", "data": <event data> }` | Handle the event. You get only events you subscribed to and were granted. |
-| `shutdown` | notification | none | Exit. The runner kills the plugin if it is still running 5 seconds later. |
+| `shutdown` | notification | none | Finish your work and exit. The runner kills the plugin if it is still running 5 seconds later. See [When your plugin stops](#when-your-plugin-stops). |
+
+### When your plugin stops
+
+The host sends `shutdown` when the owner stops your plugin and when the Aphelion service stops. Your plugin then has 5 seconds to exit. After that the runner kills it, and anything it hasn't saved is lost. Once the host has sent `shutdown`, it ignores everything your plugin writes. Treat a closed standard input like `shutdown`.
+
+The SDK does this for you, in this order:
+
+1. It stops taking events. An event that arrives after `shutdown` never reaches a handler.
+2. Every call to the host that still waits for its reply fails at once with the error `the plugin is shutting down`. Every call made from then on fails the same way. That covers `network.get`, `secrets.use` and `events.subscribe`. A handler that awaits one of these calls gets the error and can still finish its own work.
+3. It waits for `start` to finish, because the cleanup comes from `start`. This wait has no limit of its own, so a `start` that is still running after 5 seconds is killed with the plugin, and cleanup never runs.
+4. It waits for the event handlers that are still running, until 3 seconds after shutdown began.
+5. It runs the cleanup function that `start` returned. Cleanup closes your files and connections.
+6. The process exits.
+
+A handler that still runs after 3 seconds isn't stopped. The SDK logs `the handler for <event> was still running after 3 s, so the plugin's cleanup runs now` and runs your cleanup anyway, so that handler can find its files or connections already closed. The log names the event, never its data. When `start` has already finished, the 3 seconds leave about 2 seconds of the 5 for your cleanup. A `start` that finishes later leaves less. Keep handlers short, and save their work as they go.
+
+`createTestHost` behaves the same way. Its `publish` sends nothing from the moment you call `stop`.
 
 ### Requests your plugin can send
 
