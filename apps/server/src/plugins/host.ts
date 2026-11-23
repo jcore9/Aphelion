@@ -1,4 +1,11 @@
-import { pluginApiVersion, type PluginManifest } from "@aphelion/plugin-sdk";
+import {
+  networkGetParams,
+  pluginApiVersion,
+  requestUrl,
+  secretsUseParams,
+  subscribeParams,
+  type PluginManifest,
+} from "@aphelion/plugin-sdk";
 import {
   Cause,
   Clock,
@@ -10,7 +17,6 @@ import {
   Queue,
   Scope,
 } from "effect";
-import { z } from "zod";
 import type { Logger } from "../log";
 import {
   failure,
@@ -34,12 +40,7 @@ import {
 import type { Link } from "./link";
 import { PluginRefused, readManifest } from "./manifest-file";
 import { declaresPermission, PluginGrants, type Permission } from "./grants";
-import {
-  networkRequest,
-  requestParams,
-  requestUrl,
-  type NetworkRequest,
-} from "./network";
+import { networkRequest, type NetworkRequest } from "./network";
 import {
   maxPendingInputBytes,
   maxPluginLineBytes,
@@ -124,13 +125,6 @@ interface Slot {
 const maxPendingInputMessages = 4096;
 const pendingCost = (line: string) => 2 * line.length + 256;
 
-const secretParams = z.strictObject({
-  operation: z.string().max(128),
-  reference: z.string().max(1024),
-});
-
-const subscribeParams = z.strictObject({ event: z.string().max(128) });
-
 function encode(message: unknown): Effect.Effect<string, MessageNotSent> {
   return Effect.try({
     try: () => JSON.stringify(message),
@@ -193,7 +187,7 @@ export const pluginHostLayer = (options: HostOptions) =>
           "network.get",
           (slot, params, run) =>
             Effect.gen(function* () {
-              const parsed = requestParams.safeParse(params);
+              const parsed = networkGetParams.safeParse(params);
               if (!parsed.success)
                 return yield* Effect.fail(rpcErrors.invalidParams);
               const url = requestUrl(parsed.data.url);
@@ -212,7 +206,7 @@ export const pluginHostLayer = (options: HostOptions) =>
           "secrets.use",
           (slot, params, run) =>
             Effect.gen(function* () {
-              const parsed = secretParams.safeParse(params);
+              const parsed = secretsUseParams.safeParse(params);
               if (!parsed.success)
                 return yield* Effect.fail(rpcErrors.invalidParams);
               const { reference, operation } = parsed.data;

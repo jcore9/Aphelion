@@ -4,22 +4,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, onTestFinished, test } from "vitest";
-import { getPinnedHttps, isPublicIpv4, requestUrl } from "./network";
-
-test("rejects new schemes, credentials, address literals and alternate ports", () => {
-  for (const url of [
-    "http://api.example.com/",
-    "https://user:pass@api.example.com/",
-    "https://127.0.0.1/",
-    "https://[::1]/",
-    "https://api.example.com:8443/",
-  ]) {
-    expect(requestUrl(url)).toBeUndefined();
-  }
-  expect(requestUrl("https://api.example.com/path")?.hostname).toBe(
-    "api.example.com",
-  );
-});
+import { getPinnedHttps, isPublicIpv4 } from "./network";
 
 test("refuses DNS results for loopback, LAN, tailnet and link-local destinations", () => {
   for (const address of [

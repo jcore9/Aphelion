@@ -33,6 +33,12 @@ const nodeImports = {
   regex: `^(node:|(${nodeModules.join("|")})(/|$))`,
   message: webOnly,
 };
+const pluginStdio = "packages/plugin-sdk/src/stdio.ts";
+const stdioNodeImports = {
+  regex: `^(node:(?!process$)|(${nodeModules.join("|")})(/|$))`,
+  message:
+    "plugin-sdk's stdio.ts may import node:process and nothing else from Node (decision 0051).",
+};
 const hostImports = {
   regex: "^@aphelion/(server|ui)(/|$)",
   message: "Web packages never import the server or ui packages.",
@@ -111,6 +117,19 @@ export default defineConfig(
     files: webPackages,
     rules: restrict(
       [bunImports, effectBunImports, effectImports, nodeImports, hostImports],
+      [...bunGlobals, ...nodeGlobals],
+    ),
+  },
+  {
+    files: [pluginStdio],
+    rules: restrict(
+      [
+        bunImports,
+        effectBunImports,
+        effectImports,
+        stdioNodeImports,
+        hostImports,
+      ],
       [...bunGlobals, ...nodeGlobals],
     ),
   },
