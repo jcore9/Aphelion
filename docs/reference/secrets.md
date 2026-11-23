@@ -160,7 +160,7 @@ On failure the result is `{ ok: false, reason }`. The reason is one of a fixed s
 
 | Scheme | Store | Form | Example |
 | --- | --- | --- | --- |
-| `op` | 1Password, through its SDK (M0-15) | `op://vault/item/field` or `op://vault/item/section/field` | `op://AI Agents/GitHub App/private key` |
+| `op` | 1Password, through its SDK (the plugin comes in M3, [#17](https://github.com/jcore9/Aphelion/issues/17)) | `op://vault/item/field` or `op://vault/item/section/field` | `op://AI Agents/GitHub App/private key` |
 | `bws` | Bitwarden Secrets Manager | `bws://` and the secret's ID | `bws://64246aa4-70b3-4332-8587-8b1284ce6d76` |
 | `local` | The server's own encrypted store (M0-14b) | `local://` and one or more names separated by `/` | `local://github/webhook-secret` |
 

@@ -77,7 +77,7 @@ The other paths are guesses at where future code will live. Most match a folder 
 
 | Pattern | For |
 | --- | --- |
-| `secrets/`, `broker/` | The secrets broker (M0-14) and the secret backends (M0-15) |
+| `secrets/`, `broker/` | The secrets broker (M0-14) and the secret backends (M3, [#17](https://github.com/jcore9/Aphelion/issues/17)) |
 | `plugin-host/`, `grants/`, `/packages/plugin-sdk/src/manifest*` | The plugin host, permission grants, and the manifest schema (M0-13) |
 | `auth/`, `devices/` | Device tokens (M0-10) and later sign-in |
 | `policy/`, `/apps/server/**/hooks/` | The policy engine and its hooks (M2) |
