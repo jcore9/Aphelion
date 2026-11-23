@@ -702,7 +702,7 @@ interface TestHost {
 
 - `setGrants`: Sets what the owner granted, replacing earlier grants. A grant counts only when the manifest also lists the permission.
 - `respondToGet`: Sets the reply to `network.get` for one URL. A URL with no reply, a reply that takes more than 5 seconds, and a body larger than 64 KiB fail with `Operation failed`.
-- `registerSecretOperation`: Adds a named operation for `secrets.use`. While none is registered, `secrets.use` fails with error `-32002`.
+- `registerSecretOperation`: Adds a named operation for `secrets.use`. While none is registered, `secrets.use` with a granted reference fails with error `-32002`.
 - `start`: Starts the plugin and resolves when its `start` has finished, or rejects when `start` fails. A test host starts one plugin only.
 - `publish`: Sends an event to the plugin and resolves when its handler has finished. It sends nothing when the plugin isn't running, hasn't subscribed, or isn't granted the event.
 - `stop`: Sends `shutdown` and resolves when the plugin has run its cleanup and stopped.

@@ -65,7 +65,7 @@ export interface TestHost {
   setGrants(grants: readonly Grant[]): void;
   /** Sets the reply to `network.get` for one URL. A URL with no reply, a reply that takes more than 5 seconds, and a body larger than 64 KiB fail with `Operation failed`. */
   respondToGet(url: string, respond: () => MaybePromise<NetworkReply>): void;
-  /** Adds a named operation for `secrets.use`. While none is registered, `secrets.use` fails with error `-32002`. */
+  /** Adds a named operation for `secrets.use`. While none is registered, `secrets.use` with a granted reference fails with error `-32002`. */
   registerSecretOperation(name: string, operation: FakeSecretOperation): void;
   /** Starts the plugin and resolves when its `start` has finished, or rejects when `start` fails. A test host starts one plugin only. */
   start(plugin: ServerPlugin): Promise<void>;
