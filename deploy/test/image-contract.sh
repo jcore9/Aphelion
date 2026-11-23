@@ -24,6 +24,10 @@ as_root() {
   docker run --rm --entrypoint "" --network none -v "$scratch:/scratch" "$image" "$@"
 }
 
+as_root_in_volume() {
+  docker run --rm --entrypoint "" --network none -v "${project}_plugin-files:/opt/aphelion/plugins" "$image" "$@"
+}
+
 cleanup() {
   status=$?
   if ((status != 0)); then
@@ -44,8 +48,6 @@ services:
   $service:
     image: $image
     $ports
-    volumes:
-      - $scratch/plugins:/opt/aphelion/plugins:ro
     secrets: [bootstrap]
 networks:
   aphelion:
@@ -99,7 +101,7 @@ cat >"$scratch/plugins/contract-probe/checks.json" <<'EOF'
   ["read", "/proc/{server}/mem", "EACCES"],
   ["signal", "{server}", "EPERM"],
   ["signal", "{broker}", "EPERM"],
-  ["write", "/opt/aphelion/plugins/contract-probe", "EROFS"],
+  ["write", "/opt/aphelion/plugins/contract-probe", "EACCES"],
   ["write", "/usr/local/bin", "EROFS"],
   ["write", "/var/lib/aphelion-plugins/contract-probe", "ok"]
 ]
@@ -119,6 +121,12 @@ refused=$(docker compose -p "$project" -f deploy/compose.yaml -f "$scratch/overr
 grep -qF "publishes the port on every host address" <<<"$refused" ||
   fail "config check failed for another reason: $refused"
 pass "config check accepts the Compose file and refuses a port on every address"
+
+"${compose[@]}" create --quiet-pull >/dev/null 2>&1
+"${compose[@]}" cp "$scratch/plugins/contract-probe" "$service:/opt/aphelion/plugins/contract-probe" >/dev/null
+[[ $(as_root_in_volume stat -c '%U:%G %a' /opt/aphelion/plugins) == "harness:harness 755" ]] ||
+  fail "the plugin-files volume isn't owned by harness with mode 755"
+pass "docker compose cp copies a plugin into the plugin-files volume, which harness owns"
 
 install=("${compose[@]}" run --rm -T --user harness "$service" aphelion plugin install /opt/aphelion/plugins/contract-probe)
 approval=$("${install[@]}" | sed -n 's/.*--approve \([0-9a-f]\{64\}\)$/\1/p')
@@ -238,7 +246,7 @@ probe aphelion-bot '[
   ["signal", "{broker}", "EPERM"],
   ["write", "/etc", "EROFS"],
   ["write", "/usr/local/bin", "EROFS"],
-  ["write", "/opt/aphelion/plugins", "EROFS"]
+  ["write", "/opt/aphelion/plugins", "EACCES"]
 ]'
 pass "aphelion-bot can't reach the config, state, secrets, plugins, broker, pipes or other processes"
 
@@ -257,6 +265,7 @@ pass "aphelion-plugins can't reach the server's files, the broker, the bots or t
 probe harness '[
   ["list", "/etc/aphelion", "ok"],
   ["write", "/var/lib/aphelion", "ok"],
+  ["write", "/opt/aphelion/plugins", "ok"],
   ["list", "/var/lib/aphelion-bots", "ok"],
   ["write", "/var/lib/aphelion-bots", "EACCES"],
   ["connect", "/run/aphelion-secrets/broker.sock", "ok"],
@@ -266,7 +275,7 @@ probe harness '[
   ["readlink", "/proc/{runner}/fd/0", "EACCES"],
   ["signal", "{broker}", "EPERM"]
 ]'
-pass "harness reads the config, state and bot folders and reaches the broker, and nothing else"
+pass "harness reads the config, state and bot folders, writes the plugin files and reaches the broker, and nothing else"
 
 probe aphelion-secrets '[
   ["list", "/etc/aphelion", "EACCES"],

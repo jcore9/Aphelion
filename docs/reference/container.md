@@ -40,7 +40,7 @@ The image has no `sudo`. The build removes the Ubuntu image's default `ubuntu` u
 | `/var/lib/aphelion-bots` | `aphelion-bot:aphelion-bot` | `0750` | Volume `bots` | One folder per bot |
 | `/var/lib/aphelion-secrets` | `aphelion-secrets:aphelion-secrets` | `0700` | Volume `secrets` | The broker's encrypted store |
 | `/var/lib/aphelion-plugins` | `aphelion-plugins:aphelion-plugins` | `0700` | Volume `plugin-data` | One data folder per plugin |
-| `/opt/aphelion/plugins` | Set on the host | Read-only | Host folder `deploy/plugins` | The installed plugins |
+| `/opt/aphelion/plugins` | `harness:harness` | `0755` | Volume `plugin-files` | The installed plugins, one folder per plugin |
 | `/run/aphelion-secrets` | `aphelion-secrets:harness` | `2710` | Memory | The broker's socket |
 | `/run/secrets/bootstrap` | `root:root` | `0400` | File from the host's `/run/credentials/aphelion.service/` | The [bootstrap key](secrets.md#the-bootstrap-key). It is a file, not a folder. |
 | `/run` | `root:root` | `0755` | Memory | Runtime files |
@@ -50,7 +50,7 @@ The rest of the file system is read-only.
 
 Docker fills a new, empty volume from the image, and copies the owner and mode of the folder too. The launcher refuses to start if a folder in the table has another owner, or a mode with permissions beyond the one shown. `/run/aphelion-secrets` must have mode `2710` exactly.
 
-Plugins are read-only inside the container, so a plugin can't change its own code or another plugin's code. The [plugin runner](plugins.md#how-your-plugin-is-started) refuses a plugin folder that `aphelion-plugins` owns or can write.
+Only `harness` can write the `plugin-files` volume, so a plugin can't change its own code or another plugin's code. The [plugin runner](plugins.md#how-your-plugin-is-started) refuses a plugin folder that `aphelion-plugins` owns or can write.
 
 ## How the processes start
 

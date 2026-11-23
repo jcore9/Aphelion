@@ -139,15 +139,28 @@ Always start the server with `systemctl`. A plain `docker compose up` skips the 
 
 ## Install a plugin
 
-1. Unpack the plugin into `/opt/aphelion/deploy/plugins/<name>` as root, readable by everyone and writable only by root. The container sees it, read-only, at `/opt/aphelion/plugins/<name>`.
-2. Preview its permissions.
+Plugins live in the `plugin-files` volume. A volume is a folder that Docker keeps for the container, and it survives an image rebuild. The container sees this one at `/opt/aphelion/plugins`. Plugins can read it, but can't change it. Run these steps in `/opt/aphelion/deploy` while the service runs.
+
+1. Unpack the plugin into a folder named after it, then make every file readable by everyone and writable only by you.
+
+   ```sh
+   chmod -R a+rX,go-w <name>
+   ```
+
+2. Copy the folder into the volume. Docker gives the copy to `root`, so the plugin can't change its own files.
+
+   ```sh
+   sudo docker compose cp <name> aphelion:/opt/aphelion/plugins/<name>
+   ```
+
+3. Preview its permissions.
 
    ```sh
    sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/<name>
    ```
 
-3. If you accept the permissions, repeat the command with the `--approve` value it printed.
-4. Restart the service. The server starts every approved plugin when it starts.
+4. If you accept the permissions, repeat the command with the `--approve` value it printed. The approval covers every file in the folder, so approve again after any file changes.
+5. Restart the service. The server starts every approved plugin when it starts.
 
    ```sh
    sudo systemctl restart aphelion
@@ -200,7 +213,9 @@ sudo host/install
 sudo systemctl restart aphelion
 ```
 
-`host/install` installs the new unit file and keeps the existing bootstrap key. If the service then stops and the log shows `The secrets store holds a plain-text key from before the host credential`, see [Start a fresh store after an older install](#start-a-fresh-store-after-an-older-install). The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
+`host/install` installs the new unit file and keeps the existing bootstrap key.
+
+If you upgrade from a version that kept plugins in `/opt/aphelion/deploy/plugins`, install each plugin again. That version mounted the host folder. This one keeps plugins in the `plugin-files` volume, and it checks every file of a plugin, so earlier approvals don't carry over. For each folder in `/opt/aphelion/deploy/plugins`, follow [Install a plugin](#install-a-plugin) from step 2. Until you do, the server doesn't start that plugin. Then you can delete `/opt/aphelion/deploy/plugins`. If the service then stops and the log shows `The secrets store holds a plain-text key from before the host credential`, see [Start a fresh store after an older install](#start-a-fresh-store-after-an-older-install). The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
 
 ## Not covered yet
 
