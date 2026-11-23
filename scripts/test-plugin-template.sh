@@ -42,7 +42,8 @@ for name in aphelion-plugin.json "$entry"; do
     exit 1
   fi
 done
-# Hook for #159: once apps/server/src/plugins/updates/tar.ts exists, unpack "$archive" with it here and parse the manifest it holds.
+bun "$root/scripts/check-plugin-archive.ts" "$archive" "$work/unpacked"
+diff -r dist "$work/unpacked"
 
 mkdir "$work/installed"
 tar -xf "$archive" -C "$work/installed"

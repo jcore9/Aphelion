@@ -13,6 +13,8 @@ import { readManifest } from "./manifest-file";
 export const controlSocketFile = "plugin-control.sock";
 export const maxControlLineBytes = 64 * 1024;
 export const devModeOff = "dev mode is off";
+export const noServerPart = (plugin: string) =>
+  `${plugin} has no server part to run`;
 
 export const controlRequestSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -106,7 +108,7 @@ export const pluginControl = (options: ControlOptions) =>
           );
         }
         if (started.success.kind === "client only") {
-          return refused(`${id} has no server part to run`);
+          return refused(noServerPart(id));
         }
         const waited = yield* host
           .waitFor(
