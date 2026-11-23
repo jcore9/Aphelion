@@ -51,7 +51,7 @@ At startup the broker checks the key against the store. When a check fails, the 
 | `The bootstrap key does not match this secrets store` | `recipient.pub` holds another public key. Or `recipient.pub` is missing, and an entry doesn't decrypt with the key or doesn't match its filename. |
 | `The secrets broker takes no arguments except --new-key` | The broker was started with another argument. |
 
-If `recipient.pub` is missing and entries exist, as after restoring a backup of only the entries, the broker decrypts one entry to prove the key matches. Then it writes `recipient.pub`. Other startup failures, such as a folder with the wrong owner or mode, log `Secrets broker startup failed` with no reason.
+If `recipient.pub` is missing and entries exist, as after restoring a backup of only the entries, the broker checks every entry first, as described above. Then it writes `recipient.pub`. Other startup failures, such as a folder with the wrong owner or mode, log `Secrets broker startup failed` with no reason.
 
 ### Socket protocol
 
