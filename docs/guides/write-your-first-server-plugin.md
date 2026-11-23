@@ -74,7 +74,7 @@ The other file you don't need to touch is `src/index.ts`. It connects your plugi
 
 ## Run the tests
 
-Open `src/plugin.test.ts`. It runs your plugin against `createTestHost`, a fake Aphelion in the SDK. The fake follows the same rules as the real one, so a test can show that a plugin without a grant is refused. The template has two tests. One grants the event and checks the log. The other grants nothing and checks that `start` fails with error `-32001`, "not granted".
+Open `src/plugin.test.ts`. It runs your plugin against `createTestHost`, a fake Aphelion in the SDK. The fake follows the same rules as the real one, so a test can show that a plugin without a grant is refused. The template has two tests. One grants the event and checks the log. The other grants nothing and checks that `start` fails with error `-32001`, `Not granted`.
 
 1. Run the tests.
 
@@ -144,7 +144,7 @@ The [plugin reference](../reference/plugins.md#how-your-plugin-is-started) lists
 3. Check the log.
 
    ```sh
-   journalctl -u aphelion --since "2 minutes ago" | grep "plugin dev mode is on"
+   sudo journalctl -u aphelion --since "2 minutes ago" | grep "plugin dev mode is on"
    ```
 
    You should see a line with `plugin dev mode is on`. If you don't, the override didn't load. Check `.env` for a typo.
@@ -159,7 +159,7 @@ Aphelion starts a plugin only after you approve its permissions. Approve the fol
 sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/dev-plugin
 ```
 
-You should see the plugin's name and a line that starts with `events` and names `"approval.requested"`, then a line that ends with `--approve` and a long hexadecimal number. Run the command again with that number.
+You should see the plugin's name and a line that starts with `events` and names `"approval.requested"`, then a line that ends with `--approve` and a long hexadecimal number. Run the command again, with the whole number in place of `<number>` and no angle brackets.
 
 ```sh
 sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/dev-plugin --approve <number>
@@ -180,7 +180,7 @@ You should see `Plugin permissions saved.`
 2. In a second terminal, look at the server's log. You should see the plugin's `plugin started` line.
 
    ```sh
-   journalctl -u aphelion -f | grep "plugin started"
+   sudo journalctl -u aphelion -f | grep "plugin started"
    ```
 
 3. In a third terminal, in `~/hello-plugin`, start the watcher.
@@ -202,7 +202,7 @@ Press Ctrl-C in the `plugin dev` terminal to stop watching. The plugin keeps run
 An approval covers one exact manifest. Suppose you add a permission or change the version in `aphelion-plugin.json`, then build. `bun run watch` copies the manifest only when it starts. Run `bun run build` to copy it. Then `plugin dev` prints a refusal that says `hello-plugin stays stopped: the manifest changed since it was approved`, and the plugin stops.
 
 1. Run the two `plugin install` commands again, to preview and then approve.
-2. Change any file. For example, run `bun run build` again. `plugin dev` reloads only after a change, not when you approve.
+2. Change a file, for example with `touch ~/hello-plugin/dist/server.mjs`. `plugin dev` reloads only after a change, not when you approve.
 
 ## If something is refused
 
@@ -211,7 +211,8 @@ An approval covers one exact manifest. Suppose you add a permission or change th
 | `Plugin dev mode is off` | The server has no dev socket. | Check the first steps in [Start Aphelion in dev mode](#start-aphelion-in-dev-mode). |
 | `dev mode reloads only /opt/aphelion/dev-plugin` | You gave another folder. | Use the folder from the override. |
 | `isn't approved` | You haven't approved the folder yet. | Run the two `plugin install` commands. |
-| `stays stopped` | The manifest changed, or the runner refused the folder. | Read the reason, and see [When the manifest changes](#when-the-manifest-changes). |
+| `stays stopped` | The manifest changed since you approved it. | See [When the manifest changes](#when-the-manifest-changes). |
+| `Reloaded hello-plugin: crashed` | The plugin exited, or the runner refused the folder, for example because user `10004` can write to it. | Read the server log with `sudo journalctl -u aphelion`. |
 
 ## Next
 

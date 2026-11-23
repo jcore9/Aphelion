@@ -41,7 +41,7 @@ A plugin needs code that reads standard input, writes standard output, and exits
    - Against: a new door into the server. The socket accepts one request type, `reload`, for one canonical folder, with an approval row whose manifest digest matches. It accepts no approvals and no runner messages. An ordinary deployment opens no socket, and the container contract test checks that.
 2. **The CLI starts its own host and runner.**
    - For: no socket on the server.
-   - Against: the plugin would run as `harness`, the CLI's user, not `aphelion-plugins`. The CLI would grant the permissions itself, so it would test nothing about approval. It would get no real events once the server sends them, because it isn't the server.
+   - Against: the CLI runs as `harness` and can't start the runner as another user without the launcher's privileged setup, so the plugin would run as `harness`, not `aphelion-plugins`. The CLI would grant the permissions itself, so it would test nothing about approval. It would get no real events once the server sends them, because it isn't the server.
 3. **The server watches folders itself.**
    - For: no CLI, no socket.
    - Against: no `aphelion plugin dev` command, which the issue asks for. The server would need a list of watched folders and a way to change it, which is more server surface than one fixed folder.
@@ -49,7 +49,7 @@ A plugin needs code that reads standard input, writes standard output, and exits
 ### C. How a project is generated
 
 1. **A generator in the checkout, `bun run create:plugin`, that packs the SDK into the project.** It copies `templates/server-plugin/`, sets the id, runs `bun pm pack` on `packages/plugin-sdk`, and points `package.json` at the tarball in `vendor/`.
-   - For: it works today, offline, with exactly the SDK version of the checkout. The project is standalone and has no link to the checkout.
+   - For: it works today with exactly the SDK version of the checkout, and it needs no network to generate a project. Installing the project's packages still needs the registry or a package cache. The project is standalone and has no link to the checkout.
    - Against: the author needs a checkout. Each project carries a tarball of the SDK, about 11 KiB.
 2. **Publish `@aphelion/plugin-sdk` and offer `bun create aphelion-plugin`.**
    - For: the usual way. No checkout.
@@ -58,14 +58,14 @@ A plugin needs code that reads standard input, writes standard output, and exits
 ## Decision
 
 - **A: option 1.** `@aphelion/plugin-sdk/stdio` is the one SDK file that imports `node:process`. `eslint.config.ts` exempts that file and names this record in the message. The exemption allows `node:process` and no other Node import. `lint-boundaries.test.ts` checks that `stdio.ts` may import it and that every other SDK file may not.
-- **B: option 1.** The launcher passes `APHELION_PLUGIN_DEV_FOLDER` to the server as `--plugin-dev`. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml) sets it and mounts the folder read-only. A reload stops the plugin, waits for its `stopped` state, reads the approval and the manifest again, and starts it through the runner. The runner's checks on ownership, write access, ancestors and symbolic links run on every start. A changed manifest leaves the plugin stopped until the owner approves it again.
+- **B: option 1.** The launcher passes `APHELION_PLUGIN_DEV_FOLDER` to the server as `--plugin-dev`. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml) sets it and mounts the folder read-only. A reload reads the approvals for the folder, stops every plugin approved there and waits until each has stopped, reads the manifest again, and starts the plugin whose `id` it names through the runner. The runner's checks on ownership, write access, ancestors and symbolic links run on every start. A changed manifest leaves the plugin stopped until the owner approves it again.
 - **C: option 1.** The generator runs from a checkout and vendors the packed SDK. `bun create aphelion-plugin` waits until the owner decides to publish the SDK. The template's build and the generator's output are tested in CI by `scripts/test-plugin-template.sh`.
 - Issue item 4, a 1Password backend built from the template, moves to [#17](https://github.com/jcore9/Aphelion/issues/17). #106 ships the template and the kit that #17 needs.
 
 ## Consequences
 
 - Plugin authors write `{ start(ctx) { ... } } satisfies ServerPlugin` and test it with `createTestHost`. The [first plugin guide](../guides/write-your-first-server-plugin.md) walks through it.
-- The SDK now holds the wire definitions that the server also uses: method names, the error table, the parameter schemas and the HTTPS URL check. The server imports them. A contract test runs a real SDK plugin against the real plugin host, so the fake host in `/testing` can't drift without a failing test.
+- The SDK now holds the wire definitions that the server also uses: method names, the error table, the parameter schemas and the HTTPS URL check. The server imports them. A contract test runs a real SDK plugin against both the real plugin host and the fake host in `/testing`, and checks that they answer the same way. It covers subscriptions, events, network requests and the missing secret operations. Behavior outside those cases can still differ.
 - The SDK has one file with a Node import. A later client part must not import `/stdio`.
 - The dev socket exists only in dev mode. The reference documents it in [Dev mode](../reference/plugins.md#dev-mode). A host that runs dev mode in production has opened a door that the plain install doesn't have, so the guide tells the author to remove the override afterwards.
 - Revisit C when the owner decides to publish the SDK. Then the generator can depend on the published version, and `bun create aphelion-plugin` becomes possible. Revisit B when the server sends real events, to see whether a reload needs to replay one.

@@ -116,7 +116,7 @@ The command connects to `plugin-dev.sock` in the state folder. It asks the serve
 | Line | Meaning |
 | --- | --- |
 | `Watching FOLDER. Press Ctrl-C to stop watching. The plugin keeps running.` | The command is connected. Standard output. |
-| `Reloaded ID: STATE` | The server restarted the plugin `ID`, which is now in state `STATE`, usually `running`. Standard output. |
+| `Reloaded ID: STATE` | The server started a new run of plugin `ID` and saw it reach state `STATE`. `running` means it started. `crashed` means it exited or the runner refused it, and the server log says why. Standard output. |
 | `Refused: REASON` | The server didn't reload. The reason says why, for example that the folder isn't approved or that the manifest changed. The command keeps watching. Standard error. |
 
 The command exits with code 1 and a message if the server has no dev socket. It runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.

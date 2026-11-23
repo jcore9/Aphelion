@@ -154,10 +154,11 @@ Dev mode lets a plugin author reload one plugin without restarting the server. I
 
 In dev mode the server opens a Unix socket at `plugin-dev.sock` in its state folder, so `/var/lib/aphelion/plugin-dev.sock` in the container. A Unix socket is a file that two programs on the same machine use to talk. Only `harness` can open it (mode `0600`). The server replaces a socket left over from an earlier run and removes it when it stops. Without `--plugin-dev`, the server opens no socket.
 
-Approve the mounted folder once, then watch it:
+Preview and approve the mounted folder once, then watch it:
 
 ```sh
 aphelion plugin install /opt/aphelion/dev-plugin
+aphelion plugin install /opt/aphelion/dev-plugin --approve <value it printed>
 aphelion plugin dev /opt/aphelion/dev-plugin
 ```
 
