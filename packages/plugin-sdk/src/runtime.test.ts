@@ -386,6 +386,41 @@ describe("runPlugin", () => {
     await expect(run).resolves.toBeUndefined();
   });
 
+  test("starts no queued write after the shutdown", async () => {
+    const host = scriptedHost();
+    const first = Promise.withResolvers<undefined>();
+    const writes: string[] = [];
+    const run = runPlugin(
+      {
+        async start(ctx) {
+          await ctx.events.subscribe("demo.ping", async () => {
+            await Promise.allSettled([
+              ctx.events.subscribe("demo.a", () => undefined),
+              ctx.events.subscribe("demo.b", () => undefined),
+            ]);
+          });
+        },
+      },
+      {
+        ...host.io,
+        write: (line) => {
+          writes.push(line);
+          if (line.includes("demo.a")) return first.promise;
+          if (line.includes("demo.b")) return new Promise(() => undefined);
+          return host.io.write(line);
+        },
+      },
+    );
+    await host.initialize();
+    host.reply(await host.read(), {});
+    host.event("demo.ping", {});
+    host.shutdown();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    first.reject(new Error("stdout broke"));
+    await expect(run).resolves.toBeUndefined();
+    expect(writes.some((line) => line.includes("demo.b"))).toBe(false);
+  });
+
   test("fails when start throws after the handshake", async () => {
     const host = scriptedHost();
     const run = runPlugin(

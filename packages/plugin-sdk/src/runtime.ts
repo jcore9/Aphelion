@@ -75,6 +75,7 @@ export async function serve(
     const line = JSON.stringify(message);
     const sent = writing.then(() => {
       if (broken) throw broken.error;
+      if (closed) throw new Error("the plugin is shutting down");
       return io.write(line);
     });
     writing = sent.catch(breakOff);
