@@ -19,7 +19,7 @@ The M0 exit test is that the service starts on boot and answers `/health`. It do
 ### Where the token lives
 
 1. **In the local store, as `local://1password/service-account-token`.**
-   - For: it is encrypted by the bootstrap key, it is backed up with the store, and the host needs no new install step. The store already has delete and audit rows.
+   - For: it is encrypted by the bootstrap key, it is backed up with the store, and the host needs no new install step.
    - Against: anyone who can unseal the store can read it. That is true of every secret in the store.
 2. **A second host credential sealed with `systemd-creds`, like the bootstrap key.**
    - For: nothing extra in the `secrets` volume.
@@ -37,7 +37,7 @@ The M0 exit test is that the service starts on boot and answers `/health`. It do
 ### The live test
 
 1. **The owner makes a read-only service account for a vault that holds only test items and gives the token through a private secret prompt. The orchestrator runs the test.** The output never shows values, and goes in the pull request.
-2. **The owner runs a script.** Rejected.
+2. **The owner runs a script and sends the output.** Rejected. It puts the run and its upkeep on the owner at every SDK bump.
 
 ## Decision
 
@@ -51,6 +51,7 @@ The M0 exit test is that the service starts on boot and answers `/health`. It do
 - Still to build in #17:
   - The host side that asks a backend plugin for a value. No JSON-RPC method for it exists, and nothing calls `SecretBackend.resolve`.
   - How the token reaches the plugin, and how resolved values are kept from other plugins.
+  - The `aphelion` command that stores the token and the disconnect that deletes it. The broker's socket can read and write `local://` entries today, but not delete them.
   - The grant model, the CLI for grant decisions and the audit rows listed in the issue.
   - Packaging. `@1password/sdk` reads its WebAssembly file from disk at run time ([the M0-03 spike](../spikes/M0-03-headless-on-bun.md)), so the starter template's one-file bundle needs a change.
 - The M0 plan and the plan's issue breakdown get an "Amended by" note. The reference pages for secrets and the plugin manifest say the plugin comes in M3.
