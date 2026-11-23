@@ -130,6 +130,7 @@ interface PluginContext {
   The SDK sends one network or secret call at a time, so a second call waits until the first one has its reply.
 - `secrets`: `use(operation, reference)` asks the host to run a named operation with a secret, such as a signed HTTP call.
   The plugin never receives the secret's value or the operation's result, and the call waits its turn like `network.get`.
+  The server offers no secret operations yet, so today a granted call fails with error `-32002`.
 - `log`: Writes a message to the plugin's log, which goes to the server's log.
 
 ### `PluginIO`
@@ -464,7 +465,7 @@ const pluginManifestFile: "aphelion-plugin.json";
 ### `pluginManifestSchema`
 
 The Zod schema for `aphelion-plugin.json`, whose fields [the plugin manifest reference](plugin-manifest.md) lists.
-It fills in empty lists but doesn't check the API range, as `parsePluginManifest` does.
+It fills in empty lists and checks that `api` is a valid version range, but not that the range includes `pluginApiVersion`. `parsePluginManifest` checks both.
 
 ```ts
 const pluginManifestSchema: z.ZodType<{
@@ -506,8 +507,8 @@ const request: (
 
 ### `requestUrl`
 
-Returns the URL if `network.get` accepts it, and `undefined` if not.
-The URL must use `https:`, a hostname with a dot, and the default port, with no user name, password or `#` fragment, and not an IP address.
+Checks a URL's form for `network.get`, and returns the URL, or `undefined` if the form is wrong.
+The URL must use `https:`, a hostname with a dot and no dot at the end, and the default port, with no user name, password or `#` fragment, and not an IP address. `network.get` also refuses a URL longer than 4096 characters and a host that isn't granted.
 
 ```ts
 function requestUrl(text: string): URL | undefined;
@@ -601,7 +602,7 @@ const success: (
 ### `runPlugin`
 
 Runs a plugin on the given lines until the host sends `shutdown` or closes its input, then runs its cleanup.
-It rejects when the plugin's `start` fails or a line can't be read or written. Most plugins call `main` instead.
+It rejects when the plugin's `start` fails before shutdown begins, or a line can't be read or written. A `start` that fails after shutdown has begun is only logged. Most plugins call `main` instead.
 
 ```ts
 function runPlugin(plugin: ServerPlugin, io: PluginIO): Promise<void>;
@@ -686,6 +687,7 @@ interface HostCall {
 ### `TestHost`
 
 A fake host for a plugin's tests. It checks grants, network calls and secret operations the way the real host does.
+Unlike the real host, it can run secret operations that a test registers with `registerSecretOperation`.
 
 ```ts
 interface TestHost {

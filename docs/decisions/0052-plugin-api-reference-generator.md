@@ -30,7 +30,7 @@ The repository already generates two references the same way. The protocol spec 
 A module in `docs/src` asks the compiler for every export of every TypeScript entry in the SDK's `package.json`, with its type and doc comment, and renders one Markdown page. A test compares the page with `docs/reference/plugin-api.md`.
 
 - For: `typescript` 6.0.3 is already a root dev dependency, so nothing new is installed. The page is one file that opens with `# Plugin API reference`, so it fits the site unchanged. The same `test` job and the same `-u` habit as the protocol spec apply. The renderer decides how each kind of export looks, so it can hide private names and Zod internals.
-- Against: about 390 lines of collecting and rendering code to own. The renderer handles the declaration kinds the SDK uses today, which are functions, constants, interfaces, type aliases and classes. A new kind fails the test with the export's name until the renderer learns it.
+- Against: about 390 lines of collecting and rendering code to own. The renderer handles the declaration kinds the SDK uses today, which are functions, constants, interfaces, type aliases and classes. A new kind fails the test with the export's name until the renderer learns it. So do a default export, an export under a different name, and a type declared twice under one name, which the SDK doesn't use today.
 
 A ten-line test proved first that the compiler API loads under `bun --bun vitest`. It listed the exports of `src/index.ts`, and the whole run took under a second.
 
@@ -42,7 +42,7 @@ TypeDoc is the common documentation generator for TypeScript, and the plugin mak
 | --- | --- |
 | Runs on Bun | Yes. It accepts TypeScript 6.0 and finished in 1.4 s. |
 | Install | 28 packages in the scratch folder, of which 6 were the SDK's own dependencies and TypeScript. `typedoc` is 2.9 MB and the plugin 1.6 MB. |
-| Output | 49 Markdown files and 1678 lines, one page per export. |
+| Output | 49 Markdown files and 1678 lines: a page for each export, plus index pages. |
 | Page titles | None of the 49 files opens with `# Title`. Each opens with a breadcrumb link, such as `[**scratch**](../README.md)`, and the H1 comes later. The site would refuse every page. |
 | Links | 229 relative links between the generated files, which the site could check once the files are inside `docs/`. |
 | Zod schemas | `pluginManifestSchema` is shown as its full Zod type, `ZodObject<{ $schema: ZodOptional<ZodString>; ... }, $strict>`, all on one line. The shape a plugin author gets back is not shown. |

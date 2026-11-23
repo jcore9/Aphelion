@@ -59,7 +59,10 @@ export interface HostCall {
   readonly outcome: CallOutcome;
 }
 
-/** A fake host for a plugin's tests. It checks grants, network calls and secret operations the way the real host does. */
+/**
+ * A fake host for a plugin's tests. It checks grants, network calls and secret operations the way the real host does.
+ * Unlike the real host, it can run secret operations that a test registers with `registerSecretOperation`.
+ */
 export interface TestHost {
   /** Sets what the owner granted, replacing earlier grants. A grant counts only when the manifest also lists the permission. */
   setGrants(grants: readonly Grant[]): void;

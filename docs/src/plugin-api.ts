@@ -173,6 +173,14 @@ class Collector {
     }
     const hidden = this.hiddenName(declaration);
     if (ts.isTypeAliasDeclaration(declaration) && hidden) {
+      const hiddenParameter = declaration.typeParameters
+        ?.map((parameter) => this.hiddenName(parameter))
+        .find(Boolean);
+      if (hiddenParameter) {
+        throw fail(
+          `whose type parameters use ${hiddenParameter}, which isn't exported`,
+        );
+      }
       const parameters = declaration.typeParameters
         ? `<${declaration.typeParameters.map((parameter) => parameter.getText()).join(", ")}>`
         : "";
@@ -281,8 +289,17 @@ class Collector {
     const fail = (problem: string) =>
       new Error(`${specifier} exports ${symbol.name}, ${problem}`);
     const target = this.resolve(symbol);
-    const declaration = target.declarations?.[0];
+    const declarations = target.declarations ?? [];
+    const [declaration] = declarations;
     if (!declaration) throw fail("which has no declaration");
+    if (symbol.name === "default") throw fail("which is a default export");
+    if (target.name !== symbol.name) throw fail(`which renames ${target.name}`);
+    if (
+      declarations.length > 1 &&
+      !declarations.every((item) => ts.isFunctionDeclaration(item))
+    ) {
+      throw fail("which has more than one declaration");
+    }
     return {
       name: symbol.name,
       description: documentation(this.checker, target),

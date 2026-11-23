@@ -46,7 +46,7 @@ function parse(line: string): RpcMessage | undefined {
 
 /**
  * Runs a plugin on the given lines until the host sends `shutdown` or closes its input, then runs its cleanup.
- * It rejects when the plugin's `start` fails or a line can't be read or written. Most plugins call `main` instead.
+ * It rejects when the plugin's `start` fails before shutdown begins, or a line can't be read or written. A `start` that fails after shutdown has begun is only logged. Most plugins call `main` instead.
  */
 export function runPlugin(plugin: ServerPlugin, io: PluginIO): Promise<void> {
   return serve(plugin, io, {});

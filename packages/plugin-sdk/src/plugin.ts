@@ -36,6 +36,7 @@ export interface PluginContext {
   /**
    * `use(operation, reference)` asks the host to run a named operation with a secret, such as a signed HTTP call.
    * The plugin never receives the secret's value or the operation's result, and the call waits its turn like `network.get`.
+   * The server offers no secret operations yet, so today a granted call fails with error `-32002`.
    */
   readonly secrets: {
     use(operation: string, reference: SecretReference): Promise<void>;

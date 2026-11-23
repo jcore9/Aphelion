@@ -117,8 +117,8 @@ export const failure = (id: RpcId | null, error: RpcError) => ({
 const ipv4 = /^\d+\.\d+\.\d+\.\d+$/;
 
 /**
- * Returns the URL if `network.get` accepts it, and `undefined` if not.
- * The URL must use `https:`, a hostname with a dot, and the default port, with no user name, password or `#` fragment, and not an IP address.
+ * Checks a URL's form for `network.get`, and returns the URL, or `undefined` if the form is wrong.
+ * The URL must use `https:`, a hostname with a dot and no dot at the end, and the default port, with no user name, password or `#` fragment, and not an IP address. `network.get` also refuses a URL longer than 4096 characters and a host that isn't granted.
  */
 export function requestUrl(text: string): URL | undefined {
   const url = URL.parse(text);
