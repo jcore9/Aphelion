@@ -322,7 +322,9 @@ grep -qF '/run/secrets/bootstrap is missing. Start Aphelion with systemctl, whic
   fail "the container stopped without the bootstrap file for another reason: $missing"
 pass "the launcher refuses to start without the bootstrap file"
 
-if "${compose[@]}" logs --no-color 2>&1 | grep -F -- "$key" >/dev/null; then
+logs=$("${compose[@]}" logs --no-color 2>&1) || fail "docker compose logs failed: $logs"
+[[ -n $logs ]] || fail "docker compose logs printed nothing"
+if grep -F -- "$key" <<<"$logs" >/dev/null; then
   fail "the bootstrap key reached a container log"
 fi
 pass "the bootstrap key appears in no container log"

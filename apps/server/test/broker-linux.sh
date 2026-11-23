@@ -19,7 +19,7 @@ install -d -o aphelion-secrets -g harness -m 2710 /run/aphelion-secrets
 install -d -o aphelion-secrets -g aphelion-secrets -m 0700 /var/lib/aphelion-secrets
 (umask 077 && /broker --new-key >/bootstrap && /broker --new-key >/other-key)
 chmod 0400 /bootstrap /other-key
-grep -qx 'AGE-SECRET-KEY-1[0-9A-Z]*' /bootstrap
+grep -qEx 'AGE-SECRET-KEY-1[0-9A-Z]{58}' /bootstrap
 
 as_user() {
   local account=$1

@@ -44,7 +44,7 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
    The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens it. The bootstrap key unlocks it ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
 
-   The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but holds no key, the script stops and changes nothing.
+   The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a whole key, the script stops and leaves the file and the service as they are.
 
 5. Make a recovery copy of the bootstrap key, as [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) describes. Do it before you store any secret. If the host's disk fails, this copy is the only way to read the store on a new host.
 
@@ -102,10 +102,10 @@ Put the bootstrap key on the new host before you run `host/install`, so that the
    ```
 
 3. Paste the key from your password manager, press Enter, and then press Ctrl-D. The key never enters your shell history, because you paste it into `systemd-creds` and not into a command.
-4. Check the result. You should see `AGE-SECRET-KEY-1`, the first 16 characters of the key. If you see anything else, repeat steps 2 and 3.
+4. Check that the whole key arrived. The command counts the lines that look like a whole key, without showing the key. You should see `1`. If you see `0`, repeat steps 2 and 3.
 
    ```sh
-   sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap - | cut -c1-16
+   sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap - | grep -cEx 'AGE-SECRET-KEY-1[0-9A-Z]{58}'
    ```
 
 5. Follow [Install](#install) from step 1.

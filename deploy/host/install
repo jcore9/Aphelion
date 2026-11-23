@@ -25,7 +25,7 @@ if [[ ! -f $root/deploy/.env ]]; then
 fi
 
 holds_key() {
-  systemd-creds decrypt --name=bootstrap "$1" - 2>/dev/null | grep -x 'AGE-SECRET-KEY-1[0-9A-Z]*' >/dev/null
+  systemd-creds decrypt --name=bootstrap "$1" - 2>/dev/null | grep -Ex 'AGE-SECRET-KEY-1[0-9A-Z]{58}' >/dev/null
 }
 
 install -d -o root -g root -m 0755 "$root/deploy/plugins"
