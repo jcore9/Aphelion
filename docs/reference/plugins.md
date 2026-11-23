@@ -192,7 +192,7 @@ The host identifies `network.get` requests by the plugin's own channel. The requ
 
 Dev mode lets a plugin author reload one plugin without restarting the server. It is off unless you start the container with the override file [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml). That file mounts the folder named by `APHELION_PLUGIN_DEV_DIR` read-only at `/opt/aphelion/dev-plugin`, and starts the server with `--plugin-dev /opt/aphelion/dev-plugin`.
 
-In dev mode the server opens a Unix socket at `plugin-dev.sock` in its state folder, so `/var/lib/aphelion/plugin-dev.sock` in the container. A Unix socket is a file that two programs on the same machine use to talk. Only `harness` can open it (mode `0600`). The server replaces a socket left over from an earlier run and removes it when it stops. Without `--plugin-dev`, the server opens no socket.
+`plugin dev` talks to the server through the [control socket](#control-socket). In dev mode, the server also accepts reload requests on it.
 
 Preview and approve the mounted folder once, then watch it:
 
@@ -206,15 +206,31 @@ aphelion plugin dev /opt/aphelion/dev-plugin
 
 If that run then crashes before the next reload, the command prints one more line on standard error: `weather crashed after the handshake. If its start() failed, the server log says why.` A stop you asked for, such as another reload or stopping the service, does not print that line. Ctrl-C stops watching. The last run keeps running under the server.
 
-Each reload stops the plugin, waits until it has stopped, reads the approval and the manifest again, and starts a new run through the runner. The runner checks the folder as on any other start, and the plugin runs as `aphelion-plugins` with its approved grants. Reloads run one at a time. The server refuses, with a reason:
+Each reload stops the plugin, waits until it has stopped, reads the approval and the manifest again, and starts a new run through the runner. The runner checks the folder as on any other start, and the plugin runs as `aphelion-plugins` with its approved grants. Reloads run one at a time.
+
+In the dev folder, the approval covers the permissions and the version, not the files. So a code change needs no new approval. The server refuses, with a reason:
 
 - any folder other than the one given to `--plugin-dev`
 - a folder with no approval
-- a manifest that changed since its approval. The plugin then stays stopped until you run `plugin install` with `--approve` again and change a file.
+- a manifest whose `id` or `version` differs from the approved one
+- a manifest that asks for a permission that wasn't granted
+
+After a refusal, the plugin stays stopped until you run `plugin install` with `--approve` again and change a file.
 
 A reload stops every plugin approved for the folder, then starts the one whose `id` the manifest names. So when you rename a plugin and approve the new name, the old name stops.
 
-The socket accepts only reload requests, one at a time per connection. A request sent before the last one was answered is refused. It can't approve a plugin or start one from another folder.
+### Control socket
+
+The server opens a Unix socket at `plugin-control.sock` in its state folder whenever it runs plugins, so `/var/lib/aphelion/plugin-control.sock` in the container. A Unix socket is a file that two programs on the same machine use to talk. Only `harness` can open it (mode `0600`). The server replaces a socket left over from an earlier run and removes it when it stops.
+
+The socket takes one JSON request per line, and answers each one on one line:
+
+| Request | Answer |
+| --- | --- |
+| `{"type":"restart","plugin":"ID"}` | The server stops the plugin, starts its approved version with every check in [permissions](#permissions), and waits up to 15 seconds for the run to settle. It answers `{"type":"restarted","plugin":"ID","state":"STATE"}`. |
+| `{"type":"reload","folder":"FOLDER"}` | Only in [dev mode](#dev-mode). Without `--plugin-dev`, the server answers `{"type":"refused","reason":"dev mode is off"}`. |
+
+A request the server can't carry out gets `{"type":"refused","reason":"..."}`, for example for a plugin that isn't installed. Requests run one at a time, and each connection may have one request waiting for an answer. A request sent before the last one was answered is refused, and so is a line longer than 64 KiB. The socket can't approve a plugin, and it starts only approved versions.
 
 ### Isolation between plugins
 

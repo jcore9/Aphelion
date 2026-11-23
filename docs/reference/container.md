@@ -70,7 +70,7 @@ Plugins are read-only inside the container, so a plugin can't change its own cod
 
 The bot runner comes with M1-04 ([#22](https://github.com/jcore9/Aphelion/issues/22)). The launcher will start it the same way.
 
-If the environment variable `APHELION_PLUGIN_DEV_FOLDER` is set and not empty, the launcher adds `--plugin-dev` with its value to the server's command. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml) sets it. Without the variable, the server opens no dev socket. See [Dev mode](plugins.md#dev-mode).
+If the environment variable `APHELION_PLUGIN_DEV_FOLDER` is set and not empty, the launcher adds `--plugin-dev` with its value to the server's command. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml) sets it. Without the variable, the server refuses reload requests on its [control socket](plugins.md#control-socket). See [Dev mode](plugins.md#dev-mode).
 
 After the launcher closes its copies, only the server and the plugin runner hold the pipes, and no file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved, if its manifest is still the approved one ([`aphelion --headless`](cli.md#aphelion---headless)).
 

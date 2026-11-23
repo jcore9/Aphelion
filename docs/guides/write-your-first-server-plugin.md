@@ -165,7 +165,7 @@ You should see the plugin's name and a line that starts with `events` and names 
 sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/dev-plugin --approve <number>
 ```
 
-You should see `Plugin permissions saved.`
+You should see `Plugin approved.`
 
 ## Watch the folder
 
@@ -199,7 +199,7 @@ Press Ctrl-C in the `plugin dev` terminal to stop watching. The plugin keeps run
 
 ## When the manifest changes
 
-An approval covers one exact manifest. Suppose you add a permission or change the version in `aphelion-plugin.json`, then build. `bun run watch` copies the manifest only when it starts. Run `bun run build` to copy it. Then `plugin dev` prints a refusal that says `hello-plugin stays stopped: the manifest changed since it was approved`, and the plugin stops.
+In dev mode, an approval covers the plugin's `id`, its version and its permissions. A code change needs no new approval. Suppose you add a permission or change the version in `aphelion-plugin.json`, then build. `bun run watch` copies the manifest only when it starts. Run `bun run build` to copy it. Then `plugin dev` prints a refusal that starts with `hello-plugin stays stopped:` and says what doesn't match, and the plugin stops.
 
 1. Run the two `plugin install` commands again, to preview and then approve.
 2. Change a file, for example with `touch ~/hello-plugin/dist/server.mjs`. `plugin dev` reloads only after a change, not when you approve.
@@ -208,10 +208,11 @@ An approval covers one exact manifest. Suppose you add a permission or change th
 
 | `plugin dev` prints | Why | What to do |
 | --- | --- | --- |
-| `Plugin dev mode is off` | The server has no dev socket. | Check the first steps in [Start Aphelion in dev mode](#start-aphelion-in-dev-mode). |
+| `Plugin dev mode is off` | The server runs without the dev override. | Check the first steps in [Start Aphelion in dev mode](#start-aphelion-in-dev-mode). |
+| `Can't reach the server's plugin control socket` | The server isn't running. | Start the service with `sudo systemctl start aphelion`. |
 | `dev mode reloads only /opt/aphelion/dev-plugin` | You gave another folder. | Use the folder from the override. |
 | `isn't approved` | You haven't approved the folder yet. | Run the two `plugin install` commands. |
-| `stays stopped` | The manifest changed since you approved it, or it isn't valid JSON or a valid manifest. | See [When the manifest changes](#when-the-manifest-changes). |
+| `stays stopped` | The manifest's version or permissions changed since you approved it, or it isn't valid JSON or a valid manifest. | See [When the manifest changes](#when-the-manifest-changes). |
 | `Reloaded hello-plugin, but it isn't running: crashed. The server log says why.` | The plugin exited, or the runner refused the folder, for example because user `10004` can write to it. | Read the server log with `sudo journalctl -u aphelion`. |
 | `hello-plugin crashed after the handshake. If its start() failed, the server log says why.` | The handshake finished, and the run crashed after that. This can happen when `start()` throws. | Read the server log with `sudo journalctl -u aphelion`. |
 

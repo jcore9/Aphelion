@@ -1,13 +1,14 @@
 import { lstat, readdir } from "node:fs/promises";
-import { createConnection, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { Cause, type Duration, Effect, Queue } from "effect";
 import {
-  devReplySchema,
-  devSocketFile,
-  maxDevLineBytes,
-  type DevReply,
-} from "../plugins/dev-control";
+  controlReplySchema,
+  controlSocketFile,
+  devModeOff,
+  maxControlLineBytes,
+  type ControlReply,
+} from "../plugins/control";
+import { connectControl } from "../plugins/control-client";
 import { LineSplitter } from "../plugins/lines";
 import { failed } from "./failure";
 import { CliIo } from "./io";
@@ -50,36 +51,24 @@ export const watchForChanges = <E, R>(
     }
   });
 
-const connect = (path: string) =>
-  Effect.acquireRelease(
-    Effect.callback<Socket, Error>((resume) => {
-      const socket = createConnection(path);
-      socket.once("connect", () => {
-        socket.removeAllListeners("error");
-        socket.on("error", () => undefined);
-        resume(Effect.succeed(socket));
-      });
-      socket.once("error", (error) => {
-        resume(Effect.fail(error));
-      });
-    }),
-    (socket) =>
-      Effect.sync(() => {
-        socket.destroy();
-      }),
-  );
-
-const show = (message: DevReply) =>
+const show = (message: ControlReply) =>
   Effect.gen(function* () {
     const io = yield* CliIo;
     switch (message.type) {
       case "reloaded":
+      case "restarted":
         return message.state === "running"
           ? yield* io.out(`Reloaded ${message.plugin}: the handshake finished.`)
           : yield* io.err(
               `Reloaded ${message.plugin}, but it isn't running: ${message.state}. The server log says why.`,
             );
       case "refused":
+        if (message.reason === devModeOff) {
+          yield* io.err(
+            "Plugin dev mode is off. Start Aphelion with deploy/compose.plugin-dev.yaml.",
+          );
+          return yield* failed;
+        }
         return yield* io.err(`Refused: ${message.reason}`);
       case "crashed":
         return yield* io.err(
@@ -90,9 +79,9 @@ const show = (message: DevReply) =>
 
 const devClient = (path: string) =>
   Effect.gen(function* () {
-    const socket = yield* connect(path);
+    const socket = yield* connectControl(path);
     const incoming = yield* Queue.unbounded<string, Cause.Done>();
-    const splitter = new LineSplitter(maxDevLineBytes);
+    const splitter = new LineSplitter(maxControlLineBytes);
     socket.on("data", (chunk: Buffer) => {
       for (const piece of splitter.push(chunk)) {
         if (piece.kind === "line") Queue.offerUnsafe(incoming, piece.text);
@@ -106,10 +95,10 @@ const devClient = (path: string) =>
       for (;;) {
         const line = yield* Queue.take(incoming).pipe(
           Effect.catchIf(Cause.isDone, () =>
-            Effect.fail(new Error("the server closed the dev connection")),
+            Effect.fail(new Error("the server closed the control connection")),
           ),
         );
-        const message = devReplySchema.safeParse(
+        const message = controlReplySchema.safeParse(
           yield* Effect.try((): unknown => JSON.parse(line)).pipe(
             Effect.orElseSucceed(() => undefined),
           ),
@@ -141,11 +130,11 @@ export const pluginDev = (options: {
   Effect.gen(function* () {
     const io = yield* CliIo;
     const folder = resolve(options.folder);
-    const socketPath = join(options.stateDir, devSocketFile);
+    const socketPath = join(options.stateDir, controlSocketFile);
     const connected = yield* Effect.result(devClient(socketPath));
     if (connected._tag === "Failure") {
       yield* io.err(
-        `Plugin dev mode is off: the server has no dev socket at ${socketPath}. Start Aphelion with deploy/compose.plugin-dev.yaml.`,
+        `Can't reach the server's plugin control socket at ${socketPath}. Start Aphelion, then try again.`,
       );
       return yield* failed;
     }

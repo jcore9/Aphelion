@@ -24,7 +24,7 @@
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
 | `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
-| `--plugin-dev FOLDER` | `--headless` | none | An absolute path. Turns on [dev mode](plugins.md#dev-mode): the server opens a Unix socket in the state folder, and `plugin dev` can reload the approved plugin in `FOLDER`. Needs `--plugin-runner-fds` to have any effect. |
+| `--plugin-dev FOLDER` | `--headless` | none | An absolute path. Turns on [dev mode](plugins.md#dev-mode): `plugin dev` can reload the approved plugin in `FOLDER` through the server's [control socket](plugins.md#control-socket). Needs `--plugin-runner-fds` to have any effect. |
 
 The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
 
@@ -45,7 +45,7 @@ The server starts in this order:
 2. It logs a `warn` line for each config file at an older version, which it read through a migration ([versions and migrations](config.md#versions-and-migrations)).
 3. It opens `aphelion.db` in the state folder and applies any new [migrations](store.md#migrations).
 4. It starts the [HTTP and WebSocket server](server.md) on the address and port from `server.yaml`, and logs `server started` with the version, address and port.
-5. With `--plugin-runner-fds`, it starts the [plugin host](plugins.md) on those pipes and asks the runner to start every plugin that `aphelion plugin install` approved. It logs an `error` line for a plugin whose manifest it can't read, or whose files, version or permissions no longer match the approved version, and goes on with the others. Then it logs `plugin host started` with the number of approved plugins. Without the option, it logs `plugins are off: no plugin runner pipe was given`.
+5. With `--plugin-runner-fds`, it starts the [plugin host](plugins.md) on those pipes and asks the runner to start every plugin that `aphelion plugin install` approved. It logs an `error` line for a plugin whose manifest it can't read, or whose files, version or permissions no longer match the approved version, and goes on with the others. Then it logs `plugin host started` with the number of approved plugins, and opens the [control socket](plugins.md#control-socket). Without the option, it logs `plugins are off: no plugin runner pipe was given`.
 
 On `SIGTERM` or `SIGINT` it logs `server stopping`, closes the listener and the database, and exits with code 130.
 
@@ -126,7 +126,7 @@ aphelion plugin dev FOLDER [--state-dir DIR]
 
 Reloads a plugin while you work on it. The server must run with `--plugin-dev FOLDER`, and `FOLDER` must already be approved with `aphelion plugin install`. [Write your first server plugin](../guides/write-your-first-server-plugin.md) shows the whole path.
 
-The command connects to `plugin-dev.sock` in the state folder. It asks the server to reload the plugin, then checks the folder about every half second, and asks again after each change has settled. It prints one line for each answer, as soon as the answer arrives:
+The command connects to the [control socket](plugins.md#control-socket), `plugin-control.sock` in the state folder. It asks the server to reload the plugin, then checks the folder about every half second, and asks again after each change has settled. It prints one line for each answer, as soon as the answer arrives:
 
 | Line | Meaning |
 | --- | --- |
@@ -134,9 +134,9 @@ The command connects to `plugin-dev.sock` in the state folder. It asks the serve
 | `Reloaded ID: the handshake finished.` | The server started a new run of plugin `ID` and the plugin answered `initialize`. Standard output. |
 | `Reloaded ID, but it isn't running: STATE. The server log says why.` | The reload finished in some other state. `crashed` means it exited or the runner refused it. `starting` means it hadn't answered after 15 seconds. Standard error. |
 | `ID crashed after the handshake. If its start() failed, the server log says why.` | The run that just finished the handshake crashed before the next reload. A stop you asked for does not print this. Standard error. |
-| `Refused: REASON` | The server didn't reload. The reason says why, for example that the folder isn't approved or that the manifest changed. The command keeps watching. Standard error. |
+| `Refused: REASON` | The server didn't reload. The reason says why, for example that the folder isn't approved or that the manifest asks for a permission that wasn't granted. The command keeps watching. Standard error. |
 
-The command exits with code 1 and a message if the server has no dev socket. If the server closes the connection, for example when it restarts, the command prints `aphelion: the server closed the dev connection` and exits with code 1. Otherwise it runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
+The command exits with code 1 and a message if it can't reach the control socket, or if the server runs without `--plugin-dev`. If the server closes the connection, for example when it restarts, the command prints `aphelion: the server closed the control connection` and exits with code 1. Otherwise it runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
 
 ## `aphelion device add NAME`
 

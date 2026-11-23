@@ -7,10 +7,11 @@ import { Effect, Fiber, Layer } from "effect";
 import { afterAll, beforeAll, describe } from "vitest";
 import { createLogger } from "../log";
 import {
-  devSocketFile,
-  serveDevSocket,
-  type DevResult,
-} from "../plugins/dev-control";
+  controlSocketFile,
+  devModeOff,
+  serveControlSocket,
+  type ControlResult,
+} from "../plugins/control";
 import { CliFailure } from "./failure";
 import { CliIo } from "./io";
 import { folderFingerprint, pluginDev, watchForChanges } from "./plugin-dev";
@@ -86,19 +87,53 @@ describe("watching a plugin folder", () => {
 });
 
 describe("aphelion plugin dev", () => {
-  it.live("says dev mode is off when the server has no dev socket", () =>
-    Effect.gen(function* () {
-      const stateDir = yield* Effect.promise(() => mkdtemp(join(base, "off-")));
-      const { err, layer } = capture();
-      const failure = yield* pluginDev({ stateDir, folder: "/plugin" }).pipe(
-        Effect.provide(layer),
-        Effect.flip,
-      );
-      expect(failure).toBeInstanceOf(CliFailure);
-      expect(err).toEqual([
-        `Plugin dev mode is off: the server has no dev socket at ${join(stateDir, devSocketFile)}. Start Aphelion with deploy/compose.plugin-dev.yaml.`,
-      ]);
-    }),
+  it.live(
+    "says it can't reach the server when there is no control socket",
+    () =>
+      Effect.gen(function* () {
+        const stateDir = yield* Effect.promise(() =>
+          mkdtemp(join(base, "off-")),
+        );
+        const { err, layer } = capture();
+        const failure = yield* pluginDev({ stateDir, folder: "/plugin" }).pipe(
+          Effect.provide(layer),
+          Effect.flip,
+        );
+        expect(failure).toBeInstanceOf(CliFailure);
+        expect(err).toEqual([
+          `Can't reach the server's plugin control socket at ${join(stateDir, controlSocketFile)}. Start Aphelion, then try again.`,
+        ]);
+      }),
+  );
+
+  it.live("says dev mode is off when the server refuses the reload", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const stateDir = yield* Effect.promise(() =>
+          mkdtemp(join(base, "plain-")),
+        );
+        yield* serveControlSocket(
+          join(stateDir, controlSocketFile),
+          () =>
+            Effect.succeed<ControlResult>({
+              reply: { type: "refused", reason: devModeOff },
+            }),
+          createLogger({ level: "error", write: () => undefined }),
+        );
+        const { out, err, layer } = capture();
+        const failure = yield* pluginDev({ stateDir, folder: "/plugin" }).pipe(
+          Effect.provide(layer),
+          Effect.flip,
+        );
+        expect(failure).toBeInstanceOf(CliFailure);
+        expect(out).toEqual([
+          "Watching /plugin. Press Ctrl-C to stop watching. The plugin keeps running.",
+        ]);
+        expect(err).toEqual([
+          "Plugin dev mode is off. Start Aphelion with deploy/compose.plugin-dev.yaml.",
+        ]);
+      }),
+    ),
   );
 
   it.live(
@@ -115,8 +150,8 @@ describe("aphelion plugin dev", () => {
             await writeFile(join(folder, "server.mjs"), "one");
           });
           const requests: unknown[] = [];
-          yield* serveDevSocket(
-            join(stateDir, devSocketFile),
+          yield* serveControlSocket(
+            join(stateDir, controlSocketFile),
             (line) =>
               Effect.sync(() => {
                 requests.push(JSON.parse(line));
@@ -132,7 +167,7 @@ describe("aphelion plugin dev", () => {
                           plugin: "weather",
                           state: "running",
                         },
-                } satisfies DevResult;
+                } satisfies ControlResult;
               }),
             createLogger({ level: "error", write: () => undefined }),
           );
@@ -179,8 +214,8 @@ describe("aphelion plugin dev", () => {
             await writeFile(join(folder, "server.mjs"), "one");
           });
           let calls = 0;
-          yield* serveDevSocket(
-            join(stateDir, devSocketFile),
+          yield* serveControlSocket(
+            join(stateDir, controlSocketFile),
             () =>
               Effect.sync(() => {
                 calls++;
@@ -275,7 +310,7 @@ describe("aphelion plugin dev", () => {
           Effect.promise(
             () =>
               new Promise<void>((done) => {
-                server.listen(join(stateDir, devSocketFile), done);
+                server.listen(join(stateDir, controlSocketFile), done);
               }),
           ),
           () =>

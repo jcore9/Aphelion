@@ -10,15 +10,27 @@ import type { LifecycleState } from "./lifecycle";
 import { LineSplitter } from "./lines";
 import { readManifest } from "./manifest-file";
 
-export const devSocketFile = "plugin-dev.sock";
-export const maxDevLineBytes = 64 * 1024;
+export const controlSocketFile = "plugin-control.sock";
+export const maxControlLineBytes = 64 * 1024;
+export const devModeOff = "dev mode is off";
 
-export const devRequestSchema = z.strictObject({
-  type: z.literal("reload"),
-  folder: z.string().min(1).max(4096),
-});
+export const controlRequestSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("restart"),
+    plugin: z.string().min(1).max(256),
+  }),
+  z.strictObject({
+    type: z.literal("reload"),
+    folder: z.string().min(1).max(4096),
+  }),
+]);
 
-export const devReplySchema = z.discriminatedUnion("type", [
+export const controlReplySchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("restarted"),
+    plugin: z.string(),
+    state: z.string(),
+  }),
   z.strictObject({
     type: z.literal("reloaded"),
     plugin: z.string(),
@@ -28,21 +40,21 @@ export const devReplySchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("crashed"), plugin: z.string() }),
 ]);
 
-export type DevReply = z.infer<typeof devReplySchema>;
+export type ControlReply = z.infer<typeof controlReplySchema>;
 
-export interface DevResult {
-  readonly reply: DevReply;
-  readonly notice?: Effect.Effect<DevReply | undefined>;
+export interface ControlResult {
+  readonly reply: ControlReply;
+  readonly notice?: Effect.Effect<ControlReply | undefined>;
 }
 
-export interface DevControlOptions {
-  readonly folder: string;
+export interface ControlOptions {
+  readonly devFolder: string | undefined;
   readonly installs: () => readonly InstallRecord[];
 }
 
-const refuse = (reason: string): DevReply => ({ type: "refused", reason });
+const refuse = (reason: string): ControlReply => ({ type: "refused", reason });
 
-const refused = (reason: string): DevResult => ({ reply: refuse(reason) });
+const refused = (reason: string): ControlResult => ({ reply: refuse(reason) });
 
 const crashed = (state: LifecycleState) =>
   state.state === "crashed" ||
@@ -53,10 +65,14 @@ export const canonical = (path: string) =>
     ? Effect.tryPromise(() => realpath(path)).pipe(Effect.option)
     : Effect.succeedNone;
 
-export const devControl = (options: DevControlOptions) =>
+export const pluginControl = (options: ControlOptions) =>
   Effect.gen(function* () {
     const host = yield* PluginHost;
     const lock = yield* Semaphore.make(1);
+    const devFolder =
+      options.devFolder === undefined
+        ? Effect.succeed(undefined)
+        : canonical(options.devFolder).pipe(Effect.map(Option.getOrUndefined));
 
     const crashNotice = (plugin: string, run: number) =>
       host
@@ -65,7 +81,7 @@ export const devControl = (options: DevControlOptions) =>
           (state) => state.run !== run || state.state !== "running",
         )
         .pipe(
-          Effect.map((state): DevReply | undefined =>
+          Effect.map((state): ControlReply | undefined =>
             state?.run === run && crashed(state)
               ? { type: "crashed", plugin }
               : undefined,
@@ -73,41 +89,16 @@ export const devControl = (options: DevControlOptions) =>
           Effect.catchTag("RunnerClosed", () => Effect.succeed(undefined)),
         );
 
-    const reload = (folder: string) =>
+    const startSettled = (
+      record: InstallRecord,
+      dev: string | undefined,
+      type: "restarted" | "reloaded",
+    ) =>
       Effect.gen(function* () {
-        const devFolder = yield* canonical(options.folder);
-        const requested = yield* canonical(folder);
-        if (
-          Option.isNone(devFolder) ||
-          Option.isNone(requested) ||
-          requested.value !== devFolder.value
-        ) {
-          return refused(
-            `dev mode reloads only ${options.folder}, not ${JSON.stringify(folder)}`,
-          );
-        }
-        const approved = options
-          .installs()
-          .filter((record) => record.current.folder === devFolder.value);
-        const notApproved = refused(
-          `${options.folder} isn't approved. Run aphelion plugin install ${options.folder} and approve it.`,
-        );
-        if (approved.length === 0) return notApproved;
-        yield* Effect.forEach(approved, (row) => host.stop(row.plugin), {
-          discard: true,
-        });
-        const loaded = yield* Effect.result(readManifest(devFolder.value));
-        if (loaded._tag === "Failure") {
-          return refused(
-            `the plugin stays stopped: ${loaded.failure.issues.map((issue) => issue.message).join(" ")}`,
-          );
-        }
-        const id = loaded.success.manifest.id;
-        const record = approved.find((row) => row.plugin === id);
-        if (!record) return notApproved;
+        const id = record.plugin;
         const before = (yield* host.status(id))?.run ?? 0;
         const started = yield* Effect.result(
-          host.start(devFolder.value, approvalFor(record, devFolder.value)),
+          host.start(record.current.folder, approvalFor(record, dev)),
         );
         if (started._tag === "Failure") {
           return refused(
@@ -132,8 +123,8 @@ export const devControl = (options: DevControlOptions) =>
         const seen = Option.isSome(settled)
           ? settled.value
           : yield* host.status(id);
-        const reply: DevReply = {
-          type: "reloaded",
+        const reply: ControlReply = {
+          type,
           plugin: id,
           state: seen?.state ?? "unknown",
         };
@@ -141,19 +132,75 @@ export const devControl = (options: DevControlOptions) =>
           return { reply, notice: crashNotice(id, seen.run) };
         }
         return { reply };
-      }).pipe(lock.withPermits(1));
+      });
 
-    return (line: string): Effect.Effect<DevResult> => {
+    const restart = (plugin: string) =>
+      Effect.gen(function* () {
+        const record = options
+          .installs()
+          .find((installed) => installed.plugin === plugin);
+        if (!record) return refused(`${plugin} isn't installed`);
+        yield* host.stop(plugin);
+        return yield* startSettled(record, yield* devFolder, "restarted");
+      });
+
+    const reload = (path: string, folder: string) =>
+      Effect.gen(function* () {
+        const dev = yield* devFolder;
+        const requested = yield* canonical(path);
+        if (
+          dev === undefined ||
+          Option.isNone(requested) ||
+          requested.value !== dev
+        ) {
+          return refused(
+            `dev mode reloads only ${folder}, not ${JSON.stringify(path)}`,
+          );
+        }
+        const approved = options
+          .installs()
+          .filter((record) => record.current.folder === dev);
+        const notApproved = refused(
+          `${folder} isn't approved. Run aphelion plugin install ${folder} and approve it.`,
+        );
+        if (approved.length === 0) return notApproved;
+        yield* Effect.forEach(approved, (record) => host.stop(record.plugin), {
+          discard: true,
+        });
+        const loaded = yield* Effect.result(readManifest(dev));
+        if (loaded._tag === "Failure") {
+          return refused(
+            `the plugin stays stopped: ${loaded.failure.issues.map((issue) => issue.message).join(" ")}`,
+          );
+        }
+        const record = approved.find(
+          (row) => row.plugin === loaded.success.manifest.id,
+        );
+        if (!record) return notApproved;
+        return yield* startSettled(record, dev, "reloaded");
+      });
+
+    return (line: string): Effect.Effect<ControlResult> => {
       let data: unknown;
       try {
         data = JSON.parse(line);
       } catch {
         return Effect.succeed(refused("the request isn't JSON"));
       }
-      const request = devRequestSchema.safeParse(data);
-      return request.success
-        ? reload(request.data.folder)
-        : Effect.succeed(refused("the request isn't a reload request"));
+      const request = controlRequestSchema.safeParse(data);
+      if (!request.success) {
+        return Effect.succeed(
+          refused("the request isn't a restart or reload request"),
+        );
+      }
+      const { data: parsed } = request;
+      if (parsed.type === "restart") {
+        return restart(parsed.plugin).pipe(lock.withPermits(1));
+      }
+      const folder = options.devFolder;
+      return folder === undefined
+        ? Effect.succeed(refused(devModeOff))
+        : reload(parsed.folder, folder).pipe(lock.withPermits(1));
     };
   });
 
@@ -177,9 +224,9 @@ const removeStaleSocket = (path: string) =>
     await unlink(path);
   });
 
-export const serveDevSocket = (
+export const serveControlSocket = (
   path: string,
-  handle: (line: string) => Effect.Effect<DevResult>,
+  handle: (line: string) => Effect.Effect<ControlResult>,
   logger: Logger,
 ) =>
   Effect.gen(function* () {
@@ -193,11 +240,11 @@ export const serveDevSocket = (
     };
     const server = createServer((socket) => {
       connections.add(socket);
-      const splitter = new LineSplitter(maxDevLineBytes);
+      const splitter = new LineSplitter(maxControlLineBytes);
       let busy = false;
       let closed = false;
       let watch: Fiber.Fiber<void> | undefined;
-      const answer = (reply: DevReply) => {
+      const answer = (reply: ControlReply) => {
         if (socket.writable) socket.write(`${JSON.stringify(reply)}\n`);
       };
       const hangUp = (reason: string) => {
@@ -205,7 +252,7 @@ export const serveDevSocket = (
         socket.end();
         socket.removeAllListeners("data");
       };
-      const startWatch = (notice: Effect.Effect<DevReply | undefined>) => {
+      const startWatch = (notice: Effect.Effect<ControlReply | undefined>) => {
         stopWatch(watch);
         const fiber = Effect.runFork(
           notice.pipe(
@@ -270,5 +317,5 @@ export const serveDevSocket = (
         }),
     );
     yield* attempt(() => chmod(path, 0o600));
-    logger.info("plugin dev mode is on", { socket: path });
+    logger.info("the plugin control socket is open", { socket: path });
   });

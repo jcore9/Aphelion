@@ -144,9 +144,13 @@ if "${compose[@]}" logs --no-color 2>&1 | grep -F 'plugin probe failed'; then
   fail "the plugin reached something it must not"
 fi
 pass "a plugin started at boot as aphelion-plugins and was refused everything outside its data folder"
-docker exec --user harness "$container" test ! -e /var/lib/aphelion/plugin-dev.sock ||
-  fail "the server opened a plugin dev socket without the dev override"
-pass "without the dev override the server opens no plugin dev socket"
+[[ $(docker exec --user harness "$container" stat -c '%a %U' /var/lib/aphelion/plugin-control.sock) == "600 harness" ]] ||
+  fail "the plugin control socket isn't private to harness"
+reload=$(docker exec --user harness "$container" \
+  timeout 3 aphelion plugin dev /opt/aphelion/plugins/contract-probe 2>&1 || true)
+grep -qF "Plugin dev mode is off." <<<"$reload" ||
+  fail "the server didn't refuse a reload without the dev override: $reload"
+pass "the server opens a plugin control socket only harness can use, and refuses reloads without the dev override"
 
 [[ $(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}' "$container") == 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"] 1024' ]] ||
   fail "docker inspect shows different hardening: $(docker inspect --format '{{json .HostConfig}}' "$container")"
@@ -343,9 +347,9 @@ since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 "${dev_compose[@]}" up --detach --force-recreate >/dev/null 2>&1
 container=$("${dev_compose[@]}" ps --quiet "$service")
 wait_for_log '"msg":"plugin dev mode is on"'
-[[ $(docker exec --user harness "$container" stat -c '%a %U' /var/lib/aphelion/plugin-dev.sock) == "600 harness" ]] ||
-  fail "the plugin dev socket isn't private to harness"
-pass "with the dev override the server opens a plugin dev socket only harness can use"
+[[ $(docker exec --user harness "$container" stat -c '%a %U' /var/lib/aphelion/plugin-control.sock) == "600 harness" ]] ||
+  fail "the plugin control socket isn't private to harness"
+pass "with the dev override the server opens a plugin control socket only harness can use"
 
 dev_install=("${dev_compose[@]}" exec -T --user harness "$service" aphelion plugin install /opt/aphelion/dev-plugin)
 approve_dev() {
@@ -396,11 +400,12 @@ grep -qF "Refused: dev mode reloads only /opt/aphelion/dev-plugin" <<<"$other" |
 pass "plugin dev reloads the approved mounted plugin as aphelion-plugins after each edit, with the same server process"
 
 sed -i 's/"version": "1.0.0"/"version": "1.0.1"/' "$dev/aphelion-plugin.json"
+changed="Refused: dev-probe stays stopped: the plugin is dev-probe 1.0.1, but dev-probe 1.0.0 was approved"
 for ((tries = 0; tries < 100; tries++)); do
-  grep -qF "Refused: dev-probe stays stopped: the manifest changed since it was approved" "$dev_out" && break
+  grep -qF "$changed" "$dev_out" && break
   sleep 0.1
 done
-grep -qF "Refused: dev-probe stays stopped: the manifest changed since it was approved" "$dev_out" ||
+grep -qF "$changed" "$dev_out" ||
   fail "plugin dev didn't refuse a changed manifest: $(cat "$dev_out")"
 [[ $(plugin_runs) == 0 ]] || fail "the dev plugin still runs after its manifest changed"
 approve_dev

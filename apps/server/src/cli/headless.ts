@@ -6,10 +6,10 @@ import type { Logger } from "../log";
 import { approvalFor, installedPlugins } from "../plugins/approvals";
 import {
   canonical,
-  devControl,
-  devSocketFile,
-  serveDevSocket,
-} from "../plugins/dev-control";
+  controlSocketFile,
+  pluginControl,
+  serveControlSocket,
+} from "../plugins/control";
 import { sqlitePluginGrants } from "../plugins/grants";
 import { PluginHost, pluginHostLayer } from "../plugins/host";
 import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
@@ -58,12 +58,17 @@ const startPlugins = (
       }
     }
     logger.info("plugin host started", { installed: installed.length });
+    const handle = yield* pluginControl({
+      devFolder,
+      installs: () => installedPlugins(db),
+    }).pipe(Effect.provideService(PluginHost, host));
+    yield* serveControlSocket(
+      join(stateDir, controlSocketFile),
+      handle,
+      logger,
+    );
     if (devFolder !== undefined) {
-      const handle = yield* devControl({
-        folder: devFolder,
-        installs: () => installedPlugins(db),
-      }).pipe(Effect.provideService(PluginHost, host));
-      yield* serveDevSocket(join(stateDir, devSocketFile), handle, logger);
+      logger.info("plugin dev mode is on", { folder: devFolder });
     }
   });
 
