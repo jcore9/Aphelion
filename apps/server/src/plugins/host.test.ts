@@ -3,7 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pluginApiVersion } from "@aphelion/plugin-sdk";
 import { expect, it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Fiber, Layer, Queue, Stream } from "effect";
+import {
+  Cause,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Queue,
+  Scope,
+  Stream,
+} from "effect";
 import { afterAll, describe } from "vitest";
 import { createLogger } from "../log";
 import { Secret } from "../secrets";
@@ -66,6 +77,7 @@ function fakeProcesses(
     spawned: [] as SpawnSpec[],
     received: [] as string[],
     killed: 0,
+    timeline: [] as string[],
   };
   const layer = Layer.succeed(PluginProcesses, {
     sweep: Effect.succeed({ survivors: 0 }),
@@ -120,7 +132,12 @@ function fakeProcesses(
           write: (line: string) =>
             deaf.includes(spec.plugin)
               ? Effect.never
-              : Effect.sync(() => record.received.push(line)).pipe(
+              : Effect.sync(() => {
+                  record.received.push(line);
+                  const { method } = JSON.parse(line) as Message;
+                  if (typeof method === "string")
+                    record.timeline.push(`${spec.plugin} ${method}`);
+                }).pipe(
                   Effect.andThen(Queue.offer(stdin, line)),
                   Effect.asVoid,
                 ),
@@ -131,7 +148,12 @@ function fakeProcesses(
             Effect.andThen(
               Deferred.succeed(exit, { code: null, signal: "SIGKILL" }),
             ),
-            Effect.andThen(Effect.sync(() => record.killed++)),
+            Effect.andThen(
+              Effect.sync(() => {
+                record.killed++;
+                record.timeline.push(`${spec.plugin} killed`);
+              }),
+            ),
             Effect.as({ survivors: 0 }),
           ),
         };
@@ -164,6 +186,7 @@ interface HarnessOptions {
   ) => boolean | Effect.Effect<boolean>;
   readonly policy?: RestartPolicy;
   readonly deaf?: readonly string[];
+  readonly stopDeadlineMs?: number;
 }
 
 function harness(
@@ -212,6 +235,7 @@ function harness(
     ...(options.secretOperations && {
       secretOperations: options.secretOperations,
     }),
+    ...(options.stopDeadlineMs && { stopDeadlineMs: options.stopDeadlineMs }),
   }).pipe(Layer.provide(runnerLink), Layer.provide(grantsLayer));
   return { layer, record: fake.record, logs };
 }
@@ -1261,4 +1285,172 @@ describe("the plugin host", () => {
       ).toHaveLength(maxLogLinesPerMinute + 1);
     }).pipe(Effect.provide(layer));
   });
+});
+
+const openHost = (layer: Layer.Layer<PluginHost>) =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    const context = yield* Layer.buildWithScope(layer, scope);
+    const close = Effect.gen(function* () {
+      const begun = Date.now();
+      yield* Scope.close(scope, Exit.void);
+      return Date.now() - begun;
+    });
+    return { host: Context.get(context, PluginHost), close };
+  });
+
+const isRunning = (state: LifecycleState) => state.state === "running";
+
+describe("the plugin host, when it closes", () => {
+  it.live(
+    "sends shutdown to every plugin before it kills any, and kills only the ones that don't exit",
+    () => {
+      const { layer, record, logs } = harness(
+        {
+          polite: (io) =>
+            handshake(io).pipe(Effect.andThen(serveUntilShutdown(io))),
+          stubborn: (io) =>
+            handshake(io).pipe(Effect.andThen(Effect.forever(io.read))),
+        },
+        { policy: { ...fastPolicy, graceMs: 200 } },
+      );
+      return Effect.gen(function* () {
+        const { host, close } = yield* openHost(layer);
+        yield* host.start(yield* serverPlugin("polite"));
+        yield* host.start(yield* serverPlugin("stubborn"));
+        yield* host.waitFor("polite", isRunning);
+        yield* host.waitFor("stubborn", isRunning);
+        const elapsed = yield* close;
+        const stops = record.timeline.filter(
+          (entry) => !entry.endsWith("initialize"),
+        );
+        expect(stops.slice(0, 2).sort()).toEqual([
+          "polite shutdown",
+          "stubborn shutdown",
+        ]);
+        expect(stops.slice(2)).toEqual(["stubborn killed"]);
+        expect(elapsed).toBeGreaterThanOrEqual(190);
+        expect(elapsed).toBeLessThan(2000);
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            msg: "the plugin host is stopping every plugin",
+            plugins: 2,
+          }),
+        );
+      });
+    },
+  );
+
+  for (const runner of ["never confirms a kill", "stops reading"] as const) {
+    it.live(`returns within the stop deadline when the runner ${runner}`, () =>
+      Effect.gen(function* () {
+        const incoming = yield* Queue.bounded<RunnerReply, Cause.Done>(64);
+        const sent: RunnerRequest[] = [];
+        let reading = true;
+        const reply = (message: RunnerReply) =>
+          Queue.offer(incoming, message).pipe(Effect.asVoid);
+        const send = (request: RunnerRequest) =>
+          Effect.suspend(() => {
+            if (!reading) return Effect.never;
+            sent.push(request);
+            const { plugin, run } = request;
+            if (request.type === "start")
+              return reply({ type: "started", plugin, run });
+            if (request.type !== "input") return Effect.void;
+            const message = JSON.parse(request.line) as Message;
+            if (message["method"] === "shutdown" && runner === "stops reading")
+              reading = false;
+            if (message["method"] !== "initialize") return Effect.void;
+            return reply({
+              type: "output",
+              plugin,
+              run,
+              line: JSON.stringify({
+                jsonrpc: "2.0",
+                id: message["id"],
+                result: {},
+              }),
+            });
+          });
+        const logs: Message[] = [];
+        const layer = pluginHostLayer({
+          logger: createLogger({
+            level: "debug",
+            write: (line) => logs.push(JSON.parse(line) as Message),
+          }),
+          policy: { ...fastPolicy, graceMs: 100 },
+          stopDeadlineMs: 500,
+        }).pipe(
+          Layer.provide(Layer.succeed(RunnerLink, { incoming, send })),
+          Layer.provide(PluginGrants.refuseAll),
+        );
+        const { host, close } = yield* openHost(layer);
+        const ids = ["first", "second", "third"];
+        for (const id of ids) {
+          yield* host.start(yield* serverPlugin(id));
+          yield* host.waitFor(id, isRunning);
+        }
+        const elapsed = yield* close;
+        expect(elapsed).toBeGreaterThanOrEqual(440);
+        expect(elapsed).toBeLessThan(1400);
+        if (runner === "never confirms a kill") {
+          expect(logs).toContainEqual(
+            expect.objectContaining({
+              msg: "plugins were still running at the stop deadline, so the host told the runner to kill them",
+              plugins: ids,
+            }),
+          );
+        }
+      }),
+    );
+  }
+
+  it.live(
+    "relaunches neither a crashed plugin nor one started during the stop",
+    () => {
+      let flakyRuns = 0;
+      const { layer, record, logs } = harness(
+        {
+          stubborn: (io) =>
+            handshake(io).pipe(Effect.andThen(Effect.forever(io.read))),
+          flaky: (io) =>
+            Effect.sync(() => flakyRuns++).pipe(
+              Effect.andThen(handshake(io)),
+              Effect.as(1),
+            ),
+          late: (io) =>
+            handshake(io).pipe(Effect.andThen(serveUntilShutdown(io))),
+        },
+        { policy: { ...fastPolicy, graceMs: 400, firstRetryMs: 150 } },
+      );
+      return Effect.gen(function* () {
+        const { host, close } = yield* openHost(layer);
+        const late = yield* serverPlugin("late");
+        yield* host.start(yield* serverPlugin("stubborn"));
+        yield* host.waitFor("stubborn", isRunning);
+        yield* host.start(yield* serverPlugin("flaky"));
+        yield* host.waitFor("flaky", (state) => state.state === "crashed");
+        const starting = yield* Effect.forkChild(
+          waitUntil(() =>
+            logs.some(
+              (entry) =>
+                entry["msg"] === "the plugin host is stopping every plugin",
+            ),
+          ).pipe(Effect.andThen(host.start(late))),
+        );
+        const elapsed = yield* close;
+        yield* Fiber.join(starting);
+        expect(elapsed).toBeGreaterThanOrEqual(390);
+        expect(flakyRuns).toBe(1);
+        expect(record.spawned.map((spec) => spec.plugin)).toEqual([
+          "stubborn",
+          "flaky",
+        ]);
+        expect(yield* host.status("flaky")).toMatchObject({ state: "stopped" });
+        expect(yield* host.status("late")).toMatchObject({
+          state: "installed",
+        });
+      });
+    },
+  );
 });

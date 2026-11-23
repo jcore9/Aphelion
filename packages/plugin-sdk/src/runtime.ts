@@ -23,11 +23,15 @@ import {
 export interface RuntimeHooks {
   readonly started?: (settled: Promise<void>) => void;
   readonly delivered?: (settled: Promise<void>) => void;
+  readonly handlerGraceMs?: number;
 }
+
+const handlerGraceMs = 3000;
+const shuttingDown = () => new Error("the plugin is shutting down");
 
 interface PendingCall {
   resolve(result: unknown): void;
-  reject(error: Error): void;
+  reject(error: unknown): void;
 }
 
 type Handler = (data: unknown) => MaybePromise<void>;
@@ -45,7 +49,7 @@ function parse(line: string): RpcMessage | undefined {
 }
 
 /**
- * Runs a plugin on the given lines until the host sends `shutdown` or closes its input, then runs its cleanup.
+ * Runs a plugin on the given lines until the host sends `shutdown` or closes its input. It then reads no more events, waits up to 3 seconds for event handlers that are still running, and runs the plugin's cleanup.
  * It rejects when the plugin's `start` fails before shutdown begins, or when reading or writing a line fails while the plugin runs. A `start` that fails after shutdown has begun is only logged. Most plugins call `main` instead.
  */
 export function runPlugin(plugin: ServerPlugin, io: PluginIO): Promise<void> {
@@ -79,25 +83,27 @@ export async function serve(
     const line = JSON.stringify(message);
     const sent = writing.then(() => {
       if (broken) throw broken.error;
-      if (closed) throw new Error("the plugin is shutting down");
+      if (closed) throw shuttingDown();
       return io.write(line);
     });
     writing = sent.catch(breakOff);
     return sent;
   };
 
-  const call = async (method: string, params: unknown) => {
-    if (closed) throw new Error("the plugin is shutting down");
+  const call = (method: string, params: unknown) => {
+    if (closed) return Promise.reject(shuttingDown());
     const id = nextId++;
     const reply = new Promise<unknown>((resolve, reject) => {
       pending.set(id, { resolve, reject });
     });
-    reply.catch(() => undefined);
-    try {
-      await send(request(id, method, params));
-    } catch (error) {
+    const abandon = (error: unknown) => {
+      pending.get(id)?.reject(error);
       pending.delete(id);
-      throw error;
+    };
+    try {
+      send(request(id, method, params)).catch(abandon);
+    } catch (error) {
+      abandon(error);
     }
     return reply;
   };
@@ -154,19 +160,23 @@ export async function serve(
     });
   };
 
+  const inflight = new Map<Promise<void>, string>();
+
   const deliver = (params: unknown) => {
     const event = eventParams.safeParse(params);
     const handle = event.success ? handlers.get(event.data.name) : undefined;
-    const settled =
-      event.success && handle
-        ? (async () => {
-            await handle(event.data.data);
-          })().catch((error: unknown) => {
-            io.log(
-              `the handler for ${event.data.name} failed: ${describeError(error)}`,
-            );
-          })
-        : Promise.resolve();
+    if (!event.success || !handle) {
+      hooks.delivered?.(Promise.resolve());
+      return;
+    }
+    const { name, data } = event.data;
+    const settled = (async () => {
+      await handle(data);
+    })().catch((error: unknown) => {
+      io.log(`the handler for ${name} failed: ${describeError(error)}`);
+    });
+    inflight.set(settled, name);
+    void settled.then(() => inflight.delete(settled));
     hooks.delivered?.(settled);
   };
 
@@ -234,14 +244,29 @@ export async function serve(
   interrupt = undefined;
   void input.return?.();
   for (const waiting of pending.values()) {
-    waiting.reject(new Error("the plugin is shutting down"));
+    waiting.reject(shuttingDown());
   }
   pending.clear();
-  await started;
-  if (failed) {
-    io.log(`the plugin's start failed: ${describeError(failed.error)}`);
-    await writing;
-    throw failed.error;
+  const graceMs = hooks.handlerGraceMs ?? handlerGraceMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const graceOver = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, graceMs);
+  });
+  try {
+    await started;
+    if (failed) {
+      io.log(`the plugin's start failed: ${describeError(failed.error)}`);
+      await writing;
+      throw failed.error;
+    }
+    await Promise.race([Promise.all(inflight.keys()), graceOver]);
+  } finally {
+    clearTimeout(timer);
+  }
+  for (const name of inflight.values()) {
+    io.log(
+      `the handler for ${name} was still running after ${String(graceMs / 1000)} s, so the plugin's cleanup runs now`,
+    );
   }
   try {
     await cleanup?.();

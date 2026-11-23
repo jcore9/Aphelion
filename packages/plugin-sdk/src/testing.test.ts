@@ -312,6 +312,51 @@ describe("createTestHost", () => {
     expect(cleanups).toBe(1);
   });
 
+  test("stop lets a running handler finish, sends no later event, and runs cleanup last", async () => {
+    const host = hostWith([{ kind: "events", name: "demo.ping" }]);
+    const release = Promise.withResolvers<undefined>();
+    const started = Promise.withResolvers<undefined>();
+    await host.start({
+      async start(ctx) {
+        await ctx.events.subscribe("demo.ping", async (data) => {
+          ctx.log(`${String(data)} started`);
+          started.resolve(undefined);
+          await release.promise;
+          ctx.log(`${String(data)} finished`);
+        });
+        return () => {
+          ctx.log("cleanup");
+        };
+      },
+    });
+    const first = host.publish("demo.ping", "first");
+    await started.promise;
+    const stopping = host.stop();
+    await host.publish("demo.ping", "second");
+    release.resolve(undefined);
+    await first;
+    await Promise.all([stopping, host.stop()]);
+    expect(host.logs).toEqual(["first started", "first finished", "cleanup"]);
+  });
+
+  test("answers no request that arrives after stop is called", async () => {
+    const host = hostWith([{ kind: "network", name: "api.example.com" }]);
+    let asked = 0;
+    host.respondToGet("https://api.example.com/", () => {
+      asked++;
+      return { status: 204, body: "" };
+    });
+    const { plugin, ctx } = capture();
+    await host.start(plugin);
+    const call = ctx()
+      .network.get("https://api.example.com/")
+      .catch((error: unknown) => error);
+    await host.stop();
+    expect(await call).toEqual(new Error("the plugin is shutting down"));
+    expect(asked).toBe(0);
+    expect(host.calls).toEqual([]);
+  });
+
   test("refuses a manifest without a server part", () => {
     expect(() =>
       createTestHost({

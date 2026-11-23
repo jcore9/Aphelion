@@ -98,7 +98,10 @@ export interface HostOptions {
   readonly policy?: RestartPolicy;
   readonly network?: NetworkRequest;
   readonly secretOperations?: ReadonlyMap<string, SecretOperation>;
+  readonly stopDeadlineMs?: number;
 }
+
+export const defaultStopDeadlineMs = 10_000;
 
 interface SecretOperation {
   readonly reference: string;
@@ -161,9 +164,10 @@ export const pluginHostLayer = (options: HostOptions) =>
     Effect.gen(function* () {
       const link = yield* RunnerLink;
       const grants = yield* PluginGrants;
-      const scope = yield* Scope.Scope;
+      const work = yield* Scope.fork(yield* Scope.Scope);
       const { logger } = options;
       const policy = options.policy ?? defaultRestartPolicy;
+      const stopDeadlineMs = options.stopDeadlineMs ?? defaultStopDeadlineMs;
       const slots = new Map<string, Slot>();
 
       const mayUse = (slot: Slot, permission: Permission) =>
@@ -302,7 +306,7 @@ export const pluginHostLayer = (options: HostOptions) =>
                 : failure(id, outcome.failure),
               run,
             );
-          }).pipe(Effect.ensuring(release), Effect.forkIn(scope));
+          }).pipe(Effect.ensuring(release), Effect.forkIn(work));
         });
 
       const run = (slot: Slot, command: LifecycleCommand) =>
@@ -374,12 +378,13 @@ export const pluginHostLayer = (options: HostOptions) =>
                     deadline: command.deadline,
                   }),
                 ),
-                Effect.forkIn(scope),
+                Effect.forkIn(work),
               );
           }
         });
 
       let runnerClosed = false;
+      let closing = false;
 
       const settleWaiters = (slot: Slot) =>
         Effect.forEach(
@@ -400,16 +405,6 @@ export const pluginHostLayer = (options: HostOptions) =>
           const before = slot.state;
           const next = step(before, event, policy);
           slot.state = next.state;
-          yield* settleWaiters(slot);
-          if (
-            before.state === "running" &&
-            next.state.state !== "running" &&
-            slot.operation?.fiber
-          ) {
-            yield* Fiber.interrupt(slot.operation.fiber).pipe(
-              Effect.forkIn(scope),
-            );
-          }
           if (next.state.state !== before.state) {
             logger.info("plugin state changed", {
               plugin: slot.id,
@@ -417,6 +412,16 @@ export const pluginHostLayer = (options: HostOptions) =>
               to: next.state.state,
               run: next.state.run,
             });
+          }
+          yield* settleWaiters(slot);
+          if (
+            before.state === "running" &&
+            next.state.state !== "running" &&
+            slot.operation?.fiber
+          ) {
+            yield* Fiber.interrupt(slot.operation.fiber).pipe(
+              Effect.forkIn(work),
+            );
           }
           yield* Effect.forEach(
             next.commands,
@@ -474,6 +479,12 @@ export const pluginHostLayer = (options: HostOptions) =>
         });
 
       const handle = (slot: Slot, input: SlotInput) => {
+        if (
+          closing &&
+          (input.type === "start" ||
+            (input.type === "timer" && input.deadline === "retry"))
+        )
+          return Effect.void;
         if (input.type === "wait") {
           if (input.cancelled) return Effect.void;
           slot.waiters.add(input);
@@ -580,16 +591,7 @@ export const pluginHostLayer = (options: HostOptions) =>
             });
           }),
         ),
-        Effect.forkIn(scope),
-      );
-
-      yield* Effect.addFinalizer(() =>
-        Effect.forEach(
-          slots.values(),
-          (slot) =>
-            link.send({ type: "stop", plugin: slot.id, run: slot.state.run }),
-          { discard: true },
-        ),
+        Effect.forkIn(work),
       );
 
       const start = (path: string, approval?: Approval) =>
@@ -634,7 +636,7 @@ export const pluginHostLayer = (options: HostOptions) =>
             yield* Queue.take(created.mailbox).pipe(
               Effect.flatMap((input) => handle(created, input)),
               Effect.forever,
-              Effect.forkIn(scope),
+              Effect.forkIn(work),
             );
             slot = created;
           } else if (
@@ -693,18 +695,49 @@ export const pluginHostLayer = (options: HostOptions) =>
           );
         });
 
+      const stopSlot = (slot: Slot) =>
+        Effect.suspend(() => {
+          slot.blockedRun = slot.state.run;
+          return Queue.offer(slot.mailbox, { type: "stop" }).pipe(
+            Effect.andThen(waitFor(slot.id, isStopped)),
+            Effect.asVoid,
+            Effect.catchTag("RunnerClosed", () => Effect.void),
+          );
+        });
+
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          closing = true;
+          const all = [...slots.values()];
+          logger.info("the plugin host is stopping every plugin", {
+            plugins: all.length,
+          });
+          const forceMs = stopDeadlineMs / 10;
+          yield* Effect.forEach(all, stopSlot, {
+            concurrency: "unbounded",
+            discard: true,
+          }).pipe(Effect.timeoutOption(stopDeadlineMs - forceMs));
+          const left = all.filter((slot) => !isStopped(slot.state));
+          if (left.length === 0 || runnerClosed) return;
+          logger.warn(
+            "plugins were still running at the stop deadline, so the host told the runner to kill them",
+            { plugins: left.map((slot) => slot.id) },
+          );
+          yield* Effect.forEach(
+            left,
+            (slot) =>
+              link.send({ type: "stop", plugin: slot.id, run: slot.state.run }),
+            { discard: true },
+          ).pipe(Effect.timeoutOption(forceMs));
+        }),
+      );
+
       return PluginHost.of({
         start,
         stop: (id) =>
           Effect.suspend(() => {
             const slot = slots.get(id);
-            if (!slot) return Effect.void;
-            slot.blockedRun = slot.state.run;
-            return Queue.offer(slot.mailbox, { type: "stop" }).pipe(
-              Effect.andThen(waitFor(id, isStopped)),
-              Effect.asVoid,
-              Effect.catchTag("RunnerClosed", () => Effect.void),
-            );
+            return slot ? stopSlot(slot) : Effect.void;
           }),
         waitFor,
         publish,

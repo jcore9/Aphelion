@@ -78,7 +78,7 @@ After the launcher closes its copies, only the server and the plugin runner hold
 
 On `SIGTERM`, which `docker compose stop` sends, the launcher stops the processes in this order:
 
-1. It sends `SIGTERM` to the server and waits up to 20 seconds. The server asks the runner to stop each plugin.
+1. It sends `SIGTERM` to the server and waits up to 20 seconds. The server first sends `shutdown` to every plugin and gives each one 5 seconds to exit, with at most 10 seconds for all of them. See [When the server stops](plugins.md#when-the-server-stops).
 2. It waits up to 5 seconds for the runner. The runner exits by itself when the server closes the pipe, and kills any plugin that is left. If the runner is still running, the launcher sends it `SIGTERM` and waits 5 more seconds.
 3. It sends `SIGTERM` to the broker and waits up to 5 seconds.
 

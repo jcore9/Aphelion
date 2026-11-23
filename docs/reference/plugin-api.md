@@ -11,6 +11,7 @@ A `z.ZodType<T>` on this page is a [Zod](https://zod.dev/) schema. Its `parse` m
 ### `Cleanup`
 
 A function that `start` can return. The SDK calls it once when the plugin shuts down, and logs an error if it throws.
+It runs after the event handlers that were still running have finished, or after 3 seconds if one of them is still running.
 
 ```ts
 type Cleanup = () => MaybePromise<void>;
@@ -125,6 +126,7 @@ interface PluginContext {
 - `id`: The plugin's `id`, as the host sent it when it started the plugin.
 - `api`: The plugin API version that the host runs, such as `0.2.1`.
 - `events`: `subscribe(name, handle)` asks the host for an event, and the SDK then calls `handle` with each event's data.
+  Once shutdown starts, the SDK calls no handler for a new event, and every call to the host fails with `the plugin is shutting down`.
   It rejects with a `HostError` when the manifest's `permissions.events` doesn't list the event or the owner hasn't granted it.
 - `network`: `get(url)` asks the host to fetch an HTTPS URL that `requestUrl` accepts, from a host in `permissions.network` that the owner granted.
   The SDK sends one network or secret call at a time, so a second call waits until the first one has its reply.
@@ -366,6 +368,7 @@ interface ServerPlugin {
 
 - `start`: The SDK calls `start` once, after it has answered the host's `initialize` request.
   If `start` throws or rejects, the plugin stops with that error.
+  At shutdown the SDK waits for `start` to finish before it runs the cleanup that `start` returned.
 
 ### `eventParams`
 
@@ -601,7 +604,7 @@ const success: (
 
 ### `runPlugin`
 
-Runs a plugin on the given lines until the host sends `shutdown` or closes its input, then runs its cleanup.
+Runs a plugin on the given lines until the host sends `shutdown` or closes its input. It then reads no more events, waits up to 3 seconds for event handlers that are still running, and runs the plugin's cleanup.
 It rejects when the plugin's `start` fails before shutdown begins, or when reading or writing a line fails while the plugin runs. A `start` that fails after shutdown has begun is only logged. Most plugins call `main` instead.
 
 ```ts
@@ -706,8 +709,10 @@ interface TestHost {
 - `respondToGet`: Sets the reply to `network.get` for one URL. A URL with no reply, a reply that takes more than 5 seconds, and a body larger than 64 KiB fail with `Operation failed`.
 - `registerSecretOperation`: Adds a named operation for `secrets.use`. While none is registered, `secrets.use` with a granted reference fails with error `-32002`.
 - `start`: Starts the plugin and resolves when its `start` has finished, or rejects when `start` fails. A test host starts one plugin only.
-- `publish`: Sends an event to the plugin and resolves when its handler has finished. It sends nothing when the plugin isn't running, hasn't subscribed, or isn't granted the event.
-- `stop`: Sends `shutdown` and resolves when the plugin has run its cleanup and stopped.
+- `publish`: Sends an event to the plugin and resolves when its handler has finished.
+  It sends nothing and resolves at once when the plugin isn't running, hasn't subscribed, or isn't granted the event, and from the moment `stop` is called.
+- `stop`: Sends `shutdown` and resolves when the plugin has stopped. The SDK first waits up to 3 seconds for handlers that are still running, then runs the plugin's cleanup.
+  A second call resolves when the first one does.
 - `logs`: The messages that the plugin and the SDK logged, in order.
 - `calls`: The requests that the plugin sent, with the answers, in the order the test host answered them.
 
