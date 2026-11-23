@@ -1,8 +1,9 @@
 # 0053. The 1Password token lives in the local store, and the 1Password plugin moves from M0 to M3
 
-- Status: Accepted
+- Status: Proposed
 - Date: 2026-11-23
 - Decided by: project owner
+- Proposed by: the PR that moves [#17](https://github.com/jcore9/Aphelion/issues/17) to M3
 - Answers: where the 1Password service account token lives, how the live test that [decision 0015](0015-1password-ci-mock.md) requires gets run, and when [#17](https://github.com/jcore9/Aphelion/issues/17) (M0-15) is built
 - Amends: the M0 plan's M0-15 notes and the plan's issue breakdown, which place the 1Password plugin in M0
 
@@ -19,11 +20,11 @@ The M0 exit test is that the service starts on boot and answers `/health`. It do
 ### Where the token lives
 
 1. **In the local store, as `local://1password/service-account-token`.**
-   - For: it is encrypted by the bootstrap key, it is backed up with the store, and the host needs no new install step.
+   - For: it is encrypted by the bootstrap key, a backup of the store includes it, and the host needs no new install step.
    - Against: anyone who can unseal the store can read it. That is true of every secret in the store.
 2. **A second host credential sealed with `systemd-creds`, like the bootstrap key.**
    - For: nothing extra in the `secrets` volume.
-   - Against: another install step, a change needs sudo and a restart, and restoring on new hardware needs a second recovery copy.
+   - Against: another install step, a change needs sudo and a restart, and a restore to new hardware has one more item to carry over.
 3. **A plain file in the plugin's data folder.**
    - For: the simplest to build.
    - Against: the file isn't encrypted, and every plugin runs as the same Linux user, `aphelion-plugins`, so any plugin could read it.
@@ -53,8 +54,8 @@ The M0 exit test is that the service starts on boot and answers `/health`. It do
   - How the token reaches the plugin, and how resolved values are kept from other plugins.
   - The `aphelion` command that stores the token and the disconnect that deletes it. The broker's socket can read and write `local://` entries today, but not delete them.
   - The grant model, the CLI for grant decisions and the audit rows listed in the issue.
-  - Packaging. `@1password/sdk` reads its WebAssembly file from disk at run time ([the M0-03 spike](../spikes/M0-03-headless-on-bun.md)), so the starter template's one-file bundle needs a change.
+  - Packaging. `@1password/sdk` 0.5.0 reads its WebAssembly file from disk at run time ([the M0-03 spike](../spikes/M0-03-headless-on-bun.md)). #17 ships that file with the plugin and checks that the installed plugin loads it.
 - The M0 plan and the plan's issue breakdown get an "Amended by" note. The reference pages for secrets and the plugin manifest say the plugin comes in M3.
-- Decision 0020's text about M0-15 building the grant model now applies to M3.
+- Decision 0020 said M0-15 builds the grant model in M0 and M2-06 turns its decisions into `approval.requested` events. Now M2-06 builds the approval protocol first, and M0-15 connects 1Password to it in M3.
 - M1's Claude adapter is now the first first-party plugin built from the starter template, and the 1Password plugin comes after it.
 - Revisit the token's home if the store gets a second key or a per-plugin access list.

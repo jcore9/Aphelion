@@ -40,7 +40,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-14] | Secrets broker v0 | feature, security, **risk/security** | M0-08 |
 | [M0-15] | ~~1Password backend plugin~~ Moved to M3 ([decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md)) | feature, plugins, security, **risk/security** | M0-13, M0-14 |
 
-Seven of the eighteen work issues carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
+~~Seven of the eighteen~~ Six of the seventeen work issues ([decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md)) carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
 
 ### Out of scope
 
@@ -87,7 +87,7 @@ flowchart LR
 | 6 | Its dependencies merge | M0-11, ~~M0-15~~ |
 | 7 | M0-11 and M0-18 merge | M0-12, then the exit test |
 
-> Amended by [decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md). M0-15 moved to M3, so the graph no longer shows it and wave 6 holds only M0-11. Six of the seventeen remaining work issues carry `risk/security`.
+> Amended by [decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md). M0-15 moved to M3, so the graph no longer shows it and wave 6 holds only M0-11.
 
 The critical path is M0-03, M0-04, M0-16, M0-09, M0-10, M0-11, M0-12. M0-04 waits for M0-03 because the spike checks that Bun runs the SDKs the project depends on ([decision 0007](../../decisions/0007-bun-runtime.md)) before the scaffold commits to it.
 

@@ -706,7 +706,7 @@ Issue-sized tasks for every milestone, each with acceptance criteria and depende
 | M0-12 | Linux install script and systemd unit | Creates the ~~harness user and bot users~~ `harness` and `aphelion-bot` users ([0006](../decisions/0006-shared-bot-user.md)) without sudo, sets directory permissions, installs a hardened unit; service survives a reboot; install guide written | ~~M0-11~~ M0-11, M0-18 ([0035](../decisions/0035-codex-login-sandbox-approvals.md)) |
 | M0-13 | Plugin host v0 | Manifest schema, API-range check, one process per plugin over JSON-RPC, permission grants stored and enforced; a sample plugin passes and an out-of-range plugin is refused; API reference generated into the docs | M0-04, M0-07, M0-16 |
 | M0-14 | Secrets broker v0 | Secret wrapper, reference syntax, local age-encrypted store, bootstrap secret via systemd-creds; test proves values never land in logs or the database | M0-08 |
-| M0-15 | 1Password backend plugin (moved to M3 by [decision 0053](../decisions/0053-1password-token-and-move-to-m3.md)) | Resolves op:// references with a read-only service account through the official SDK | M0-13, M0-14 |
+| ~~M0-15~~ | ~~1Password backend plugin~~ Moved to M3 ([0053](../decisions/0053-1password-token-and-move-to-m3.md)) | ~~Resolves op:// references with a read-only service account through the official SDK~~ | ~~M0-13, M0-14~~ |
 
 M0-16 sits out of numeric order so that every existing ID, and every reference to it in later milestones, stays the same.
 
@@ -743,6 +743,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M3-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M3 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M3-01 | Gateway service | Runs on a separate host or as a separate local user; authenticated channel to the harness; hosts the secrets broker | M0-14 |
 | M3-02 | Connector plugin contract | Manifest with tools, risk classes and provider permissions; auth flow; handlers; optional event source | M0-13 |
+| M0-15 | 1Password backend plugin (moved from M0 by [0053](../decisions/0053-1password-token-and-move-to-m3.md)) | Resolves op:// references with a read-only service account through the official SDK; grants per consumer, bot and item ([0020](../decisions/0020-1password-grok-bot-style.md)) through the approval protocol. Connectors whose secrets are `op://` references need it | M0-13, M0-14, M2-06 |
 | M3-03 | Harness MCP endpoint | One endpoint per bot session with a short-lived bearer token; aggregates connector tools; every call goes through the policy engine | M3-02, M2-04 |
 | M3-04 | GitHub App connector | App ID and key reference in config; per-call installation tokens scoped to one repo and one permission; tools and default policy from the main plan | M3-01, M3-03 |
 | M3-05 | Git credential helper | Fetch gets a read-only token and push goes through approval; a test proves no long-lived credential exists on the bot VM | M3-04 |

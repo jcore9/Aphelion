@@ -109,4 +109,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0050](decisions/0050-bootstrap-key-is-the-store-key.md) | The host's bootstrap credential is the local store's age key | Proposed |
 | [0051](decisions/0051-plugin-dev-kit.md) | The plugin dev kit has a stdio entry in the SDK, reloads through the running server, and generates from a checkout | Proposed |
 | [0052](decisions/0052-plugin-api-reference-generator.md) | A test generates the plugin API reference from the SDK's types and doc comments with the TypeScript compiler, and fails when the page is stale | Proposed |
-| [0053](decisions/0053-1password-token-and-move-to-m3.md) | The 1Password token lives in the local store, and the 1Password plugin moves from M0 to M3 | Accepted |
+| [0053](decisions/0053-1password-token-and-move-to-m3.md) | The 1Password token lives in the local store, and the 1Password plugin moves from M0 to M3 | Proposed |
