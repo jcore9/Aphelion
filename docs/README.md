@@ -18,6 +18,7 @@ These Markdown files read the same on GitHub and on the docs site. `bun run docs
 ## Guides
 
 - [Install the headless server](guides/install.md): the host, the image, `aphelion.service`, plugins, the network check and upgrades.
+- [Write your first server plugin](guides/write-your-first-server-plugin.md): create a plugin from the template, test it, build it and reload it in dev mode.
 
 ## Working on the repository
 
@@ -105,3 +106,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0048](decisions/0048-cli-on-node-parseargs.md) | The aphelion command reads its command line with Node's parseArgs, and Docker's Compose output reaches config check through standard input | Proposed |
 | [0049](decisions/0049-ai-tools-installed-from-a-list.md) | The container image ships no AI tool, and the owner installs AI tools from a list | Proposed |
 | [0050](decisions/0050-bootstrap-key-is-the-store-key.md) | The host's bootstrap credential is the local store's age key | Proposed |
+| [0051](decisions/0051-plugin-dev-kit.md) | The plugin dev kit has a stdio entry in the SDK, reloads through the running server, and generates from a checkout | Proposed |
