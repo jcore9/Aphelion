@@ -5,6 +5,8 @@ cd "$(dirname "$0")/../.."
 readonly project=aphelion-contract
 readonly image=aphelion:contract
 readonly service=aphelion
+readonly fixtures=apps/server/src/plugins/updates/fixtures/aphelion-test-plugin
+readonly test_plugin=aphelion-test-plugin
 scratch=$(mktemp -d)
 chmod 0755 "$scratch"
 
@@ -106,6 +108,8 @@ cat >"$scratch/plugins/contract-probe/checks.json" <<'EOF'
   ["write", "/var/lib/aphelion-plugins/contract-probe", "ok"]
 ]
 EOF
+mkdir "$scratch/plugins/$test_plugin"
+tar -xf "$fixtures/v1.0.0/aphelion-plugin.tar" -C "$scratch/plugins/$test_plugin"
 chmod -R a+rX,go-w "$scratch/plugins"
 as_root bash -c 'rm /scratch/secrets/bootstrap && aphelion-secrets --new-key >/scratch/secrets/bootstrap && chmod 0400 /scratch/secrets/bootstrap'
 key=$(as_root cat /scratch/secrets/bootstrap)
@@ -123,16 +127,20 @@ grep -qF "publishes the port on every host address" <<<"$refused" ||
 pass "config check accepts the Compose file and refuses a port on every address"
 
 "${compose[@]}" create --quiet-pull >/dev/null 2>&1
-"${compose[@]}" cp "$scratch/plugins/contract-probe" "$service:/opt/aphelion/plugins/contract-probe" >/dev/null
+for plugin in contract-probe "$test_plugin"; do
+  "${compose[@]}" cp "$scratch/plugins/$plugin" "$service:/opt/aphelion/plugins/$plugin" >/dev/null
+done
 [[ $(as_root_in_volume stat -c '%U:%G %a' /opt/aphelion/plugins) == "harness:harness 755" ]] ||
   fail "the plugin-files volume isn't owned by harness with mode 755"
 pass "docker compose cp copies a plugin into the plugin-files volume, which harness owns"
 
-install=("${compose[@]}" run --rm -T --user harness "$service" aphelion plugin install /opt/aphelion/plugins/contract-probe)
-approval=$("${install[@]}" | sed -n 's/.*--approve \([0-9a-f]\{64\}\)$/\1/p')
-[[ -n $approval ]] || fail "plugin install printed no approval"
-"${install[@]}" --approve "$approval" >/dev/null
-pass "plugin install records the probe plugin"
+for plugin in contract-probe "$test_plugin"; do
+  install=("${compose[@]}" run --rm -T --user harness "$service" aphelion plugin install "/opt/aphelion/plugins/$plugin")
+  approval=$("${install[@]}" | sed -n 's/.*--approve \([0-9a-f]\{64\}\)$/\1/p')
+  [[ -n $approval ]] || fail "plugin install printed no approval for $plugin"
+  "${install[@]}" --approve "$approval" >/dev/null
+done
+pass "plugin install records the probe plugin and version 1.0.0 of the test plugin"
 
 since=0
 wait_for_log() {
@@ -144,10 +152,15 @@ wait_for_log() {
   fail "the log never showed: $text"
 }
 
+server_pid() {
+  docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do [[ $(tr "\0" " " <$p/cmdline 2>/dev/null) == "/usr/local/bin/aphelion --headless "* ]] && echo ${p#/proc/}; done; true'
+}
+
 "${compose[@]}" up --detach --quiet-pull >/dev/null 2>&1
 container=$("${compose[@]}" ps --quiet "$service")
 wait_for_log '"msg":"server started"'
 wait_for_log 'plugin probe'
+wait_for_log "$test_plugin 1.0.0 started"
 if "${compose[@]}" logs --no-color 2>&1 | grep -F 'plugin probe failed'; then
   fail "the plugin reached something it must not"
 fi
@@ -290,6 +303,73 @@ probe root '[
 ]'
 pass "only root reads the bootstrap file, and root in the container can't read other users' folders"
 
+test_plugin_run() {
+  docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do
+    [[ $(tr "\0" " " <$p/cmdline 2>/dev/null) == "/usr/local/bin/bun --no-env-file "* ]] || continue
+    folder=$(readlink $p/cwd 2>/dev/null) || continue
+    [[ $folder == /opt/aphelion/plugins/'"$test_plugin"'* ]] && echo "${p#/proc/} $folder"
+  done; true'
+}
+
+fake=$scratch/fake-github
+mkdir -p "$fake/releases"
+cp -r "$fixtures/v1.0.0" "$fixtures/v1.1.0" "$fake/releases/"
+cp deploy/test/fake-github.mjs "$fake/"
+echo v1.1.0 >"$fake/releases/latest"
+chmod -R a+rX,go-w "$fake"
+tar -C "$scratch" -cf - fake-github | docker exec -i --user harness "$container" tar -xf - -C /tmp
+docker exec --detach --user harness --env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$container" \
+  bun /tmp/fake-github/fake-github.mjs /tmp/fake-github/releases 8099
+update=(docker exec --user harness --env APHELION_GITHUB_API=http://127.0.0.1:8099 "$container" aphelion plugin update "$test_plugin")
+for ((tries = 0; tries < 50; tries++)); do
+  preview=$("${update[@]}" 2>&1) && break
+  sleep 0.1
+done
+grep -qF "Plugin $test_plugin can update from 1.0.0 to 1.1.0." <<<"$preview" ||
+  fail "plugin update showed no preview: $preview"
+grep -qF $'adds\tevents\t"bot.status"' <<<"$preview" ||
+  fail "the update preview doesn't show the added permission: $preview"
+token=$(sed -n 's/.*--approve \([0-9a-f]\{64\}\)$/\1/p' <<<"$preview")
+server_before=$(server_pid)
+[[ -n $server_before ]] || fail "no server process"
+updated=$("${update[@]}" --approve "$token" 2>&1) || fail "plugin update --approve failed: $updated"
+grep -qF "$test_plugin 1.1.0 runs." <<<"$updated" || fail "plugin update didn't report the new version running: $updated"
+wait_for_log "$test_plugin 1.1.0 started"
+[[ $(server_pid) == "$server_before" ]] || fail "the server restarted during a plugin update"
+[[ $(test_plugin_run) == *" /opt/aphelion/plugins/$test_plugin@1.1.0" ]] ||
+  fail "the test plugin doesn't run from its 1.1.0 folder: $(test_plugin_run)"
+pass "plugin update installs an attested release on approval and restarts only the plugin"
+
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+sleep 1
+back=$(docker exec --user harness "$container" aphelion plugin rollback "$test_plugin" 2>&1) ||
+  fail "plugin rollback failed: $back"
+grep -qF "Went back from $test_plugin 1.1.0 to 1.0.0." <<<"$back" && grep -qF "$test_plugin 1.0.0 runs." <<<"$back" ||
+  fail "plugin rollback printed something else: $back"
+wait_for_log "$test_plugin 1.0.0 started"
+[[ $(server_pid) == "$server_before" ]] || fail "the server restarted during a rollback"
+[[ $(test_plugin_run) == *" /opt/aphelion/plugins/$test_plugin" ]] ||
+  fail "the test plugin doesn't run from its 1.0.0 folder: $(test_plugin_run)"
+docker exec --user harness "$container" test ! -e "/opt/aphelion/plugins/$test_plugin@1.1.0" ||
+  fail "rollback kept the 1.1.0 folder"
+pass "plugin rollback goes back to 1.0.0 and deletes the 1.1.0 files"
+
+docker exec --user harness --env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$container" bun --eval '
+  const fs = require("node:fs");
+  const file = "/tmp/fake-github/releases/v1.1.0/aphelion-plugin.tar";
+  const bytes = fs.readFileSync(file);
+  bytes[1024] ^= 1;
+  fs.writeFileSync(file, bytes);
+'
+running=$(test_plugin_run)
+refused=$("${update[@]}" 2>&1) && fail "plugin update accepted an archive with a changed byte"
+grep -qF "The release's attestation vouches for other bytes than the downloaded aphelion-plugin.tar, so Aphelion won't install it." <<<"$refused" ||
+  fail "plugin update refused the changed archive for another reason: $refused"
+[[ -n $running && $(test_plugin_run) == "$running" ]] ||
+  fail "the running plugin stopped or restarted after a refused update"
+docker exec --user harness "$container" bash -c 'for p in /proc/[0-9]*; do [[ ${p#/proc/} != "$$" && $(tr "\0" " " <$p/cmdline 2>/dev/null) == *fake-github.mjs* ]] && kill ${p#/proc/}; done; true'
+pass "plugin update refuses an archive with one changed byte, and the running version keeps running"
+
 if [[ -n ${APHELION_TEST_TAILNET_ADDRESS:-} ]]; then
   [[ $(curl --silent --max-time 5 "http://$APHELION_TAILNET_ADDRESS:17400/health") == '{"status":"ok"}' ]] ||
     fail "/health did not answer on the tailnet address"
@@ -313,7 +393,7 @@ pass "docker compose stop stops every process and exits 0"
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 sleep 1
 "${compose[@]}" start >/dev/null 2>&1
-wait_for_log '"msg":"plugin host started","installed":1'
+wait_for_log '"msg":"plugin host started","installed":2'
 broker=$(docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do [[ $(tr "\0" " " <$p/cmdline 2>/dev/null) == /usr/local/bin/aphelion-secrets* ]] && echo ${p#/proc/}; done; true')
 docker exec --privileged "$container" bash -c "kill -KILL $broker"
 for ((tries = 0; tries < 100; tries++)); do
@@ -379,11 +459,8 @@ grep -qF "Refused: /opt/aphelion/dev-plugin isn't approved" "$dev_out" ||
   fail "plugin dev reloaded a folder that isn't approved: $(cat "$dev_out")"
 approve_dev
 
-server_pid() {
-  docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do [[ $(tr "\0" " " <$p/cmdline 2>/dev/null) == "/usr/local/bin/aphelion --headless "* ]] && echo ${p#/proc/}; done; true'
-}
 plugin_runs() {
-  docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do tr "\0" " " <$p/cmdline 2>/dev/null; echo; done' | grep -c "server.mjs" || true
+  docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do [[ $(readlink $p/cwd 2>/dev/null) == /opt/aphelion/dev-plugin ]] && tr "\0" " " <$p/cmdline; echo; done' | grep -c "server.mjs" || true
 }
 touch_bundle() {
   sed -i "s/build-$1/build-$2/" "$dev/server.mjs"
