@@ -33,7 +33,7 @@ else
   trap 'rm -f "$temporary"' EXIT
   (
     umask 077
-    docker run --rm --network none --read-only --user aphelion-secrets \
+    docker run --rm --pull never --network none --read-only --user aphelion-secrets \
       --entrypoint /usr/local/bin/aphelion-secrets aphelion:local --new-key |
       systemd-creds encrypt --name=bootstrap - "$temporary"
   )
