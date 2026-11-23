@@ -476,14 +476,14 @@ describe("the aphelion service container port", () => {
     ]);
   });
 
-  test("refuses a published port with no container port", () => {
-    expect(
-      check(
-        withPorts("{ host_ip: 100.71.226.67, published: 8443 }"),
-        composeListener.port,
-      ),
-    ).toEqual([
-      forwardRefusal(0, "has no container port", composeListener.port),
+  test.each([
+    "{ host_ip: 100.71.226.67, published: 8443 }",
+    "{ host_ip: 100.71.226.67, published: 8443, target: { token: hidden } }",
+    '"100.71.226.67:8443:"',
+  ])("refuses a published port with no container port number: %s", (entry) => {
+    const issues = check(withPorts(entry), composeListener.port);
+    expect(issues).toEqual([
+      forwardRefusal(0, "has no container port number", composeListener.port),
     ]);
   });
 

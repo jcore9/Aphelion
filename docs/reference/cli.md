@@ -93,7 +93,7 @@ It also checks that a published port can reach the server ([decision 0055](../de
 - `port` in `server.yaml` must be `7400`, the only port that the [host firewall](container.md#network) lets into the container.
 - Every port that the `aphelion` service publishes must forward to the server's TCP port. The first number, the host port, may differ: `"100.71.226.67:8443:7400"` passes. A service that publishes no port passes this rule.
 
-Without `--compose`, any address and port pass, so the server can run from source on `127.0.0.1`. A check of a `server.yaml` with `address: 127.0.0.1` and `port: 7401` against the shipped Compose file prints:
+Without `--compose`, any valid address and port pass, so the server can run from source on `127.0.0.1`. A check of a `server.yaml` with `address: 127.0.0.1` and `port: 7401` against the shipped Compose file prints:
 
 ```
 /etc/aphelion/server.yaml: address: is 127.0.0.1. With --compose it must be 0.0.0.0, so a published port can reach the server inside the container.

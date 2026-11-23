@@ -194,7 +194,7 @@ test("config check --compose - reads a pipe", async () => {
     });
     expect(code).toBe(0);
     expect(stdout).toBe(
-      "Config OK. The Compose file publishes ports only on the tailnet, and they reach the server.\n",
+      "Config OK. The Compose file publishes ports only on the tailnet, and server.yaml sets address 0.0.0.0 and port 7400.\n",
     );
   } finally {
     await writeFile(

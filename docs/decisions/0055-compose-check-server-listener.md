@@ -40,7 +40,7 @@ The owner chose option 1 in all three cases. With `--compose`:
 - `server.yaml`'s `port` must be 7400.
 - Every port the `aphelion` service publishes must forward to the server's port over TCP. The server and the firewall take only TCP, so a UDP mapping is refused too. A service that publishes no port passes.
 
-Each refusal names the setting, the value found and the value expected. Without `--compose`, any address and port stay valid, so running from source on `127.0.0.1` still works.
+Each refusal names the setting, the value found and the value expected. Without `--compose`, any valid address and port stay valid, so running from source on `127.0.0.1` still works.
 
 ## Consequences
 

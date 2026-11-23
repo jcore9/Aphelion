@@ -172,7 +172,7 @@ test("config check --compose - accepts tailnet-only ports from standard input", 
   );
   expect(code).toBe(0);
   expect(out).toEqual([
-    "Config OK. The Compose file publishes ports only on the tailnet, and they reach the server.",
+    "Config OK. The Compose file publishes ports only on the tailnet, and server.yaml sets address 0.0.0.0 and port 7400.",
   ]);
 });
 
@@ -183,7 +183,7 @@ test("config check --compose accepts the shipped config when the host port diffe
   );
   expect(code).toBe(0);
   expect(out).toEqual([
-    "Config OK. The Compose file publishes ports only on the tailnet, and they reach the server.",
+    "Config OK. The Compose file publishes ports only on the tailnet, and server.yaml sets address 0.0.0.0 and port 7400.",
   ]);
 });
 

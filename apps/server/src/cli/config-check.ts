@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import {
   checkComposePorts,
   checkServerListener,
+  composeListener,
   configAreas,
   formatIssue,
   type ConfigIssue,
@@ -82,6 +83,6 @@ export const configCheck = (options: {
     yield* io.out(
       options.compose === undefined
         ? "Config OK. The Compose file wasn't checked: pass --compose to check it."
-        : "Config OK. The Compose file publishes ports only on the tailnet, and they reach the server.",
+        : `Config OK. The Compose file publishes ports only on the tailnet, and server.yaml sets address ${composeListener.address} and port ${String(composeListener.port)}.`,
     );
   });

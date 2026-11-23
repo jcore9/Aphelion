@@ -80,18 +80,13 @@ function hostAddress(entry: PortEntry): string | undefined {
   return parts.length > 2 ? parts.slice(0, -2).join(":") : undefined;
 }
 
-function shown(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
-
 function forwarding(entry: PortEntry): { target: unknown; protocol: unknown } {
   if (typeof entry === "number") return { target: entry, protocol: "tcp" };
   if (typeof entry === "object") {
     return { target: entry.target, protocol: entry.protocol ?? "tcp" };
   }
   const [body = "", protocol = "tcp"] = entry.split("/");
-  const target = body.split(":").at(-1);
-  return { target: target === "" ? undefined : target, protocol };
+  return { target: body.split(":").at(-1), protocol };
 }
 
 function forwardIssue(
@@ -105,11 +100,17 @@ function forwardIssue(
       : target;
   const tcp = typeof protocol === "string" && protocol.toLowerCase() === "tcp";
   if (port === serverPort && tcp) return undefined;
-  const found =
-    target === undefined
-      ? "has no container port"
-      : `forwards to container port ${shown(target)}${tcp ? "" : `/${shown(protocol)}`}`;
-  return `${found}, but it must forward to TCP port ${String(serverPort)}, the server's port in server.yaml.`;
+  const expected = `it must forward to TCP port ${String(serverPort)}, the server's port in server.yaml.`;
+  if (
+    (typeof target !== "string" && typeof target !== "number") ||
+    target === ""
+  ) {
+    return `has no container port number, but ${expected}`;
+  }
+  const suffix = tcp
+    ? ""
+    : `/${typeof protocol === "string" ? protocol : "an unknown protocol"}`;
+  return `forwards to container port ${String(target)}${suffix}, but ${expected}`;
 }
 
 export function checkServerListener(
