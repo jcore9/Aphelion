@@ -40,17 +40,17 @@ fi
 pass "the firewall refuses to run without Docker's DOCKER-USER chain"
 
 namespace() {
-  local name=$1 inside=$2 outside=$3 peer=$4
+  local name=$1 inside=$2 outside=$3 peer=$4 link=${5:-v-$1}
   ip netns add "$name"
-  ip link add "v-$name" type veth peer name eth0 netns "$name"
+  ip link add "$link" type veth peer name eth0 netns "$name"
   nsenter --net="/run/netns/$name" ip address add "$inside" dev eth0
   nsenter --net="/run/netns/$name" ip link set eth0 up
   nsenter --net="/run/netns/$name" ip link set lo up
   nsenter --net="/run/netns/$name" ip route add default via "$peer"
   if [[ -n $outside ]]; then
-    ip address add "$outside" dev "v-$name"
+    ip address add "$outside" dev "$link"
   fi
-  ip link set "v-$name" up
+  ip link set "$link" up
 }
 
 ip link add aphelion0 type bridge
@@ -59,9 +59,10 @@ ip link set aphelion0 up
 namespace bot 172.30.73.2/24 "" 172.30.73.1
 ip link set v-bot master aphelion0
 namespace lan 10.9.0.2/24 10.9.0.1/24 10.9.0.1
-namespace peer 100.100.5.2/24 100.100.5.1/24 100.100.5.1
+namespace peer 100.100.5.2/24 100.100.5.1/24 100.100.5.1 tailscale0
 namespace internet 203.0.113.2/24 203.0.113.1/24 203.0.113.1
 sysctl -q net.ipv4.ip_forward=1
+iptables -t nat -A PREROUTING -d 100.100.5.1 -p tcp --dport 7400 -j DNAT --to-destination 172.30.73.2:7400
 
 listen() {
   local where=$1 address=$2 port=$3
@@ -97,15 +98,24 @@ targets=(10.9.0.2:80 10.9.0.1:22 100.100.5.1:22 100.100.5.2:22 172.30.73.1:22 20
 for target in "${targets[@]}"; do
   expect open bot "${target%:*}" "${target#*:}"
 done
-pass "without the rules, the bot namespace reaches all six targets"
+expect open peer 100.100.5.1 7400
+expect open lan 100.100.5.1 7400
+expect open lan 172.30.73.2 7400
+pass "without the rules, the bot reaches all six targets, and the LAN reaches the published port"
 
 iptables -N DOCKER-USER
+if /opt/aphelion/deploy/host/firewall >/dev/null 2>&1; then
+  fail "the firewall ran with a DOCKER-USER chain that FORWARD doesn't use"
+fi
 iptables -A FORWARD -j DOCKER-USER
 /opt/aphelion/deploy/host/firewall >/dev/null
 first=$(iptables -S; ip6tables -S)
 /opt/aphelion/deploy/host/firewall >/dev/null
 [[ $(iptables -S; ip6tables -S) == "$first" ]] || fail "a second run changed the rules"
-pass "the firewall installs its rules, and a second run changes nothing"
+if iptables -S | grep -q -- -NEXT; then
+  fail "a temporary chain was left behind"
+fi
+pass "the firewall needs a live DOCKER-USER chain, and a second run changes nothing"
 
 expect closed bot 10.9.0.2 80
 expect closed bot 10.9.0.1 22
@@ -115,8 +125,10 @@ expect closed bot 172.30.73.1 22
 expect open bot 203.0.113.2 443
 pass "the bot namespace reaches only the internet: the LAN, the host, the tailnet and the bridge are dropped"
 
-expect open peer 172.30.73.2 7400
-pass "a tailnet client still reaches the container, and the replies get back"
+expect open peer 100.100.5.1 7400
+expect closed lan 100.100.5.1 7400
+expect closed lan 172.30.73.2 7400
+pass "only the tailnet interface opens connections to the published port, and the replies get back"
 
 cd /opt/aphelion/deploy
 if APHELION_TAILNET_ADDRESS=192.168.1.5 host/preflight >/dev/null 2>&1; then
@@ -125,10 +137,14 @@ fi
 if APHELION_TAILNET_ADDRESS=100.100.9.9 APHELION_TAILNET_WAIT=1 host/preflight >/dev/null 2>&1; then
   fail "preflight went on without the tailnet address"
 fi
+ip address add 100.100.9.9/32 dev v-lan
+if APHELION_TAILNET_ADDRESS=100.100.9.9 APHELION_TAILNET_WAIT=1 host/preflight >/dev/null 2>&1; then
+  fail "preflight accepted a tailnet address on an interface other than tailscale0"
+fi
 rm -f /tmp/docker-calls
 APHELION_TAILNET_ADDRESS=100.100.5.1 host/preflight >/dev/null
 if ! grep -qx "compose --profile \* config" /tmp/docker-calls ||
   ! grep -qx "compose run --rm -T --user harness aphelion aphelion config check --compose -" /tmp/docker-calls; then
   fail "preflight didn't pipe the rendered Compose file into config check as harness"
 fi
-pass "preflight waits for the tailnet address, installs the firewall and runs config check"
+pass "preflight waits for the tailnet address on tailscale0, installs the firewall and runs config check"

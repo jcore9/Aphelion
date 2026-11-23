@@ -18,4 +18,4 @@ TimeoutStartSec=300s
 TimeoutStopSec=90s
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target docker.service

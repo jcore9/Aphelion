@@ -6,34 +6,57 @@ if (($# != 6)); then
 usage: network-check LAN_GATEWAY:PORT HOST_LAN:PORT HOST_TAILNET:PORT TAILNET_PEER:PORT BRIDGE_GATEWAY:PORT INTERNET:PORT
 
 Connects to each target as aphelion-bot inside the running container.
-The first five must fail and the last must succeed.
+The first five must time out, because the firewall drops them.
+The last must connect.
 USAGE
   exit 2
 fi
 
-cd "$(dirname "$0")/.."
-failed=0
+for target in "$@"; do
+  [[ $target =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}$ ]] || {
+    echo "network-check: $target isn't an IPv4 address and port, such as 10.0.0.1:80" >&2
+    exit 2
+  }
+done
 
-reaches() {
-  docker compose exec -T --user aphelion-bot aphelion \
-    timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "${1%:*}" "${1##*:}" 2>/dev/null
+cd "$(dirname "$0")/.."
+in_container() {
+  docker compose exec -T --user aphelion-bot aphelion "$@"
+}
+in_container true || {
+  echo "network-check: the aphelion container isn't running. Start it with: sudo systemctl start aphelion" >&2
+  exit 2
 }
 
+probe() {
+  local status=0
+  in_container timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "${1%:*}" "${1##*:}" 2>/dev/null || status=$?
+  case $status in
+    0) echo connected ;;
+    124) echo "timed out" ;;
+    1) echo answered ;;
+    *) echo "failed with status $status" ;;
+  esac
+}
+
+failed=0
 for target in "${@:1:5}"; do
-  if reaches "$target"; then
-    echo "FAIL  $target is reachable from the container"
-    failed=1
-  else
+  result=$(probe "$target")
+  if [[ $result == "timed out" ]]; then
     echo "ok    $target is blocked"
+  else
+    echo "FAIL  $target $result, so the firewall didn't drop it"
+    failed=1
   fi
 done
-if reaches "$6"; then
+result=$(probe "$6")
+if [[ $result == connected ]]; then
   echo "ok    $6 is reachable"
 else
-  echo "FAIL  $6 isn't reachable, so the container has no internet"
+  echo "FAIL  $6 $result, so the container has no internet"
   failed=1
 fi
-if docker compose exec -T --user aphelion-bot aphelion getent hosts api.anthropic.com >/dev/null; then
+if in_container getent hosts api.anthropic.com >/dev/null; then
   echo "ok    names resolve inside the container"
 else
   echo "FAIL  names don't resolve inside the container"

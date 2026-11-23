@@ -85,8 +85,18 @@ export const sqlitePluginGrants = (db: Database) =>
       ).pipe(Effect.orElseSucceed(() => false)),
   });
 
-export function installedPluginFolders(db: Database): string[] {
+export interface Installed {
+  readonly plugin: string;
+  readonly folder: string;
+  readonly digest: string;
+}
+
+export function installedPlugins(db: Database): Installed[] {
   return db
-    .all("SELECT folder FROM plugin_installs ORDER BY plugin")
-    .map((row) => String(row["folder"]));
+    .all("SELECT plugin, folder, digest FROM plugin_installs ORDER BY plugin")
+    .map((row) => ({
+      plugin: String(row["plugin"]),
+      folder: String(row["folder"]),
+      digest: String(row["digest"]),
+    }));
 }

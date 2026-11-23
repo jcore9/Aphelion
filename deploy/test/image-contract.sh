@@ -110,12 +110,12 @@ as_root bash -c 'rm /scratch/secrets/bootstrap && printf bootstrap-canary >/scra
 "${compose[@]}" config | "${compose[@]}" run --rm -T --user harness "$service" \
   aphelion config check --compose - >/dev/null ||
   fail "config check refused the contract Compose file"
-if docker compose -p "$project" -f deploy/compose.yaml -f "$scratch/override.yaml" \
+refused=$(docker compose -p "$project" -f deploy/compose.yaml -f "$scratch/override.yaml" \
   -f "$scratch/everywhere.yaml" config |
   "${compose[@]}" run --rm -T --user harness "$service" \
-    aphelion config check --compose - >/dev/null 2>&1; then
-  fail "config check accepted a port published on every address"
-fi
+    aphelion config check --compose - 2>&1) && fail "config check accepted a port published on every address"
+grep -qF "publishes the port on every host address" <<<"$refused" ||
+  fail "config check failed for another reason: $refused"
 pass "config check accepts the Compose file and refuses a port on every address"
 
 install=("${compose[@]}" run --rm -T --user harness "$service" aphelion plugin install /opt/aphelion/plugins/contract-probe)

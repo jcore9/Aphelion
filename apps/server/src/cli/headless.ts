@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import { formatIssue } from "../config";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
-import { installedPluginFolders, sqlitePluginGrants } from "../plugins/grants";
+import { installedPlugins, sqlitePluginGrants } from "../plugins/grants";
 import { PluginHost, pluginHostLayer } from "../plugins/host";
 import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
 import type { Database } from "../store";
@@ -21,17 +21,20 @@ const startPlugins = (db: Database, fds: RunnerPipeFds, logger: Logger) =>
       ),
     );
     const host = Context.get(services, PluginHost);
-    const folders = installedPluginFolders(db);
-    for (const folder of folders) {
-      const started = yield* Effect.result(host.start(folder));
+    const installed = installedPlugins(db);
+    for (const { plugin, folder, digest } of installed) {
+      const started = yield* Effect.result(
+        host.start(folder, { id: plugin, digest }),
+      );
       if (started._tag === "Failure") {
         logger.error("an installed plugin was refused at startup", {
+          plugin,
           folder,
           issues: started.failure.issues.map((issue) => issue.message),
         });
       }
     }
-    logger.info("plugin host started", { installed: folders.length });
+    logger.info("plugin host started", { installed: installed.length });
   });
 
 export const headless = (

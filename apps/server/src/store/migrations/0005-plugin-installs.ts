@@ -7,5 +7,7 @@ export const pluginInstalls: Migration = {
     plugin TEXT PRIMARY KEY,
     folder TEXT NOT NULL,
     digest TEXT NOT NULL
-  ) STRICT;`,
+  ) STRICT;
+  INSERT INTO plugin_installs (plugin, folder, digest)
+    SELECT plugin, folder, digest FROM plugin_grants GROUP BY plugin;`,
 };

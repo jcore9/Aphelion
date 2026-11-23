@@ -142,7 +142,7 @@ aphelion plugin install /path/to/plugin
 
 If you accept the listed permissions, repeat the command with the displayed `--approve` argument. This approves the complete list for that folder and manifest. Installing again replaces the previous grant list for that plugin ID. The approval applies to the displayed folder and manifest. The host reads the manifest again on every launch, including automatic restarts. A changed manifest needs a new approval. Use the same `--state-dir` as the server if you changed the default.
 
-The install command records the plugin and its grants in SQLite. The server starts every recorded plugin when it starts, so restart the server after an install. In the container, plugins live read-only under `/opt/aphelion/plugins` ([install a plugin](../guides/install.md#install-a-plugin)).
+The install command records the plugin and its grants in SQLite. The server starts every recorded plugin when it starts, so restart the server after an install. The host refuses to start or restart a recorded plugin whose manifest differs from the approved one, and logs `a plugin's manifest changed since it was approved, so it won't start`. In the container, plugins live read-only under `/opt/aphelion/plugins` ([install a plugin](../guides/install.md#install-a-plugin)).
 
 The host identifies `network.get` requests by the plugin's own channel. The request takes an HTTPS URL using the default port and an exact granted hostname. The host connects to a public IPv4 address, skips redirects, and limits the response to 64 KiB and the request to five seconds. The container's controls for direct network access are a separate boundary.
 

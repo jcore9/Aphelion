@@ -421,6 +421,55 @@ describe("the plugin host", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.live(
+    "starts an approved plugin only while its manifest matches the approval",
+    () => {
+      let folder = "";
+      const { layer, record, logs } = harness({
+        pinned: (io) =>
+          Effect.gen(function* () {
+            yield* handshake(io);
+            yield* Effect.promise(() =>
+              writeFile(
+                join(folder, "aphelion-plugin.json"),
+                JSON.stringify({
+                  id: "pinned",
+                  version: "1.0.1",
+                  api: "^0.2.0",
+                  server: { entry: "index.js" },
+                  permissions: {},
+                }),
+              ),
+            );
+            return 1;
+          }),
+      });
+      return Effect.gen(function* () {
+        const host = yield* PluginHost;
+        folder = yield* serverPlugin("pinned");
+        const { digest } = yield* readManifest(folder);
+
+        const refused = yield* Effect.flip(
+          host.start(folder, { id: "pinned", digest: "0".repeat(64) }),
+        );
+        expect(refused.issues[0]?.message).toContain(
+          "the manifest changed since it was approved",
+        );
+        expect(record.spawned).toEqual([]);
+
+        yield* host.start(folder, { id: "pinned", digest });
+        yield* waitFor("pinned", { state: "stopped" });
+        expect(record.spawned).toHaveLength(1);
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            msg: "a plugin's manifest changed since it was approved, so it won't start",
+            plugin: "pinned",
+          }),
+        );
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
   it.live("gives up on a plugin that keeps crashing", () => {
     const { layer, record } = harness({
       broken: (io) => handshake(io).pipe(Effect.as(1)),

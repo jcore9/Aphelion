@@ -69,7 +69,7 @@ Plugins are read-only inside the container, so a plugin can't change its own cod
 
 The bot runner comes with M1-04 ([#22](https://github.com/jcore9/Aphelion/issues/22)). The launcher will start it the same way.
 
-After the launcher closes its copies, only the server and the plugin runner hold the pipes, and no file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved ([`aphelion --headless`](cli.md#aphelion---headless)).
+After the launcher closes its copies, only the server and the plugin runner hold the pipes, and no file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved, if its manifest is still the approved one ([`aphelion --headless`](cli.md#aphelion---headless)).
 
 ### Stopping
 
@@ -112,12 +112,16 @@ The container joins a bridge network named `aphelion`. Its host interface is `ap
 
 The server listens on port 7400 on every address inside the container. The Compose file publishes the port only on the host's tailnet address, which `APHELION_TAILNET_ADDRESS` sets. [`aphelion config check --compose -`](cli.md#checking-the-compose-file) refuses any other address.
 
-The host firewall keeps the container away from the LAN ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`deploy/host/firewall`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/firewall) installs two chains:
+The host firewall keeps the container away from the LAN, and the LAN away from the container ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`deploy/host/firewall`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/firewall) installs two chains:
 
-- `APHELION-FORWARD`, reached from Docker's `DOCKER-USER` chain for traffic from `aphelion0`, drops new connections to `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10` (the tailnet), `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`, multicast and `240.0.0.0/4`.
-- `APHELION-INPUT`, reached from `INPUT` for traffic from `aphelion0`, drops new connections to any of the host's own addresses.
+- `APHELION-FORWARD` is the first rule of Docker's `DOCKER-USER` chain. It drops traffic from `aphelion0` to `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10` (the tailnet), `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`, multicast and `240.0.0.0/4`. It also drops every new connection into the container, except one to port 7400 that arrives on the tailnet interface, `tailscale0`.
+- `APHELION-INPUT` is the first rule of the host's `INPUT` chain. It drops traffic from `aphelion0` to any of the host's own addresses.
 
-Both chains let replies through, so a tailnet device can still reach the published port. Everything else, including the AI providers' APIs, is allowed. If `ip6tables` works on the host, the script also drops all IPv6 traffic from `aphelion0`.
+The second rule matters because Linux accepts a packet for any of the host's addresses on any interface. Without it, a LAN device that sends a packet to the host's tailnet address reaches the published port.
+
+Both chains let replies through, but only replies to connections that were opened toward the container. Everything else from the container, including the AI providers' APIs, is allowed. If `ip6tables` works on the host, the script also drops all IPv6 traffic to and from `aphelion0`.
+
+The script refuses to run unless Docker's `DOCKER-USER` chain exists and the `FORWARD` chain uses it. It builds each chain under a temporary name and switches to it before it removes the old one, so a running container is never left without rules. Set `APHELION_TAILNET_INTERFACE` in `deploy/.env` if Tailscale's interface has another name.
 
 Names still resolve. Docker's resolver in the container sends its queries from the host's network, outside these rules. Docker 29.10 reported this as `ExtServers: [host(...)]` in the container's `/etc/resolv.conf`.
 
@@ -135,7 +139,7 @@ Names still resolve. Docker's resolver in the container sends its queries from t
 
 With `APHELION_TEST_TAILNET_ADDRESS` and `APHELION_TEST_LAN_ADDRESS` set, it also checks that `/health` answers on the tailnet address and not on the LAN address or `127.0.0.1`.
 
-[`deploy/test/host-contract.sh`](https://github.com/jcore9/Aphelion/blob/dev/deploy/test/host-contract.sh) runs in a throwaway privileged container, never on the host's own firewall. It builds a small network of namespaces with a bridge named `aphelion0`, and checks that the firewall drops the LAN, the host, the tailnet and the bridge, and still allows the internet and replies. It also checks that a second run of the firewall changes nothing, that `systemd-analyze` accepts `aphelion.service`, and that the preflight script refuses a bad or missing tailnet address.
+[`deploy/test/host-contract.sh`](https://github.com/jcore9/Aphelion/blob/dev/deploy/test/host-contract.sh) runs in a throwaway privileged container, never on the host's own firewall. It builds a small network of namespaces with a bridge named `aphelion0`, an interface named `tailscale0`, and a published port forwarded the way Docker does it. It checks that the firewall drops the container's traffic to the LAN, the host, the tailnet and the bridge, and still allows the internet. It checks that a tailnet client reaches the published port and that a LAN client doesn't, through the tailnet address or directly. It also checks that the firewall needs a live `DOCKER-USER` chain, that a second run changes nothing, that `systemd-analyze` accepts `aphelion.service`, and that the preflight script refuses a tailnet address that is malformed, missing or on another interface.
 
 A real host checks the rest during the M0 exit test: the install, a reboot, Tailscale, and the firewall with Docker's own chains. [Check the network boundary](../guides/install.md#check-the-network-boundary) runs the six connects from the [M0-03 review](../spikes/M0-03-headless-on-bun.md#review-findings).
 

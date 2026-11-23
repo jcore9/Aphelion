@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-readonly bridge=${APHELION_BRIDGE:-aphelion0}
-readonly forward=APHELION-FORWARD
-readonly input=APHELION-INPUT
+readonly bridge=aphelion0
+readonly tailnet=${APHELION_TAILNET_INTERFACE:-tailscale0}
+readonly port=7400
 readonly blocked=(
   0.0.0.0/8
   10.0.0.0/8
@@ -16,34 +16,54 @@ readonly blocked=(
   240.0.0.0/4
 )
 
-iptables -n -L DOCKER-USER >/dev/null 2>&1 || {
-  echo "firewall: Docker's DOCKER-USER chain is missing. Start Docker with its default iptables firewall first." >&2
+fail() {
+  echo "firewall: $*" >&2
   exit 1
 }
 
-for chain in "$forward" "$input"; do
-  iptables -N "$chain" 2>/dev/null || iptables -F "$chain"
-done
+[[ $tailnet =~ ^[A-Za-z0-9_.-]{1,15}$ ]] ||
+  fail "APHELION_TAILNET_INTERFACE must be a network interface name"
+iptables -n -L DOCKER-USER >/dev/null 2>&1 && iptables -C FORWARD -j DOCKER-USER 2>/dev/null ||
+  fail "Docker's DOCKER-USER chain is missing or unused. Start Docker with its default iptables firewall first."
 
-iptables -A "$forward" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-for range in "${blocked[@]}"; do
-  iptables -A "$forward" -d "$range" -j DROP
-done
-iptables -A "$forward" -j RETURN
+forward_rules() {
+  iptables -A "$1" -i "$bridge" -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j RETURN
+  for range in "${blocked[@]}"; do
+    iptables -A "$1" -i "$bridge" -d "$range" -j DROP
+  done
+  iptables -A "$1" -o "$bridge" -i "$tailnet" -p tcp --dport "$port" -m conntrack --ctstate NEW -j RETURN
+  iptables -A "$1" -o "$bridge" -m conntrack --ctstate NEW -j DROP
+}
 
-iptables -A "$input" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-iptables -A "$input" -j DROP
+input_rules() {
+  iptables -A "$1" -i "$bridge" -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j RETURN
+  iptables -A "$1" -i "$bridge" -j DROP
+}
 
-iptables -C DOCKER-USER -i "$bridge" -j "$forward" 2>/dev/null ||
-  iptables -I DOCKER-USER 1 -i "$bridge" -j "$forward"
-iptables -C INPUT -i "$bridge" -j "$input" 2>/dev/null ||
-  iptables -I INPUT 1 -i "$bridge" -j "$input"
+replace_chain() {
+  local name=$1 parent=$2 rules=$3 next="$1-NEXT"
+  while iptables -D "$parent" -j "$next" 2>/dev/null; do :; done
+  iptables -F "$next" 2>/dev/null && iptables -X "$next"
+  iptables -N "$next"
+  "$rules" "$next"
+  iptables -I "$parent" 1 -j "$next"
+  while iptables -D "$parent" -j "$name" 2>/dev/null; do :; done
+  if iptables -n -L "$name" >/dev/null 2>&1; then
+    iptables -F "$name"
+    iptables -X "$name"
+  fi
+  iptables -E "$next" "$name"
+}
+
+replace_chain APHELION-FORWARD DOCKER-USER forward_rules
+replace_chain APHELION-INPUT INPUT input_rules
 
 if ip6tables -n -L INPUT >/dev/null 2>&1; then
-  for chain in INPUT FORWARD; do
-    ip6tables -C "$chain" -i "$bridge" -j DROP 2>/dev/null ||
-      ip6tables -I "$chain" 1 -i "$bridge" -j DROP
+  for rule in "INPUT -i $bridge" "FORWARD -i $bridge" "FORWARD -o $bridge"; do
+    read -r chain direction interface <<<"$rule"
+    ip6tables -C "$chain" "$direction" "$interface" -j DROP 2>/dev/null ||
+      ip6tables -I "$chain" 1 "$direction" "$interface" -j DROP
   done
 fi
 
-echo "firewall: traffic from $bridge to private, tailnet and host addresses is dropped"
+echo "firewall: $bridge reaches only the internet, and only $tailnet opens connections to port $port"

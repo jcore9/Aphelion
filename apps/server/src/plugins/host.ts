@@ -32,7 +32,7 @@ import {
   type RestartPolicy,
 } from "./lifecycle";
 import type { Link } from "./link";
-import { readManifest, type PluginRefused } from "./manifest-file";
+import { PluginRefused, readManifest } from "./manifest-file";
 import { declaresPermission, PluginGrants, type Permission } from "./grants";
 import {
   networkRequest,
@@ -65,11 +65,17 @@ export type StartOutcome =
   | { readonly kind: "starting"; readonly id: string }
   | { readonly kind: "client only"; readonly id: string };
 
+export interface Approval {
+  readonly id: string;
+  readonly digest: string;
+}
+
 export class PluginHost extends Context.Service<
   PluginHost,
   {
     readonly start: (
       folder: string,
+      approval?: Approval,
     ) => Effect.Effect<StartOutcome, PluginRefused>;
     readonly stop: (id: string) => Effect.Effect<void>;
     readonly publish: (
@@ -103,6 +109,7 @@ interface Slot {
   readonly mailbox: Queue.Queue<SlotInput>;
   folder: string;
   digest: string;
+  approval: Approval | undefined;
   manifest: ServerManifest;
   state: LifecycleState;
   subscriptions: Set<string>;
@@ -304,6 +311,17 @@ export const pluginHostLayer = (options: HostOptions) =>
                 return;
               }
               const { manifest, digest } = loaded.success;
+              if (slot.approval && slot.approval.digest !== digest) {
+                logger.error(
+                  "a plugin's manifest changed since it was approved, so it won't start",
+                  { plugin: slot.id },
+                );
+                yield* Queue.offer(slot.mailbox, {
+                  type: "spawn-failed",
+                  run: command.run,
+                });
+                return;
+              }
               slot.manifest = manifest;
               slot.digest = digest;
               slot.subscriptions = new Set();
@@ -536,9 +554,23 @@ export const pluginHostLayer = (options: HostOptions) =>
         ),
       );
 
-      const start = (path: string) =>
+      const start = (path: string, approval?: Approval) =>
         Effect.gen(function* () {
           const { manifest, digest, folder } = yield* readManifest(path);
+          if (
+            approval &&
+            (approval.id !== manifest.id || approval.digest !== digest)
+          ) {
+            return yield* new PluginRefused({
+              folder: path,
+              issues: [
+                {
+                  message:
+                    "the manifest changed since it was approved. Run aphelion plugin install again.",
+                },
+              ],
+            });
+          }
           if (manifest.server === undefined) {
             return { kind: "client only", id: manifest.id } as const;
           }
@@ -549,6 +581,7 @@ export const pluginHostLayer = (options: HostOptions) =>
               mailbox: yield* Queue.unbounded<SlotInput>(),
               folder,
               digest,
+              approval,
               manifest,
               state: installed,
               subscriptions: new Set(),
@@ -572,6 +605,7 @@ export const pluginHostLayer = (options: HostOptions) =>
           ) {
             slot.folder = folder;
             slot.digest = digest;
+            slot.approval = approval;
             slot.manifest = manifest;
           }
           yield* Queue.offer(slot.mailbox, { type: "start" });

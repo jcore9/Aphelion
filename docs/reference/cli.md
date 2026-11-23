@@ -43,7 +43,7 @@ The server starts in this order:
 2. It logs a `warn` line for each config file at an older version, which it read through a migration ([versions and migrations](config.md#versions-and-migrations)).
 3. It opens `aphelion.db` in the state folder and applies any new [migrations](store.md#migrations).
 4. It starts the [HTTP and WebSocket server](server.md) on the address and port from `server.yaml`, and logs `server started` with the version, address and port.
-5. With `--plugin-runner-fds`, it starts the [plugin host](plugins.md) on those pipes and asks the runner to start every plugin that `aphelion plugin install` approved. It logs an `error` line for a plugin whose manifest it can't read, and goes on with the others. Then it logs `plugin host started` with the number of approved plugins. Without the option, it logs `plugins are off: no plugin runner pipe was given`.
+5. With `--plugin-runner-fds`, it starts the [plugin host](plugins.md) on those pipes and asks the runner to start every plugin that `aphelion plugin install` approved. It logs an `error` line for a plugin whose manifest it can't read or no longer matches the approved one, and goes on with the others. Then it logs `plugin host started` with the number of approved plugins. Without the option, it logs `plugins are off: no plugin runner pipe was given`.
 
 On `SIGTERM` or `SIGINT` it logs `server stopping`, closes the listener and the database, and exits with code 130.
 

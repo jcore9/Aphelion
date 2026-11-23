@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { installedPluginFolders } from "../plugins/grants";
+import { installedPlugins } from "../plugins/grants";
 import { openStore } from "../store";
 import { version } from "../version";
 import { cli, CliFailure, CliIo } from "./index";
@@ -356,7 +356,9 @@ test("plugin install previews permissions and only saves the approved manifest",
         name: "api.example.com",
       },
     ]);
-    expect(installedPluginFolders(db)).toEqual([folder]);
+    expect(installedPlugins(db)).toEqual([
+      { plugin: "weather", folder, digest },
+    ]);
   } finally {
     db.close();
   }

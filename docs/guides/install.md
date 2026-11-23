@@ -15,10 +15,10 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
 ## Install
 
-1. Clone the repository to `/opt/aphelion` as root. The service runs the files there, so only root may change them.
+1. Clone the `dev` branch to `/opt/aphelion` as root. The service runs the files there, so only root may change them. Until the first release, only `dev` has the deployment files.
 
    ```sh
-   sudo git clone https://github.com/jcore9/Aphelion.git /opt/aphelion
+   sudo git clone --branch dev https://github.com/jcore9/Aphelion.git /opt/aphelion
    ```
 
 2. Write the host's tailnet address to `/opt/aphelion/deploy/.env`.
@@ -27,7 +27,7 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
    echo "APHELION_TAILNET_ADDRESS=$(tailscale ip -4)" | sudo tee /opt/aphelion/deploy/.env
    ```
 
-   The same file takes three optional settings: `APHELION_MEMORY` (default `4g`), `APHELION_CPUS` (default `2`) and `APHELION_SUBNET` (default `172.30.73.0/24`).
+   The same file takes four optional settings: `APHELION_MEMORY` (default `4g`), `APHELION_CPUS` (default `2`), `APHELION_SUBNET` (default `172.30.73.0/24`) and `APHELION_TAILNET_INTERFACE` (default `tailscale0`).
 
 3. Build the image.
 
@@ -66,9 +66,9 @@ Run every `docker compose` command in this guide from `/opt/aphelion/deploy`, so
 
 ## What the service does
 
-[`aphelion.service`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/aphelion.service) starts after Docker and Tailscale. Before each start, [`host/preflight`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/preflight) does three things:
+[`aphelion.service`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/aphelion.service) starts at boot after Docker and Tailscale. It also starts whenever Docker starts, and stops when Docker stops. Before each start, [`host/preflight`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/preflight) does three things:
 
-1. It waits up to 120 seconds for `APHELION_TAILNET_ADDRESS` to appear on the host. Docker can't publish a port on an address that doesn't exist yet.
+1. It waits up to 120 seconds for `APHELION_TAILNET_ADDRESS` to appear on the tailnet interface, `tailscale0`. Docker can't publish a port on an address that doesn't exist yet.
 2. It installs the [host firewall](../reference/container.md#network) again. Firewall rules don't survive a reboot, so every start installs them.
 3. It runs `aphelion config check` on the rendered Compose file, as `harness`. The check refuses a port published anywhere but the tailnet.
 
@@ -111,7 +111,7 @@ Each target is an address and an open port. For example:
 sudo host/network-check 10.0.0.1:80 10.0.0.133:22 100.71.226.67:22 100.93.139.95:22 172.30.73.1:22 1.1.1.1:443
 ```
 
-The first five must print `blocked`, the sixth `reachable`, and names must resolve. The script exits with code 1 if any check fails.
+The first five must print `blocked`, which means the connection timed out because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The script exits with code 1 if any check fails, and with code 2 if a target is malformed or the container isn't running.
 
 Other tools that change Docker's `DOCKER-USER` chain or the `INPUT` chain can break the boundary. Run the check again after you change the host's firewall.
 
@@ -128,7 +128,7 @@ The launcher, the server, the broker, the plugin runner and the plugins all log 
 
 ```sh
 cd /opt/aphelion
-sudo git pull
+sudo git pull --ff-only
 cd deploy
 sudo docker compose build
 sudo systemctl restart aphelion

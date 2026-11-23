@@ -3,6 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 readonly address=${APHELION_TAILNET_ADDRESS:-}
+readonly interface=${APHELION_TAILNET_INTERFACE:-tailscale0}
 readonly wait_seconds=${APHELION_TAILNET_WAIT:-120}
 
 if [[ ! $address =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
@@ -10,9 +11,9 @@ if [[ ! $address =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0
   exit 1
 fi
 
-until ip -4 -o address show | grep -qF " inet $address/"; do
+until ip -4 -o address show dev "$interface" 2>/dev/null | grep -qF " inet $address/"; do
   if ((SECONDS >= wait_seconds)); then
-    echo "preflight: $address didn't appear within $wait_seconds seconds. Is Tailscale up?" >&2
+    echo "preflight: $address didn't appear on $interface within $wait_seconds seconds. Is Tailscale up?" >&2
     exit 1
   fi
   sleep 2
