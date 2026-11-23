@@ -29,6 +29,7 @@ describe("accepted command lines", () => {
         configDir: defaultConfigDir,
         stateDir: defaultStateDir,
         pluginRunnerFds: undefined,
+        pluginDev: undefined,
       },
     ],
     [
@@ -38,6 +39,7 @@ describe("accepted command lines", () => {
         configDir: "/c",
         stateDir: "/s",
         pluginRunnerFds: undefined,
+        pluginDev: undefined,
       },
     ],
     [
@@ -47,6 +49,31 @@ describe("accepted command lines", () => {
         configDir: defaultConfigDir,
         stateDir: defaultStateDir,
         pluginRunnerFds: { replies: 3, requests: 4 },
+        pluginDev: undefined,
+      },
+    ],
+    [
+      [
+        "--headless",
+        "--plugin-runner-fds",
+        "3,4",
+        "--plugin-dev",
+        "/opt/aphelion/dev-plugin",
+      ],
+      {
+        kind: "headless",
+        configDir: defaultConfigDir,
+        stateDir: defaultStateDir,
+        pluginRunnerFds: { replies: 3, requests: 4 },
+        pluginDev: "/opt/aphelion/dev-plugin",
+      },
+    ],
+    [
+      ["plugin", "dev", "/opt/aphelion/dev-plugin"],
+      {
+        kind: "plugin dev",
+        stateDir: defaultStateDir,
+        folder: "/opt/aphelion/dev-plugin",
       },
     ],
     [
@@ -167,6 +194,15 @@ describe("refused command lines", () => {
     [
       ["--headless", "--plugin-runner-fds", "3,3"],
       "--plugin-runner-fds must name two different descriptors",
+    ],
+    [
+      ["--headless", "--plugin-dev", "dev-plugin"],
+      "--plugin-dev must be an absolute path",
+    ],
+    [["plugin", "dev"], '"plugin dev" needs a folder'],
+    [
+      ["plugin", "dev", "/a", "--plugin-dev", "/a"],
+      '--plugin-dev isn\'t an option of "plugin dev"',
     ],
     [
       ["config", "check", "--plugin-runner-fds", "3,4"],

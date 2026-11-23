@@ -7,9 +7,12 @@ export const helpText = `Aphelion server and command line
 Usage:
   aphelion --headless [--config-dir DIR] [--state-dir DIR]
                       [--plugin-runner-fds REPLIES,REQUESTS]
+                      [--plugin-dev FOLDER]
       Start the server. The container runs this. With --plugin-runner-fds,
       the server reads the plugin runner's replies on descriptor REPLIES,
       writes its requests on REQUESTS, and starts every installed plugin.
+      With --plugin-dev, the server also lets plugin dev reload the approved
+      plugin in FOLDER.
 
   aphelion config check [--config-dir DIR] [--state-dir DIR] [--compose FILE]
       Check the config files, the modes of both folders and, with --compose,
@@ -29,6 +32,11 @@ Usage:
   aphelion plugin install FOLDER [--approve DIGEST] [--state-dir DIR]
       Preview the permissions for an unpacked plugin. Repeat with the displayed
       digest to save the grants.
+
+  aphelion plugin dev FOLDER [--state-dir DIR]
+      Reload the approved plugin in FOLDER through the running server, then
+      reload it again each time its files change. Works only when the server
+      runs with --plugin-dev FOLDER. Ctrl-C stops watching.
 
   aphelion --version
   aphelion --help

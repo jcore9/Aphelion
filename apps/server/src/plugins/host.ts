@@ -589,8 +589,7 @@ export const pluginHostLayer = (options: HostOptions) =>
               folder: path,
               issues: [
                 {
-                  message:
-                    "the manifest changed since it was approved. Run aphelion plugin install again.",
+                  message: `the manifest changed since it was approved. Run aphelion plugin install ${folder} to approve it again.`,
                 },
               ],
             });
