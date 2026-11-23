@@ -9,6 +9,7 @@
 - Amends: [0006](0006-shared-bot-user.md) (how bots are started), [0009](0009-electron-desktop-shell.md) (desktop local mode), [0010](0010-bot-folders.md) (per-bot systemd units), [0012](0012-secrets-broker-process.md) (where the broker runs), [0014](0014-filesystem-layout.md) (where the paths live)
 - Amended by: [0035](0035-codex-login-sandbox-approvals.md) (the container's seccomp profile allows user namespaces, so Codex's sandbox runs)
 - Amended by: [0045](0045-no-bot-namespaces-default-seccomp.md) (reverses that: the container keeps Docker's default seccomp profile)
+- Amended by: [0049](0049-ai-tools-installed-from-a-list.md) (the image ships no AI tool; the owner installs AI tools from a list)
 
 ## Context
 

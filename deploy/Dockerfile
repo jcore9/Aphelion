@@ -1,0 +1,37 @@
+FROM oven/bun:1.4.5@sha256:3aa040e5445efa09d75bb428a64ba50db13e2b3ac9b6b0c7f145615f62b2ee18 AS build
+WORKDIR /src
+COPY . .
+RUN bun install --frozen-lockfile --filter @aphelion/server \
+ && cd apps/server \
+ && bun run build \
+ && bun run build:broker \
+ && bun run build:plugin-runner
+
+FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends ca-certificates git tini \
+ && rm -rf /var/lib/apt/lists/* \
+ && userdel --remove ubuntu \
+ && groupadd --gid 10001 harness \
+ && groupadd --gid 10002 aphelion-bot \
+ && groupadd --gid 10003 aphelion-secrets \
+ && groupadd --gid 10004 aphelion-plugins \
+ && useradd --uid 10001 --gid harness --groups aphelion-bot --no-create-home --home-dir /var/lib/aphelion --shell /usr/sbin/nologin harness \
+ && useradd --uid 10002 --gid aphelion-bot --no-create-home --home-dir /var/lib/aphelion-bots --shell /usr/sbin/nologin aphelion-bot \
+ && useradd --uid 10003 --gid aphelion-secrets --no-create-home --home-dir /var/lib/aphelion-secrets --shell /usr/sbin/nologin aphelion-secrets \
+ && useradd --uid 10004 --gid aphelion-plugins --no-create-home --home-dir /var/lib/aphelion-plugins --shell /usr/sbin/nologin aphelion-plugins \
+ && install -d -o harness -g harness -m 0750 /etc/aphelion \
+ && install -d -o harness -g harness -m 0700 /var/lib/aphelion \
+ && install -d -o aphelion-bot -g aphelion-bot -m 0750 /var/lib/aphelion-bots \
+ && install -d -o aphelion-secrets -g aphelion-secrets -m 0700 /var/lib/aphelion-secrets \
+ && install -d -o aphelion-plugins -g aphelion-plugins -m 0700 /var/lib/aphelion-plugins \
+ && install -d -m 0755 /opt/aphelion/plugins /usr/local/lib/aphelion \
+ && find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
+COPY --from=build --chmod=0755 /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=build --chmod=0755 /src/apps/server/dist/aphelion /src/apps/server/dist/aphelion-secrets /usr/local/bin/
+COPY --from=build --chmod=0644 /src/apps/server/dist/plugin-runner.js /usr/local/lib/aphelion/
+COPY --chown=harness:harness --chmod=0640 docs/reference/config/example/*.yaml /etc/aphelion/
+COPY --chmod=0755 deploy/image/launch /usr/local/lib/aphelion/launch
+EXPOSE 7400
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/usr/local/lib/aphelion/launch"]

@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly root=/opt/aphelion
+readonly unit=/etc/systemd/system/aphelion.service
+
+if ((EUID != 0)); then
+  echo "install: run this with sudo" >&2
+  exit 1
+fi
+if [[ $(cd "$(dirname "$0")/../.." && pwd -P) != "$root" ]]; then
+  echo "install: clone Aphelion to $root first. The unit runs the files there." >&2
+  exit 1
+fi
+for path in "$root" "$root/deploy" "$root/deploy/host"; do
+  if [[ $(stat -c '%u' "$path") != 0 ]] || (($(stat -c '%a' "$path" | sed 's/^/8#/') & 8#022)); then
+    echo "install: $path must be owned by root and writable only by root" >&2
+    exit 1
+  fi
+done
+if [[ ! -f $root/deploy/.env ]]; then
+  echo "install: create $root/deploy/.env with APHELION_TAILNET_ADDRESS first" >&2
+  exit 1
+fi
+
+install -d -o root -g root -m 0755 "$root/deploy/plugins"
+install -o root -g root -m 0644 "$root/deploy/host/aphelion.service" "$unit"
+systemctl daemon-reload
+systemctl enable aphelion.service
+echo "install: aphelion.service is installed and enabled. Start it with: sudo systemctl start aphelion"

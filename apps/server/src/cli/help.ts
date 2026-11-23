@@ -6,7 +6,10 @@ export const helpText = `Aphelion server and command line
 
 Usage:
   aphelion --headless [--config-dir DIR] [--state-dir DIR]
-      Start the server. The container runs this.
+                      [--plugin-runner-fds REPLIES,REQUESTS]
+      Start the server. The container runs this. With --plugin-runner-fds,
+      the server reads the plugin runner's replies on descriptor REPLIES,
+      writes its requests on REQUESTS, and starts every installed plugin.
 
   aphelion config check [--config-dir DIR] [--state-dir DIR] [--compose FILE]
       Check the config files, the modes of both folders and, with --compose,

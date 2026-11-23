@@ -59,6 +59,10 @@ export function recordGrants(
     throw new Error("a grant must be declared in the manifest");
   }
   db.transaction(() => {
+    db.run(
+      "INSERT INTO plugin_installs (plugin, folder, digest) VALUES (?, ?, ?) ON CONFLICT (plugin) DO UPDATE SET folder = excluded.folder, digest = excluded.digest",
+      [manifest.id, folder, digest],
+    );
     db.run("DELETE FROM plugin_grants WHERE plugin = ?", [manifest.id]);
     for (const { kind, name } of permissions) {
       db.run(
@@ -80,3 +84,19 @@ export const sqlitePluginGrants = (db: Database) =>
           ).length > 0,
       ).pipe(Effect.orElseSucceed(() => false)),
   });
+
+export interface Installed {
+  readonly plugin: string;
+  readonly folder: string;
+  readonly digest: string;
+}
+
+export function installedPlugins(db: Database): Installed[] {
+  return db
+    .all("SELECT plugin, folder, digest FROM plugin_installs ORDER BY plugin")
+    .map((row) => ({
+      plugin: String(row["plugin"]),
+      folder: String(row["folder"]),
+      digest: String(row["digest"]),
+    }));
+}

@@ -142,7 +142,7 @@ aphelion plugin install /path/to/plugin
 
 If you accept the listed permissions, repeat the command with the displayed `--approve` argument. This approves the complete list for that folder and manifest. Installing again replaces the previous grant list for that plugin ID. The approval applies to the displayed folder and manifest. The host reads the manifest again on every launch, including automatic restarts. A changed manifest needs a new approval. Use the same `--state-dir` as the server if you changed the default.
 
-The install command records grants in SQLite for an existing folder. The container startup that runs plugins in the deployed server is tracked in [#14](https://github.com/jcore9/Aphelion/issues/14).
+The install command records the plugin and its grants in SQLite. The server starts every recorded plugin when it starts, so restart the server after an install. The host refuses to start or restart a recorded plugin whose manifest differs from the approved one, and logs `a plugin's manifest changed since it was approved, so it won't start`. In the container, plugins live read-only under `/opt/aphelion/plugins` ([install a plugin](../guides/install.md#install-a-plugin)).
 
 The host identifies `network.get` requests by the plugin's own channel. The request takes an HTTPS URL using the default port and an exact granted hostname. The host connects to a public IPv4 address, skips redirects, and limits the response to 64 KiB and the request to five seconds. The container's controls for direct network access are a separate boundary.
 
@@ -159,19 +159,21 @@ The runner trusts every message on its standard input. Only the server may write
 - The runner marks itself as not dumpable with `prctl(PR_SET_DUMPABLE, 0)`. Linux then hides the runner's memory and open files from other processes of the same user. A plugin can't open the runner's pipe through `/proc/<runner>/fd/` or attach a debugger to the runner. A test checks that a process of the same user can't read where `/proc/<runner>/fd/0` points, which Linux refuses for the same reason it refuses opening it.
 - The runner gives each plugin new pipes for its standard input, output and error. A plugin doesn't inherit the runner's pipe.
 
-Issue [#14](https://github.com/jcore9/Aphelion/issues/14), the container image, must make sure of the rest:
+The [container](container.md#how-the-processes-start) makes sure of the rest, and its contract test checks each point:
 
-- The init creates the pipe before it drops privileges, and only the server and the runner hold its ends.
-- No file in the filesystem leads to the pipe, and no other process gets a copy of its ends.
-- The `aphelion-plugins` user can't open, signal or debug the server.
+- The launcher creates the pipe before it drops privileges, and only the server and the runner hold its ends.
+- No file in the file system leads to the pipe, and no other process gets a copy of its ends.
+- The `aphelion-plugins` user can't open the server's pipes, read its memory or signal it.
 
 ### Running the runner
 
-The container's init starts the runner as `aphelion-plugins`, with the pipe to the server on its standard input and output:
+The container's launcher starts the runner as `aphelion-plugins`, with the pipe to the server on its standard input and output:
 
 ```sh
-bun apps/server/src/plugins/runner-main.ts --bun /usr/local/bin/bun --data /var/lib/aphelion-plugins
+bun /usr/local/lib/aphelion/plugin-runner.js --bun /usr/local/bin/bun --data /var/lib/aphelion-plugins
 ```
+
+`bun run --filter @aphelion/server build:plugin-runner` bundles `apps/server/src/plugins/runner-main.ts` into that one file.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -180,4 +182,4 @@ bun apps/server/src/plugins/runner-main.ts --bun /usr/local/bin/bun --data /var/
 
 The runner logs to its standard error. It logs an error if it couldn't kill every process of a plugin. When the server stops, the host tells the runner to stop every plugin. When the pipe closes, the runner kills every plugin and exits.
 
-The container image adds the user, the runner and the data volume in issue [#14](https://github.com/jcore9/Aphelion/issues/14).
+If the server closes its end first, the runner logs `the plugin runner couldn't write to the server` and exits when its standard input closes.

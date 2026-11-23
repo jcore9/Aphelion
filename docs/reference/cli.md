@@ -22,6 +22,7 @@
 | `--state-dir DIR` | `--headless`, `config check`, `device` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
+| `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
 
 The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
 
@@ -42,6 +43,7 @@ The server starts in this order:
 2. It logs a `warn` line for each config file at an older version, which it read through a migration ([versions and migrations](config.md#versions-and-migrations)).
 3. It opens `aphelion.db` in the state folder and applies any new [migrations](store.md#migrations).
 4. It starts the [HTTP and WebSocket server](server.md) on the address and port from `server.yaml`, and logs `server started` with the version, address and port.
+5. With `--plugin-runner-fds`, it starts the [plugin host](plugins.md) on those pipes and asks the runner to start every plugin that `aphelion plugin install` approved. It logs an `error` line for a plugin whose manifest it can't read or no longer matches the approved one, and goes on with the others. Then it logs `plugin host started` with the number of approved plugins. Without the option, it logs `plugins are off: no plugin runner pipe was given`.
 
 On `SIGTERM` or `SIGINT` it logs `server stopping`, closes the listener and the database, and exits with code 130.
 
@@ -51,7 +53,7 @@ The server logs JSON lines on standard output, through the redacting [logger](lo
 {"time":"2026-11-22T22:30:55.188Z","level":"info","msg":"server started","version":"0.0.0","address":"0.0.0.0","port":7400}
 ```
 
-Headless mode never loads Electron or any GUI library. The plugin host doesn't start with the server yet. [#14](https://github.com/jcore9/Aphelion/issues/14) adds it with the container.
+Headless mode never loads Electron or any GUI library. In the container, the [launcher](container.md#how-the-processes-start) creates the pipes and passes `--plugin-runner-fds 3,4`.
 
 ## `aphelion config check`
 
@@ -95,7 +97,7 @@ docker compose --profile '*' config \
 
 `set -o pipefail` makes the whole line fail when `docker compose config` fails, for example on a syntax error, instead of reporting only the check's result.
 
-The service name and the way the image starts `aphelion` come from the Compose file and image that [#14](https://github.com/jcore9/Aphelion/issues/14) builds, so this line may change there. `--compose FILE` reads a file that holds the same output instead. The check refuses input with no services, such as an empty file or `{}`, because that can't be the output for Aphelion's Compose file.
+The service is named `aphelion` in [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.yaml), and `aphelion.service` runs this line before every start ([what the service does](../guides/install.md#what-the-service-does)). `--compose FILE` reads a file that holds the same output instead. The check refuses input with no services, such as an empty file or `{}`, because that can't be the output for Aphelion's Compose file.
 
 ## `aphelion device add NAME`
 
@@ -147,7 +149,7 @@ cd apps/server
 bun run build
 ```
 
-This runs `bun build --compile` and writes one file, `apps/server/dist/aphelion`, of about 110 MB. The binary holds Bun itself, so the machine that runs it needs nothing else. On a developer's machine, `bun apps/server/src/cli/main.ts` runs the same program from source.
+This runs `bun build --compile` and writes one file, `apps/server/dist/aphelion`, of about 110 MB. The [container image](container.md) builds it the same way. The binary holds Bun itself, so the machine that runs it needs nothing else. On a developer's machine, `bun apps/server/src/cli/main.ts` runs the same program from source.
 
 ## Code
 

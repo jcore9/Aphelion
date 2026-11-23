@@ -6,7 +6,7 @@ Plugins never see a secret's value ([decision 0042](../decisions/0042-plugin-ser
 
 ## Local secrets broker
 
-The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003). Build its executable with `bun run --filter @aphelion/server build:broker`. The executable is `apps/server/dist/aphelion-secrets`. Container startup is tracked in [#14](https://github.com/jcore9/Aphelion/issues/14). Delivery of the bootstrap credential is tracked in [#105](https://github.com/jcore9/Aphelion/issues/105).
+The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003). Build its executable with `bun run --filter @aphelion/server build:broker`. The executable is `apps/server/dist/aphelion-secrets`. In the container, the [launcher](container.md#how-the-processes-start) starts it. If `/run/secrets/bootstrap` exists, the launcher opens it as root and gives it to the broker as standard input. Delivery of the bootstrap credential to that file, and its use by the broker, are tracked in [#105](https://github.com/jcore9/Aphelion/issues/105).
 
 | Path | Owner and mode | Purpose |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003)
 | `/run/aphelion-secrets/broker.sock` | `aphelion-secrets:harness`, `0660` | The broker creates the socket at startup. The service accounts for bots and plugins are outside the `harness` group. |
 | `/var/lib/aphelion-secrets/` | `aphelion-secrets`, `0700` | The persistent store. The broker creates the age private key and encrypted entries with mode `0600`. |
 
-Init provisions the directories before starting the broker. Their parent directories must be writable only by trusted system users. After an unclean stop, init may remove a leftover socket once it confirms that the previous broker has exited. The broker checks the socket directory group against the local `harness` group in `/etc/group`. It refuses to replace an existing socket at startup.
+The parent folders of these paths must be writable only by root. In the container, `/run/aphelion-secrets/` is a fresh in-memory folder that Docker creates with this owner and mode at every start, so no socket is left over from an earlier run. The launcher checks its owner and mode before it starts the broker. The broker checks the socket directory group against the local `harness` group in `/etc/group`. It refuses to replace an existing socket at startup.
 
 The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. The encrypted record includes a format version and the reference path. A read fails if the stored path differs from the requested path. If the key is missing and entries exist, startup fails.
 

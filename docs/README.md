@@ -15,6 +15,10 @@ These Markdown files read the same on GitHub and on the docs site. `bun run docs
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
 
+## Guides
+
+- [Install the headless server](guides/install.md): the host, the image, `aphelion.service`, plugins, the network check and upgrades.
+
 ## Working on the repository
 
 - [Branch protection](branch-protection.md): how changes reach `dev` and `main`, and why.
@@ -42,6 +46,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [Protocol spec](reference/protocol-spec.md): every frame, command, event and error code, generated from the protocol schemas.
 - [Plugin manifest](reference/plugin-manifest.md): the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
 - [Running plugins on the server](reference/plugins.md): how the plugin host and the plugin runner start, talk to, restart and stop a plugin's server part, its environment and data folder, and the JSON-RPC messages.
+- [The container](reference/container.md): the image, the four users, the folders, how the launcher starts and stops the processes, the hardening, the network boundary and the contract tests.
 - [Secrets](reference/secrets.md): the `Secret` type, what it guarantees and what it doesn't, how to read a value, and the secret reference syntax.
 
 ## Decision records
@@ -98,3 +103,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0046](decisions/0046-plugin-runner-kills-process-trees.md) | The plugin runner adopts every process its plugins leave behind, and freezes then kills a plugin's whole process tree | Accepted |
 | [0047](decisions/0047-repo-layout.md) | The code is split into apps and shared packages, and the server and its CLI are one package in `apps/server` | Accepted |
 | [0048](decisions/0048-cli-on-node-parseargs.md) | The aphelion command reads its command line with Node's parseArgs, and Docker's Compose output reaches config check through standard input | Proposed |
+| [0049](decisions/0049-ai-tools-installed-from-a-list.md) | The container image ships no AI tool, and the owner installs AI tools from a list | Proposed |

@@ -21,6 +21,11 @@ export async function serveRunner(options: RunnerMainOptions): Promise<void> {
   const logger = createLogger({
     write: (line) => process.stderr.write(`${line}\n`),
   });
+  process.stdout.on("error", (error) => {
+    logger.error("the plugin runner couldn't write to the server", {
+      error: error.message,
+    });
+  });
   const program = Effect.gen(function* () {
     const link = yield* pipeLink(
       Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>,

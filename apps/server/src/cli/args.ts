@@ -14,6 +14,7 @@ const options = {
   compose: { type: "string" },
   days: { type: "string" },
   approve: { type: "string" },
+  "plugin-runner-fds": { type: "string" },
 } as const;
 
 type Option = keyof typeof options;
@@ -25,6 +26,7 @@ export type Command =
       readonly kind: "headless";
       readonly configDir: string;
       readonly stateDir: string;
+      readonly pluginRunnerFds: PluginRunnerFds | undefined;
     }
   | {
       readonly kind: "config check";
@@ -51,6 +53,11 @@ export type Command =
       readonly id: string;
     };
 
+export interface PluginRunnerFds {
+  readonly replies: number;
+  readonly requests: number;
+}
+
 type Kind = Command["kind"];
 
 const grammar: Record<
@@ -63,7 +70,10 @@ const grammar: Record<
 > = {
   help: { words: 0, flags: ["help"] },
   version: { words: 0, flags: ["version"] },
-  headless: { words: 0, flags: ["headless", "config-dir", "state-dir"] },
+  headless: {
+    words: 0,
+    flags: ["headless", "config-dir", "state-dir", "plugin-runner-fds"],
+  },
   "config check": {
     words: 2,
     flags: ["config-dir", "state-dir", "compose"],
@@ -89,6 +99,23 @@ const days = z
   .regex(/^\d+$/, { error: "must be a whole number of days" })
   .transform(Number)
   .pipe(lifetimeDays);
+
+const pluginRunnerFds = z
+  .string()
+  .regex(/^\d{1,4},\d{1,4}$/, {
+    error: "must be two file descriptor numbers, such as 3,4",
+  })
+  .transform((text) => {
+    const [replies = 0, requests = 0] = text.split(",").map(Number);
+    return { replies, requests };
+  })
+  .refine(({ replies, requests }) => replies >= 3 && requests >= 3, {
+    error:
+      "must name descriptors from 3 up, after standard input, output and error",
+  })
+  .refine(({ replies, requests }) => replies !== requests, {
+    error: "must name two different descriptors",
+  });
 
 function check<T>(
   label: string,
@@ -195,8 +222,24 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
     case "help":
     case "version":
       return { ok: true, command: { kind } };
-    case "headless":
-      return { ok: true, command: { kind, configDir, stateDir } };
+    case "headless": {
+      if (values["plugin-runner-fds"] === undefined) {
+        return {
+          ok: true,
+          command: { kind, configDir, stateDir, pluginRunnerFds: undefined },
+        };
+      }
+      const fds = check(
+        "--plugin-runner-fds",
+        pluginRunnerFds,
+        values["plugin-runner-fds"],
+      );
+      if (!fds.ok) return fds;
+      return {
+        ok: true,
+        command: { kind, configDir, stateDir, pluginRunnerFds: fds.value },
+      };
+    }
     case "config check":
       return {
         ok: true,

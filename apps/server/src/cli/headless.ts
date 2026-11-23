@@ -1,14 +1,48 @@
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { formatIssue } from "../config";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
+import { installedPlugins, sqlitePluginGrants } from "../plugins/grants";
+import { PluginHost, pluginHostLayer } from "../plugins/host";
+import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
+import type { Database } from "../store";
 import { version } from "../version";
 import { checkDirs, migratedNote } from "./checks";
 import { withStore } from "./device";
 import { failed } from "./failure";
 
+const startPlugins = (db: Database, fds: RunnerPipeFds, logger: Logger) =>
+  Effect.gen(function* () {
+    const services = yield* Layer.build(
+      pluginHostLayer({ logger }).pipe(
+        Layer.provide(
+          Layer.mergeAll(runnerPipeLink(fds, logger), sqlitePluginGrants(db)),
+        ),
+      ),
+    );
+    const host = Context.get(services, PluginHost);
+    const installed = installedPlugins(db);
+    for (const { plugin, folder, digest } of installed) {
+      const started = yield* Effect.result(
+        host.start(folder, { id: plugin, digest }),
+      );
+      if (started._tag === "Failure") {
+        logger.error("an installed plugin was refused at startup", {
+          plugin,
+          folder,
+          issues: started.failure.issues.map((issue) => issue.message),
+        });
+      }
+    }
+    logger.info("plugin host started", { installed: installed.length });
+  });
+
 export const headless = (
-  options: { readonly configDir: string; readonly stateDir: string },
+  options: {
+    readonly configDir: string;
+    readonly stateDir: string;
+    readonly pluginRunnerFds: RunnerPipeFds | undefined;
+  },
   logger: Logger,
 ) =>
   Effect.gen(function* () {
@@ -25,10 +59,16 @@ export const headless = (
       });
     }
     const { address, port } = checked.config.server;
+    const fds = options.pluginRunnerFds;
     return yield* withStore(options.stateDir, (db) =>
       Effect.gen(function* () {
         yield* Layer.build(serveHttp({ address, port }, db));
         logger.info("server started", { version, address, port });
+        if (fds === undefined) {
+          logger.info("plugins are off: no plugin runner pipe was given");
+        } else {
+          yield* startPlugins(db, fds, logger);
+        }
         return yield* Effect.never;
       }).pipe(
         Effect.scoped,
