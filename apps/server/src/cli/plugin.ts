@@ -9,6 +9,8 @@ import {
 import { permissionList } from "../plugins/grants";
 import { readManifest } from "../plugins/manifest-file";
 import { filesDigest } from "../plugins/tree-digest";
+import { withFilesLock } from "../plugins/updates/files-lock";
+import { UpdateRefused } from "../plugins/updates/refused";
 import { databaseFile, withStore } from "./device";
 import { failed } from "./failure";
 import { CliIo } from "./io";
@@ -69,9 +71,9 @@ export const pluginInstall = (options: {
       return;
     }
     const { approve } = options;
-    const saved =
-      approve === approval &&
-      (yield* withStore(options.stateDir, (db) =>
+    const save = withFilesLock(
+      options.stateDir,
+      withStore(options.stateDir, (db) =>
         Effect.sync(() =>
           db.transaction(() => {
             const installed = readInstall(db, manifest.id)?.current.version;
@@ -82,13 +84,21 @@ export const pluginInstall = (options: {
               source: "folder",
               folder,
               filesDigest: digest.success,
-              repository: undefined,
+              repository: manifest.repository,
               grants: permissions,
             });
             return true;
           }),
         ),
-      ));
+      ),
+    ).pipe(
+      Effect.catch((error) =>
+        error instanceof UpdateRefused
+          ? Effect.andThen(io.err(error.reason), Effect.fail(failed))
+          : Effect.fail(error),
+      ),
+    );
+    const saved = approve === approval && (yield* save);
     if (!saved) {
       yield* io.err(
         "The approval does not match this plugin's files, permissions or installed version. Preview the plugin again.",

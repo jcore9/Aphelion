@@ -1,6 +1,6 @@
 import { defaultConfigDir } from "../config";
 import { defaultLifetimeDays } from "../devices";
-import { defaultStateDir } from "./args";
+import { defaultPluginsDir, defaultStateDir } from "./args";
 
 export const helpText = `Aphelion server and command line
 
@@ -33,6 +33,16 @@ Usage:
       Preview the permissions for an unpacked plugin. Repeat with the displayed
       digest to save the grants.
 
+  aphelion plugin update ID [--approve DIGEST] [--state-dir DIR]
+                         [--plugins-dir DIR]
+      Check the GitHub repository that plugin ID names for a newer release,
+      check that GitHub built it, and preview what it changes. Repeat with the
+      displayed digest to install it and restart the plugin on it.
+
+  aphelion plugin rollback ID [--state-dir DIR] [--plugins-dir DIR]
+      Go back to the version plugin ID ran before its last update or install,
+      and restart the plugin on it.
+
   aphelion plugin dev FOLDER [--state-dir DIR]
       Reload the approved plugin in FOLDER through the running server, then
       reload it again each time its files change. Works only when the server
@@ -41,4 +51,5 @@ Usage:
   aphelion --version
   aphelion --help
 
---config-dir is ${defaultConfigDir} and --state-dir is ${defaultStateDir} unless given.`;
+--config-dir is ${defaultConfigDir}, --state-dir is ${defaultStateDir} and
+--plugins-dir is ${defaultPluginsDir} unless given.`;
