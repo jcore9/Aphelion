@@ -94,6 +94,23 @@ async function recipientOf(key: Secret): Promise<string> {
   }
 }
 
+const entryFile = (name: string) =>
+  `${createHash("sha256").update(name).digest("hex")}.age`;
+
+async function decryptEntry(
+  decrypter: Decrypter,
+  encrypted: Uint8Array,
+): Promise<z.infer<typeof entrySchema> | undefined> {
+  try {
+    const entry = entrySchema.safeParse(
+      JSON.parse(await decrypter.decrypt(encrypted, "text")),
+    );
+    return entry.success ? entry.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function checkRecipient(
   directory: string,
   uid: number,
@@ -106,15 +123,13 @@ async function checkRecipient(
   );
   let recorded = await readPrivateFile(path, uid);
   if (!recorded) {
-    const entry = (await readdir(directory))
-      .filter((name) => name.endsWith(".age"))
-      .sort()[0];
-    const encrypted =
-      entry && (await readPrivateFile(join(directory, entry), uid));
-    if (encrypted) {
-      await decrypter.decrypt(encrypted).catch(() => {
-        throw mismatch;
-      });
+    const entries = (await readdir(directory)).filter((name) =>
+      /^[0-9a-f]{64}\.age$/.test(name),
+    );
+    for (const name of entries) {
+      const encrypted = await readPrivateFile(join(directory, name), uid);
+      const entry = encrypted && (await decryptEntry(decrypter, encrypted));
+      if (!entry || entryFile(entry.path) !== name) throw mismatch;
     }
     try {
       await publish(directory, path, `${recipient}\n`, link);
@@ -154,8 +169,7 @@ export async function openLocalStore(directory: string, key: Secret) {
   decrypter.addIdentity(key.reveal());
   await checkRecipient(directory, uid, recipient, decrypter);
 
-  const entryPath = (name: string) =>
-    join(directory, `${createHash("sha256").update(name).digest("hex")}.age`);
+  const entryPath = (name: string) => join(directory, entryFile(name));
   return {
     async read(name: string): Promise<Secret | undefined> {
       const encrypted = await readPrivateFile(entryPath(name), uid);

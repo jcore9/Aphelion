@@ -147,6 +147,46 @@ describe("local secret store", () => {
     expect(await readdir(directory)).toContain("recipient.pub");
   });
 
+  it("refuses a restore without recipient.pub unless every entry decrypts under its own name", async () => {
+    const otherKey = await newKey();
+    const other = await mkdtemp(join(tmpdir(), "aphelion-secrets-"));
+    try {
+      const secret = Secret.make("other-canary");
+      try {
+        await (
+          await openLocalStore(other, otherKey)
+        ).write("test/other", secret);
+      } finally {
+        secret.wipe();
+      }
+      const [foreign] = (await readdir(other)).filter((entry) =>
+        entry.endsWith(".age"),
+      );
+      if (foreign === undefined) throw new Error("Missing ciphertext");
+
+      await write(await open(), "a-local-canary");
+      const [own] = (await readdir(directory)).filter((entry) =>
+        entry.endsWith(".age"),
+      );
+      if (own === undefined) throw new Error("Missing ciphertext");
+      await unlink(recipientFile());
+      await rename(join(other, foreign), join(directory, foreign));
+      await expect(open()).rejects.toThrow(mismatch);
+      await expect(readFile(recipientFile())).rejects.toThrow("ENOENT");
+
+      await unlink(join(directory, foreign));
+      const misplaced = join(directory, `${"0".repeat(64)}.age`);
+      await rename(join(directory, own), misplaced);
+      await expect(open()).rejects.toThrow(mismatch);
+
+      await rename(misplaced, join(directory, own));
+      await expect(open()).resolves.toBeDefined();
+      expect(await readdir(directory)).toContain("recipient.pub");
+    } finally {
+      await rm(other, { force: true, recursive: true });
+    }
+  });
+
   it("refuses a plain-text identity left from before the host credential", async () => {
     await write(await open(), "a-local-canary");
     await writeFile(join(directory, "identity.agekey"), key.reveal(), {
