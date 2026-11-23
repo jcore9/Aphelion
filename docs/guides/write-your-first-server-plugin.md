@@ -216,6 +216,7 @@ An approval covers one exact manifest. Suppose you add a permission or change th
 
 ## Next
 
+- [The plugin API reference](../reference/plugin-api.md) lists every type and function that the SDK exports, such as `PluginContext` and `createTestHost`.
 - [The plugin reference](../reference/plugins.md) lists the messages between Aphelion and a plugin, the errors, and what a crash does.
 - [Dev mode](../reference/plugins.md#dev-mode) and [`aphelion plugin dev`](../reference/cli.md#aphelion-plugin-dev-folder) describe the socket and the command exactly.
 - To run a finished plugin on a server, copy `dist/` to `/opt/aphelion/deploy/plugins/<name>` as root and follow [Install a plugin](install.md#install-a-plugin).

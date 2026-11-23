@@ -20,6 +20,10 @@ const exit = (code: number) => {
   process.stderr.write("", () => process.exit(code));
 };
 
+/**
+ * Runs a plugin on standard input and output, and exits the process when the plugin stops, with code 0, or 1 after an error.
+ * It drops a line from the host that is longer than 1 MiB, and logs that it did.
+ */
 export function main(plugin: ServerPlugin): void {
   const input = readLines(process.stdin, () => {
     log("the host sent a line longer than 1 MiB, so the plugin dropped it");

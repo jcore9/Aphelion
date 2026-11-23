@@ -26,35 +26,59 @@ import {
   type RpcError,
 } from "./wire.ts";
 
+/** A permission that the owner granted, for `TestHost.setGrants`. */
 export interface Grant {
+  /** The manifest list in `permissions` that the permission is in. */
   readonly kind: "events" | "network" | "secrets";
+  /** The event name, hostname or secret reference. */
   readonly name: string;
 }
 
+/** A secret operation that the test host runs for `secrets.use`. */
 export interface FakeSecretOperation {
+  /** The secret reference that the plugin must name, and that the plugin needs a grant for. */
   readonly reference: SecretReference;
+  /** The hostname that the operation sends to. The plugin needs a network grant for it. */
   readonly host: string;
+  /** Runs the operation with the plugin's id. The plugin never sees what it returns or throws, and the call fails after 5 seconds. */
   run(pluginId: string): MaybePromise<unknown>;
 }
 
+/** The test host's answer to a request, which is a result or an error. */
 export type CallOutcome =
   | { readonly result: unknown }
   | { readonly error: { readonly code: number; readonly message: string } };
 
+/** One request that the plugin sent to the test host. */
 export interface HostCall {
+  /** The JSON-RPC method, such as `network.get`. */
   readonly method: string;
+  /** The params that the plugin sent. */
   readonly params: unknown;
+  /** The test host's answer. */
   readonly outcome: CallOutcome;
 }
 
+/**
+ * A fake host for a plugin's tests. It checks grants, network calls and secret operations the way the real host does.
+ * Unlike the real host, it can run secret operations that a test registers with `registerSecretOperation`.
+ */
 export interface TestHost {
+  /** Sets what the owner granted, replacing earlier grants. A grant counts only when the manifest also lists the permission. */
   setGrants(grants: readonly Grant[]): void;
+  /** Sets the reply to `network.get` for one URL. A URL with no reply, a reply that takes more than 5 seconds, and a body larger than 64 KiB fail with `Operation failed`. */
   respondToGet(url: string, respond: () => MaybePromise<NetworkReply>): void;
+  /** Adds a named operation for `secrets.use`. While none is registered, `secrets.use` with a granted reference fails with error `-32002`. */
   registerSecretOperation(name: string, operation: FakeSecretOperation): void;
+  /** Starts the plugin and resolves when its `start` has finished, or rejects when `start` fails. A test host starts one plugin only. */
   start(plugin: ServerPlugin): Promise<void>;
+  /** Sends an event to the plugin and resolves when its handler has finished. It sends nothing when the plugin isn't running, hasn't subscribed, or isn't granted the event. */
   publish(name: string, data: unknown): Promise<void>;
+  /** Sends `shutdown` and resolves when the plugin has run its cleanup and stopped. */
   stop(): Promise<void>;
+  /** The messages that the plugin and the SDK logged, in order. */
   readonly logs: readonly string[];
+  /** The requests that the plugin sent, with the answers, in the order the test host answered them. */
   readonly calls: readonly HostCall[];
 }
 
@@ -150,6 +174,7 @@ async function withinTimeout<T>(work: () => MaybePromise<T>): Promise<T> {
   }
 }
 
+/** Makes a test host for a plugin's manifest, with nothing granted. It throws when the manifest is invalid or has no server part. */
 export function createTestHost(manifestData: unknown): TestHost {
   const manifest = serverManifest(manifestData);
   const toPlugin = lineQueue();
