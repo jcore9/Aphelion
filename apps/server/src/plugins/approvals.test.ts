@@ -1,8 +1,10 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Context, Effect, Layer } from "effect";
 import { expect, onTestFinished, test } from "vitest";
 import { openStore } from "../store";
+import { PluginGrants, sqlitePluginGrants } from "./grants";
 import {
   approvalFor,
   installedPlugins,
@@ -78,19 +80,58 @@ test("only the dev folder's approval skips the files check", () => {
     current: version("1.0.0"),
     previous: undefined,
   };
+  const folder = "/opt/aphelion/plugins/weather-1.0.0";
   expect(approvalFor(record, undefined)).toEqual({
     id: "weather",
     version: "1.0.0",
+    folder,
     filesDigest: "digest-1.0.0",
   });
   expect(approvalFor(record, "/opt/aphelion/dev-plugin")).toEqual({
     id: "weather",
     version: "1.0.0",
+    folder,
     filesDigest: "digest-1.0.0",
   });
-  expect(approvalFor(record, "/opt/aphelion/plugins/weather-1.0.0")).toEqual({
+  expect(approvalFor(record, folder)).toEqual({
     id: "weather",
     version: "1.0.0",
+    folder,
     filesDigest: undefined,
   });
+});
+
+test("a run keeps its grants only while its exact approval stands", async () => {
+  const db = await store();
+  const grants = Effect.runSync(
+    Layer.build(sqlitePluginGrants(db)).pipe(
+      Effect.map((services) => Context.get(services, PluginGrants)),
+      Effect.scoped,
+    ),
+  );
+  const status = { kind: "events", name: "bot.status" } as const;
+  const allowed = (approval: Parameters<typeof grants.allows>[0]) =>
+    Effect.runSync(grants.allows(approval, status));
+  recordVersion(db, version("1.0.0"));
+  const first = approvalFor(
+    { plugin: "weather", current: version("1.0.0"), previous: undefined },
+    undefined,
+  );
+  const dev = { ...first, filesDigest: undefined };
+  expect(allowed(first)).toBe(true);
+  expect(allowed(dev)).toBe(true);
+
+  const sameFolder = version("1.0.0", { filesDigest: "digest-edited" });
+  recordVersion(db, sameFolder);
+  expect(allowed(first)).toBe(false);
+  expect(allowed(dev)).toBe(true);
+  expect(allowed({ ...first, filesDigest: "digest-edited" })).toBe(true);
+
+  const elsewhere = version("1.0.0", { folder: "/srv/weather-copy" });
+  recordVersion(db, elsewhere);
+  expect(allowed(first)).toBe(false);
+  expect(allowed(dev)).toBe(false);
+  expect(
+    allowed({ ...first, folder: elsewhere.folder, filesDigest: undefined }),
+  ).toBe(true);
 });

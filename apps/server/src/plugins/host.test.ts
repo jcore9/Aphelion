@@ -219,8 +219,8 @@ function harness(
   const { grants } = options;
   const grantsLayer = grants
     ? Layer.succeed(PluginGrants, {
-        allows: (plugin, _version, permission) => {
-          const allowed = grants(plugin, permission);
+        allows: ({ id }, permission) => {
+          const allowed = grants(id, permission);
           return typeof allowed === "boolean"
             ? Effect.succeed(allowed)
             : allowed;
@@ -501,6 +501,7 @@ describe("the plugin host", () => {
         const approval = {
           id: "pinned",
           version: "1.0.0",
+          folder,
           filesDigest: yield* filesDigest(folder),
         };
         yield* Effect.promise(() => writeFile(code, "twp"));
@@ -930,6 +931,62 @@ describe("the plugin host", () => {
           yield* host.publish({ name: "bot.status", data: {} });
           yield* Effect.sleep("20 millis");
           expect(events).toHaveLength(1);
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "takes a run's grants away when another folder is approved at the same version",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* tempStore;
+        const status = { kind: "events", name: "bot.status" } as const;
+        const first = yield* serverPlugin("twin", { events: ["bot.status"] });
+        const copy = yield* serverPlugin("twin", { events: ["bot.status"] });
+        yield* Effect.promise(() =>
+          writeFile(join(copy, "index.js"), "other files"),
+        );
+        const crash = yield* Deferred.make<number>();
+        const events: Message[] = [];
+        const { layer, record, logs } = harness(
+          {
+            twin: (io) =>
+              Effect.gen(function* () {
+                yield* handshake(io);
+                yield* io.call("events.subscribe", { event: "bot.status" });
+                const listen = Effect.forever(
+                  io.read.pipe(
+                    Effect.map((message) => {
+                      if (message["method"] === "event") events.push(message);
+                    }),
+                  ),
+                );
+                return yield* Effect.raceFirst(listen, Deferred.await(crash));
+              }),
+          },
+          { store: db },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          yield* host.start(first, yield* approveFolder(db, first, [status]));
+          yield* waitFor("twin", { state: "running", run: 1 });
+          yield* host.publish({ name: "bot.status", data: {} });
+          yield* waitUntil(() => events.length === 1);
+
+          yield* approveFolder(db, copy, [status]);
+          yield* host.publish({ name: "bot.status", data: {} });
+          yield* Effect.sleep("20 millis");
+          expect(events).toHaveLength(1);
+
+          yield* Deferred.succeed(crash, 1);
+          yield* waitUntil(() =>
+            logs.some(
+              (log) =>
+                log["msg"] ===
+                "a plugin changed since it was approved, so it won't start",
+            ),
+          );
+          expect(record.spawned).toHaveLength(1);
         }).pipe(Effect.provide(layer));
       }).pipe(Effect.scoped),
   );

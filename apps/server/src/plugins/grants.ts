@@ -1,6 +1,7 @@
 import type { PluginManifest } from "@aphelion/plugin-sdk";
 import { Context, Effect, Layer } from "effect";
 import type { Database } from "../store/database";
+import type { Approval } from "./approvals";
 
 export const permissionKinds = [
   "events",
@@ -18,8 +19,7 @@ export class PluginGrants extends Context.Service<
   PluginGrants,
   {
     readonly allows: (
-      plugin: string,
-      version: string,
+      approval: Approval,
       permission: Permission,
     ) => Effect.Effect<boolean>;
   }
@@ -44,12 +44,23 @@ export function declaresPermission(
 
 export const sqlitePluginGrants = (db: Database) =>
   Layer.succeed(PluginGrants, {
-    allows: (plugin, version, { kind, name }) =>
+    allows: ({ id, version, folder, filesDigest }, { kind, name }) =>
       Effect.try(
         () =>
           db.all(
-            "SELECT 1 FROM plugin_grants WHERE plugin = ? AND version = ? AND kind = ? AND name = ?",
-            [plugin, version, kind, name],
+            `SELECT 1 FROM plugin_grants g JOIN plugin_versions v
+               ON v.plugin = g.plugin AND v.version = g.version
+             WHERE g.plugin = ? AND g.version = ? AND g.kind = ? AND g.name = ?
+               AND v.folder = ? AND (? IS NULL OR v.files_digest = ?)`,
+            [
+              id,
+              version,
+              kind,
+              name,
+              folder,
+              filesDigest ?? null,
+              filesDigest ?? null,
+            ],
           ).length > 0,
       ).pipe(Effect.orElseSucceed(() => false)),
   });

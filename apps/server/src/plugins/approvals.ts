@@ -22,6 +22,7 @@ export interface InstallRecord {
 export interface Approval {
   readonly id: string;
   readonly version: string;
+  readonly folder: string;
   readonly filesDigest: string | undefined;
 }
 
@@ -31,6 +32,7 @@ export const approvalFor = (
 ): Approval => ({
   id: record.plugin,
   version: record.current.version,
+  folder: record.current.folder,
   filesDigest:
     record.current.folder === devFolder
       ? undefined

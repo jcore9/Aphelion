@@ -171,9 +171,17 @@ export const pluginHostLayer = (options: HostOptions) =>
       const stopDeadlineMs = options.stopDeadlineMs ?? defaultStopDeadlineMs;
       const slots = new Map<string, Slot>();
 
+      const runApproval = (slot: Slot): Approval =>
+        slot.approval ?? {
+          id: slot.id,
+          version: slot.manifest.version,
+          folder: slot.folder,
+          filesDigest: undefined,
+        };
+
       const mayUse = (slot: Slot, permission: Permission) =>
         declaresPermission(slot.manifest, permission)
-          ? grants.allows(slot.id, slot.manifest.version, permission)
+          ? grants.allows(runApproval(slot), permission)
           : Effect.succeed(false);
 
       const refusal = (
@@ -202,7 +210,7 @@ export const pluginHostLayer = (options: HostOptions) =>
             permissionList(manifest),
             (permission) =>
               grants
-                .allows(approval.id, approval.version, permission)
+                .allows(approval, permission)
                 .pipe(Effect.map((allowed) => !allowed)),
           );
           if (ungranted.length > 0) {

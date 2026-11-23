@@ -221,7 +221,7 @@ function realHost(plugin: ServerPlugin) {
     }),
   );
   const grantsLayer = Layer.succeed(PluginGrants, {
-    allows: (_plugin, _version, permission) =>
+    allows: (_approval, permission) =>
       Effect.succeed(
         grants.some(
           (grant) =>
