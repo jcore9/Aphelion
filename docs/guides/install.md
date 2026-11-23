@@ -113,7 +113,11 @@ sudo host/network-check 10.0.0.1:80 10.0.0.133:22 100.71.226.67:22 100.93.139.95
 
 The script first connects to each target from the host itself, and stops if one doesn't answer. Pick targets with an open port. The first five must then print `blocked`, which means the connection from the container timed out because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The script exits with code 1 if any check fails, and with code 2 if a target is malformed or the container isn't running.
 
-Other tools that change iptables' `mangle` table can break the boundary. Run the check again after you change the host's firewall.
+Other tools that change iptables' `mangle` table can remove the rules while the server runs. Two common ones are `sudo ufw reload` when `MANAGE_BUILTINS=yes` is set in `/etc/default/ufw`, and reloading `/etc/nftables.conf`, which starts with `flush ruleset`. After either one, restart the service so the preflight installs the rules again, and run the check again:
+
+```sh
+sudo systemctl restart aphelion
+```
 
 ## Logs
 

@@ -22,8 +22,11 @@ fail() {
 }
 
 mangle() {
-  iptables -t mangle "$@"
+  iptables -w 10 -t mangle "$@"
 }
+
+exec 9>/run/aphelion-firewall.lock
+flock --timeout 30 9 || fail "another run of the firewall script didn't finish within 30 seconds"
 
 [[ $tailnet =~ ^[A-Za-z0-9_.-]{1,15}$ ]] ||
   fail "APHELION_TAILNET_INTERFACE must be a network interface name"
@@ -67,11 +70,11 @@ replace_chain() {
 replace_chain APHELION-FORWARD FORWARD forward_rules
 replace_chain APHELION-INPUT INPUT input_rules
 
-if ip6tables -t mangle -n -L INPUT >/dev/null 2>&1; then
+if ip6tables -w 10 -t mangle -n -L INPUT >/dev/null 2>&1; then
   for rule in "INPUT -i $bridge" "FORWARD -i $bridge" "FORWARD -o $bridge"; do
     read -r chain direction interface <<<"$rule"
-    ip6tables -t mangle -C "$chain" "$direction" "$interface" -j DROP 2>/dev/null ||
-      ip6tables -t mangle -I "$chain" 1 "$direction" "$interface" -j DROP
+    ip6tables -w 10 -t mangle -C "$chain" "$direction" "$interface" -j DROP 2>/dev/null ||
+      ip6tables -w 10 -t mangle -I "$chain" 1 "$direction" "$interface" -j DROP
   done
 fi
 

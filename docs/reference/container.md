@@ -123,7 +123,9 @@ Both chains let replies through, but only replies to connections that were opene
 
 Decision 0022 named Docker's `DOCKER-USER` chain as the place for these rules. They live in the `mangle` table instead, because Linux checks it before the `filter` table, where Docker, Tailscale and ufw put their rules. Tailscale puts its own chain at the top of `FORWARD` in the `filter` table, and that chain accepts traffic that leaves on `tailscale0`. Rules in `DOCKER-USER` would come after it, so the container could reach other tailnet devices. Rules in `mangle` can't be skipped by a rule in `filter`.
 
-The script builds each new chain under a temporary name, puts it in front of the old one, and only then removes the old one. A running container is never left without rules, even when an earlier run stopped partway. Set `APHELION_TAILNET_INTERFACE` in `deploy/.env` if Tailscale's interface has another name.
+The script builds each new chain under a temporary name, puts it in front of the old one, and only then removes the old one. A running container is never left without rules, even when an earlier run stopped partway. Only one run of the script changes the rules at a time. Set `APHELION_TAILNET_INTERFACE` in `deploy/.env` if Tailscale's interface has another name.
+
+The rules stay in place until something removes them. The preflight installs them again at every start. A tool that flushes the `mangle` table while the server runs, such as `ufw reload` with `MANAGE_BUILTINS=yes`, removes them until the next start ([Check the network boundary](../guides/install.md#check-the-network-boundary)).
 
 Names still resolve. Docker's resolver in the container sends its queries from the host's network, outside these rules. Docker 29.10 reported this as `ExtServers: [host(...)]` in the container's `/etc/resolv.conf`.
 
