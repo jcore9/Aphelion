@@ -10,6 +10,7 @@ PartOf=docker.service
 Type=exec
 WorkingDirectory=/opt/aphelion/deploy
 EnvironmentFile=/opt/aphelion/deploy/.env
+LoadCredentialEncrypted=bootstrap:/etc/credstore.encrypted/aphelion-bootstrap
 ExecStartPre=/opt/aphelion/deploy/host/preflight
 ExecStart=/usr/bin/docker compose up --no-build --abort-on-container-exit --exit-code-from aphelion
 Restart=on-failure
