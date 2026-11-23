@@ -13,7 +13,7 @@ The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/b
 
 ## For plugin authors
 
-You don't have to write JSON-RPC by hand. The SDK, `@aphelion/plugin-sdk`, does it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them. The rest of this section says what the host does and expects, which is what the SDK builds on.
+You don't have to write JSON-RPC by hand. The SDK, `@aphelion/plugin-sdk`, does it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them, and [the plugin API reference](plugin-api.md) lists every type and function in the SDK. The rest of this section says what the host does and expects, which is what the SDK builds on.
 
 ### How your plugin is started
 

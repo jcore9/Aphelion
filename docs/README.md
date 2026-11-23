@@ -46,6 +46,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [The client protocol](reference/protocol.md): how frames, sequence numbers, replay, resync and command ids work.
 - [Protocol spec](reference/protocol-spec.md): every frame, command, event and error code, generated from the protocol schemas.
 - [Plugin manifest](reference/plugin-manifest.md): the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
+- [Plugin API reference](reference/plugin-api.md): every type, function and constant in `@aphelion/plugin-sdk`, generated from the SDK's types and doc comments.
 - [Running plugins on the server](reference/plugins.md): how the plugin host and the plugin runner start, talk to, restart and stop a plugin's server part, its environment and data folder, and the JSON-RPC messages.
 - [The container](reference/container.md): the image, the four users, the folders, how the launcher starts and stops the processes, the hardening, the network boundary and the contract tests.
 - [Secrets](reference/secrets.md): the `Secret` type, what it guarantees and what it doesn't, how to read a value, and the secret reference syntax.
@@ -107,3 +108,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0049](decisions/0049-ai-tools-installed-from-a-list.md) | The container image ships no AI tool, and the owner installs AI tools from a list | Proposed |
 | [0050](decisions/0050-bootstrap-key-is-the-store-key.md) | The host's bootstrap credential is the local store's age key | Proposed |
 | [0051](decisions/0051-plugin-dev-kit.md) | The plugin dev kit has a stdio entry in the SDK, reloads through the running server, and generates from a checkout | Proposed |
+| [0052](decisions/0052-plugin-api-reference-generator.md) | A test generates the plugin API reference from the SDK's types and doc comments with the TypeScript compiler, and fails when the page is stale | Proposed |
