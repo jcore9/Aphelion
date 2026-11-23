@@ -405,6 +405,14 @@ export const pluginHostLayer = (options: HostOptions) =>
           const before = slot.state;
           const next = step(before, event, policy);
           slot.state = next.state;
+          if (next.state.state !== before.state) {
+            logger.info("plugin state changed", {
+              plugin: slot.id,
+              from: before.state,
+              to: next.state.state,
+              run: next.state.run,
+            });
+          }
           yield* settleWaiters(slot);
           if (
             before.state === "running" &&
@@ -414,14 +422,6 @@ export const pluginHostLayer = (options: HostOptions) =>
             yield* Fiber.interrupt(slot.operation.fiber).pipe(
               Effect.forkIn(work),
             );
-          }
-          if (next.state.state !== before.state) {
-            logger.info("plugin state changed", {
-              plugin: slot.id,
-              from: before.state,
-              to: next.state.state,
-              run: next.state.run,
-            });
           }
           yield* Effect.forEach(
             next.commands,
