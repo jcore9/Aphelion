@@ -1,5 +1,5 @@
 export { configAreas, type Config } from "./areas";
-export { checkComposePorts } from "./compose";
+export { checkComposePorts, checkServerListener } from "./compose";
 export { formatIssue, type ConfigIssue } from "./issues";
 export {
   defaultConfigDir,

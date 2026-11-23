@@ -172,7 +172,88 @@ test("config check --compose - accepts tailnet-only ports from standard input", 
   );
   expect(code).toBe(0);
   expect(out).toEqual([
-    "Config OK, and the Compose file publishes ports only on the tailnet.",
+    "Config OK. The Compose file publishes ports only on the tailnet, and they reach the server.",
+  ]);
+});
+
+test("config check --compose accepts the shipped config when the host port differs", async () => {
+  const { code, out } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    "services:\n  aphelion:\n    ports: ['100.71.226.67:8443:7400']\n",
+  );
+  expect(code).toBe(0);
+  expect(out).toEqual([
+    "Config OK. The Compose file publishes ports only on the tailnet, and they reach the server.",
+  ]);
+});
+
+test("config check --compose refuses a loopback address", async () => {
+  await writeFile(
+    join(configDir, "server.yaml"),
+    "version: 1\naddress: 127.0.0.1\nport: 7400\n",
+  );
+  const { code, out, err } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    tailnetCompose,
+  );
+  expect(code).toBe(1);
+  expect(out).toEqual([
+    `${configDir}/server.yaml: address: is 127.0.0.1. With --compose it must be 0.0.0.0, so a published port can reach the server inside the container.`,
+  ]);
+  expect(err).toEqual(["1 problem found."]);
+});
+
+test("config check --compose refuses a container port other than the server's", async () => {
+  const { code, out } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    "services:\n  aphelion:\n    ports: ['100.71.226.67:7400:7401']\n",
+  );
+  expect(code).toBe(1);
+  expect(out).toEqual([
+    `${stdinLabel}:3:13: services.aphelion.ports[0]: forwards to container port 7401, but it must forward to TCP port 7400, the server's port in server.yaml.`,
+  ]);
+});
+
+test("config check --compose refuses a server port other than 7400 when the container port matches", async () => {
+  await writeFile(
+    join(configDir, "server.yaml"),
+    "version: 1\naddress: 0.0.0.0\nport: 7401\n",
+  );
+  const { code, out } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    "services:\n  aphelion:\n    ports: ['100.71.226.67:8443:7401']\n",
+  );
+  expect(code).toBe(1);
+  expect(out).toEqual([
+    `${configDir}/server.yaml: port: is 7401. With --compose it must be 7400, the port the host firewall opens.`,
+  ]);
+});
+
+test("config check accepts a loopback address and a custom port without --compose", async () => {
+  await writeFile(
+    join(configDir, "server.yaml"),
+    "version: 1\naddress: 127.0.0.1\nport: 7401\n",
+  );
+  const { code, out } = await run(["config", "check", ...dirs()]);
+  expect(code).toBe(0);
+  expect(out).toEqual([
+    "Config OK. The Compose file wasn't checked: pass --compose to check it.",
+  ]);
+});
+
+test("config check --compose still checks Compose ports when the config doesn't load", async () => {
+  await writeFile(
+    join(configDir, "server.yaml"),
+    "version: 1\naddress: x\nport: 7400\n",
+  );
+  const { code, out } = await run(
+    ["config", "check", ...dirs(), "--compose", "-"],
+    "services:\n  aphelion:\n    ports: ['7400:7400']\n",
+  );
+  expect(code).toBe(1);
+  expect(out).toEqual([
+    `${configDir}/server.yaml:2:10: address: must be an IPv4 or IPv6 address, such as 0.0.0.0`,
+    `${stdinLabel}:3:13: services.aphelion.ports[0]: publishes the port on every host address. Publish it only on the host's tailnet address, such as "100.71.226.67:7400:7400" (decision 0022).`,
   ]);
 });
 
