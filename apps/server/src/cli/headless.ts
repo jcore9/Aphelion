@@ -1,14 +1,16 @@
 import { join } from "node:path";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import { formatIssue } from "../config";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
+import { approvalFor, installedPlugins } from "../plugins/approvals";
 import {
+  canonical,
   devControl,
   devSocketFile,
   serveDevSocket,
 } from "../plugins/dev-control";
-import { installedPlugins, sqlitePluginGrants } from "../plugins/grants";
+import { sqlitePluginGrants } from "../plugins/grants";
 import { PluginHost, pluginHostLayer } from "../plugins/host";
 import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
 import type { Database } from "../store";
@@ -38,13 +40,18 @@ const startPlugins = (
     );
     const host = Context.get(services, PluginHost);
     const installed = installedPlugins(db);
-    for (const { plugin, folder, digest } of installed) {
+    const canonicalDev =
+      devFolder === undefined
+        ? undefined
+        : Option.getOrUndefined(yield* canonical(devFolder));
+    for (const record of installed) {
+      const { folder } = record.current;
       const started = yield* Effect.result(
-        host.start(folder, { id: plugin, digest }),
+        host.start(folder, approvalFor(record, canonicalDev)),
       );
       if (started._tag === "Failure") {
         logger.error("an installed plugin was refused at startup", {
-          plugin,
+          plugin: record.plugin,
           folder,
           issues: started.failure.issues.map((issue) => issue.message),
         });
@@ -54,7 +61,7 @@ const startPlugins = (
     if (devFolder !== undefined) {
       const handle = yield* devControl({
         folder: devFolder,
-        approvals: () => installedPlugins(db),
+        installs: () => installedPlugins(db),
       }).pipe(Effect.provideService(PluginHost, host));
       yield* serveDevSocket(join(stateDir, devSocketFile), handle, logger);
     }

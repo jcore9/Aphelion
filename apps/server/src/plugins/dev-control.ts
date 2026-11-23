@@ -4,7 +4,7 @@ import { isAbsolute } from "node:path";
 import { Effect, Fiber, Option, Semaphore } from "effect";
 import { z } from "zod";
 import type { Logger } from "../log";
-import type { Installed } from "./grants";
+import { approvalFor, type InstallRecord } from "./approvals";
 import { PluginHost } from "./host";
 import type { LifecycleState } from "./lifecycle";
 import { LineSplitter } from "./lines";
@@ -37,7 +37,7 @@ export interface DevResult {
 
 export interface DevControlOptions {
   readonly folder: string;
-  readonly approvals: () => readonly Installed[];
+  readonly installs: () => readonly InstallRecord[];
 }
 
 const refuse = (reason: string): DevReply => ({ type: "refused", reason });
@@ -48,7 +48,7 @@ const crashed = (state: LifecycleState) =>
   state.state === "crashed" ||
   (state.state === "stopped" && state.reason === "crashed too often");
 
-const canonical = (path: string) =>
+export const canonical = (path: string) =>
   isAbsolute(path)
     ? Effect.tryPromise(() => realpath(path)).pipe(Effect.option)
     : Effect.succeedNone;
@@ -87,8 +87,8 @@ export const devControl = (options: DevControlOptions) =>
           );
         }
         const approved = options
-          .approvals()
-          .filter((row) => row.folder === devFolder.value);
+          .installs()
+          .filter((record) => record.current.folder === devFolder.value);
         const notApproved = refused(
           `${options.folder} isn't approved. Run aphelion plugin install ${options.folder} and approve it.`,
         );
@@ -103,11 +103,11 @@ export const devControl = (options: DevControlOptions) =>
           );
         }
         const id = loaded.success.manifest.id;
-        const approval = approved.find((row) => row.plugin === id);
-        if (!approval) return notApproved;
+        const record = approved.find((row) => row.plugin === id);
+        if (!record) return notApproved;
         const before = (yield* host.status(id))?.run ?? 0;
         const started = yield* Effect.result(
-          host.start(devFolder.value, { id, digest: approval.digest }),
+          host.start(devFolder.value, approvalFor(record, devFolder.value)),
         );
         if (started._tag === "Failure") {
           return refused(

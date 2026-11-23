@@ -13,7 +13,7 @@ import {
   type DevReply,
   type DevResult,
 } from "./dev-control";
-import type { Installed } from "./grants";
+import type { InstallRecord } from "./approvals";
 import { PluginHost, pluginHostLayer, RunnerLink } from "./host";
 import { defaultRestartPolicy, type RestartPolicy } from "./lifecycle";
 import { PluginGrants } from "./grants";
@@ -105,6 +105,23 @@ const manifest = (version: string) =>
     permissions: {},
   });
 
+const recordOf = (path: string) =>
+  readManifest(path).pipe(
+    Effect.map(({ manifest, folder }): InstallRecord => ({
+      plugin: manifest.id,
+      current: {
+        plugin: manifest.id,
+        version: manifest.version,
+        source: "folder",
+        folder,
+        filesDigest: "not checked in dev mode",
+        repository: undefined,
+        grants: [],
+      },
+      previous: undefined,
+    })),
+  );
+
 const setup = Effect.gen(function* () {
   const root = yield* Effect.promise(() => mkdtemp(join(base, "case-")));
   const folder = join(root, "dev-plugin");
@@ -115,18 +132,13 @@ const setup = Effect.gen(function* () {
       await writeFile(join(path, "aphelion-plugin.json"), manifest("1.0.0"));
     }
   });
-  const approvals: Installed[] = [];
+  const approvals: InstallRecord[] = [];
   const approve = Effect.gen(function* () {
-    const loaded = yield* readManifest(folder);
-    approvals.splice(0, approvals.length, {
-      plugin: loaded.manifest.id,
-      folder: loaded.folder,
-      digest: loaded.digest,
-    });
+    approvals.splice(0, approvals.length, yield* recordOf(folder));
   });
   const handle = yield* devControl({
     folder,
-    approvals: () => approvals,
+    installs: () => approvals,
   });
   const reload = (path: string) =>
     handle(JSON.stringify({ type: "reload", folder: path })).pipe(
@@ -175,12 +187,7 @@ describe("plugin dev control", () => {
               manifest("1.0.0").replace('"weather"', '"weather-v2"'),
             ),
           );
-          const renamed = yield* readManifest(folder);
-          approvals.push({
-            plugin: renamed.manifest.id,
-            folder: renamed.folder,
-            digest: renamed.digest,
-          });
+          approvals.push(yield* recordOf(folder));
           expect(yield* reload(folder)).toEqual({
             type: "reloaded",
             plugin: "weather-v2",
@@ -297,7 +304,7 @@ describe("plugin dev control", () => {
           const approved = yield* readManifest(folder);
           expect(yield* reload(folder)).toEqual({
             type: "refused",
-            reason: `weather stays stopped: the manifest changed since it was approved. Run aphelion plugin install ${approved.folder} to approve it again.`,
+            reason: `weather stays stopped: the plugin is weather 1.0.1, but weather 1.0.0 was approved. Run aphelion plugin install ${approved.folder} to approve it.`,
           });
           expect(yield* host.status("weather")).toMatchObject({
             state: "stopped",
@@ -310,6 +317,40 @@ describe("plugin dev control", () => {
             type: "reloaded",
             plugin: "weather",
             state: "running",
+          });
+          expect(starts).toEqual([1, 2]);
+        }),
+      ),
+  );
+
+  it.live(
+    "reloads a code edit without a new approval, and refuses a new permission",
+    () =>
+      withHost((starts) =>
+        Effect.gen(function* () {
+          const { folder, approve, reload } = yield* setup;
+          yield* approve;
+          yield* reload(folder);
+          yield* Effect.promise(() =>
+            writeFile(join(folder, "index.js"), "// edited"),
+          );
+          expect(yield* reload(folder)).toEqual({
+            type: "reloaded",
+            plugin: "weather",
+            state: "running",
+          });
+          yield* Effect.promise(() =>
+            writeFile(
+              join(folder, "aphelion-plugin.json"),
+              manifest("1.0.0").replace(
+                '"permissions":{}',
+                '"permissions":{"events":["bot.status"]}',
+              ),
+            ),
+          );
+          expect(yield* reload(folder)).toEqual({
+            type: "refused",
+            reason: `weather stays stopped: the plugin asks for permissions that weren't approved: events "bot.status". Run aphelion plugin install ${folder} to approve it.`,
           });
           expect(starts).toEqual([1, 2]);
         }),

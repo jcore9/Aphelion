@@ -60,19 +60,24 @@ test("migration 3 renames audit_log.agent_id to bot_id and keeps the rows", () =
   }).toThrow("audit_log is append-only");
 });
 
-test("migration 5 records every plugin that already had grants as installed", () => {
+test("migration 6 drops the old plugin approvals, and a version needs its row before a pointer or grant names it", () => {
   const path = tempDatabasePath();
   const old = openSqlite(path);
-  migrate(old, migrations.slice(0, 4));
-  for (const [kind, name] of [
-    ["events", "bot.status"],
-    ["network", "api.example.com"],
-  ] as const) {
-    old.run(
-      "INSERT INTO plugin_grants (plugin, folder, digest, kind, name) VALUES (?, ?, ?, ?, ?)",
-      ["weather", "/opt/aphelion/plugins/weather", "abc123", kind, name],
-    );
-  }
+  migrate(old, migrations.slice(0, 5));
+  old.run(
+    "INSERT INTO plugin_grants (plugin, folder, digest, kind, name) VALUES (?, ?, ?, ?, ?)",
+    [
+      "weather",
+      "/opt/aphelion/plugins/weather",
+      "abc123",
+      "events",
+      "bot.status",
+    ],
+  );
+  old.run(
+    "INSERT INTO plugin_installs (plugin, folder, digest) VALUES (?, ?, ?)",
+    ["weather", "/opt/aphelion/plugins/weather", "abc123"],
+  );
   old.close();
 
   const store = openStore(path);
@@ -80,13 +85,28 @@ test("migration 5 records every plugin that already had grants as installed", ()
     store.close();
   });
 
+  expect(store.all("SELECT * FROM plugin_installs")).toEqual([]);
+  expect(store.all("SELECT * FROM plugin_grants")).toEqual([]);
+  expect(() => {
+    store.run(
+      "INSERT INTO plugin_installs (plugin, version) VALUES ('weather', '1.0.0')",
+    );
+  }).toThrow("FOREIGN KEY");
+  expect(() => {
+    store.run(
+      "INSERT INTO plugin_grants (plugin, version, kind, name) VALUES ('weather', '1.0.0', 'events', 'bot.status')",
+    );
+  }).toThrow("FOREIGN KEY");
+  store.run(
+    "INSERT INTO plugin_versions (plugin, version, source, folder, files_digest) VALUES ('weather', '1.0.0', 'folder', '/opt/aphelion/plugins/weather', 'def456')",
+  );
+  store.run(
+    "INSERT INTO plugin_grants (plugin, version, kind, name) VALUES ('weather', '1.0.0', 'events', 'bot.status')",
+  );
+  store.run(
+    "INSERT INTO plugin_installs (plugin, version) VALUES ('weather', '1.0.0')",
+  );
   expect(
-    store.all("SELECT plugin, folder, digest FROM plugin_installs"),
-  ).toEqual([
-    {
-      plugin: "weather",
-      folder: "/opt/aphelion/plugins/weather",
-      digest: "abc123",
-    },
-  ]);
+    store.all("SELECT plugin, version, previous FROM plugin_installs"),
+  ).toEqual([{ plugin: "weather", version: "1.0.0", previous: null }]);
 });

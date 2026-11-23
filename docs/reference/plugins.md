@@ -154,15 +154,37 @@ A plugin gets an event only if both are true:
 - Its manifest asks for it.
 - The owner granted it.
 
-Put the unpacked plugin in its final, read-only location. Run the install command to preview its permission requests.
+Put the unpacked plugin in its final location, where only you can change it. Run the install command to preview its permission requests.
 
 ```sh
 aphelion plugin install /path/to/plugin
 ```
 
-If you accept the listed permissions, repeat the command with the displayed `--approve` argument. This approves the complete list for that folder and manifest. Installing again replaces the previous grant list for that plugin ID. The approval applies to the displayed folder and manifest. The host reads the manifest again on every launch, including automatic restarts. A changed manifest needs a new approval. Use the same `--state-dir` as the server if you changed the default.
+If you accept the listed permissions, repeat the command with the displayed `--approve` argument. Use the same `--state-dir` as the server if you changed the default.
 
-The install command records the plugin and its grants in SQLite. The server starts every recorded plugin when it starts, so restart the server after an install. The host refuses to start or restart a recorded plugin whose manifest differs from the approved one, and logs `a plugin's manifest changed since it was approved, so it won't start`. In the container, plugins live read-only under `/opt/aphelion/plugins` ([install a plugin](../guides/install.md#install-a-plugin)).
+The approval covers every file in the folder, not only the manifest. The install command computes a digest of the folder: a SHA-256 hash of each file's path and contents, combined into one value. Hidden files count. The command refuses a folder that holds a symbolic link or another special file, more than 1000 files, or more than 64 MiB.
+
+The `--approve` value is a hash of these parts:
+
+- the plugin's `id` and `version`
+- the version that is approved now, if any
+- the folder
+- the permission list
+- the files digest
+
+The value stops working when any of these parts changes. So a value printed before another approval of the same plugin no longer matches. Preview again to get a new one.
+
+The install command records each approved version with its folder, its files digest and its grants, in SQLite. A grant belongs to one version of a plugin. When you approve a new version, the server keeps the version it replaces as the previous one. Approving the same version again replaces that version's folder, digest and grants.
+
+The server starts the current version of every installed plugin when it starts, so restart the server after an install. Before every start, and before every automatic restart after a crash, the host checks three things:
+
+- The manifest's `id` and `version` match the approved version.
+- The files digest of the folder matches the approved one.
+- The manifest asks only for permissions that were granted to that version.
+
+If a check fails, the plugin doesn't start. An automatic restart logs `a plugin changed since it was approved, so it won't start`, with the reason. A running plugin keeps the grants of the version it started with, even after you approve a newer version.
+
+Approvals from before this change don't carry over. After you upgrade Aphelion, approve each installed plugin once more with `plugin install`. In the container, plugins live under `/opt/aphelion/plugins` ([install a plugin](../guides/install.md#install-a-plugin)).
 
 The host identifies `network.get` requests by the plugin's own channel. The request takes an HTTPS URL using the default port and an exact granted hostname. The host connects to a public IPv4 address, skips redirects, and limits the response to 64 KiB and the request to five seconds. The container's controls for direct network access are a separate boundary.
 

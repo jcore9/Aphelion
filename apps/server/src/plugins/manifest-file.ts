@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import {
@@ -36,9 +35,5 @@ export const readManifest = (folder: string) =>
     if (!parsed.ok) {
       return yield* new PluginRefused({ folder, issues: parsed.issues });
     }
-    return {
-      manifest: parsed.manifest,
-      folder: canonicalFolder,
-      digest: createHash("sha256").update(text).digest("hex"),
-    };
+    return { manifest: parsed.manifest, folder: canonicalFolder };
   });

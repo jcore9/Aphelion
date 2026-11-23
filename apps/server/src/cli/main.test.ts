@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync, statSync } from "node:fs";
 import {
   chmod,
@@ -215,19 +214,12 @@ test("aphelion --headless starts installed plugins through the runner pipe", asy
     permissions: {},
   });
   await writeFile(join(folder, "aphelion-plugin.json"), manifest);
-  const digest = createHash("sha256").update(manifest).digest("hex");
-  const approval = createHash("sha256")
-    .update(JSON.stringify([folder, digest]))
-    .digest("hex");
-  const install = start([
-    "plugin",
-    "install",
-    folder,
-    "--approve",
-    approval,
-    "--state-dir",
-    stateDir,
-  ]);
+  const command = ["plugin", "install", folder, "--state-dir", stateDir];
+  const preview = start(command);
+  expect(await preview.exited).toBe(0);
+  const approval = /--approve ([0-9a-f]{64})$/m.exec(preview.stdout())?.[1];
+  expect(approval).toBeDefined();
+  const install = start([...command, "--approve", approval ?? ""]);
   expect(await install.exited).toBe(0);
 
   const child = spawn(

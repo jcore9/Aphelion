@@ -20,6 +20,7 @@ import { createLogger } from "../log";
 import { Secret } from "../secrets";
 import { openStore } from "../store";
 import { readManifest } from "./manifest-file";
+import { filesDigest } from "./tree-digest";
 import {
   PluginHost,
   type HostOptions,
@@ -28,11 +29,12 @@ import {
   RunnerLink,
 } from "./host";
 import {
-  PluginGrants,
-  recordGrants,
-  sqlitePluginGrants,
-  type Permission,
-} from "./grants";
+  approvalFor,
+  readInstall,
+  recordVersion,
+  type InstallRecord,
+} from "./approvals";
+import { PluginGrants, sqlitePluginGrants, type Permission } from "./grants";
 import { rpcErrors } from "./json-rpc";
 import type { LifecycleState, RestartPolicy } from "./lifecycle";
 import { memoryLinkPair, type Framing } from "./link";
@@ -217,7 +219,7 @@ function harness(
   const { grants } = options;
   const grantsLayer = grants
     ? Layer.succeed(PluginGrants, {
-        allows: (plugin, permission) => {
+        allows: (plugin, _version, permission) => {
           const allowed = grants(plugin, permission);
           return typeof allowed === "boolean"
             ? Effect.succeed(allowed)
@@ -267,6 +269,38 @@ const serverPlugin = (id: string, permissions: Message = {}) =>
       permissions,
     }),
   );
+
+const tempStore = Effect.acquireRelease(
+  Effect.promise(async () => {
+    base ??= await mkdtemp(join(tmpdir(), "aphelion-host-"));
+    return openStore(join(base, `${crypto.randomUUID()}.db`));
+  }),
+  (db) =>
+    Effect.sync(() => {
+      db.close();
+    }),
+);
+
+const approveFolder = (
+  db: ReturnType<typeof openStore>,
+  path: string,
+  grants: readonly Permission[],
+) =>
+  Effect.gen(function* () {
+    const { manifest, folder } = yield* readManifest(path);
+    recordVersion(db, {
+      plugin: manifest.id,
+      version: manifest.version,
+      source: "folder",
+      folder,
+      filesDigest: yield* filesDigest(folder),
+      repository: undefined,
+      grants,
+    });
+    const record: InstallRecord | undefined = readInstall(db, manifest.id);
+    if (record === undefined) return yield* Effect.die("no install record");
+    return approvalFor(record, undefined);
+  });
 
 const handshake = (io: FakeIo) =>
   Effect.gen(function* () {
@@ -446,7 +480,7 @@ describe("the plugin host", () => {
   });
 
   it.live(
-    "starts an approved plugin only while its manifest matches the approval",
+    "starts an approved plugin only while every file matches the approval, also on an automatic restart",
     () => {
       let folder = "";
       const { layer, record, logs } = harness({
@@ -454,16 +488,7 @@ describe("the plugin host", () => {
           Effect.gen(function* () {
             yield* handshake(io);
             yield* Effect.promise(() =>
-              writeFile(
-                join(folder, "aphelion-plugin.json"),
-                JSON.stringify({
-                  id: "pinned",
-                  version: "1.0.1",
-                  api: "^0.2.0",
-                  server: { entry: "index.js" },
-                  permissions: {},
-                }),
-              ),
+              writeFile(join(folder, "index.js"), "twp"),
             );
             return 1;
           }),
@@ -471,27 +496,67 @@ describe("the plugin host", () => {
       return Effect.gen(function* () {
         const host = yield* PluginHost;
         folder = yield* serverPlugin("pinned");
-        const { digest } = yield* readManifest(folder);
+        const code = join(folder, "index.js");
+        yield* Effect.promise(() => writeFile(code, "two"));
+        const approval = {
+          id: "pinned",
+          version: "1.0.0",
+          filesDigest: yield* filesDigest(folder),
+        };
+        yield* Effect.promise(() => writeFile(code, "twp"));
 
-        const refused = yield* Effect.flip(
-          host.start(folder, { id: "pinned", digest: "0".repeat(64) }),
-        );
-        expect(refused.issues[0]?.message).toContain(
-          "the manifest changed since it was approved",
+        const refused = yield* Effect.flip(host.start(folder, approval));
+        expect(refused.issues[0]?.message).toBe(
+          `the plugin's files changed since they were approved. Run aphelion plugin install ${folder} to approve it.`,
         );
         expect(record.spawned).toEqual([]);
 
-        yield* host.start(folder, { id: "pinned", digest });
+        yield* Effect.promise(() => writeFile(code, "two"));
+        yield* host.start(folder, approval);
         yield* waitFor("pinned", { state: "stopped" });
         expect(record.spawned).toHaveLength(1);
         expect(logs).toContainEqual(
           expect.objectContaining({
-            msg: "a plugin's manifest changed since it was approved, so it won't start",
+            msg: "a plugin changed since it was approved, so it won't start",
             plugin: "pinned",
+            reason: `the plugin's files changed since they were approved. Run aphelion plugin install ${folder} to approve it.`,
           }),
         );
       }).pipe(Effect.provide(layer));
     },
+  );
+
+  it.live(
+    "starts an approved plugin only when its manifest asks for no more than was granted",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* tempStore;
+        const folder = yield* serverPlugin("watcher", {
+          events: ["bot.status"],
+        });
+        const { layer, record } = harness(
+          {
+            watcher: (io) =>
+              handshake(io).pipe(Effect.andThen(serveUntilShutdown(io))),
+          },
+          { store: db },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          const ungranted = yield* approveFolder(db, folder, []);
+          const refused = yield* Effect.flip(host.start(folder, ungranted));
+          expect(refused.issues[0]?.message).toBe(
+            `the plugin asks for permissions that weren't approved: events "bot.status". Run aphelion plugin install ${folder} to approve it.`,
+          );
+          expect(record.spawned).toEqual([]);
+
+          const granted = yield* approveFolder(db, folder, [
+            { kind: "events", name: "bot.status" },
+          ]);
+          yield* host.start(folder, granted);
+          yield* waitFor("watcher", { state: "running" });
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
   );
 
   it.live("gives up on a plugin that keeps crashing", () => {
@@ -759,29 +824,12 @@ describe("the plugin host", () => {
         const sibling = yield* serverPlugin("sibling", {
           network: ["api.example.com"],
         });
-        const installation = yield* readManifest(folder);
-        yield* Effect.acquireUseRelease(
-          Effect.sync(() => openStore(join(folder, "grants.db"))),
-          (db) =>
-            Effect.sync(() => {
-              recordGrants(db, { ...installation, folder }, [
-                { kind: "network", name: "api.example.com" },
-                { kind: "events", name: "bot.status" },
-                { kind: "secrets", name: "op://vault/item/field" },
-              ]);
-            }),
-          (db) =>
-            Effect.sync(() => {
-              db.close();
-            }),
-        );
-        const db = yield* Effect.acquireRelease(
-          Effect.sync(() => openStore(join(folder, "grants.db"))),
-          (db) =>
-            Effect.sync(() => {
-              db.close();
-            }),
-        );
+        const db = yield* tempStore;
+        yield* approveFolder(db, folder, [
+          { kind: "network", name: "api.example.com" },
+          { kind: "events", name: "bot.status" },
+          { kind: "secrets", name: "op://vault/item/field" },
+        ]);
         const replies: Message[] = [];
         const siblingReplies: Message[] = [];
         const urls: string[] = [];
@@ -878,7 +926,7 @@ describe("the plugin host", () => {
             name: "bot.status",
             data: {},
           });
-          recordGrants(db, { ...installation, folder }, []);
+          yield* approveFolder(db, folder, []);
           yield* host.publish({ name: "bot.status", data: {} });
           yield* Effect.sleep("20 millis");
           expect(events).toHaveLength(1);
@@ -979,15 +1027,8 @@ describe("the plugin host", () => {
         });
         const file = join(folder, "aphelion-plugin.json");
         const original = yield* Effect.promise(() => readFile(file, "utf8"));
-        const installation = yield* readManifest(folder);
-        const db = yield* Effect.acquireRelease(
-          Effect.sync(() => openStore(join(folder, "grants.db"))),
-          (store) =>
-            Effect.sync(() => {
-              store.close();
-            }),
-        );
-        recordGrants(db, installation, [
+        const db = yield* tempStore;
+        yield* approveFolder(db, folder, [
           { kind: "events", name: "bot.status" },
         ]);
         const replies: Message[] = [];
@@ -1016,6 +1057,63 @@ describe("the plugin host", () => {
           yield* waitUntil(() => replies.length === 2);
           expect(replies[0]?.["result"]).toEqual({});
           expect(replies[1]?.["error"]).toEqual(rpcErrors.notGranted);
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps a run's grants when a newer version is approved, and starts only the approved version",
+    () =>
+      Effect.gen(function* () {
+        const folder = yield* serverPlugin("watcher", {
+          events: ["bot.status"],
+        });
+        const file = join(folder, "aphelion-plugin.json");
+        const original = yield* Effect.promise(() => readFile(file, "utf8"));
+        const db = yield* tempStore;
+        const go = Deferred.makeUnsafe<undefined>();
+        const replies: Message[] = [];
+        const { layer, record } = harness(
+          {
+            watcher: (io) =>
+              Effect.gen(function* () {
+                yield* handshake(io);
+                yield* Deferred.await(go);
+                replies.push(
+                  yield* io.call("events.subscribe", { event: "bot.status" }),
+                );
+                return yield* serveUntilShutdown(io);
+              }),
+          },
+          { store: db },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          const first = yield* approveFolder(db, folder, [
+            { kind: "events", name: "bot.status" },
+          ]);
+          yield* host.start(folder, first);
+          yield* waitFor("watcher", { state: "running" });
+          yield* Effect.promise(() =>
+            writeFile(
+              file,
+              original
+                .replace("1.0.0", "1.1.0")
+                .replace('["bot.status"]', "[]"),
+            ),
+          );
+          const newer = yield* approveFolder(db, folder, []);
+          yield* Effect.promise(() => writeFile(file, original));
+          yield* Deferred.succeed(go, undefined);
+          yield* waitUntil(() => replies.length === 1);
+          expect(replies[0]?.["result"]).toEqual({});
+
+          yield* host.stop("watcher");
+          const refused = yield* Effect.flip(host.start(folder, newer));
+          expect(refused.issues[0]?.message).toBe(
+            `the plugin is watcher 1.0.0, but watcher 1.1.0 was approved. Run aphelion plugin install ${folder} to approve it.`,
+          );
+          expect(record.spawned).toHaveLength(1);
         }).pipe(Effect.provide(layer));
       }).pipe(Effect.scoped),
   );

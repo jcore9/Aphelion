@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { installedPlugins } from "../plugins/grants";
+import { readInstall } from "../plugins/approvals";
 import { openStore } from "../store";
 import { version } from "../version";
 import { cli, CliFailure, CliIo } from "./index";
@@ -374,7 +374,10 @@ test("an unexpected error prints its message and exits 1", async () => {
   expect(err[0]).toMatch(/^aphelion: .*ENOENT/);
 });
 
-test("plugin install previews permissions and only saves the approved manifest", async () => {
+const sha256 = (text: string) =>
+  createHash("sha256").update(text).digest("hex");
+
+test("plugin install approves every file, and an upgrade needs a token that names the installed version", async () => {
   const folder = join(root, "plugin");
   await mkdir(folder);
   const file = join(folder, "aphelion-plugin.json");
@@ -387,10 +390,31 @@ test("plugin install previews permissions and only saves the approved manifest",
   };
   const text = JSON.stringify(manifest);
   await writeFile(file, text);
-  const digest = createHash("sha256").update(text).digest("hex");
-  const approval = createHash("sha256")
-    .update(JSON.stringify([folder, digest]))
-    .digest("hex");
+  await writeFile(join(folder, "index.js"), "one");
+  const files = (manifestText: string) =>
+    sha256(
+      JSON.stringify([
+        ["aphelion-plugin.json", sha256(manifestText)],
+        ["index.js", sha256("one")],
+      ]),
+    );
+  const permissions = [
+    ["events", "bot.status"],
+    ["network", "api.example.com"],
+  ];
+  const token = (from: string | null, version: string, manifestText: string) =>
+    sha256(
+      JSON.stringify([
+        "aphelion-approval-v1",
+        "weather",
+        from,
+        version,
+        folder,
+        permissions,
+        files(manifestText),
+      ]),
+    );
+  const approval = token(null, "1.0.0", text);
   const command = ["plugin", "install", folder, "--state-dir", stateDir];
 
   const preview = await run(command);
@@ -405,42 +429,64 @@ test("plugin install previews permissions and only saves the approved manifest",
 
   const sibling = join(root, "sibling");
   await cp(folder, sibling, { recursive: true });
-  const siblingCommand = [
-    "plugin",
-    "install",
-    sibling,
-    "--state-dir",
-    stateDir,
-  ];
-  expect((await run([...siblingCommand, "--approve", approval])).code).toBe(1);
-  expect(await readdir(stateDir)).toEqual([]);
-
-  await writeFile(file, JSON.stringify({ ...manifest, version: "1.0.1" }));
+  expect(
+    (
+      await run([
+        "plugin",
+        "install",
+        sibling,
+        "--state-dir",
+        stateDir,
+        "--approve",
+        approval,
+      ])
+    ).code,
+  ).toBe(1);
+  await writeFile(join(folder, "index.js"), "onf");
   expect((await run([...command, "--approve", approval])).code).toBe(1);
   expect(await readdir(stateDir)).toEqual([]);
 
-  await writeFile(file, text);
+  await writeFile(join(folder, "index.js"), "one");
   expect((await run([...command, "--approve", approval])).code).toBe(0);
-  const db = openStore(join(stateDir, "aphelion.db"));
-  try {
-    expect(
-      db.all(
-        "SELECT plugin, folder, digest, kind, name FROM plugin_grants ORDER BY kind",
-      ),
-    ).toEqual([
-      { plugin: "weather", folder, digest, kind: "events", name: "bot.status" },
-      {
-        plugin: "weather",
-        folder,
-        digest,
-        kind: "network",
-        name: "api.example.com",
-      },
-    ]);
-    expect(installedPlugins(db)).toEqual([
-      { plugin: "weather", folder, digest },
-    ]);
-  } finally {
-    db.close();
-  }
+  const installed = () => {
+    const db = openStore(join(stateDir, "aphelion.db"));
+    try {
+      return readInstall(db, "weather");
+    } finally {
+      db.close();
+    }
+  };
+  const first = {
+    plugin: "weather",
+    version: "1.0.0",
+    source: "folder",
+    folder,
+    filesDigest: files(text),
+    repository: undefined,
+    grants: [
+      { kind: "events", name: "bot.status" },
+      { kind: "network", name: "api.example.com" },
+    ],
+  };
+  expect(installed()).toEqual({
+    plugin: "weather",
+    current: first,
+    previous: undefined,
+  });
+
+  const upgraded = JSON.stringify({ ...manifest, version: "1.1.0" });
+  await writeFile(file, upgraded);
+  const upgrade = await run(command);
+  expect(upgrade.out[1]).toBe("Replaces the approved version 1.0.0");
+  expect(
+    (await run([...command, "--approve", token(null, "1.1.0", upgraded)])).code,
+  ).toBe(1);
+  const next = token("1.0.0", "1.1.0", upgraded);
+  expect(upgrade.out.at(-1)).toContain(next);
+  expect((await run([...command, "--approve", next])).code).toBe(0);
+  expect(installed()).toEqual({
+    plugin: "weather",
+    current: { ...first, version: "1.1.0", filesDigest: files(upgraded) },
+    previous: first,
+  });
 });
