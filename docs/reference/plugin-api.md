@@ -508,7 +508,7 @@ const request: (
 ### `requestUrl`
 
 Checks a URL's form for `network.get`, and returns the URL, or `undefined` if the form is wrong.
-The URL must use `https:`, a hostname with a dot and no dot at the end, and the default port, with no user name, password or `#` fragment, and not an IP address. `network.get` also refuses a URL longer than 4096 characters and a host that isn't granted.
+The URL must use `https:`, a hostname with a dot and no dot at the end, and the default port, with no user name, password or text after a `#`, and not an IP address. `network.get` also refuses a URL longer than 4096 characters and a host that isn't granted.
 
 ```ts
 function requestUrl(text: string): URL | undefined;
@@ -602,7 +602,7 @@ const success: (
 ### `runPlugin`
 
 Runs a plugin on the given lines until the host sends `shutdown` or closes its input, then runs its cleanup.
-It rejects when the plugin's `start` fails before shutdown begins, or a line can't be read or written. A `start` that fails after shutdown has begun is only logged. Most plugins call `main` instead.
+It rejects when the plugin's `start` fails before shutdown begins, or when reading or writing a line fails while the plugin runs. A `start` that fails after shutdown has begun is only logged. Most plugins call `main` instead.
 
 ```ts
 function runPlugin(plugin: ServerPlugin, io: PluginIO): Promise<void>;
