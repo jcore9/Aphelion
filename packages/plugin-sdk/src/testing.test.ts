@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { PluginContext, ServerPlugin } from "./plugin.ts";
 import { createTestHost, type Grant } from "./testing.ts";
+import { maxPluginLineBytes, methods, notification } from "./wire.ts";
 
 const manifest = {
   id: "demo",
@@ -46,6 +47,22 @@ const outcome = (promise: Promise<unknown>) =>
       message: (error as Error).message,
     }),
   );
+
+const utf8 = new TextEncoder();
+
+function eventLine(data: string): string {
+  return JSON.stringify(
+    notification(methods.event, { name: "demo.ping", data }),
+  );
+}
+
+function eventData(target: number, multibyte: boolean): string {
+  const extra = target - utf8.encode(eventLine("")).byteLength;
+  if (!multibyte) return "a".repeat(extra);
+  const euros = Math.floor(extra / 3);
+  const rest = extra % 3;
+  return `${"€".repeat(euros)}${rest === 2 ? "é" : rest === 1 ? "a" : ""}`;
+}
 
 describe("createTestHost", () => {
   test("delivers a published event to a granted subscription and waits for its handler", async () => {
@@ -173,6 +190,42 @@ describe("createTestHost", () => {
     await expect(host.publish("demo.ping", { n: 1n })).rejects.toThrow();
     await host.publish("demo.ping", { n: 2 });
     expect(seen).toEqual([{ n: 2 }]);
+    await host.stop();
+  });
+
+  test("rejects an event whose encoded line is past 1 MiB and still delivers one that fits", async () => {
+    const host = hostWith([{ kind: "events", name: "demo.ping" }]);
+    const seen: unknown[] = [];
+    await host.start({
+      async start(ctx) {
+        await ctx.events.subscribe("demo.ping", (data) => {
+          seen.push(data);
+        });
+      },
+    });
+    const ascii = eventData(maxPluginLineBytes, false);
+    const asciiOver = eventData(maxPluginLineBytes + 1, false);
+    const multibyte = eventData(maxPluginLineBytes, true);
+    const multibyteOver = eventData(maxPluginLineBytes + 1, true);
+    expect(utf8.encode(eventLine(ascii)).byteLength).toBe(maxPluginLineBytes);
+    expect(utf8.encode(eventLine(asciiOver)).byteLength).toBe(
+      maxPluginLineBytes + 1,
+    );
+    expect(utf8.encode(eventLine(multibyte)).byteLength).toBe(
+      maxPluginLineBytes,
+    );
+    expect(utf8.encode(eventLine(multibyteOver)).byteLength).toBe(
+      maxPluginLineBytes + 1,
+    );
+    await host.publish("demo.ping", ascii);
+    await expect(host.publish("demo.ping", asciiOver)).rejects.toThrow(
+      "the event is longer than 1 MiB once encoded, so the host refuses it",
+    );
+    await host.publish("demo.ping", multibyte);
+    await expect(host.publish("demo.ping", multibyteOver)).rejects.toThrow(
+      "the event is longer than 1 MiB once encoded, so the host refuses it",
+    );
+    expect(seen).toEqual([ascii, multibyte]);
     await host.stop();
   });
 

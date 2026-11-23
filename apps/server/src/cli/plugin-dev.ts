@@ -1,7 +1,7 @@
 import { lstat, readdir } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
 import { join, resolve } from "node:path";
-import { Cause, type Duration, Effect, Queue } from "effect";
+import { Cause, Deferred, type Duration, Effect, Queue } from "effect";
 import {
   devReplySchema,
   devSocketFile,
@@ -69,49 +69,86 @@ const connect = (path: string) =>
       }),
   );
 
+const show = (message: DevReply) =>
+  Effect.gen(function* () {
+    const io = yield* CliIo;
+    if (message.type === "crashed") {
+      yield* io.err(
+        `${message.plugin} crashed after the handshake. If its start() failed, the server log says why.`,
+      );
+      return;
+    }
+    if (!message.ok) {
+      yield* io.err(`Refused: ${message.reason}`);
+      return;
+    }
+    if (message.state === "running") {
+      yield* io.out(`Reloaded ${message.plugin}: the handshake finished.`);
+      return;
+    }
+    yield* io.err(
+      `Reloaded ${message.plugin}, but it isn't running: ${message.state}. The server log says why.`,
+    );
+  });
+
 const devClient = (path: string) =>
   Effect.gen(function* () {
     const socket = yield* connect(path);
-    const replies = yield* Queue.unbounded<string, Cause.Done>();
+    const incoming = yield* Queue.unbounded<string, Cause.Done>();
     const splitter = new LineSplitter(maxDevLineBytes);
     socket.on("data", (chunk: Buffer) => {
       for (const piece of splitter.push(chunk)) {
-        if (piece.kind === "line") Queue.offerUnsafe(replies, piece.text);
+        if (piece.kind === "line") Queue.offerUnsafe(incoming, piece.text);
       }
     });
     socket.on("close", () => {
-      Queue.endUnsafe(replies);
+      Queue.endUnsafe(incoming);
     });
-    return (folder: string) =>
-      Effect.gen(function* () {
-        socket.write(`${JSON.stringify({ type: "reload", folder })}\n`);
-        const line = yield* Queue.take(replies).pipe(
-          Effect.catchIf(Cause.isDone, () =>
-            Effect.fail(new Error("the server closed the dev connection")),
-          ),
+    let waiter: Deferred.Deferred<undefined, Error> | undefined;
+    let fault: Error | undefined;
+    const failWaiter = (error: Error) => {
+      fault = error;
+      const pending = waiter;
+      waiter = undefined;
+      return pending ? Deferred.fail(pending, error) : Effect.void;
+    };
+    const takeLine = Queue.take(incoming).pipe(
+      Effect.catchIf(Cause.isDone, () =>
+        Effect.fail(new Error("the server closed the dev connection")),
+      ),
+    );
+    const read = Effect.gen(function* () {
+      for (;;) {
+        const line = yield* takeLine.pipe(
+          Effect.tapError((error) => failWaiter(error)),
         );
-        const reply = devReplySchema.safeParse(
+        const message = devReplySchema.safeParse(
           yield* Effect.try(() => JSON.parse(line) as unknown).pipe(
             Effect.orElseSucceed(() => undefined),
           ),
         );
-        if (!reply.success) {
-          return yield* Effect.fail(
+        if (!message.success) {
+          return yield* failWaiter(
             new Error("the server sent a reply this command can't read"),
           );
         }
-        return reply.data;
+        yield* show(message.data);
+        if (message.data.type === "reply" && waiter) {
+          const pending = waiter;
+          waiter = undefined;
+          yield* Deferred.succeed(pending, undefined);
+        }
+      }
+    });
+    yield* Effect.forkScoped(read, { startImmediately: true });
+    return (folder: string) =>
+      Effect.gen(function* () {
+        if (fault) return yield* Effect.fail(fault);
+        const gate = yield* Deferred.make<undefined, Error>();
+        waiter = gate;
+        socket.write(`${JSON.stringify({ type: "reload", folder })}\n`);
+        yield* Deferred.await(gate);
       });
-  });
-
-const show = (reply: DevReply) =>
-  Effect.gen(function* () {
-    const io = yield* CliIo;
-    if (reply.ok) {
-      yield* io.out(`Reloaded ${reply.plugin}: ${reply.state}`);
-    } else {
-      yield* io.err(`Refused: ${reply.reason}`);
-    }
   });
 
 export const pluginDev = (options: {
@@ -135,7 +172,7 @@ export const pluginDev = (options: {
     );
     return yield* watchForChanges(
       folderFingerprint(folder),
-      connected.success(folder).pipe(Effect.flatMap(show)),
+      connected.success(folder),
       options.every ?? "500 millis",
     );
   }).pipe(Effect.scoped);

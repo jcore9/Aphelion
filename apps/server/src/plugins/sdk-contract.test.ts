@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   HostError,
+  maxPluginLineBytes,
+  methods,
+  notification,
   type ServerPlugin,
   type SecretReference,
 } from "@aphelion/plugin-sdk";
@@ -13,7 +16,12 @@ import { Cause, Deferred, Effect, Layer, Queue, Stream } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import { PluginGrants } from "./grants";
-import { PluginHost, pluginHostLayer, RunnerLink } from "./host";
+import {
+  MessageNotSent,
+  PluginHost,
+  pluginHostLayer,
+  RunnerLink,
+} from "./host";
 import { memoryLinkPair, type Framing } from "./link";
 import { PluginProcesses, SpawnFailed, type ProcessExit } from "./processes";
 import { runRunner } from "./runner";
@@ -299,4 +307,105 @@ describe("an SDK plugin", () => {
       }).pipe(Effect.provide(layer), Effect.scoped);
     },
   );
+
+  it.live(
+    "the real host and the test host agree on the 1 MiB event limit",
+    () => {
+      const ascii = eventData(maxPluginLineBytes, false);
+      const asciiOver = eventData(maxPluginLineBytes + 1, false);
+      const multibyte = eventData(maxPluginLineBytes, true);
+      const multibyteOver = eventData(maxPluginLineBytes + 1, true);
+      const encoder = new TextEncoder();
+      for (const [data, bytes] of [
+        [ascii, maxPluginLineBytes],
+        [asciiOver, maxPluginLineBytes + 1],
+        [multibyte, maxPluginLineBytes],
+        [multibyteOver, maxPluginLineBytes + 1],
+      ] as const) {
+        expect(encoder.encode(eventLine(data)).byteLength).toBe(bytes);
+      }
+      const seen: unknown[] = [];
+      const plugin: ServerPlugin = {
+        async start(ctx) {
+          await ctx.events.subscribe("demo.ping", (data) => {
+            seen.push(data);
+          });
+          ctx.log("subscribed");
+        },
+      };
+      const { layer, logs } = realHost(plugin);
+      return Effect.gen(function* () {
+        const folder = yield* Effect.promise(async () => {
+          const created = await mkdtemp(join(tmpdir(), "aphelion-contract-"));
+          await writeFile(
+            join(created, "aphelion-plugin.json"),
+            JSON.stringify(manifest),
+          );
+          return created;
+        });
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => rm(folder, { recursive: true, force: true })),
+        );
+        const host = yield* PluginHost;
+        yield* host.start(folder);
+        yield* waitUntil(() =>
+          logs.some((entry) => entry["line"] === "subscribed"),
+        );
+        yield* host.publish({ name: "demo.ping", data: ascii });
+        const asciiRefused = yield* Effect.flip(
+          host.publish({ name: "demo.ping", data: asciiOver }),
+        );
+        yield* host.publish({ name: "demo.ping", data: multibyte });
+        const multibyteRefused = yield* Effect.flip(
+          host.publish({ name: "demo.ping", data: multibyteOver }),
+        );
+        yield* waitUntil(() => seen.length === 2);
+        expect(asciiRefused).toBeInstanceOf(MessageNotSent);
+        expect(asciiRefused).toMatchObject({ reason: "too long" });
+        expect(multibyteRefused).toMatchObject({ reason: "too long" });
+        expect(seen).toEqual([ascii, multibyte]);
+
+        const fakeSeen: unknown[] = [];
+        const testHost = createTestHost(manifest);
+        testHost.setGrants(grants);
+        yield* Effect.promise(async () => {
+          await testHost.start({
+            async start(ctx) {
+              await ctx.events.subscribe("demo.ping", (data) => {
+                fakeSeen.push(data);
+              });
+            },
+          });
+          await testHost.publish("demo.ping", ascii);
+          await expect(
+            testHost.publish("demo.ping", asciiOver),
+          ).rejects.toThrow(
+            "the event is longer than 1 MiB once encoded, so the host refuses it",
+          );
+          await testHost.publish("demo.ping", multibyte);
+          await expect(
+            testHost.publish("demo.ping", multibyteOver),
+          ).rejects.toThrow(
+            "the event is longer than 1 MiB once encoded, so the host refuses it",
+          );
+          expect(fakeSeen).toEqual([ascii, multibyte]);
+          await testHost.stop();
+        });
+      }).pipe(Effect.provide(layer), Effect.scoped);
+    },
+  );
 });
+
+function eventLine(data: string): string {
+  return JSON.stringify(
+    notification(methods.event, { name: "demo.ping", data }),
+  );
+}
+
+function eventData(target: number, multibyte: boolean): string {
+  const extra = target - new TextEncoder().encode(eventLine("")).byteLength;
+  if (!multibyte) return "a".repeat(extra);
+  const euros = Math.floor(extra / 3);
+  const rest = extra % 3;
+  return `${"€".repeat(euros)}${rest === 2 ? "é" : rest === 1 ? "a" : ""}`;
+}

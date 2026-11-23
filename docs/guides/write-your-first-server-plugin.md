@@ -175,7 +175,7 @@ You should see `Plugin permissions saved.`
    sudo docker compose exec --user harness aphelion aphelion plugin dev /opt/aphelion/dev-plugin
    ```
 
-   You should see `Watching /opt/aphelion/dev-plugin.` and then `Reloaded hello-plugin: running`.
+   You should see `Watching /opt/aphelion/dev-plugin.` and then `Reloaded hello-plugin: the handshake finished.`
 
 2. In a second terminal, look at the server's log. You should see the plugin's `plugin started` line.
 
@@ -193,7 +193,7 @@ You should see `Plugin permissions saved.`
 
 4. Change the text in `src/plugin.ts`, for example `"plugin started"` to `"plugin started again"`, and save the file.
 
-   Within a second or two, the build output shows a new build. Then `plugin dev` prints `Reloaded hello-plugin: running` once more, and the second terminal shows the new line. The server didn't restart.
+   Within a second or two, the build output shows a new build. Then `plugin dev` prints `Reloaded hello-plugin: the handshake finished.` once more, and the second terminal shows the new line. The server didn't restart.
 
 Press Ctrl-C in the `plugin dev` terminal to stop watching. The plugin keeps running under the server. A restart of the service starts it again, because it stays approved.
 
@@ -212,7 +212,8 @@ An approval covers one exact manifest. Suppose you add a permission or change th
 | `dev mode reloads only /opt/aphelion/dev-plugin` | You gave another folder. | Use the folder from the override. |
 | `isn't approved` | You haven't approved the folder yet. | Run the two `plugin install` commands. |
 | `stays stopped` | The manifest changed since you approved it, or it isn't valid JSON or a valid manifest. | See [When the manifest changes](#when-the-manifest-changes). |
-| `Reloaded hello-plugin: crashed` | The plugin exited, or the runner refused the folder, for example because user `10004` can write to it. | Read the server log with `sudo journalctl -u aphelion`. |
+| `Reloaded hello-plugin, but it isn't running: crashed. The server log says why.` | The plugin exited, or the runner refused the folder, for example because user `10004` can write to it. | Read the server log with `sudo journalctl -u aphelion`. |
+| `hello-plugin crashed after the handshake. If its start() failed, the server log says why.` | The handshake finished, and the run crashed after that. This can happen when `start()` throws. | Read the server log with `sudo journalctl -u aphelion`. |
 
 ## Next
 

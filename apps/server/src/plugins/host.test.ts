@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pluginApiVersion } from "@aphelion/plugin-sdk";
+import { maxPluginLineBytes, pluginApiVersion } from "@aphelion/plugin-sdk";
 import { expect, it } from "@effect/vitest";
 import {
   Cause,
@@ -50,7 +50,6 @@ import {
 } from "./runner";
 import {
   maxFrameBytes,
-  maxPluginLineBytes,
   runnerReplySchema,
   runnerRequestSchema,
   type RunnerReply,

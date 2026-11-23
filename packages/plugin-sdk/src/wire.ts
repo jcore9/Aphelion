@@ -26,6 +26,16 @@ export const rpcErrors = {
   busy: { code: -32004, message: "Operation in progress" },
 } as const satisfies Record<string, RpcError>;
 
+/** The most UTF-8 bytes one JSON line may hold, not counting the newline. The limit is 1 MiB. */
+export const maxPluginLineBytes = 1024 * 1024;
+
+const utf8 = new TextEncoder();
+
+/** Whether `line`, without its newline, fits in `maxPluginLineBytes` as UTF-8. */
+export function pluginLineFits(line: string): boolean {
+  return utf8.encode(line).byteLength <= maxPluginLineBytes;
+}
+
 /** The JSON-RPC method names that the host and a plugin send. */
 export const methods = {
   initialize: "initialize",

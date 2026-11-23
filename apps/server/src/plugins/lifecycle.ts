@@ -34,7 +34,11 @@ export type LifecycleEvent =
   | { readonly type: "spawned"; readonly run: number }
   | { readonly type: "spawn-failed"; readonly run: number }
   | { readonly type: "ready"; readonly run: number; readonly at: number }
-  | { readonly type: "broke-protocol"; readonly run: number }
+  | {
+      readonly type: "broke-protocol";
+      readonly run: number;
+      readonly at: number;
+    }
   | { readonly type: "exited"; readonly run: number; readonly at: number }
   | { readonly type: "killed"; readonly run: number }
   | {
@@ -89,6 +93,15 @@ function launch(run: number, crashes: number): Step {
     state: { state: "starting", run, crashes },
     commands: [{ type: "spawn", run }],
   };
+}
+
+function crashCount(
+  crashes: number,
+  since: number,
+  at: number,
+  stableMs: number,
+): number {
+  return at - since >= stableMs ? 1 : crashes + 1;
 }
 
 function crash(
@@ -164,17 +177,14 @@ export function step(
       }
     case "running":
       switch (event.type) {
-        case "exited": {
-          const stable = event.at - state.since >= policy.stableMs;
+        case "exited":
+        case "broke-protocol":
           return crash(
             state.run,
-            stable ? 1 : state.crashes + 1,
+            crashCount(state.crashes, state.since, event.at, policy.stableMs),
             policy,
-            false,
+            event.type === "broke-protocol",
           );
-        }
-        case "broke-protocol":
-          return crash(state.run, state.crashes + 1, policy, true);
         case "stop":
           return {
             state: { state: "stopping", run: state.run },

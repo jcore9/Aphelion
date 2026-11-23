@@ -7,16 +7,22 @@ import { expect, it } from "@effect/vitest";
 import { Cause, Effect, Exit, Layer, Queue, Scope } from "effect";
 import { afterAll, beforeAll, describe } from "vitest";
 import { createLogger } from "../log";
-import { devControl, serveDevSocket, type DevReply } from "./dev-control";
+import {
+  devControl,
+  serveDevSocket,
+  type DevReply,
+  type DevResult,
+} from "./dev-control";
 import type { Installed } from "./grants";
 import { PluginHost, pluginHostLayer, RunnerLink } from "./host";
+import { defaultRestartPolicy, type RestartPolicy } from "./lifecycle";
 import { PluginGrants } from "./grants";
 import { readManifest } from "./manifest-file";
 import type { RunnerReply, RunnerRequest } from "./runner-protocol";
 
 const logger = createLogger({ level: "error", write: () => undefined });
 
-function fakeRunner() {
+function fakeRunner(exitAfterReady: boolean) {
   const starts: number[] = [];
   const layer = Layer.effect(
     RunnerLink,
@@ -46,7 +52,17 @@ function fakeRunner() {
                     id: message.id,
                     result: {},
                   });
-                  return yield* reply({ type: "output", plugin, run, line });
+                  yield* reply({ type: "output", plugin, run, line });
+                  if (exitAfterReady) {
+                    return yield* reply({
+                      type: "exited",
+                      plugin,
+                      run,
+                      code: 1,
+                      signal: null,
+                    });
+                  }
+                  return;
                 }
                 if (message.method === "shutdown") {
                   return yield* reply({
@@ -107,17 +123,26 @@ const setup = Effect.gen(function* () {
     approvals: () => approvals,
   });
   const reload = (path: string) =>
-    handle(JSON.stringify({ type: "reload", folder: path }));
+    handle(JSON.stringify({ type: "reload", folder: path })).pipe(
+      Effect.map((result) => result.reply),
+    );
   return { root, folder, other, approvals, approve, handle, reload };
 });
 
 const withHost = <A, E>(
   test: (starts: number[]) => Effect.Effect<A, E, PluginHost>,
+  options?: {
+    readonly exitAfterReady?: boolean;
+    readonly policy?: RestartPolicy;
+  },
 ) => {
-  const runner = fakeRunner();
+  const runner = fakeRunner(options?.exitAfterReady ?? false);
+  const hostLayer = options?.policy
+    ? pluginHostLayer({ logger, policy: options.policy })
+    : pluginHostLayer({ logger });
   return test(runner.starts).pipe(
     Effect.provide(
-      pluginHostLayer({ logger }).pipe(
+      hostLayer.pipe(
         Layer.provide(runner.layer),
         Layer.provide(PluginGrants.refuseAll),
       ),
@@ -148,6 +173,7 @@ describe("plugin dev control", () => {
             digest: renamed.digest,
           });
           expect(yield* reload(folder)).toEqual({
+            type: "reply",
             ok: true,
             plugin: "weather-v2",
             state: "running",
@@ -167,11 +193,13 @@ describe("plugin dev control", () => {
           const { folder, approve, reload } = yield* setup;
           yield* approve;
           expect(yield* reload(folder)).toEqual({
+            type: "reply",
             ok: true,
             plugin: "weather",
             state: "running",
           });
           expect(yield* reload(`${folder}/`)).toEqual({
+            type: "reply",
             ok: true,
             plugin: "weather",
             state: "running",
@@ -198,6 +226,7 @@ describe("plugin dev control", () => {
         );
         expect(replies).toEqual(
           Array.from({ length: 3 }, () => ({
+            type: "reply",
             ok: true,
             plugin: "weather",
             state: "running",
@@ -221,6 +250,7 @@ describe("plugin dev control", () => {
           expect(yield* reload(link)).toMatchObject({ ok: true });
           for (const path of [other, "dev-plugin", join(root, "missing")]) {
             expect(yield* reload(path)).toEqual({
+              type: "reply",
               ok: false,
               reason: `dev mode reloads only ${folder}, not ${JSON.stringify(path)}`,
             });
@@ -240,6 +270,7 @@ describe("plugin dev control", () => {
       Effect.gen(function* () {
         const { folder, reload } = yield* setup;
         expect(yield* reload(folder)).toEqual({
+          type: "reply",
           ok: false,
           reason: `${folder} isn't approved. Run aphelion plugin install ${folder} and approve it.`,
         });
@@ -262,6 +293,7 @@ describe("plugin dev control", () => {
           );
           const approved = yield* readManifest(folder);
           expect(yield* reload(folder)).toEqual({
+            type: "reply",
             ok: false,
             reason: `weather stays stopped: the manifest changed since it was approved. Run aphelion plugin install ${approved.folder} to approve it again.`,
           });
@@ -273,6 +305,7 @@ describe("plugin dev control", () => {
           expect(starts).toEqual([1]);
           yield* approve;
           expect(yield* reload(folder)).toEqual({
+            type: "reply",
             ok: true,
             plugin: "weather",
             state: "running",
@@ -287,12 +320,21 @@ describe("plugin dev control", () => {
       Effect.gen(function* () {
         const { folder, handle } = yield* setup;
         expect(yield* handle("{")).toEqual({
-          ok: false,
-          reason: "the request isn't JSON",
+          reply: {
+            type: "reply",
+            ok: false,
+            reason: "the request isn't JSON",
+          },
         });
         expect(
           yield* handle(JSON.stringify({ type: "approve", folder })),
-        ).toEqual({ ok: false, reason: "the request isn't a reload request" });
+        ).toEqual({
+          reply: {
+            type: "reply",
+            ok: false,
+            reason: "the request isn't a reload request",
+          },
+        });
       }),
     ),
   );
@@ -360,9 +402,12 @@ describe("the plugin dev socket", () => {
             Effect.sync(() => {
               seen.push(line);
               return {
-                ok: true,
-                plugin: "weather",
-                state: String(seen.length),
+                reply: {
+                  type: "reply",
+                  ok: true,
+                  plugin: "weather",
+                  state: String(seen.length),
+                },
               };
             }),
           logger,
@@ -371,17 +416,25 @@ describe("the plugin dev socket", () => {
           0o600,
         );
         expect(yield* ask(path, "first\nsecond\n")).toEqual([
-          { ok: false, reason: "wait for the reply to your last request" },
+          {
+            type: "reply",
+            ok: false,
+            reason: "wait for the reply to your last request",
+          },
         ]);
         expect(yield* askLater(path, "ignored\n")).toEqual([
-          { ok: false, reason: "wait for the reply to your last request" },
+          {
+            type: "reply",
+            ok: false,
+            reason: "wait for the reply to your last request",
+          },
         ]);
         expect(seen).toEqual(["first", "first"]);
         expect(yield* ask(path, "second\n")).toEqual([
-          { ok: true, plugin: "weather", state: "3" },
+          { type: "reply", ok: true, plugin: "weather", state: "3" },
         ]);
         expect(yield* ask(path, `${"x".repeat(70 * 1024)}\n`)).toEqual([
-          { ok: false, reason: "the request is too long" },
+          { type: "reply", ok: false, reason: "the request is too long" },
         ]);
         expect(seen).toEqual(["first", "first", "second"]);
         yield* Scope.close(scope, Exit.void);
@@ -406,12 +459,14 @@ describe("the plugin dev socket", () => {
       expect(left.status).toBe(0);
       expect((yield* Effect.promise(() => stat(path))).isSocket()).toBe(true);
       const answer = () =>
-        Effect.succeed<DevReply>({ ok: false, reason: "fresh" });
+        Effect.succeed<DevResult>({
+          reply: { type: "reply", ok: false, reason: "fresh" },
+        });
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* serveDevSocket(path, answer, logger);
           expect(yield* ask(path, "hello\n")).toEqual([
-            { ok: false, reason: "fresh" },
+            { type: "reply", ok: false, reason: "fresh" },
           ]);
         }),
       );
@@ -421,5 +476,149 @@ describe("the plugin dev socket", () => {
       ).pipe(Effect.flip);
       expect(String(refused)).toContain("isn't a socket");
     }),
+  );
+});
+
+const runningReply = {
+  type: "reply" as const,
+  ok: true as const,
+  plugin: "weather",
+  state: "running",
+};
+
+const connectDev = (path: string) =>
+  Effect.acquireRelease(
+    Effect.promise(async () => {
+      const socket = createConnection(path);
+      await new Promise<void>((resolve, reject) => {
+        socket.once("connect", () => {
+          resolve();
+        });
+        socket.once("error", reject);
+      });
+      socket.removeAllListeners("error");
+      socket.on("error", () => undefined);
+      let text = "";
+      socket.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      const parse = (from: number) =>
+        text
+          .slice(from)
+          .split("\n")
+          .filter((line) => line !== "")
+          .map((line) => JSON.parse(line) as unknown);
+      return {
+        socket,
+        send(body: string) {
+          socket.write(`${body}\n`);
+        },
+        lines: () => parse(0),
+        mark: () => text.length,
+        wait(from: number) {
+          return Effect.gen(function* () {
+            for (
+              let tries = 0;
+              tries < 500 && parse(from).length === 0;
+              tries++
+            ) {
+              yield* Effect.sleep("10 millis");
+            }
+            return parse(from);
+          });
+        },
+      };
+    }),
+    (client) =>
+      Effect.sync(() => {
+        client.socket.destroy();
+      }),
+  );
+
+describe("a crash after the dev handshake", () => {
+  const open = (
+    folder: string,
+    handle: (line: string) => Effect.Effect<DevResult>,
+  ) =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => mkdtemp(join(base, "watch-")));
+      const path = join(root, "plugin-dev.sock");
+      yield* serveDevSocket(path, handle, logger);
+      const io = yield* connectDev(path);
+      return { io, request: JSON.stringify({ type: "reload", folder }) };
+    });
+
+  it.live(
+    "sends the running reply and then one notice when that run exits",
+    () =>
+      withHost(
+        () =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const { folder, approve, handle } = yield* setup;
+              yield* approve;
+              const { io, request } = yield* open(folder, handle);
+              io.send(request);
+              yield* io.wait(0);
+              yield* Effect.sleep("200 millis");
+              expect(io.lines()).toEqual([
+                runningReply,
+                { type: "crashed", plugin: "weather" },
+              ]);
+            }),
+          ),
+        { exitAfterReady: true },
+      ),
+  );
+
+  it.live(
+    "sends one notice when the run stops because it crashed too often",
+    () =>
+      withHost(
+        () =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const { folder, approve, handle } = yield* setup;
+              yield* approve;
+              const { io, request } = yield* open(folder, handle);
+              io.send(request);
+              yield* io.wait(0);
+              yield* Effect.sleep("200 millis");
+              expect(io.lines()).toEqual([
+                runningReply,
+                { type: "crashed", plugin: "weather" },
+              ]);
+            }),
+          ),
+        {
+          exitAfterReady: true,
+          policy: { ...defaultRestartPolicy, maxCrashes: 0 },
+        },
+      ),
+  );
+
+  it.live("sends no notice for another reload or a requested stop", () =>
+    withHost(() =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const host = yield* PluginHost;
+          const { folder, approve, handle } = yield* setup;
+          yield* approve;
+          const { io, request } = yield* open(folder, handle);
+          io.send(request);
+          yield* io.wait(0);
+          yield* Effect.sleep("150 millis");
+          expect(io.lines()).toEqual([runningReply]);
+          const mark = io.mark();
+          io.send(request);
+          yield* io.wait(mark);
+          yield* Effect.sleep("150 millis");
+          expect(io.lines()).toEqual([runningReply, runningReply]);
+          yield* host.stop("weather");
+          yield* Effect.sleep("150 millis");
+          expect(io.lines()).toEqual([runningReply, runningReply]);
+        }),
+      ),
+    ),
   );
 });
