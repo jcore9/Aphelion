@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-23
 - Decided by: project owner
-- Proposed by: the PR that moves [#17](https://github.com/jcore9/Aphelion/issues/17) to M3
+- Proposed by: the orchestrator, in the PR that moves [#17](https://github.com/jcore9/Aphelion/issues/17) to M3
 - Answers: where the 1Password service account token lives, how the live test that [decision 0015](0015-1password-ci-mock.md) requires gets run, and when [#17](https://github.com/jcore9/Aphelion/issues/17) (M0-15) is built
 - Amends: the M0 plan's M0-15 notes and the plan's issue breakdown, which place the 1Password plugin in M0
 
