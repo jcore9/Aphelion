@@ -130,7 +130,7 @@ since=0
 wait_for_log() {
   local text=$1 tries
   for ((tries = 0; tries < 300; tries++)); do
-    if "${compose[@]}" logs --no-color --since "$since" 2>&1 | grep -qF "$text"; then return 0; fi
+    if "${compose[@]}" logs --no-color --since "$since" 2>&1 | grep -F "$text" >/dev/null; then return 0; fi
     sleep 0.1
   done
   fail "the log never showed: $text"
@@ -148,7 +148,7 @@ pass "a plugin started at boot as aphelion-plugins and was refused everything ou
 [[ $(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}' "$container") == 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"] 1024' ]] ||
   fail "docker inspect shows different hardening: $(docker inspect --format '{{json .HostConfig}}' "$container")"
 (($(docker inspect --format '{{.HostConfig.Memory}}' "$container") > 0)) || fail "no memory limit"
-if docker inspect --format '{{json .Mounts}}' "$container" | grep -q docker.sock; then
+if docker inspect --format '{{json .Mounts}}' "$container" | grep docker.sock >/dev/null; then
   fail "the Docker socket is mounted"
 fi
 pass "read-only root, no-new-privileges, only SETUID, SETGID and KILL, limits set, no Docker socket"
@@ -290,7 +290,7 @@ started=$SECONDS
 [[ $(docker inspect --format '{{.State.ExitCode}}' "$container") == 0 ]] || fail "a clean stop exited non-zero"
 ((SECONDS - started < 40)) || fail "the clean stop took $((SECONDS - started)) seconds"
 for text in "the launcher is stopping" '"msg":"server stopping"'; do
-  "${compose[@]}" logs --no-color 2>&1 | grep -qF "$text" || fail "the stop never logged: $text"
+  "${compose[@]}" logs --no-color 2>&1 | grep -F "$text" >/dev/null || fail "the stop never logged: $text"
 done
 pass "docker compose stop stops every process and exits 0"
 
@@ -322,7 +322,7 @@ grep -qF '/run/secrets/bootstrap is missing. Start Aphelion with systemctl, whic
   fail "the container stopped without the bootstrap file for another reason: $missing"
 pass "the launcher refuses to start without the bootstrap file"
 
-if "${compose[@]}" logs --no-color 2>&1 | grep -qF -- "$key"; then
+if "${compose[@]}" logs --no-color 2>&1 | grep -F -- "$key" >/dev/null; then
   fail "the bootstrap key reached a container log"
 fi
 pass "the bootstrap key appears in no container log"

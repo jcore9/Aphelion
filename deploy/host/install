@@ -24,8 +24,16 @@ if [[ ! -f $root/deploy/.env ]]; then
   exit 1
 fi
 
+holds_key() {
+  systemd-creds decrypt --name=bootstrap "$1" - 2>/dev/null | grep -x 'AGE-SECRET-KEY-1[0-9A-Z]*' >/dev/null
+}
+
 install -d -o root -g root -m 0755 "$root/deploy/plugins"
 if [[ -e $credential ]]; then
+  if ! holds_key "$credential"; then
+    echo "install: $credential holds no bootstrap key. install never replaces it, so check it by hand." >&2
+    exit 1
+  fi
   echo "install: keeping the bootstrap key in $credential"
 else
   install -d -o root -g root -m 0700 "$(dirname "$credential")"
@@ -33,10 +41,11 @@ else
   trap 'rm -f "$temporary"' EXIT
   (
     umask 077
-    docker run --rm --pull never --network none --read-only --user aphelion-secrets \
+    docker run --rm --pull never --log-driver none --network none --read-only --user aphelion-secrets \
       --entrypoint /usr/local/bin/aphelion-secrets aphelion:local --new-key |
       systemd-creds encrypt --name=bootstrap - "$temporary"
   )
+  holds_key "$temporary" || { echo "install: the new bootstrap key didn't decrypt, so install stops" >&2; exit 1; }
   ln "$temporary" "$credential"
   rm -f "$temporary"
   echo "install: created the bootstrap key in $credential. Keep a recovery copy. Print it with:"
