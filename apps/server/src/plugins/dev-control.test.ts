@@ -320,6 +320,31 @@ const ask = (path: string, lines: string) =>
       }),
   );
 
+const askLater = (path: string, late: string) =>
+  Effect.promise(
+    () =>
+      new Promise<DevReply[]>((resolve, reject) => {
+        const socket = createConnection({ path, allowHalfOpen: true });
+        let text = "";
+        socket.on("data", (chunk: Buffer) => (text += chunk.toString()));
+        socket.on("error", reject);
+        socket.on("end", () => {
+          socket.write(late, () => {
+            setTimeout(() => {
+              socket.end();
+              resolve(
+                text
+                  .split("\n")
+                  .filter((line) => line !== "")
+                  .map((line) => JSON.parse(line) as DevReply),
+              );
+            }, 50);
+          });
+        });
+        socket.write("first\nsecond\n");
+      }),
+  );
+
 describe("the plugin dev socket", () => {
   it.live(
     "answers one request at a time, is private to its owner and is removed on shutdown",
@@ -348,13 +373,17 @@ describe("the plugin dev socket", () => {
         expect(yield* ask(path, "first\nsecond\n")).toEqual([
           { ok: false, reason: "wait for the reply to your last request" },
         ]);
+        expect(yield* askLater(path, "ignored\n")).toEqual([
+          { ok: false, reason: "wait for the reply to your last request" },
+        ]);
+        expect(seen).toEqual(["first", "first"]);
         expect(yield* ask(path, "second\n")).toEqual([
-          { ok: true, plugin: "weather", state: "2" },
+          { ok: true, plugin: "weather", state: "3" },
         ]);
         expect(yield* ask(path, `${"x".repeat(70 * 1024)}\n`)).toEqual([
           { ok: false, reason: "the request is too long" },
         ]);
-        expect(seen).toEqual(["first", "second"]);
+        expect(seen).toEqual(["first", "first", "second"]);
         yield* Scope.close(scope, Exit.void);
         const gone = yield* Effect.promise(() =>
           stat(path).then(

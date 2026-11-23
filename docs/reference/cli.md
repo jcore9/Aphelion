@@ -55,7 +55,7 @@ The server logs JSON lines on standard output, through the redacting [logger](lo
 {"time":"2026-11-22T22:30:55.188Z","level":"info","msg":"server started","version":"0.0.0","address":"0.0.0.0","port":7400}
 ```
 
-Headless mode never loads Electron or any GUI library. In the container, the [launcher](container.md#how-the-processes-start) creates the pipes and passes `--plugin-runner-fds 3,4`, and `--plugin-dev` when `APHELION_PLUGIN_DEV_FOLDER` is set.
+Headless mode never loads Electron or any GUI library. In the container, the [launcher](container.md#how-the-processes-start) creates the pipes and passes `--plugin-runner-fds 3,4`, and `--plugin-dev` when `APHELION_PLUGIN_DEV_FOLDER` is set and not empty.
 
 ## `aphelion config check`
 
@@ -116,7 +116,7 @@ The command connects to `plugin-dev.sock` in the state folder. It asks the serve
 | Line | Meaning |
 | --- | --- |
 | `Watching FOLDER. Press Ctrl-C to stop watching. The plugin keeps running.` | The command is connected. Standard output. |
-| `Reloaded ID: STATE` | The server started a new run of plugin `ID` and saw it reach state `STATE`. `running` means it started. `crashed` means it exited or the runner refused it, and the server log says why. Standard output. |
+| `Reloaded ID: STATE` | The server started a new run of plugin `ID` and saw it reach state `STATE`. `running` means it started. `crashed` means it exited or the runner refused it, and the server log says why. `starting` means it hadn't answered after 15 seconds. Standard output. |
 | `Refused: REASON` | The server didn't reload. The reason says why, for example that the folder isn't approved or that the manifest changed. The command keeps watching. Standard error. |
 
 The command exits with code 1 and a message if the server has no dev socket. It runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.

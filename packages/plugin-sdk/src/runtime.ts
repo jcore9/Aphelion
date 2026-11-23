@@ -66,13 +66,17 @@ export async function serve(
 
   let broken: { readonly error: unknown } | undefined;
   const breakOff = (error: unknown) => {
+    if (closed) return;
     broken ??= { error };
     interrupt?.();
   };
 
   const send = (message: unknown) => {
     const line = JSON.stringify(message);
-    const sent = writing.then(() => io.write(line));
+    const sent = writing.then(() => {
+      if (broken) throw broken.error;
+      return io.write(line);
+    });
     writing = sent.catch(breakOff);
     return sent;
   };
@@ -83,6 +87,7 @@ export async function serve(
     const reply = new Promise<unknown>((resolve, reject) => {
       pending.set(id, { resolve, reject });
     });
+    reply.catch(() => undefined);
     try {
       await send(request(id, method, params));
     } catch (error) {

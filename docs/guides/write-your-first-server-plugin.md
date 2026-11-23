@@ -211,7 +211,7 @@ An approval covers one exact manifest. Suppose you add a permission or change th
 | `Plugin dev mode is off` | The server has no dev socket. | Check the first steps in [Start Aphelion in dev mode](#start-aphelion-in-dev-mode). |
 | `dev mode reloads only /opt/aphelion/dev-plugin` | You gave another folder. | Use the folder from the override. |
 | `isn't approved` | You haven't approved the folder yet. | Run the two `plugin install` commands. |
-| `stays stopped` | The manifest changed since you approved it. | See [When the manifest changes](#when-the-manifest-changes). |
+| `stays stopped` | The manifest changed since you approved it, or it isn't valid JSON or a valid manifest. | See [When the manifest changes](#when-the-manifest-changes). |
 | `Reloaded hello-plugin: crashed` | The plugin exited, or the runner refused the folder, for example because user `10004` can write to it. | Read the server log with `sudo journalctl -u aphelion`. |
 
 ## Next

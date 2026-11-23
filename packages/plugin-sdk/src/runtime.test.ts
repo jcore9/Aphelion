@@ -324,6 +324,68 @@ describe("runPlugin", () => {
     expect(cleanups).toBe(1);
   });
 
+  test("writes nothing more after a write fails, and rejects only once", async () => {
+    const host = scriptedHost();
+    const writes: string[] = [];
+    let cleanups = 0;
+    const run = runPlugin(
+      {
+        async start(ctx) {
+          await ctx.events.subscribe("demo.ping", async () => {
+            await Promise.allSettled([
+              ctx.events.subscribe("demo.a", () => undefined),
+              ctx.events.subscribe("demo.b", () => undefined),
+            ]);
+          });
+          return () => {
+            cleanups++;
+          };
+        },
+      },
+      {
+        ...host.io,
+        write: (line) => {
+          writes.push(line);
+          return line.includes("demo.a")
+            ? Promise.reject(new Error("stdout broke"))
+            : host.io.write(line);
+        },
+      },
+    );
+    await host.initialize();
+    host.reply(await host.read(), {});
+    host.event("demo.ping", {});
+    await expect(run).rejects.toThrow("stdout broke");
+    expect(cleanups).toBe(1);
+    expect(writes.some((line) => line.includes("demo.b"))).toBe(false);
+  });
+
+  test("shuts down cleanly when a write fails after the shutdown", async () => {
+    const host = scriptedHost();
+    const stuck = Promise.withResolvers<undefined>();
+    const run = runPlugin(
+      {
+        async start(ctx) {
+          await ctx.events.subscribe("demo.ping", async () => {
+            await ctx.network.get("https://api.example.com/");
+          });
+        },
+      },
+      {
+        ...host.io,
+        write: (line) =>
+          line.includes("network.get") ? stuck.promise : host.io.write(line),
+      },
+    );
+    await host.initialize();
+    host.reply(await host.read(), {});
+    host.event("demo.ping", {});
+    host.shutdown();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    stuck.reject(new Error("stdout broke"));
+    await expect(run).resolves.toBeUndefined();
+  });
+
   test("fails when start throws after the handshake", async () => {
     const host = scriptedHost();
     const run = runPlugin(

@@ -162,16 +162,19 @@ export const serveDevSocket = (
       const answer = (reply: DevReply) => {
         if (socket.writable) socket.write(`${JSON.stringify(reply)}\n`);
       };
+      const hangUp = (reason: string) => {
+        answer(refuse(reason));
+        socket.end();
+        socket.removeAllListeners("data");
+      };
       socket.on("data", (chunk: Buffer) => {
         for (const piece of splitter.push(chunk)) {
           if (piece.kind !== "line") {
-            answer(refuse("the request is too long"));
-            socket.end();
+            hangUp("the request is too long");
             return;
           }
           if (busy) {
-            answer(refuse("wait for the reply to your last request"));
-            socket.end();
+            hangUp("wait for the reply to your last request");
             return;
           }
           busy = true;
