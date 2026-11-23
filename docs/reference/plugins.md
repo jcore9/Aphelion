@@ -169,7 +169,9 @@ Each reload stops the plugin, waits until it has stopped, reads the approval and
 - a folder with no approval
 - a manifest that changed since its approval. The plugin then stays stopped until you run `plugin install` with `--approve` again and change a file.
 
-The socket accepts only reload requests. It can't approve a plugin or start one from another folder.
+A reload stops every plugin approved for the folder, then starts the one whose `id` the manifest names. So when you rename a plugin and approve the new name, the old name stops.
+
+The socket accepts only reload requests, one at a time per connection. A request sent before the last one was answered is refused. It can't approve a plugin or start one from another folder.
 
 ### Isolation between plugins
 

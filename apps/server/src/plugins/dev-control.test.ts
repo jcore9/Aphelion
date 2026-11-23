@@ -108,7 +108,7 @@ const setup = Effect.gen(function* () {
   });
   const reload = (path: string) =>
     handle(JSON.stringify({ type: "reload", folder: path }));
-  return { root, folder, other, approve, handle, reload };
+  return { root, folder, other, approvals, approve, handle, reload };
 });
 
 const withHost = <A, E>(
@@ -126,6 +126,39 @@ const withHost = <A, E>(
 };
 
 describe("plugin dev control", () => {
+  it.live(
+    "runs the plugin whose id the manifest names when the folder has two approvals",
+    () =>
+      withHost(() =>
+        Effect.gen(function* () {
+          const host = yield* PluginHost;
+          const { folder, approvals, approve, reload } = yield* setup;
+          yield* approve;
+          expect(yield* reload(folder)).toMatchObject({ plugin: "weather" });
+          yield* Effect.promise(() =>
+            writeFile(
+              join(folder, "aphelion-plugin.json"),
+              manifest("1.0.0").replace('"weather"', '"weather-v2"'),
+            ),
+          );
+          const renamed = yield* readManifest(folder);
+          approvals.push({
+            plugin: renamed.manifest.id,
+            folder: renamed.folder,
+            digest: renamed.digest,
+          });
+          expect(yield* reload(folder)).toEqual({
+            ok: true,
+            plugin: "weather-v2",
+            state: "running",
+          });
+          expect(yield* host.status("weather")).toMatchObject({
+            state: "stopped",
+          });
+        }),
+      ),
+  );
+
   it.live(
     "starts the approved dev plugin and gives each reload a fresh run",
     () =>
@@ -289,7 +322,7 @@ const ask = (path: string, lines: string) =>
 
 describe("the plugin dev socket", () => {
   it.live(
-    "answers each request line, is private to its owner and is removed on shutdown",
+    "answers one request at a time, is private to its owner and is removed on shutdown",
     () =>
       Effect.gen(function* () {
         const root = yield* Effect.promise(() => mkdtemp(join(base, "sock-")));
@@ -313,7 +346,10 @@ describe("the plugin dev socket", () => {
           0o600,
         );
         expect(yield* ask(path, "first\nsecond\n")).toEqual([
+          { ok: false, reason: "wait for the reply to your last request" },
           { ok: true, plugin: "weather", state: "1" },
+        ]);
+        expect(yield* ask(path, "second\n")).toEqual([
           { ok: true, plugin: "weather", state: "2" },
         ]);
         expect(yield* ask(path, `${"x".repeat(70 * 1024)}\n`)).toEqual([

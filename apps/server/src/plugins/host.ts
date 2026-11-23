@@ -376,9 +376,13 @@ export const pluginHostLayer = (options: HostOptions) =>
           }
         });
 
+      let runnerClosed = false;
+
       const settleWaiters = (slot: Slot) =>
         Effect.forEach(
-          [...slot.waiters].filter((waiter) => waiter.until(slot.state)),
+          [...slot.waiters].filter(
+            (waiter) => runnerClosed || waiter.until(slot.state),
+          ),
           (waiter) => {
             slot.waiters.delete(waiter);
             return Deferred.succeed(waiter.done, slot.state);
@@ -562,8 +566,12 @@ export const pluginHostLayer = (options: HostOptions) =>
         ),
         Effect.forever,
         Effect.catchIf(Cause.isDone, () =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             logger.error("the plugin runner's pipe closed");
+            runnerClosed = true;
+            yield* Effect.forEach(slots.values(), settleWaiters, {
+              discard: true,
+            });
           }),
         ),
         Effect.forkIn(scope),
@@ -661,9 +669,19 @@ export const pluginHostLayer = (options: HostOptions) =>
         Effect.gen(function* () {
           const slot = slots.get(id);
           if (!slot) return undefined;
-          const done = yield* Deferred.make<LifecycleState>();
-          yield* Queue.offer(slot.mailbox, { type: "wait", until, done });
-          return yield* Deferred.await(done);
+          const waiter = {
+            type: "wait" as const,
+            until,
+            done: yield* Deferred.make<LifecycleState>(),
+          };
+          yield* Queue.offer(slot.mailbox, waiter);
+          return yield* Deferred.await(waiter.done).pipe(
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                slot.waiters.delete(waiter);
+              }),
+            ),
+          );
         });
 
       return PluginHost.of({

@@ -561,6 +561,28 @@ describe("the plugin host", () => {
     },
   );
 
+  it.live("stop returns once the runner's pipe closes", () =>
+    Effect.gen(function* () {
+      const incoming = yield* Queue.bounded<RunnerReply, Cause.Done>(16);
+      const layer = pluginHostLayer({
+        logger: createLogger({ level: "error", write: () => undefined }),
+      }).pipe(
+        Layer.provide(
+          Layer.succeed(RunnerLink, { incoming, send: () => Effect.void }),
+        ),
+        Layer.provide(PluginGrants.refuseAll),
+      );
+      yield* Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.start(yield* serverPlugin("orphan"));
+        const stopping = yield* Effect.forkChild(host.stop("orphan"));
+        yield* Effect.sleep("50 millis");
+        yield* Queue.end(incoming);
+        yield* Fiber.join(stopping).pipe(Effect.timeout("2 seconds"));
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.live("returns at once when stopping a plugin that isn't running", () => {
     const { layer } = harness({ quitter: () => Effect.succeed(1) });
     return Effect.gen(function* () {

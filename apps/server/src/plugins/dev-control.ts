@@ -7,6 +7,7 @@ import type { Logger } from "../log";
 import type { Installed } from "./grants";
 import { PluginHost } from "./host";
 import { LineSplitter } from "./lines";
+import { readManifest } from "./manifest-file";
 
 export const devSocketFile = "plugin-dev.sock";
 export const maxDevLineBytes = 64 * 1024;
@@ -57,16 +58,25 @@ export const devControl = (options: DevControlOptions) =>
             `dev mode reloads only ${options.folder}, not ${JSON.stringify(folder)}`,
           );
         }
-        const approval = options
+        const approved = options
           .approvals()
-          .find((row) => row.folder === devFolder.value);
-        if (!approval) {
+          .filter((row) => row.folder === devFolder.value);
+        const notApproved = refuse(
+          `${options.folder} isn't approved. Run aphelion plugin install ${options.folder} and approve it.`,
+        );
+        if (approved.length === 0) return notApproved;
+        yield* Effect.forEach(approved, (row) => host.stop(row.plugin), {
+          discard: true,
+        });
+        const loaded = yield* Effect.result(readManifest(devFolder.value));
+        if (loaded._tag === "Failure") {
           return refuse(
-            `${options.folder} isn't approved. Run aphelion plugin install ${options.folder} and approve it.`,
+            `the plugin stays stopped: ${loaded.failure.issues.map((issue) => issue.message).join(" ")}`,
           );
         }
-        const id = approval.plugin;
-        yield* host.stop(id);
+        const id = loaded.success.manifest.id;
+        const approval = approved.find((row) => row.plugin === id);
+        if (!approval) return notApproved;
         const before = (yield* host.status(id))?.run ?? 0;
         const started = yield* Effect.result(
           host.start(devFolder.value, { id, digest: approval.digest }),
@@ -142,17 +152,25 @@ export const serveDevSocket = (
       socket.on("close", () => connections.delete(socket));
       socket.on("error", () => undefined);
       const splitter = new LineSplitter(maxDevLineBytes);
-      let queue = Promise.resolve();
+      let busy = false;
+      const answer = (reply: DevReply) => {
+        if (socket.writable) socket.write(`${JSON.stringify(reply)}\n`);
+      };
       socket.on("data", (chunk: Buffer) => {
         for (const piece of splitter.push(chunk)) {
-          queue = queue.then(async () => {
-            const reply =
-              piece.kind === "line"
-                ? await Effect.runPromise(handle(piece.text))
-                : refuse("the request is too long");
-            if (!socket.writable) return;
-            socket.write(`${JSON.stringify(reply)}\n`);
-            if (piece.kind !== "line") socket.end();
+          if (piece.kind !== "line") {
+            answer(refuse("the request is too long"));
+            socket.end();
+            return;
+          }
+          if (busy) {
+            answer(refuse("wait for the reply to your last request"));
+            continue;
+          }
+          busy = true;
+          void Effect.runPromise(handle(piece.text)).then((reply) => {
+            busy = false;
+            answer(reply);
           });
         }
       });
