@@ -1,0 +1,6 @@
+services:
+  aphelion:
+    environment:
+      APHELION_PLUGIN_DEV_FOLDER: /opt/aphelion/dev-plugin
+    volumes:
+      - ${APHELION_PLUGIN_DEV_DIR:?set APHELION_PLUGIN_DEV_DIR to the absolute path of the built plugin folder}:/opt/aphelion/dev-plugin:ro

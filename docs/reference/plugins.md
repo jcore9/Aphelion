@@ -146,6 +146,29 @@ The install command records the plugin and its grants in SQLite. The server star
 
 The host identifies `network.get` requests by the plugin's own channel. The request takes an HTTPS URL using the default port and an exact granted hostname. The host connects to a public IPv4 address, skips redirects, and limits the response to 64 KiB and the request to five seconds. The container's controls for direct network access are a separate boundary.
 
+### Dev mode
+
+Dev mode lets a plugin author reload one plugin without restarting the server. It is off unless you start the container with the override file [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml). That file mounts the folder named by `APHELION_PLUGIN_DEV_DIR` read-only at `/opt/aphelion/dev-plugin`, and starts the server with `--plugin-dev /opt/aphelion/dev-plugin`.
+
+In dev mode the server opens a Unix socket at `plugin-dev.sock` in its state folder, so `/var/lib/aphelion/plugin-dev.sock` in the container. A Unix socket is a file that two programs on the same machine use to talk. Only `harness` can open it (mode `0600`). The server replaces a socket left over from an earlier run and removes it when it stops. Without `--plugin-dev`, the server opens no socket.
+
+Approve the mounted folder once, then watch it:
+
+```sh
+aphelion plugin install /opt/aphelion/dev-plugin
+aphelion plugin dev /opt/aphelion/dev-plugin
+```
+
+`plugin dev` asks the server to reload the plugin, then checks the folder about every half second and asks again after each change settles. It prints each answer, such as `Reloaded weather: running`. Ctrl-C stops watching. The last run keeps running under the server.
+
+Each reload stops the plugin, waits until it has stopped, reads the approval and the manifest again, and starts a new run through the runner. The runner checks the folder as on any other start, and the plugin runs as `aphelion-plugins` with its approved grants. Reloads run one at a time. The server refuses, with a reason:
+
+- any folder other than the one given to `--plugin-dev`
+- a folder with no approval
+- a manifest that changed since its approval. The plugin then stays stopped until you run `plugin install` with `--approve` again and change a file.
+
+The socket accepts only reload requests. It can't approve a plugin or start one from another folder.
+
 ### Isolation between plugins
 
 Every server plugin runs as the same `aphelion-plugins` user ([decision 0018](../decisions/0018-shared-plugin-user.md)), with Docker's default seccomp profile and no namespaces of its own ([decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md)). The host's permission checks keep plugins apart. The operating system doesn't. One plugin can read another plugin's data folder and send signals to its processes. Install only plugins you trust.
