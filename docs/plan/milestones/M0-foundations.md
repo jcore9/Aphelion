@@ -357,7 +357,7 @@ All eight are settled; each answer links to its decision record.
 
 Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu-lts.md)) with Docker Engine, the Compose plugin and Tailscale:
 
-1. Follow the install guide: install `aphelion.service`, store the bootstrap secret with `systemd-creds`, and start the service.
+1. Follow the install guide: run `host/install`, which installs `aphelion.service` and creates the bootstrap key with `systemd-creds`, make the recovery copy, and start the service.
 2. Check that `systemctl is-enabled aphelion` reports `enabled`, then reboot.
 3. From another device on the tailnet, `curl http://<tailnet-address>:<port>/health` returns `200` with `{"status":"ok"}`. The same request to the host's LAN address fails.
 4. A WebSocket opened without a token is closed; one opened with a token from `aphelion device add` is accepted.

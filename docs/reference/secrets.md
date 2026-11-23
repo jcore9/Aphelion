@@ -10,13 +10,13 @@ The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003)
 
 ### The bootstrap key
 
-The store's key is an age identity, a line that starts with `AGE-SECRET-KEY-1`. It is the bootstrap key, and only the host keeps it ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)). It travels this way:
+The store's key is an age identity, the private half of a key pair for [age](https://age-encryption.org), a small file encryption format. It is a line that starts with `AGE-SECRET-KEY-1`. It is the bootstrap key, and only the host keeps it ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)). It travels this way:
 
 1. `deploy/host/install` makes the key once and seals it with `systemd-creds` in `/etc/credstore.encrypted/aphelion-bootstrap`.
 2. At each start, `aphelion.service` decrypts it with `LoadCredentialEncrypted=` into `/run/credentials/aphelion.service/bootstrap`. That folder is in memory and readable only by root.
 3. Compose mounts the file at `/run/secrets/bootstrap` in the container.
 4. The launcher opens the file as root and gives it to the broker as standard input.
-5. The broker reads at most 1 KiB, trims spaces and line breaks from both ends, and closes standard input. The broker then no longer holds the file.
+5. The broker reads at most 1 KiB from standard input, the channel the launcher feeds it. It trims spaces and line breaks from both ends, and closes that channel. The broker then no longer holds the file.
 
 The broker wraps the key in a `Secret`, so the logger masks it. The key never reaches an environment variable, a command line or the volume.
 
@@ -34,6 +34,8 @@ The parent folders of these paths must be writable only by root. In the containe
 
 The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. The encrypted record includes a format version and the reference path. A read fails if the stored path differs from the requested path.
 
+`recipient.pub` catches a wrong key. It isn't protection against someone who can change files in the volume. If `recipient.pub` is missing, the broker checks every entry before it writes the file. Each one must decrypt with the key and hold the reference path that its filename was made from.
+
 To back up the store, copy the entry files and `recipient.pub`. The folder holds no key, so a copy of it alone decrypts nothing. Keep the [recovery copy of the key](../guides/install.md#keep-a-recovery-copy-of-the-bootstrap-key) apart from the backup.
 
 ### Startup refusals
@@ -45,8 +47,8 @@ At startup the broker checks the key against the store. When a check fails, the 
 | `The bootstrap key is missing from standard input` | Standard input was empty, or held only spaces and line breaks. |
 | `The bootstrap key is longer than 1 KiB` | Standard input held more than 1024 bytes. |
 | `The bootstrap key is not a valid age identity` | The key isn't an age identity. |
-| `The secrets store holds a plain-text key from before the host credential` | `identity.agekey` is still in the store. [Move a store made before #105](../guides/install.md#move-a-store-made-before-105) explains what to do. |
-| `The bootstrap key does not match this secrets store` | `recipient.pub` holds another public key. Or `recipient.pub` is missing, and the key can't decrypt an existing entry. |
+| `The secrets store holds a plain-text key from before the host credential` | `identity.agekey` is still in the store. [Start a fresh store after an older install](../guides/install.md#start-a-fresh-store-after-an-older-install) explains what to do. |
+| `The bootstrap key does not match this secrets store` | `recipient.pub` holds another public key. Or `recipient.pub` is missing, and an entry doesn't decrypt with the key or doesn't match its filename. |
 | `The secrets broker takes no arguments except --new-key` | The broker was started with another argument. |
 
 If `recipient.pub` is missing and entries exist, as after restoring a backup of only the entries, the broker decrypts one entry to prove the key matches. Then it writes `recipient.pub`. Other startup failures, such as a folder with the wrong owner or mode, log `Secrets broker startup failed` with no reason.

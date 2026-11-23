@@ -42,9 +42,11 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
    sudo host/install
    ```
 
-   The first time, the script also creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. The bootstrap key encrypts the secrets store ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)). `systemd-creds` keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists.
+   The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens it. The bootstrap key unlocks it ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
 
-5. Make a recovery copy of the bootstrap key, as [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) describes. Without it, a new host can't read the secrets.
+   The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but holds no key, the script stops and changes nothing.
+
+5. Make a recovery copy of the bootstrap key, as [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) describes. Do it before you store any secret. If the host's disk fails, this copy is the only way to read the store on a new host.
 
 6. Start the service.
 
@@ -70,7 +72,7 @@ Run every `docker compose` command in this guide from `/opt/aphelion/deploy`, so
 
 ## Keep a recovery copy of the bootstrap key
 
-The bootstrap key is the only key to the secrets store. If the host's disk or its TPM is lost, the key is lost with it, and so is every secret in the store.
+The bootstrap key is the only key to the secrets store. If the host's disk is lost, the key is lost with it, and so is every secret in the store. On a host with a TPM, a security chip on the motherboard, the key may also be tied to that chip, so a new machine can't decrypt the old file.
 
 1. Print the key. The command shows the key on screen, so make sure that nobody can see your screen.
 
@@ -100,41 +102,28 @@ Put the bootstrap key on the new host before you run `host/install`, so that the
    ```
 
 3. Paste the key from your password manager, press Enter, and then press Ctrl-D. The key never enters your shell history, because you paste it into `systemd-creds` and not into a command.
-4. Follow [Install](#install) from step 1. Restore the `secrets` volume from your backup before you start the service.
-
-The broker refuses to start if the key doesn't match the restored store. The log then shows `The bootstrap key does not match this secrets store`.
-
-## Move a store made before #105
-
-Before [#105](https://github.com/jcore9/Aphelion/issues/105), the store kept its key in plain text in `identity.agekey`, inside the `secrets` volume. The broker now refuses to start while that file exists, and logs `The secrets store holds a plain-text key from before the host credential`. To move the key into the host credential, take these steps from `/opt/aphelion/deploy`:
-
-1. Stop the service.
+4. Check the result. You should see `AGE-SECRET-KEY-1`, the first 16 characters of the key. If you see anything else, repeat steps 2 and 3.
 
    ```sh
-   sudo systemctl stop aphelion
+   sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap - | cut -c1-16
    ```
 
-2. Copy the key out of the volume, straight into `systemd-creds`. If `host/install` already created a new key, this replaces it. That new key encrypts nothing, because the broker refused to start with it.
+5. Follow [Install](#install) from step 1.
 
-   ```sh
-   sudo install -d -m 0700 /etc/credstore.encrypted
-   sudo docker run --rm --network none --read-only --user aphelion-secrets --entrypoint cat \
-     -v aphelion_secrets:/var/lib/aphelion-secrets aphelion:local /var/lib/aphelion-secrets/identity.agekey |
-     sudo sh -c 'umask 077 && systemd-creds encrypt --name=bootstrap - /etc/credstore.encrypted/aphelion-bootstrap'
-   ```
+The key alone restores nothing. The secrets themselves are in the `secrets` volume, and this guide has no tested way yet to back up a volume and restore it on another host. The broker refuses to start if the key doesn't match a store it finds, and the log then shows `The bootstrap key does not match this secrets store`.
 
-3. Delete the plain-text key from the volume.
+## Start a fresh store after an older install
 
-   ```sh
-   sudo docker run --rm --network none --read-only --user aphelion-secrets --entrypoint rm \
-     -v aphelion_secrets:/var/lib/aphelion-secrets aphelion:local /var/lib/aphelion-secrets/identity.agekey
-   ```
+Before [#105](https://github.com/jcore9/Aphelion/issues/105), the store kept its key in plain text in a file called `identity.agekey`, inside the `secrets` volume. The broker now refuses to start while that file exists. It logs `The secrets store holds a plain-text key from before the host credential`.
 
-4. Make a [recovery copy](#keep-a-recovery-copy-of-the-bootstrap-key), and start the service.
+No install from before #105 holds real secrets, so there is no tool to move that key. Delete the old store and let the broker start an empty one. This deletes every secret in it. Run these commands from `/opt/aphelion/deploy`. `docker compose down` removes the stopped container, which still holds the volume, and keeps the volumes.
 
-   ```sh
-   sudo systemctl start aphelion
-   ```
+```sh
+sudo systemctl stop aphelion
+sudo docker compose down
+sudo docker volume rm aphelion_secrets
+sudo systemctl start aphelion
+```
 
 ## What the service does
 
@@ -211,7 +200,7 @@ sudo host/install
 sudo systemctl restart aphelion
 ```
 
-`host/install` installs the new unit file and keeps the existing bootstrap key. The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
+`host/install` installs the new unit file and keeps the existing bootstrap key. If the service then stops and the log shows `The secrets store holds a plain-text key from before the host credential`, see [Start a fresh store after an older install](#start-a-fresh-store-after-an-older-install). The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
 
 ## Not covered yet
 
