@@ -25,6 +25,8 @@ const code = {
   bareNodeImport:
     'import { join } from "path";\nexport const joinPath = join;\n',
   processGlobal: "export const env = process.env;\n",
+  processImport:
+    'import process from "node:process";\nexport const env = process.env;\n',
   serverImport:
     'import * as server from "@aphelion/server";\nexport const host = server;\n',
   dynamicBunImport: 'export const load = () => import("bun:sqlite");\n',
@@ -70,6 +72,13 @@ test.each([
   ["packages/protocol/src/frame.ts", "processGlobal", [globals]],
   ["packages/ui/src/main.ts", "processGlobal", [globals]],
   ["packages/plugin-sdk/src/index.ts", "serverImport", [imports]],
+  ["packages/plugin-sdk/src/stdio.ts", "processImport", []],
+  ["packages/plugin-sdk/src/index.ts", "processImport", [imports]],
+  ["packages/plugin-sdk/src/stdio.ts", "nodeImport", [imports]],
+  ["packages/plugin-sdk/src/stdio.ts", "bareNodeImport", [imports]],
+  ["packages/plugin-sdk/src/stdio.ts", "processGlobal", [globals]],
+  ["packages/plugin-sdk/src/stdio.ts", "effectImport", [imports]],
+  ["packages/plugin-sdk/src/stdio.ts", "dynamicNodeImport", [syntax]],
   ["packages/ui/src/main.ts", "serverImport", [imports]],
   ["apps/server/src/store.ts", "dynamicBunImport", [syntax]],
   [

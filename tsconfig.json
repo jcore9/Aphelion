@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
-  "compilerOptions": { "types": ["bun"] },
-  "include": ["*.ts"]
+  "compilerOptions": { "types": ["bun"], "allowImportingTsExtensions": true },
+  "include": ["*.ts", "scripts/*.ts"]
 }

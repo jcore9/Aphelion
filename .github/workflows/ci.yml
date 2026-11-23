@@ -32,6 +32,8 @@ jobs:
       - run: bun run ${{ matrix.task }}
       - if: matrix.task == 'test'
         run: bash apps/server/test/broker-linux.sh
+      - if: matrix.task == 'test'
+        run: bash scripts/test-plugin-template.sh
 
   container:
     name: container

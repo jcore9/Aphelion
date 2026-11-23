@@ -1,7 +1,13 @@
+import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
 import { formatIssue } from "../config";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
+import {
+  devControl,
+  devSocketFile,
+  serveDevSocket,
+} from "../plugins/dev-control";
 import { installedPlugins, sqlitePluginGrants } from "../plugins/grants";
 import { PluginHost, pluginHostLayer } from "../plugins/host";
 import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
@@ -11,7 +17,17 @@ import { checkDirs, migratedNote } from "./checks";
 import { withStore } from "./device";
 import { failed } from "./failure";
 
-const startPlugins = (db: Database, fds: RunnerPipeFds, logger: Logger) =>
+interface PluginOptions {
+  readonly fds: RunnerPipeFds;
+  readonly stateDir: string;
+  readonly devFolder: string | undefined;
+}
+
+const startPlugins = (
+  db: Database,
+  { fds, stateDir, devFolder }: PluginOptions,
+  logger: Logger,
+) =>
   Effect.gen(function* () {
     const services = yield* Layer.build(
       pluginHostLayer({ logger }).pipe(
@@ -35,6 +51,13 @@ const startPlugins = (db: Database, fds: RunnerPipeFds, logger: Logger) =>
       }
     }
     logger.info("plugin host started", { installed: installed.length });
+    if (devFolder !== undefined) {
+      const handle = yield* devControl({
+        folder: devFolder,
+        approvals: () => installedPlugins(db),
+      }).pipe(Effect.provideService(PluginHost, host));
+      yield* serveDevSocket(join(stateDir, devSocketFile), handle, logger);
+    }
   });
 
 export const headless = (
@@ -42,6 +65,7 @@ export const headless = (
     readonly configDir: string;
     readonly stateDir: string;
     readonly pluginRunnerFds: RunnerPipeFds | undefined;
+    readonly pluginDev: string | undefined;
   },
   logger: Logger,
 ) =>
@@ -67,7 +91,15 @@ export const headless = (
         if (fds === undefined) {
           logger.info("plugins are off: no plugin runner pipe was given");
         } else {
-          yield* startPlugins(db, fds, logger);
+          yield* startPlugins(
+            db,
+            {
+              fds,
+              stateDir: options.stateDir,
+              devFolder: options.pluginDev,
+            },
+            logger,
+          );
         }
         return yield* Effect.never;
       }).pipe(

@@ -144,6 +144,9 @@ if "${compose[@]}" logs --no-color 2>&1 | grep -F 'plugin probe failed'; then
   fail "the plugin reached something it must not"
 fi
 pass "a plugin started at boot as aphelion-plugins and was refused everything outside its data folder"
+docker exec --user harness "$container" test ! -e /var/lib/aphelion/plugin-dev.sock ||
+  fail "the server opened a plugin dev socket without the dev override"
+pass "without the dev override the server opens no plugin dev socket"
 
 [[ $(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}' "$container") == 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"] 1024' ]] ||
   fail "docker inspect shows different hardening: $(docker inspect --format '{{json .HostConfig}}' "$container")"
@@ -328,3 +331,78 @@ if grep -F -- "$key" <<<"$logs" >/dev/null; then
   fail "the bootstrap key reached a container log"
 fi
 pass "the bootstrap key appears in no container log"
+
+dev=$scratch/dev-plugin
+mkdir -p "$dev"
+cp deploy/test/dev-plugin/* "$dev/"
+chmod -R a+rX,go-w "$dev"
+export APHELION_PLUGIN_DEV_DIR=$dev
+dev_compose=("${compose[@]}" -f deploy/compose.plugin-dev.yaml)
+as_root chmod 0400 /scratch/secrets/bootstrap
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+"${dev_compose[@]}" up --detach --force-recreate >/dev/null 2>&1
+container=$("${dev_compose[@]}" ps --quiet "$service")
+wait_for_log '"msg":"plugin dev mode is on"'
+[[ $(docker exec --user harness "$container" stat -c '%a %U' /var/lib/aphelion/plugin-dev.sock) == "600 harness" ]] ||
+  fail "the plugin dev socket isn't private to harness"
+pass "with the dev override the server opens a plugin dev socket only harness can use"
+
+dev_install=("${dev_compose[@]}" exec -T --user harness "$service" aphelion plugin install /opt/aphelion/dev-plugin)
+approve_dev() {
+  local approval
+  approval=$("${dev_install[@]}" | sed -n 's/.*--approve \([0-9a-f]\{64\}\)$/\1/p')
+  [[ -n $approval ]] || fail "plugin install printed no approval for the dev plugin"
+  "${dev_install[@]}" --approve "$approval" >/dev/null
+}
+
+dev_out=$scratch/plugin-dev.out
+"${dev_compose[@]}" exec -T --user harness "$service" aphelion plugin dev /opt/aphelion/dev-plugin >"$dev_out" 2>&1 &
+dev_client=$!
+for ((tries = 0; tries < 100; tries++)); do
+  grep -qF "Refused: /opt/aphelion/dev-plugin isn't approved" "$dev_out" && break
+  sleep 0.1
+done
+grep -qF "Refused: /opt/aphelion/dev-plugin isn't approved" "$dev_out" ||
+  fail "plugin dev reloaded a folder that isn't approved: $(cat "$dev_out")"
+approve_dev
+
+server_pid() {
+  docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do [[ $(tr "\0" " " <$p/cmdline 2>/dev/null) == "/usr/local/bin/aphelion --headless "* ]] && echo ${p#/proc/}; done; true'
+}
+plugin_runs() {
+  docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do tr "\0" " " <$p/cmdline 2>/dev/null; echo; done' | grep -c "server.mjs" || true
+}
+touch_bundle() {
+  sed -i "s/build-$1/build-$2/" "$dev/server.mjs"
+}
+
+touch_bundle 1 2
+wait_for_log 'dev plugin build-2 started as uid 10004'
+first_server=$(server_pid)
+[[ -n $first_server ]] || fail "no server process"
+touch_bundle 2 3
+wait_for_log 'dev plugin build-3 started as uid 10004'
+[[ $(server_pid) == "$first_server" ]] || fail "the server restarted during a plugin reload"
+[[ $(plugin_runs) == 1 ]] || fail "more than one copy of the dev plugin runs"
+[[ $(grep -cF "Reloaded dev-probe: running" "$dev_out") -ge 2 ]] ||
+  fail "plugin dev printed no reload replies: $(cat "$dev_out")"
+other=$("${dev_compose[@]}" exec -T --user harness "$service" \
+  timeout 3 aphelion plugin dev /opt/aphelion/plugins/contract-probe 2>&1 || true)
+grep -qF "Refused: dev mode reloads only /opt/aphelion/dev-plugin" <<<"$other" ||
+  fail "plugin dev didn't refuse another folder: $other"
+pass "plugin dev reloads the approved mounted plugin as aphelion-plugins after each edit, with the same server process"
+
+sed -i 's/"version": "1.0.0"/"version": "1.0.1"/' "$dev/aphelion-plugin.json"
+for ((tries = 0; tries < 100; tries++)); do
+  grep -qF "Refused: dev-probe stays stopped: the manifest changed since it was approved" "$dev_out" && break
+  sleep 0.1
+done
+grep -qF "Refused: dev-probe stays stopped: the manifest changed since it was approved" "$dev_out" ||
+  fail "plugin dev didn't refuse a changed manifest: $(cat "$dev_out")"
+[[ $(plugin_runs) == 0 ]] || fail "the dev plugin still runs after its manifest changed"
+approve_dev
+touch_bundle 3 4
+wait_for_log 'dev plugin build-4 started as uid 10004'
+[[ $(server_pid) == "$first_server" ]] || fail "the server restarted during a plugin reload"
+kill "$dev_client" 2>/dev/null || true
+pass "a changed manifest leaves the dev plugin stopped until it is approved again"

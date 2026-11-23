@@ -2,28 +2,7 @@ import { lookup } from "node:dns/promises";
 import { request } from "node:https";
 import { BlockList, isIP } from "node:net";
 import { Effect } from "effect";
-import { z } from "zod";
 import { rpcErrors, type RpcError } from "./json-rpc";
-
-export const requestParams = z.strictObject({ url: z.string().max(4096) });
-
-export function requestUrl(text: string): URL | undefined {
-  const url = URL.parse(text);
-  if (
-    url?.protocol === "https:" &&
-    !url.port &&
-    !url.username &&
-    !url.password &&
-    !url.hash &&
-    !isIP(url.hostname) &&
-    !url.hostname.startsWith("[") &&
-    url.hostname.includes(".") &&
-    !url.hostname.endsWith(".")
-  ) {
-    return url;
-  }
-  return undefined;
-}
 
 const nonPublic = new BlockList();
 for (const [network, prefix] of [

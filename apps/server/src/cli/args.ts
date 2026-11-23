@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { defaultConfigDir } from "../config";
@@ -15,6 +16,7 @@ const options = {
   days: { type: "string" },
   approve: { type: "string" },
   "plugin-runner-fds": { type: "string" },
+  "plugin-dev": { type: "string" },
 } as const;
 
 type Option = keyof typeof options;
@@ -27,6 +29,7 @@ export type Command =
       readonly configDir: string;
       readonly stateDir: string;
       readonly pluginRunnerFds: PluginRunnerFds | undefined;
+      readonly pluginDev: string | undefined;
     }
   | {
       readonly kind: "config check";
@@ -45,6 +48,11 @@ export type Command =
       readonly stateDir: string;
       readonly folder: string;
       readonly approve: string | undefined;
+    }
+  | {
+      readonly kind: "plugin dev";
+      readonly stateDir: string;
+      readonly folder: string;
     }
   | { readonly kind: "device list"; readonly stateDir: string }
   | {
@@ -72,7 +80,13 @@ const grammar: Record<
   version: { words: 0, flags: ["version"] },
   headless: {
     words: 0,
-    flags: ["headless", "config-dir", "state-dir", "plugin-runner-fds"],
+    flags: [
+      "headless",
+      "config-dir",
+      "state-dir",
+      "plugin-runner-fds",
+      "plugin-dev",
+    ],
   },
   "config check": {
     words: 2,
@@ -84,6 +98,7 @@ const grammar: Record<
     operand: "folder",
     flags: ["state-dir", "approve"],
   },
+  "plugin dev": { words: 2, operand: "folder", flags: ["state-dir"] },
   "device list": { words: 2, flags: ["state-dir"] },
   "device revoke": { words: 2, operand: "id", flags: ["state-dir"] },
 };
@@ -116,6 +131,10 @@ const pluginRunnerFds = z
   .refine(({ replies, requests }) => replies !== requests, {
     error: "must name two different descriptors",
   });
+
+const absolutePath = z
+  .string()
+  .refine(isAbsolute, { error: "must be an absolute path" });
 
 function check<T>(
   label: string,
@@ -223,21 +242,27 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
     case "version":
       return { ok: true, command: { kind } };
     case "headless": {
-      if (values["plugin-runner-fds"] === undefined) {
-        return {
-          ok: true,
-          command: { kind, configDir, stateDir, pluginRunnerFds: undefined },
-        };
-      }
-      const fds = check(
-        "--plugin-runner-fds",
-        pluginRunnerFds,
-        values["plugin-runner-fds"],
-      );
+      const fdsText = values["plugin-runner-fds"];
+      const fds =
+        fdsText === undefined
+          ? ({ ok: true, value: undefined } as const)
+          : check("--plugin-runner-fds", pluginRunnerFds, fdsText);
       if (!fds.ok) return fds;
+      const devText = values["plugin-dev"];
+      const dev =
+        devText === undefined
+          ? ({ ok: true, value: undefined } as const)
+          : check("--plugin-dev", absolutePath, devText);
+      if (!dev.ok) return dev;
       return {
         ok: true,
-        command: { kind, configDir, stateDir, pluginRunnerFds: fds.value },
+        command: {
+          kind,
+          configDir,
+          stateDir,
+          pluginRunnerFds: fds.value,
+          pluginDev: dev.value,
+        },
       };
     }
     case "config check":
@@ -266,6 +291,8 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
         ok: true,
         command: { kind, stateDir, folder: operand, approve: values.approve },
       };
+    case "plugin dev":
+      return { ok: true, command: { kind, stateDir, folder: operand } };
     case "device list":
       return { ok: true, command: { kind, stateDir } };
     case "device revoke": {

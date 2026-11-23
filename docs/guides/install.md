@@ -153,7 +153,7 @@ Always start the server with `systemctl`. A plain `docker compose up` skips the 
    sudo systemctl restart aphelion
    ```
 
-[Running plugins on the server](../reference/plugins.md#permissions) explains the approval.
+[Running plugins on the server](../reference/plugins.md#permissions) explains the approval. To write a plugin, see [Write your first server plugin](write-your-first-server-plugin.md).
 
 ## Check the network boundary
 

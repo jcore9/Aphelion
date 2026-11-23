@@ -1,16 +1,23 @@
-import { pluginApiVersion, type PluginManifest } from "@aphelion/plugin-sdk";
+import {
+  networkGetParams,
+  pluginApiVersion,
+  requestUrl,
+  secretsUseParams,
+  subscribeParams,
+  type PluginManifest,
+} from "@aphelion/plugin-sdk";
 import {
   Cause,
   Clock,
   Context,
   Data,
+  Deferred,
   Effect,
   Fiber,
   Layer,
   Queue,
   Scope,
 } from "effect";
-import { z } from "zod";
 import type { Logger } from "../log";
 import {
   failure,
@@ -34,12 +41,7 @@ import {
 import type { Link } from "./link";
 import { PluginRefused, readManifest } from "./manifest-file";
 import { declaresPermission, PluginGrants, type Permission } from "./grants";
-import {
-  networkRequest,
-  requestParams,
-  requestUrl,
-  type NetworkRequest,
-} from "./network";
+import { networkRequest, type NetworkRequest } from "./network";
 import {
   maxPendingInputBytes,
   maxPluginLineBytes,
@@ -51,6 +53,8 @@ export class RunnerLink extends Context.Service<
   RunnerLink,
   Link<RunnerReply, RunnerRequest>
 >()("aphelion/plugins/RunnerLink") {}
+
+export class RunnerClosed extends Data.TaggedError("RunnerClosed") {}
 
 export class MessageNotSent extends Data.TaggedError("MessageNotSent")<{
   readonly reason: "not serializable" | "too long";
@@ -78,6 +82,10 @@ export class PluginHost extends Context.Service<
       approval?: Approval,
     ) => Effect.Effect<StartOutcome, PluginRefused>;
     readonly stop: (id: string) => Effect.Effect<void>;
+    readonly waitFor: (
+      id: string,
+      until: (state: LifecycleState) => boolean,
+    ) => Effect.Effect<LifecycleState | undefined, RunnerClosed>;
     readonly publish: (
       event: PluginEvent,
     ) => Effect.Effect<void, MessageNotSent>;
@@ -100,9 +108,16 @@ interface SecretOperation {
 
 type ServerManifest = Extract<PluginManifest, { server: object }>;
 
+interface Waiter {
+  readonly until: (state: LifecycleState) => boolean;
+  readonly done: Deferred.Deferred<LifecycleState, RunnerClosed>;
+  cancelled: boolean;
+}
+
 type SlotInput =
   | LifecycleEvent
-  | { readonly type: "line"; readonly run: number; readonly line: string };
+  | { readonly type: "line"; readonly run: number; readonly line: string }
+  | ({ readonly type: "wait" } & Waiter);
 
 interface Slot {
   readonly id: string;
@@ -119,17 +134,14 @@ interface Slot {
   floodedRun: number | undefined;
   blockedRun: number | undefined;
   operation: { fiber?: Fiber.Fiber<void> } | undefined;
+  readonly waiters: Set<Waiter>;
 }
+
+const isStopped = (state: LifecycleState) =>
+  state.state === "stopped" || state.state === "installed";
 
 const maxPendingInputMessages = 4096;
 const pendingCost = (line: string) => 2 * line.length + 256;
-
-const secretParams = z.strictObject({
-  operation: z.string().max(128),
-  reference: z.string().max(1024),
-});
-
-const subscribeParams = z.strictObject({ event: z.string().max(128) });
 
 function encode(message: unknown): Effect.Effect<string, MessageNotSent> {
   return Effect.try({
@@ -193,7 +205,7 @@ export const pluginHostLayer = (options: HostOptions) =>
           "network.get",
           (slot, params, run) =>
             Effect.gen(function* () {
-              const parsed = requestParams.safeParse(params);
+              const parsed = networkGetParams.safeParse(params);
               if (!parsed.success)
                 return yield* Effect.fail(rpcErrors.invalidParams);
               const url = requestUrl(parsed.data.url);
@@ -212,7 +224,7 @@ export const pluginHostLayer = (options: HostOptions) =>
           "secrets.use",
           (slot, params, run) =>
             Effect.gen(function* () {
-              const parsed = secretParams.safeParse(params);
+              const parsed = secretsUseParams.safeParse(params);
               if (!parsed.success)
                 return yield* Effect.fail(rpcErrors.invalidParams);
               const { reference, operation } = parsed.data;
@@ -367,11 +379,28 @@ export const pluginHostLayer = (options: HostOptions) =>
           }
         });
 
+      let runnerClosed = false;
+
+      const settleWaiters = (slot: Slot) =>
+        Effect.forEach(
+          [...slot.waiters].filter(
+            (waiter) => runnerClosed || waiter.until(slot.state),
+          ),
+          (waiter) => {
+            slot.waiters.delete(waiter);
+            return runnerClosed
+              ? Deferred.fail(waiter.done, new RunnerClosed())
+              : Deferred.succeed(waiter.done, slot.state);
+          },
+          { discard: true },
+        );
+
       const apply = (slot: Slot, event: LifecycleEvent) =>
         Effect.gen(function* () {
           const before = slot.state;
           const next = step(before, event, policy);
           slot.state = next.state;
+          yield* settleWaiters(slot);
           if (
             before.state === "running" &&
             next.state.state !== "running" &&
@@ -445,6 +474,11 @@ export const pluginHostLayer = (options: HostOptions) =>
         });
 
       const handle = (slot: Slot, input: SlotInput) => {
+        if (input.type === "wait") {
+          if (input.cancelled) return Effect.void;
+          slot.waiters.add(input);
+          return settleWaiters(slot);
+        }
         if (input.type !== "line") return apply(slot, input);
         slot.pending.bytes -= pendingCost(input.line);
         slot.pending.messages--;
@@ -538,8 +572,12 @@ export const pluginHostLayer = (options: HostOptions) =>
         ),
         Effect.forever,
         Effect.catchIf(Cause.isDone, () =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             logger.error("the plugin runner's pipe closed");
+            runnerClosed = true;
+            yield* Effect.forEach(slots.values(), settleWaiters, {
+              discard: true,
+            });
           }),
         ),
         Effect.forkIn(scope),
@@ -565,8 +603,7 @@ export const pluginHostLayer = (options: HostOptions) =>
               folder: path,
               issues: [
                 {
-                  message:
-                    "the manifest changed since it was approved. Run aphelion plugin install again.",
+                  message: `the manifest changed since it was approved. Run aphelion plugin install ${folder} to approve it again.`,
                 },
               ],
             });
@@ -591,6 +628,7 @@ export const pluginHostLayer = (options: HostOptions) =>
               floodedRun: undefined,
               blockedRun: undefined,
               operation: undefined,
+              waiters: new Set(),
             };
             slots.set(created.id, created);
             yield* Queue.take(created.mailbox).pipe(
@@ -633,6 +671,28 @@ export const pluginHostLayer = (options: HostOptions) =>
           }
         });
 
+      const waitFor = (id: string, until: Waiter["until"]) =>
+        Effect.gen(function* () {
+          const slot = slots.get(id);
+          if (!slot) return undefined;
+          if (runnerClosed) return yield* new RunnerClosed();
+          const waiter = {
+            type: "wait" as const,
+            until,
+            done: yield* Deferred.make<LifecycleState, RunnerClosed>(),
+            cancelled: false,
+          };
+          yield* Queue.offer(slot.mailbox, waiter);
+          return yield* Deferred.await(waiter.done).pipe(
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                waiter.cancelled = true;
+                slot.waiters.delete(waiter);
+              }),
+            ),
+          );
+        });
+
       return PluginHost.of({
         start,
         stop: (id) =>
@@ -641,9 +701,12 @@ export const pluginHostLayer = (options: HostOptions) =>
             if (!slot) return Effect.void;
             slot.blockedRun = slot.state.run;
             return Queue.offer(slot.mailbox, { type: "stop" }).pipe(
+              Effect.andThen(waitFor(id, isStopped)),
               Effect.asVoid,
+              Effect.catchTag("RunnerClosed", () => Effect.void),
             );
           }),
+        waitFor,
         publish,
         status: (id) => Effect.sync(() => slots.get(id)?.state),
       });

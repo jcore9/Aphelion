@@ -88,11 +88,16 @@ broker=$!
 ) &
 runner=$!
 
+server_args=(--headless --plugin-runner-fds 3,4)
+if [[ -n ${APHELION_PLUGIN_DEV_FOLDER:-} ]]; then
+  server_args+=(--plugin-dev "$APHELION_PLUGIN_DEV_FOLDER")
+fi
+
 (
   exec </dev/null 3<&"$replies_in" 4>&"$requests_out"
   close_pipes
   exec "${drop[@]}" --reuid=harness --regid=harness -- \
-    /usr/local/bin/aphelion --headless --plugin-runner-fds 3,4
+    /usr/local/bin/aphelion "${server_args[@]}"
 ) &
 server=$!
 

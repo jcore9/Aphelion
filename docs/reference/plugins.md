@@ -13,6 +13,8 @@ The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/b
 
 ## For plugin authors
 
+You don't have to write JSON-RPC by hand. The SDK, `@aphelion/plugin-sdk`, does it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them. The rest of this section says what the host does and expects, which is what the SDK builds on.
+
 ### How your plugin is started
 
 Before it starts anything, the host reads `aphelion-plugin.json` and refuses the plugin if the manifest is invalid or its `api` range doesn't include the host's plugin API ([the API range](plugin-manifest.md#the-api-range)).
@@ -145,6 +147,32 @@ If you accept the listed permissions, repeat the command with the displayed `--a
 The install command records the plugin and its grants in SQLite. The server starts every recorded plugin when it starts, so restart the server after an install. The host refuses to start or restart a recorded plugin whose manifest differs from the approved one, and logs `a plugin's manifest changed since it was approved, so it won't start`. In the container, plugins live read-only under `/opt/aphelion/plugins` ([install a plugin](../guides/install.md#install-a-plugin)).
 
 The host identifies `network.get` requests by the plugin's own channel. The request takes an HTTPS URL using the default port and an exact granted hostname. The host connects to a public IPv4 address, skips redirects, and limits the response to 64 KiB and the request to five seconds. The container's controls for direct network access are a separate boundary.
+
+### Dev mode
+
+Dev mode lets a plugin author reload one plugin without restarting the server. It is off unless you start the container with the override file [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml). That file mounts the folder named by `APHELION_PLUGIN_DEV_DIR` read-only at `/opt/aphelion/dev-plugin`, and starts the server with `--plugin-dev /opt/aphelion/dev-plugin`.
+
+In dev mode the server opens a Unix socket at `plugin-dev.sock` in its state folder, so `/var/lib/aphelion/plugin-dev.sock` in the container. A Unix socket is a file that two programs on the same machine use to talk. Only `harness` can open it (mode `0600`). The server replaces a socket left over from an earlier run and removes it when it stops. Without `--plugin-dev`, the server opens no socket.
+
+Preview and approve the mounted folder once, then watch it:
+
+```sh
+aphelion plugin install /opt/aphelion/dev-plugin
+aphelion plugin install /opt/aphelion/dev-plugin --approve <value it printed>
+aphelion plugin dev /opt/aphelion/dev-plugin
+```
+
+`plugin dev` asks the server to reload the plugin, then checks the folder about every half second and asks again after each change settles. It prints each answer, such as `Reloaded weather: running`. Ctrl-C stops watching. The last run keeps running under the server.
+
+Each reload stops the plugin, waits until it has stopped, reads the approval and the manifest again, and starts a new run through the runner. The runner checks the folder as on any other start, and the plugin runs as `aphelion-plugins` with its approved grants. Reloads run one at a time. The server refuses, with a reason:
+
+- any folder other than the one given to `--plugin-dev`
+- a folder with no approval
+- a manifest that changed since its approval. The plugin then stays stopped until you run `plugin install` with `--approve` again and change a file.
+
+A reload stops every plugin approved for the folder, then starts the one whose `id` the manifest names. So when you rename a plugin and approve the new name, the old name stops.
+
+The socket accepts only reload requests, one at a time per connection. A request sent before the last one was answered is refused. It can't approve a plugin or start one from another folder.
 
 ### Isolation between plugins
 

@@ -10,4 +10,32 @@ export {
   type PluginManifest,
   type PluginScreen,
 } from "./manifest.ts";
+export {
+  HostError,
+  type Cleanup,
+  type MaybePromise,
+  type NetworkReply,
+  type PluginContext,
+  type PluginIO,
+  type ServerPlugin,
+} from "./plugin.ts";
 export type { SecretBackend, SecretReference } from "./secret-backend.ts";
+export {
+  eventParams,
+  failure,
+  initializeParams,
+  methods,
+  networkGetParams,
+  networkReply,
+  notification,
+  request,
+  requestUrl,
+  rpcErrors,
+  rpcMessageSchema,
+  secretsUseParams,
+  subscribeParams,
+  success,
+  type RpcError,
+  type RpcId,
+  type RpcMessage,
+} from "./wire.ts";

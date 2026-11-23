@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync, statSync } from "node:fs";
 import {
   chmod,
   cp,
@@ -10,7 +10,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -245,10 +245,54 @@ test("aphelion --headless starts installed plugins through the runner pipe", asy
       entry: "index.js",
     });
     expect(stdout).toContain('"msg":"plugin host started","installed":1');
+    expect(existsSync(join(stateDir, "plugin-dev.sock"))).toBe(false);
     replies.end();
     await waitFor(() => stdout.includes("the plugin runner's pipe closed"));
   } finally {
     child.kill("SIGTERM");
   }
   expect(await exited).toBe(130);
+}, 20_000);
+
+test("aphelion --headless --plugin-dev opens a private dev socket and removes it on stop", async () => {
+  const devFolder = join(root, "dev-plugin");
+  await mkdir(devFolder);
+  const socketPath = join(stateDir, "plugin-dev.sock");
+  const child = spawn(
+    process.execPath,
+    [
+      main,
+      "--headless",
+      ...dirs(),
+      "--plugin-runner-fds",
+      "3,4",
+      "--plugin-dev",
+      devFolder,
+    ],
+    { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+  const exited = new Promise((resolve) => child.on("close", resolve));
+  try {
+    await waitFor(() => stdout.includes('"msg":"plugin dev mode is on"'));
+    expect(statSync(socketPath).mode & 0o777).toBe(0o600);
+    const reply = await new Promise<string>((resolve, reject) => {
+      const socket = createConnection(socketPath);
+      socket.on("error", reject);
+      socket.on("data", (chunk: Buffer) => {
+        resolve(chunk.toString());
+        socket.end();
+      });
+      socket.write(`${JSON.stringify({ type: "reload", folder: root })}\n`);
+    });
+    expect(JSON.parse(reply)).toEqual({
+      ok: false,
+      reason: `dev mode reloads only ${devFolder}, not ${JSON.stringify(root)}`,
+    });
+  } finally {
+    child.kill("SIGTERM");
+  }
+  expect(await exited).toBe(130);
+  expect(existsSync(socketPath)).toBe(false);
 }, 20_000);

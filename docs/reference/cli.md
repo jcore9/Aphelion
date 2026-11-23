@@ -8,6 +8,7 @@
 | --- | --- |
 | `aphelion --headless` | Checks the config, then starts the server. The container runs this. |
 | `aphelion config check` | Checks the config files, the modes of the config and state folders and, with `--compose`, the ports a Compose file publishes |
+| `aphelion plugin dev FOLDER` | Reloads the approved plugin in `FOLDER` through the running server, and again after each change to the folder. Works only in [dev mode](plugins.md#dev-mode). |
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
 | `aphelion device revoke ID` | Stops a device's token at once |
@@ -19,10 +20,11 @@
 | Option | Used by | Default | Meaning |
 | --- | --- | --- | --- |
 | `--config-dir DIR` | `--headless`, `config check` | `/etc/aphelion` | The folder with the [config files](config.md) |
-| `--state-dir DIR` | `--headless`, `config check`, `device` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
+| `--state-dir DIR` | `--headless`, `config check`, `plugin dev`, `device` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
 | `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
+| `--plugin-dev FOLDER` | `--headless` | none | An absolute path. Turns on [dev mode](plugins.md#dev-mode): the server opens a Unix socket in the state folder, and `plugin dev` can reload the approved plugin in `FOLDER`. Needs `--plugin-runner-fds` to have any effect. |
 
 The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
 
@@ -53,7 +55,7 @@ The server logs JSON lines on standard output, through the redacting [logger](lo
 {"time":"2026-11-22T22:30:55.188Z","level":"info","msg":"server started","version":"0.0.0","address":"0.0.0.0","port":7400}
 ```
 
-Headless mode never loads Electron or any GUI library. In the container, the [launcher](container.md#how-the-processes-start) creates the pipes and passes `--plugin-runner-fds 3,4`.
+Headless mode never loads Electron or any GUI library. In the container, the [launcher](container.md#how-the-processes-start) creates the pipes and passes `--plugin-runner-fds 3,4`, and `--plugin-dev` when `APHELION_PLUGIN_DEV_FOLDER` is set and not empty.
 
 ## `aphelion config check`
 
@@ -100,6 +102,24 @@ docker compose --profile '*' config \
 `docker compose run` mounts the bootstrap key that `aphelion.service` decrypts, so the line works only while the service runs. When the service is stopped, the run fails because the key file doesn't exist. The service runs the line itself before every start.
 
 The service is named `aphelion` in [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.yaml), and `aphelion.service` runs this line before every start ([what the service does](../guides/install.md#what-the-service-does)). `--compose FILE` reads a file that holds the same output instead. The check refuses input with no services, such as an empty file or `{}`, because that can't be the output for Aphelion's Compose file.
+
+## `aphelion plugin dev FOLDER`
+
+```sh
+aphelion plugin dev FOLDER [--state-dir DIR]
+```
+
+Reloads a plugin while you work on it. The server must run with `--plugin-dev FOLDER`, and `FOLDER` must already be approved with `aphelion plugin install`. [Write your first server plugin](../guides/write-your-first-server-plugin.md) shows the whole path.
+
+The command connects to `plugin-dev.sock` in the state folder. It asks the server to reload the plugin, then checks the folder about every half second, and asks again after each change has settled. It prints one line for each answer:
+
+| Line | Meaning |
+| --- | --- |
+| `Watching FOLDER. Press Ctrl-C to stop watching. The plugin keeps running.` | The command is connected. Standard output. |
+| `Reloaded ID: STATE` | The server started a new run of plugin `ID` and saw it reach state `STATE`. `running` means it started. `crashed` means it exited or the runner refused it, and the server log says why. `starting` means it hadn't answered after 15 seconds. Standard output. |
+| `Refused: REASON` | The server didn't reload. The reason says why, for example that the folder isn't approved or that the manifest changed. The command keeps watching. Standard error. |
+
+The command exits with code 1 and a message if the server has no dev socket. It runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
 
 ## `aphelion device add NAME`
 

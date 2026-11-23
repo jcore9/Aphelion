@@ -13,6 +13,7 @@ import {
   PluginHost,
   type HostOptions,
   pluginHostLayer,
+  RunnerClosed,
   RunnerLink,
 } from "./host";
 import {
@@ -530,6 +531,76 @@ describe("the plugin host", () => {
       }).pipe(Effect.provide(layer));
     },
   );
+
+  it.live(
+    "finishes stopping before stop returns, so a start right after it runs again",
+    () => {
+      const { layer, record } = harness({
+        stubborn: (io) =>
+          handshake(io).pipe(Effect.andThen(Effect.forever(io.read))),
+      });
+      return Effect.gen(function* () {
+        const host = yield* PluginHost;
+        const folder = yield* serverPlugin("stubborn");
+        yield* host.start(folder);
+        yield* waitFor("stubborn", { state: "running", run: 1 });
+        yield* host.stop("stubborn");
+        expect(yield* host.status("stubborn")).toEqual({
+          state: "stopped",
+          run: 1,
+          reason: "requested",
+        });
+        expect(record.killed).toBe(1);
+        yield* host.start(folder);
+        const state = yield* host.waitFor(
+          "stubborn",
+          (state) => state.state === "running",
+        );
+        expect(state).toMatchObject({ state: "running", run: 2 });
+        expect(record.spawned).toHaveLength(2);
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
+  it.live("stop returns, and waits fail, once the runner's pipe closes", () =>
+    Effect.gen(function* () {
+      const incoming = yield* Queue.bounded<RunnerReply, Cause.Done>(16);
+      const layer = pluginHostLayer({
+        logger: createLogger({ level: "error", write: () => undefined }),
+      }).pipe(
+        Layer.provide(
+          Layer.succeed(RunnerLink, { incoming, send: () => Effect.void }),
+        ),
+        Layer.provide(PluginGrants.refuseAll),
+      );
+      yield* Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.start(yield* serverPlugin("orphan"));
+        const stopping = yield* Effect.forkChild(host.stop("orphan"));
+        yield* Effect.sleep("50 millis");
+        yield* Queue.end(incoming);
+        yield* Fiber.join(stopping).pipe(Effect.timeout("2 seconds"));
+        const waited = yield* Effect.flip(host.waitFor("orphan", () => false));
+        expect(waited).toBeInstanceOf(RunnerClosed);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.live("returns at once when stopping a plugin that isn't running", () => {
+    const { layer } = harness({ quitter: () => Effect.succeed(1) });
+    return Effect.gen(function* () {
+      const host = yield* PluginHost;
+      yield* host.stop("unknown");
+      yield* host.start(yield* serverPlugin("quitter"));
+      yield* waitFor("quitter", { state: "stopped" });
+      yield* host.stop("quitter");
+      expect(yield* host.status("quitter")).toMatchObject({
+        state: "stopped",
+        reason: "crashed too often",
+      });
+      expect(yield* host.waitFor("unknown", () => true)).toBeUndefined();
+    }).pipe(Effect.provide(layer));
+  });
 
   it.live(
     "answers malformed JSON-RPC with an error and keeps the plugin running",
