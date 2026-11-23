@@ -295,6 +295,35 @@ describe("runPlugin", () => {
     expect(cleanups).toBe(1);
   });
 
+  test("runs cleanup and rethrows when a write from an event handler fails", async () => {
+    const host = scriptedHost();
+    let cleanups = 0;
+    const run = runPlugin(
+      {
+        async start(ctx) {
+          await ctx.events.subscribe("demo.ping", async () => {
+            await ctx.network.get("https://api.example.com/");
+          });
+          return () => {
+            cleanups++;
+          };
+        },
+      },
+      {
+        ...host.io,
+        write: (line) =>
+          line.includes("network.get")
+            ? Promise.reject(new Error("stdout broke"))
+            : host.io.write(line),
+      },
+    );
+    await host.initialize();
+    host.reply(await host.read(), {});
+    host.event("demo.ping", {});
+    await expect(run).rejects.toThrow("stdout broke");
+    expect(cleanups).toBe(1);
+  });
+
   test("fails when start throws after the handshake", async () => {
     const host = scriptedHost();
     const run = runPlugin(

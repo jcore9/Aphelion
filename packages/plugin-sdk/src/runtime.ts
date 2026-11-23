@@ -64,10 +64,16 @@ export async function serve(
   let started: Promise<void> | undefined;
   let cleanup: Cleanup | undefined;
 
+  let broken: { readonly error: unknown } | undefined;
+  const breakOff = (error: unknown) => {
+    broken ??= { error };
+    interrupt?.();
+  };
+
   const send = (message: unknown) => {
     const line = JSON.stringify(message);
     const sent = writing.then(() => io.write(line));
-    writing = sent.catch(() => undefined);
+    writing = sent.catch(breakOff);
     return sent;
   };
 
@@ -174,7 +180,7 @@ export async function serve(
       input.next().then(resolve, reject);
     });
   const receive = async () => {
-    while (!failed) {
+    while (!failed && !broken) {
       const next = await read();
       if (next.done) return;
       const message = parse(next.value);
@@ -208,11 +214,10 @@ export async function serve(
     }
   };
 
-  let broken: { readonly error: unknown } | undefined;
   try {
     await receive();
   } catch (error) {
-    broken = { error };
+    breakOff(error);
   }
 
   closed = true;

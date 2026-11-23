@@ -347,7 +347,6 @@ describe("the plugin dev socket", () => {
         );
         expect(yield* ask(path, "first\nsecond\n")).toEqual([
           { ok: false, reason: "wait for the reply to your last request" },
-          { ok: true, plugin: "weather", state: "1" },
         ]);
         expect(yield* ask(path, "second\n")).toEqual([
           { ok: true, plugin: "weather", state: "2" },

@@ -13,6 +13,7 @@ import {
   PluginHost,
   type HostOptions,
   pluginHostLayer,
+  RunnerClosed,
   RunnerLink,
 } from "./host";
 import {
@@ -561,7 +562,7 @@ describe("the plugin host", () => {
     },
   );
 
-  it.live("stop returns once the runner's pipe closes", () =>
+  it.live("stop returns, and waits fail, once the runner's pipe closes", () =>
     Effect.gen(function* () {
       const incoming = yield* Queue.bounded<RunnerReply, Cause.Done>(16);
       const layer = pluginHostLayer({
@@ -579,6 +580,8 @@ describe("the plugin host", () => {
         yield* Effect.sleep("50 millis");
         yield* Queue.end(incoming);
         yield* Fiber.join(stopping).pipe(Effect.timeout("2 seconds"));
+        const waited = yield* Effect.flip(host.waitFor("orphan", () => false));
+        expect(waited).toBeInstanceOf(RunnerClosed);
       }).pipe(Effect.provide(layer));
     }),
   );

@@ -2,6 +2,7 @@ export {
   MessageNotSent,
   PluginHost,
   pluginHostLayer,
+  RunnerClosed,
   RunnerLink,
   type HostOptions,
   type PluginEvent,

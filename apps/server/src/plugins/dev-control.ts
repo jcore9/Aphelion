@@ -89,12 +89,18 @@ export const devControl = (options: DevControlOptions) =>
         if (started.success.kind === "client only") {
           return refuse(`${id} has no server part to run`);
         }
-        const settled = yield* host
+        const waited = yield* host
           .waitFor(
             id,
             (state) => state.run > before && state.state !== "starting",
           )
-          .pipe(Effect.timeoutOption("15 seconds"));
+          .pipe(Effect.timeoutOption("15 seconds"), Effect.result);
+        if (waited._tag === "Failure") {
+          return refuse(
+            `${id} can't run: the plugin runner stopped. Restart Aphelion.`,
+          );
+        }
+        const settled = waited.success;
         const state = Option.isSome(settled)
           ? settled.value
           : yield* host.status(id);
@@ -165,7 +171,8 @@ export const serveDevSocket = (
           }
           if (busy) {
             answer(refuse("wait for the reply to your last request"));
-            continue;
+            socket.end();
+            return;
           }
           busy = true;
           void Effect.runPromise(handle(piece.text)).then((reply) => {

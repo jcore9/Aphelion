@@ -54,6 +54,8 @@ export class RunnerLink extends Context.Service<
   Link<RunnerReply, RunnerRequest>
 >()("aphelion/plugins/RunnerLink") {}
 
+export class RunnerClosed extends Data.TaggedError("RunnerClosed") {}
+
 export class MessageNotSent extends Data.TaggedError("MessageNotSent")<{
   readonly reason: "not serializable" | "too long";
 }> {}
@@ -83,7 +85,7 @@ export class PluginHost extends Context.Service<
     readonly waitFor: (
       id: string,
       until: (state: LifecycleState) => boolean,
-    ) => Effect.Effect<LifecycleState | undefined>;
+    ) => Effect.Effect<LifecycleState | undefined, RunnerClosed>;
     readonly publish: (
       event: PluginEvent,
     ) => Effect.Effect<void, MessageNotSent>;
@@ -108,7 +110,8 @@ type ServerManifest = Extract<PluginManifest, { server: object }>;
 
 interface Waiter {
   readonly until: (state: LifecycleState) => boolean;
-  readonly done: Deferred.Deferred<LifecycleState>;
+  readonly done: Deferred.Deferred<LifecycleState, RunnerClosed>;
+  cancelled: boolean;
 }
 
 type SlotInput =
@@ -385,7 +388,9 @@ export const pluginHostLayer = (options: HostOptions) =>
           ),
           (waiter) => {
             slot.waiters.delete(waiter);
-            return Deferred.succeed(waiter.done, slot.state);
+            return runnerClosed
+              ? Deferred.fail(waiter.done, new RunnerClosed())
+              : Deferred.succeed(waiter.done, slot.state);
           },
           { discard: true },
         );
@@ -470,6 +475,7 @@ export const pluginHostLayer = (options: HostOptions) =>
 
       const handle = (slot: Slot, input: SlotInput) => {
         if (input.type === "wait") {
+          if (input.cancelled) return Effect.void;
           slot.waiters.add(input);
           return settleWaiters(slot);
         }
@@ -669,15 +675,18 @@ export const pluginHostLayer = (options: HostOptions) =>
         Effect.gen(function* () {
           const slot = slots.get(id);
           if (!slot) return undefined;
+          if (runnerClosed) return yield* new RunnerClosed();
           const waiter = {
             type: "wait" as const,
             until,
-            done: yield* Deferred.make<LifecycleState>(),
+            done: yield* Deferred.make<LifecycleState, RunnerClosed>(),
+            cancelled: false,
           };
           yield* Queue.offer(slot.mailbox, waiter);
           return yield* Deferred.await(waiter.done).pipe(
             Effect.onInterrupt(() =>
               Effect.sync(() => {
+                waiter.cancelled = true;
                 slot.waiters.delete(waiter);
               }),
             ),
@@ -694,6 +703,7 @@ export const pluginHostLayer = (options: HostOptions) =>
             return Queue.offer(slot.mailbox, { type: "stop" }).pipe(
               Effect.andThen(waitFor(id, isStopped)),
               Effect.asVoid,
+              Effect.catchTag("RunnerClosed", () => Effect.void),
             );
           }),
         waitFor,
