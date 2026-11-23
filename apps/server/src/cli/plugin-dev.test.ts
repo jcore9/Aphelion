@@ -123,13 +123,11 @@ describe("aphelion plugin dev", () => {
                   reply:
                     requests.length === 2
                       ? {
-                          type: "reply",
-                          ok: false,
+                          type: "refused",
                           reason: "the manifest changed",
                         }
                       : {
-                          type: "reply",
-                          ok: true,
+                          type: "reloaded",
                           plugin: "weather",
                           state: "running",
                         },
@@ -188,8 +186,7 @@ describe("aphelion plugin dev", () => {
                 return calls === 1
                   ? {
                       reply: {
-                        type: "reply" as const,
-                        ok: true as const,
+                        type: "reloaded" as const,
                         plugin: "weather",
                         state: "running",
                       },
@@ -200,8 +197,7 @@ describe("aphelion plugin dev", () => {
                     }
                   : {
                       reply: {
-                        type: "reply" as const,
-                        ok: true as const,
+                        type: "reloaded" as const,
                         plugin: "weather",
                         state: "crashed",
                       },

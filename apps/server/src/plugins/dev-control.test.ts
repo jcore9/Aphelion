@@ -173,8 +173,7 @@ describe("plugin dev control", () => {
             digest: renamed.digest,
           });
           expect(yield* reload(folder)).toEqual({
-            type: "reply",
-            ok: true,
+            type: "reloaded",
             plugin: "weather-v2",
             state: "running",
           });
@@ -193,14 +192,12 @@ describe("plugin dev control", () => {
           const { folder, approve, reload } = yield* setup;
           yield* approve;
           expect(yield* reload(folder)).toEqual({
-            type: "reply",
-            ok: true,
+            type: "reloaded",
             plugin: "weather",
             state: "running",
           });
           expect(yield* reload(`${folder}/`)).toEqual({
-            type: "reply",
-            ok: true,
+            type: "reloaded",
             plugin: "weather",
             state: "running",
           });
@@ -226,8 +223,7 @@ describe("plugin dev control", () => {
         );
         expect(replies).toEqual(
           Array.from({ length: 3 }, () => ({
-            type: "reply",
-            ok: true,
+            type: "reloaded",
             plugin: "weather",
             state: "running",
           })),
@@ -247,11 +243,10 @@ describe("plugin dev control", () => {
           yield* reload(folder);
           const link = join(root, "link");
           yield* Effect.promise(() => symlink(folder, link));
-          expect(yield* reload(link)).toMatchObject({ ok: true });
+          expect(yield* reload(link)).toMatchObject({ type: "reloaded" });
           for (const path of [other, "dev-plugin", join(root, "missing")]) {
             expect(yield* reload(path)).toEqual({
-              type: "reply",
-              ok: false,
+              type: "refused",
               reason: `dev mode reloads only ${folder}, not ${JSON.stringify(path)}`,
             });
           }
@@ -270,8 +265,7 @@ describe("plugin dev control", () => {
       Effect.gen(function* () {
         const { folder, reload } = yield* setup;
         expect(yield* reload(folder)).toEqual({
-          type: "reply",
-          ok: false,
+          type: "refused",
           reason: `${folder} isn't approved. Run aphelion plugin install ${folder} and approve it.`,
         });
         expect(starts).toEqual([]);
@@ -293,20 +287,18 @@ describe("plugin dev control", () => {
           );
           const approved = yield* readManifest(folder);
           expect(yield* reload(folder)).toEqual({
-            type: "reply",
-            ok: false,
+            type: "refused",
             reason: `weather stays stopped: the manifest changed since it was approved. Run aphelion plugin install ${approved.folder} to approve it again.`,
           });
           expect(yield* host.status("weather")).toMatchObject({
             state: "stopped",
             reason: "requested",
           });
-          expect(yield* reload(folder)).toMatchObject({ ok: false });
+          expect(yield* reload(folder)).toMatchObject({ type: "refused" });
           expect(starts).toEqual([1]);
           yield* approve;
           expect(yield* reload(folder)).toEqual({
-            type: "reply",
-            ok: true,
+            type: "reloaded",
             plugin: "weather",
             state: "running",
           });
@@ -321,8 +313,7 @@ describe("plugin dev control", () => {
         const { folder, handle } = yield* setup;
         expect(yield* handle("{")).toEqual({
           reply: {
-            type: "reply",
-            ok: false,
+            type: "refused",
             reason: "the request isn't JSON",
           },
         });
@@ -330,8 +321,7 @@ describe("plugin dev control", () => {
           yield* handle(JSON.stringify({ type: "approve", folder })),
         ).toEqual({
           reply: {
-            type: "reply",
-            ok: false,
+            type: "refused",
             reason: "the request isn't a reload request",
           },
         });
@@ -403,8 +393,7 @@ describe("the plugin dev socket", () => {
               seen.push(line);
               return {
                 reply: {
-                  type: "reply",
-                  ok: true,
+                  type: "reloaded",
                   plugin: "weather",
                   state: String(seen.length),
                 },
@@ -417,24 +406,22 @@ describe("the plugin dev socket", () => {
         );
         expect(yield* ask(path, "first\nsecond\n")).toEqual([
           {
-            type: "reply",
-            ok: false,
+            type: "refused",
             reason: "wait for the reply to your last request",
           },
         ]);
         expect(yield* askLater(path, "ignored\n")).toEqual([
           {
-            type: "reply",
-            ok: false,
+            type: "refused",
             reason: "wait for the reply to your last request",
           },
         ]);
         expect(seen).toEqual(["first", "first"]);
         expect(yield* ask(path, "second\n")).toEqual([
-          { type: "reply", ok: true, plugin: "weather", state: "3" },
+          { type: "reloaded", plugin: "weather", state: "3" },
         ]);
         expect(yield* ask(path, `${"x".repeat(70 * 1024)}\n`)).toEqual([
-          { type: "reply", ok: false, reason: "the request is too long" },
+          { type: "refused", reason: "the request is too long" },
         ]);
         expect(seen).toEqual(["first", "first", "second"]);
         yield* Scope.close(scope, Exit.void);
@@ -460,13 +447,13 @@ describe("the plugin dev socket", () => {
       expect((yield* Effect.promise(() => stat(path))).isSocket()).toBe(true);
       const answer = () =>
         Effect.succeed<DevResult>({
-          reply: { type: "reply", ok: false, reason: "fresh" },
+          reply: { type: "refused", reason: "fresh" },
         });
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* serveDevSocket(path, answer, logger);
           expect(yield* ask(path, "hello\n")).toEqual([
-            { type: "reply", ok: false, reason: "fresh" },
+            { type: "refused", reason: "fresh" },
           ]);
         }),
       );
@@ -480,8 +467,7 @@ describe("the plugin dev socket", () => {
 });
 
 const runningReply = {
-  type: "reply" as const,
-  ok: true as const,
+  type: "reloaded" as const,
   plugin: "weather",
   state: "running",
 };

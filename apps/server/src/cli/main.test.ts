@@ -296,8 +296,7 @@ test("aphelion --headless --plugin-dev opens a private dev socket and removes it
       socket.write(`${JSON.stringify({ type: "reload", folder: root })}\n`);
     });
     expect(JSON.parse(reply)).toEqual({
-      type: "reply",
-      ok: false,
+      type: "refused",
       reason: `dev mode reloads only ${devFolder}, not ${JSON.stringify(root)}`,
     });
   } finally {

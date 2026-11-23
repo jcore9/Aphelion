@@ -229,6 +229,17 @@ describe("createTestHost", () => {
     await host.stop();
   });
 
+  test("rejects a too-long event even when no plugin would get it", async () => {
+    const host = hostWith([]);
+    const tooLong = eventData(maxPluginLineBytes + 1, false);
+    await expect(host.publish("demo.ping", tooLong)).rejects.toThrow(
+      "the event is longer than 1 MiB once encoded, so the host refuses it",
+    );
+    await expect(
+      host.publish("demo.ping", eventData(maxPluginLineBytes, false)),
+    ).resolves.toBeUndefined();
+  });
+
   test("runs two network requests from the plugin one after the other", async () => {
     const host = hostWith([{ kind: "network", name: "api.example.com" }]);
     let active = 0;

@@ -18,22 +18,14 @@ export const devRequestSchema = z.strictObject({
   folder: z.string().min(1).max(4096),
 });
 
-export const devReplySchema = z.union([
+export const devReplySchema = z.discriminatedUnion("type", [
   z.strictObject({
-    type: z.literal("reply"),
-    ok: z.literal(true),
+    type: z.literal("reloaded"),
     plugin: z.string(),
     state: z.string(),
   }),
-  z.strictObject({
-    type: z.literal("reply"),
-    ok: z.literal(false),
-    reason: z.string(),
-  }),
-  z.strictObject({
-    type: z.literal("crashed"),
-    plugin: z.string(),
-  }),
+  z.strictObject({ type: z.literal("refused"), reason: z.string() }),
+  z.strictObject({ type: z.literal("crashed"), plugin: z.string() }),
 ]);
 
 export type DevReply = z.infer<typeof devReplySchema>;
@@ -48,20 +40,13 @@ export interface DevControlOptions {
   readonly approvals: () => readonly Installed[];
 }
 
-const refuse = (reason: string): DevReply => ({
-  type: "reply",
-  ok: false,
-  reason,
-});
+const refuse = (reason: string): DevReply => ({ type: "refused", reason });
 
 const refused = (reason: string): DevResult => ({ reply: refuse(reason) });
 
-const runCrashed =
-  (run: number) =>
-  (state: LifecycleState): boolean =>
-    state.run === run &&
-    (state.state === "crashed" ||
-      (state.state === "stopped" && state.reason === "crashed too often"));
+const crashed = (state: LifecycleState) =>
+  state.state === "crashed" ||
+  (state.state === "stopped" && state.reason === "crashed too often");
 
 const canonical = (path: string) =>
   isAbsolute(path)
@@ -74,14 +59,19 @@ export const devControl = (options: DevControlOptions) =>
     const lock = yield* Semaphore.make(1);
 
     const crashNotice = (plugin: string, run: number) =>
-      host.waitFor(plugin, runCrashed(run)).pipe(
-        Effect.map((state) =>
-          state === undefined
-            ? undefined
-            : { type: "crashed" as const, plugin },
-        ),
-        Effect.catchTag("RunnerClosed", () => Effect.succeed(undefined)),
-      );
+      host
+        .waitFor(
+          plugin,
+          (state) => state.run !== run || state.state !== "running",
+        )
+        .pipe(
+          Effect.map((state): DevReply | undefined =>
+            state?.run === run && crashed(state)
+              ? { type: "crashed", plugin }
+              : undefined,
+          ),
+          Effect.catchTag("RunnerClosed", () => Effect.succeed(undefined)),
+        );
 
     const reload = (folder: string) =>
       Effect.gen(function* () {
@@ -143,8 +133,7 @@ export const devControl = (options: DevControlOptions) =>
           ? settled.value
           : yield* host.status(id);
         const reply: DevReply = {
-          type: "reply",
-          ok: true,
+          type: "reloaded",
           plugin: id,
           state: seen?.state ?? "unknown",
         };
@@ -206,6 +195,7 @@ export const serveDevSocket = (
       connections.add(socket);
       const splitter = new LineSplitter(maxDevLineBytes);
       let busy = false;
+      let closed = false;
       let watch: Fiber.Fiber<void> | undefined;
       const answer = (reply: DevReply) => {
         if (socket.writable) socket.write(`${JSON.stringify(reply)}\n`);
@@ -230,6 +220,7 @@ export const serveDevSocket = (
         watches.add(fiber);
       };
       socket.on("close", () => {
+        closed = true;
         connections.delete(socket);
         stopWatch(watch);
         watch = undefined;
@@ -251,7 +242,7 @@ export const serveDevSocket = (
           void Effect.runPromise(handle(piece.text)).then((result) => {
             busy = false;
             answer(result.reply);
-            if (result.notice) startWatch(result.notice);
+            if (result.notice && !closed) startWatch(result.notice);
           });
         }
       });

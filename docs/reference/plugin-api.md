@@ -726,8 +726,8 @@ interface TestHost {
 - `registerSecretOperation`: Adds a named operation for `secrets.use`. While none is registered, `secrets.use` with a granted reference fails with error `-32002`.
 - `start`: Starts the plugin and resolves when its `start` has finished, or rejects when `start` fails. A test host starts one plugin only.
 - `publish`: Sends an event to the plugin and resolves when its handler has finished.
+  It rejects when the encoded event line is longer than 1 MiB, as the real host does, and sends nothing.
   It sends nothing and resolves at once when the plugin isn't running, hasn't subscribed, or isn't granted the event, and from the moment `stop` is called.
-  It rejects when the encoded event line is longer than 1 MiB, and sends that event to no plugin.
 - `stop`: Sends `shutdown` and resolves when the plugin has stopped. The SDK first waits up to 3 seconds for handlers that are still running, then runs the plugin's cleanup.
   A second call resolves when the first one does.
 - `logs`: The messages that the plugin and the SDK logged, in order.

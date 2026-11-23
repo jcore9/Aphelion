@@ -75,8 +75,8 @@ export interface TestHost {
   start(plugin: ServerPlugin): Promise<void>;
   /**
    * Sends an event to the plugin and resolves when its handler has finished.
+   * It rejects when the encoded event line is longer than 1 MiB, as the real host does, and sends nothing.
    * It sends nothing and resolves at once when the plugin isn't running, hasn't subscribed, or isn't granted the event, and from the moment `stop` is called.
-   * It rejects when the encoded event line is longer than 1 MiB, and sends that event to no plugin.
    */
   publish(name: string, data: unknown): Promise<void>;
   /**
@@ -319,14 +319,14 @@ export function createTestHost(manifestData: unknown): TestHost {
       await Promise.race([started.promise, run]);
     },
     async publish(name, data) {
-      if (!running || !subscriptions.has(name) || !allows("events", name))
-        return;
       const line = JSON.stringify(notification(methods.event, { name, data }));
       if (!pluginLineFits(line)) {
         throw new Error(
           "the event is longer than 1 MiB once encoded, so the host refuses it",
         );
       }
+      if (!running || !subscriptions.has(name) || !allows("events", name))
+        return;
       const delivered = adoptLater();
       deliveries.push(delivered.adopt);
       toPlugin.pushLine(line);

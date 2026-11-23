@@ -685,8 +685,8 @@ export const pluginHostLayer = (options: HostOptions) =>
             done: yield* Deferred.make<LifecycleState, RunnerClosed>(),
             cancelled: false,
           };
-          yield* Queue.offer(slot.mailbox, waiter);
-          return yield* Deferred.await(waiter.done).pipe(
+          return yield* Queue.offer(slot.mailbox, waiter).pipe(
+            Effect.andThen(Deferred.await(waiter.done)),
             Effect.onInterrupt(() =>
               Effect.sync(() => {
                 waiter.cancelled = true;
