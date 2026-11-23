@@ -126,15 +126,17 @@ aphelion plugin dev FOLDER [--state-dir DIR]
 
 Reloads a plugin while you work on it. The server must run with `--plugin-dev FOLDER`, and `FOLDER` must already be approved with `aphelion plugin install`. [Write your first server plugin](../guides/write-your-first-server-plugin.md) shows the whole path.
 
-The command connects to `plugin-dev.sock` in the state folder. It asks the server to reload the plugin, then checks the folder about every half second, and asks again after each change has settled. It prints one line for each answer:
+The command connects to `plugin-dev.sock` in the state folder. It asks the server to reload the plugin, then checks the folder about every half second, and asks again after each change has settled. It prints one line for each answer, as soon as the answer arrives:
 
 | Line | Meaning |
 | --- | --- |
 | `Watching FOLDER. Press Ctrl-C to stop watching. The plugin keeps running.` | The command is connected. Standard output. |
-| `Reloaded ID: STATE` | The server started a new run of plugin `ID` and saw it reach state `STATE`. `running` means it started. `crashed` means it exited or the runner refused it, and the server log says why. `starting` means it hadn't answered after 15 seconds. Standard output. |
+| `Reloaded ID: the handshake finished.` | The server started a new run of plugin `ID` and the plugin answered `initialize`. Standard output. |
+| `Reloaded ID, but it isn't running: STATE. The server log says why.` | The reload finished in some other state. `crashed` means it exited or the runner refused it. `starting` means it hadn't answered after 15 seconds. Standard error. |
+| `ID crashed after the handshake. If its start() failed, the server log says why.` | The run that just finished the handshake crashed before the next reload. A stop you asked for does not print this. Standard error. |
 | `Refused: REASON` | The server didn't reload. The reason says why, for example that the folder isn't approved or that the manifest changed. The command keeps watching. Standard error. |
 
-The command exits with code 1 and a message if the server has no dev socket. It runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
+The command exits with code 1 and a message if the server has no dev socket. If the server closes the connection, for example when it restarts, the command prints `aphelion: the server closed the dev connection` and exits with code 1. Otherwise it runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
 
 ## `aphelion device add NAME`
 

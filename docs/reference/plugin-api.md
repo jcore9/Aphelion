@@ -397,6 +397,14 @@ The Zod schema for the params of the host's `initialize` request.
 const initializeParams: z.ZodType<{ api: string; plugin: string }>;
 ```
 
+### `maxPluginLineBytes`
+
+The most UTF-8 bytes one JSON line may hold, not counting the newline. The limit is 1 MiB.
+
+```ts
+const maxPluginLineBytes: number;
+```
+
 ### `methods`
 
 The JSON-RPC method names that the host and a plugin send.
@@ -455,6 +463,14 @@ The plugin API version that this SDK and the host run. A manifest's `api` range 
 
 ```ts
 const pluginApiVersion: "0.2.1";
+```
+
+### `pluginLineFits`
+
+Whether `line`, without its newline, fits in `maxPluginLineBytes` as UTF-8.
+
+```ts
+function pluginLineFits(line: string): boolean;
 ```
 
 ### `pluginManifestFile`
@@ -710,6 +726,7 @@ interface TestHost {
 - `registerSecretOperation`: Adds a named operation for `secrets.use`. While none is registered, `secrets.use` with a granted reference fails with error `-32002`.
 - `start`: Starts the plugin and resolves when its `start` has finished, or rejects when `start` fails. A test host starts one plugin only.
 - `publish`: Sends an event to the plugin and resolves when its handler has finished.
+  It rejects when the encoded event line is longer than 1 MiB, as the real host does, and sends nothing.
   It sends nothing and resolves at once when the plugin isn't running, hasn't subscribed, or isn't granted the event, and from the moment `stop` is called.
 - `stop`: Sends `shutdown` and resolves when the plugin has stopped. The SDK first waits up to 3 seconds for handlers that are still running, then runs the plugin's cleanup.
   A second call resolves when the first one does.

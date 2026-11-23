@@ -69,49 +69,68 @@ const connect = (path: string) =>
       }),
   );
 
+const show = (message: DevReply) =>
+  Effect.gen(function* () {
+    const io = yield* CliIo;
+    switch (message.type) {
+      case "reloaded":
+        return message.state === "running"
+          ? yield* io.out(`Reloaded ${message.plugin}: the handshake finished.`)
+          : yield* io.err(
+              `Reloaded ${message.plugin}, but it isn't running: ${message.state}. The server log says why.`,
+            );
+      case "refused":
+        return yield* io.err(`Refused: ${message.reason}`);
+      case "crashed":
+        return yield* io.err(
+          `${message.plugin} crashed after the handshake. If its start() failed, the server log says why.`,
+        );
+    }
+  });
+
 const devClient = (path: string) =>
   Effect.gen(function* () {
     const socket = yield* connect(path);
-    const replies = yield* Queue.unbounded<string, Cause.Done>();
+    const incoming = yield* Queue.unbounded<string, Cause.Done>();
     const splitter = new LineSplitter(maxDevLineBytes);
     socket.on("data", (chunk: Buffer) => {
       for (const piece of splitter.push(chunk)) {
-        if (piece.kind === "line") Queue.offerUnsafe(replies, piece.text);
+        if (piece.kind === "line") Queue.offerUnsafe(incoming, piece.text);
       }
     });
     socket.on("close", () => {
-      Queue.endUnsafe(replies);
+      Queue.endUnsafe(incoming);
     });
-    return (folder: string) =>
-      Effect.gen(function* () {
-        socket.write(`${JSON.stringify({ type: "reload", folder })}\n`);
-        const line = yield* Queue.take(replies).pipe(
+    const answered = yield* Queue.unbounded<undefined>();
+    const read = Effect.gen(function* () {
+      for (;;) {
+        const line = yield* Queue.take(incoming).pipe(
           Effect.catchIf(Cause.isDone, () =>
             Effect.fail(new Error("the server closed the dev connection")),
           ),
         );
-        const reply = devReplySchema.safeParse(
-          yield* Effect.try(() => JSON.parse(line) as unknown).pipe(
+        const message = devReplySchema.safeParse(
+          yield* Effect.try((): unknown => JSON.parse(line)).pipe(
             Effect.orElseSucceed(() => undefined),
           ),
         );
-        if (!reply.success) {
+        if (!message.success) {
           return yield* Effect.fail(
             new Error("the server sent a reply this command can't read"),
           );
         }
-        return reply.data;
+        yield* show(message.data);
+        if (message.data.type !== "crashed") {
+          yield* Queue.offer(answered, undefined);
+        }
+      }
+    });
+    const reload = (folder: string) =>
+      Effect.gen(function* () {
+        socket.write(`${JSON.stringify({ type: "reload", folder })}\n`);
+        yield* Queue.take(answered);
       });
-  });
-
-const show = (reply: DevReply) =>
-  Effect.gen(function* () {
-    const io = yield* CliIo;
-    if (reply.ok) {
-      yield* io.out(`Reloaded ${reply.plugin}: ${reply.state}`);
-    } else {
-      yield* io.err(`Refused: ${reply.reason}`);
-    }
+    return { read, reload };
   });
 
 export const pluginDev = (options: {
@@ -135,7 +154,7 @@ export const pluginDev = (options: {
     );
     return yield* watchForChanges(
       folderFingerprint(folder),
-      connected.success(folder).pipe(Effect.flatMap(show)),
+      connected.success.reload(folder),
       options.every ?? "500 millis",
-    );
+    ).pipe(Effect.raceFirst(connected.success.read));
   }).pipe(Effect.scoped);

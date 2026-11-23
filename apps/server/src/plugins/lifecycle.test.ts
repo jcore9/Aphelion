@@ -73,6 +73,43 @@ describe("the plugin lifecycle", () => {
     });
   });
 
+  it("counts a crash just before the stable time as another in the row", () => {
+    const running: LifecycleState = {
+      state: "running",
+      run: 3,
+      crashes: 2,
+      since: 1_000,
+    };
+    for (const type of ["exited", "broke-protocol"] as const) {
+      const next = step(
+        running,
+        { type, run: 3, at: 1_000 + policy.stableMs - 1 },
+        policy,
+      );
+      expect(next.state).toMatchObject({ state: "crashed", crashes: 3 });
+      expect(next.commands.some((command) => command.type === "kill")).toBe(
+        type === "broke-protocol",
+      );
+    }
+  });
+
+  it("counts a crash at the stable time as the first in the row", () => {
+    const running: LifecycleState = {
+      state: "running",
+      run: 3,
+      crashes: 2,
+      since: 1_000,
+    };
+    for (const type of ["exited", "broke-protocol"] as const) {
+      const next = step(
+        running,
+        { type, run: 3, at: 1_000 + policy.stableMs },
+        policy,
+      );
+      expect(next.state).toMatchObject({ state: "crashed", crashes: 1 });
+    }
+  });
+
   it("forgives earlier crashes once a run stayed up long enough", () => {
     const { state } = play([
       { type: "start" },

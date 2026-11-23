@@ -112,3 +112,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0053](decisions/0053-1password-token-and-move-to-m3.md) | The 1Password token lives in the local store, and the 1Password plugin moves from M0 to M3 | Proposed |
 | [0054](decisions/0054-graceful-plugin-stop-deadlines.md) | At service stop each plugin gets 5 seconds with a 10-second cap for all, and the SDK waits up to 3 seconds for running event handlers before cleanup | Proposed |
 | [0055](decisions/0055-compose-check-server-listener.md) | With `--compose`, the config check requires the server to listen on 0.0.0.0 port 7400 | Proposed |
+| [0056](decisions/0056-test-host-event-limit-and-dev-crash-notice.md) | The test host rejects an event the real host would refuse, and `plugin dev` reports a crash after the handshake | Proposed |

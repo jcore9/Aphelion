@@ -1,11 +1,11 @@
-const newline = 0x0a;
+import { maxPluginLineBytes } from "./wire.ts";
 
-export const maxLineBytes = 1024 * 1024;
+const newline = 0x0a;
 
 export async function* readLines(
   chunks: AsyncIterable<Uint8Array>,
   onTooLong: () => void,
-  maxBytes = maxLineBytes,
+  maxBytes = maxPluginLineBytes,
 ): AsyncGenerator<string> {
   const decoder = new TextDecoder();
   let parts: Uint8Array[] = [];

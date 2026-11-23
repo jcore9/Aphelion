@@ -1,6 +1,6 @@
+import { maxPluginLineBytes } from "@aphelion/plugin-sdk";
 import { z } from "zod";
 
-export const maxPluginLineBytes = 1024 * 1024;
 export const maxFrameBytes = 8 * maxPluginLineBytes;
 export const maxPendingInputBytes = 16 * maxPluginLineBytes;
 

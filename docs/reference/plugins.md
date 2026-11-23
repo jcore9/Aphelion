@@ -48,6 +48,7 @@ Your plugin talks to the host in [JSON-RPC 2.0](https://www.jsonrpc.org/specific
 - The host writes to your plugin's standard input.
 - Your plugin writes to its standard output.
 - A line can be at most 1 MiB. The runner drops a longer line and logs that it did.
+- An event the host sends uses that same limit. The limit is 1 MiB of UTF-8 bytes of the whole JSON-RPC line, envelope included, not counting the newline. The host sends a longer event to no plugin. `createTestHost`'s `publish` rejects it.
 - Anything your plugin writes to standard error goes to the server's log, one line per entry, up to 1000 lines a minute. The notes about dropped long lines count toward the same 1000. The runner drops the rest of that minute and logs that it did.
 
 Keep reading your standard input. Messages for your plugin wait in a buffer of about 16 MiB. The runner kills your plugin if either of these happens:
@@ -121,7 +122,7 @@ The host restarts a plugin that crashes. A crash is any of these:
 - It answers `initialize` with an error. The runner kills it.
 - It stops reading its standard input, or it writes faster than the host can handle. See [Talking to the host](#talking-to-the-host).
 
-The restarts after the first five crashes in a row wait 1, 2, 4, 8 and 16 seconds. After the sixth crash in a row, the host stops the plugin and doesn't restart it. A run that stays up for 60 seconds or more resets the count.
+The restarts after the first five crashes in a row wait 1, 2, 4, 8 and 16 seconds. After the sixth crash in a row, the host stops the plugin and doesn't restart it. A crash after a run stayed up 60 seconds or more counts as the first crash in a row. This applies to every crash in the list above.
 
 ### Child processes
 
@@ -179,7 +180,9 @@ aphelion plugin install /opt/aphelion/dev-plugin --approve <value it printed>
 aphelion plugin dev /opt/aphelion/dev-plugin
 ```
 
-`plugin dev` asks the server to reload the plugin, then checks the folder about every half second and asks again after each change settles. It prints each answer, such as `Reloaded weather: running`. Ctrl-C stops watching. The last run keeps running under the server.
+`plugin dev` asks the server to reload the plugin, then checks the folder about every half second and asks again after each change settles. It prints each answer at once. The handshake is the plugin's answer to `initialize`, which the SDK sends before it calls your `start`. When the plugin finished the handshake, the line on standard output is `Reloaded weather: the handshake finished.` When the plugin is in any other state, the line on standard error is `Reloaded weather, but it isn't running: crashed. The server log says why.`, with that run's state in place of `crashed`.
+
+If that run then crashes before the next reload, the command prints one more line on standard error: `weather crashed after the handshake. If its start() failed, the server log says why.` A stop you asked for, such as another reload or stopping the service, does not print that line. Ctrl-C stops watching. The last run keeps running under the server.
 
 Each reload stops the plugin, waits until it has stopped, reads the approval and the manifest again, and starts a new run through the runner. The runner checks the folder as on any other start, and the plugin runs as `aphelion-plugins` with its approved grants. Reloads run one at a time. The server refuses, with a reason:
 

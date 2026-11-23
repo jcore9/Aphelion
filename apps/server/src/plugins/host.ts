@@ -1,6 +1,7 @@
 import {
   networkGetParams,
   pluginApiVersion,
+  pluginLineFits,
   requestUrl,
   secretsUseParams,
   subscribeParams,
@@ -44,7 +45,6 @@ import { declaresPermission, PluginGrants, type Permission } from "./grants";
 import { networkRequest, type NetworkRequest } from "./network";
 import {
   maxPendingInputBytes,
-  maxPluginLineBytes,
   type RunnerReply,
   type RunnerRequest,
 } from "./runner-protocol";
@@ -152,7 +152,7 @@ function encode(message: unknown): Effect.Effect<string, MessageNotSent> {
     catch: () => new MessageNotSent({ reason: "not serializable" }),
   }).pipe(
     Effect.filterOrFail(
-      (line) => Buffer.byteLength(line) <= maxPluginLineBytes,
+      pluginLineFits,
       () => new MessageNotSent({ reason: "too long" }),
     ),
   );
@@ -469,7 +469,7 @@ export const pluginHostLayer = (options: HostOptions) =>
                   slot,
                   message.kind === "result"
                     ? { type: "ready", run, at }
-                    : { type: "broke-protocol", run },
+                    : { type: "broke-protocol", run, at },
                 );
               }
               return;
@@ -556,10 +556,11 @@ export const pluginHostLayer = (options: HostOptions) =>
           plugin: slot.id,
         });
         return Effect.gen(function* () {
+          const at = yield* Clock.currentTimeMillis;
           const backlog = yield* Queue.clear(slot.mailbox);
           slot.pending = { bytes: 0, messages: 0 };
           yield* Queue.offerAll(slot.mailbox, [
-            { type: "broke-protocol", run: input.run },
+            { type: "broke-protocol", run: input.run, at },
             ...backlog.filter((queued) => queued.type !== "line"),
           ]);
         });
@@ -684,8 +685,8 @@ export const pluginHostLayer = (options: HostOptions) =>
             done: yield* Deferred.make<LifecycleState, RunnerClosed>(),
             cancelled: false,
           };
-          yield* Queue.offer(slot.mailbox, waiter);
-          return yield* Deferred.await(waiter.done).pipe(
+          return yield* Queue.offer(slot.mailbox, waiter).pipe(
+            Effect.andThen(Deferred.await(waiter.done)),
             Effect.onInterrupt(() =>
               Effect.sync(() => {
                 waiter.cancelled = true;

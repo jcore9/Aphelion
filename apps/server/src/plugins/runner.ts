@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { maxPluginLineBytes } from "@aphelion/plugin-sdk";
 import {
   Cause,
   Clock,
@@ -15,7 +16,6 @@ import type { Link } from "./link";
 import { PluginProcesses, type Cleanup, type PluginProcess } from "./processes";
 import {
   maxPendingInputBytes,
-  maxPluginLineBytes,
   type RunnerReply,
   type RunnerRequest,
   type StartRequest,

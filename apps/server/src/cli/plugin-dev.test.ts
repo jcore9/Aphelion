@@ -1,11 +1,16 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
 import { Effect, Fiber, Layer } from "effect";
 import { afterAll, beforeAll, describe } from "vitest";
 import { createLogger } from "../log";
-import { devSocketFile, serveDevSocket } from "../plugins/dev-control";
+import {
+  devSocketFile,
+  serveDevSocket,
+  type DevResult,
+} from "../plugins/dev-control";
 import { CliFailure } from "./failure";
 import { CliIo } from "./io";
 import { folderFingerprint, pluginDev, watchForChanges } from "./plugin-dev";
@@ -115,9 +120,19 @@ describe("aphelion plugin dev", () => {
             (line) =>
               Effect.sync(() => {
                 requests.push(JSON.parse(line));
-                return requests.length === 2
-                  ? { ok: false, reason: "the manifest changed" }
-                  : { ok: true, plugin: "weather", state: "running" };
+                return {
+                  reply:
+                    requests.length === 2
+                      ? {
+                          type: "refused",
+                          reason: "the manifest changed",
+                        }
+                      : {
+                          type: "reloaded",
+                          plugin: "weather",
+                          state: "running",
+                        },
+                } satisfies DevResult;
               }),
             createLogger({ level: "error", write: () => undefined }),
           );
@@ -142,11 +157,159 @@ describe("aphelion plugin dev", () => {
           );
           expect(out).toEqual([
             `Watching ${folder}. Press Ctrl-C to stop watching. The plugin keeps running.`,
-            "Reloaded weather: running",
-            "Reloaded weather: running",
+            "Reloaded weather: the handshake finished.",
+            "Reloaded weather: the handshake finished.",
           ]);
           expect(err).toEqual(["Refused: the manifest changed"]);
         }),
       ),
+  );
+
+  it.live(
+    "prints a crash after the handshake, and a reload that is not running",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const stateDir = yield* Effect.promise(() =>
+            mkdtemp(join(base, "state-")),
+          );
+          const folder = join(stateDir, "plugin");
+          yield* Effect.promise(async () => {
+            await mkdir(folder);
+            await writeFile(join(folder, "server.mjs"), "one");
+          });
+          let calls = 0;
+          yield* serveDevSocket(
+            join(stateDir, devSocketFile),
+            () =>
+              Effect.sync(() => {
+                calls++;
+                return calls === 1
+                  ? {
+                      reply: {
+                        type: "reloaded" as const,
+                        plugin: "weather",
+                        state: "running",
+                      },
+                      notice: Effect.succeed({
+                        type: "crashed" as const,
+                        plugin: "weather",
+                      }),
+                    }
+                  : {
+                      reply: {
+                        type: "reloaded" as const,
+                        plugin: "weather",
+                        state: "crashed",
+                      },
+                    };
+              }),
+            createLogger({ level: "error", write: () => undefined }),
+          );
+          const order: string[] = [];
+          const layer = Layer.succeed(CliIo, {
+            out: (line) => Effect.sync(() => void order.push(`out ${line}`)),
+            err: (line) => Effect.sync(() => void order.push(`err ${line}`)),
+            stdin: Effect.succeed(""),
+          });
+          const watching = yield* pluginDev({
+            stateDir,
+            folder,
+            every: "10 millis",
+          }).pipe(Effect.provide(layer), Effect.forkChild);
+          yield* until(() =>
+            order.includes(
+              "err weather crashed after the handshake. If its start() failed, the server log says why.",
+            ),
+          );
+          yield* Effect.promise(() =>
+            writeFile(join(folder, "server.mjs"), "two"),
+          );
+          yield* until(() =>
+            order.includes(
+              "err Reloaded weather, but it isn't running: crashed. The server log says why.",
+            ),
+          );
+          yield* Fiber.interrupt(watching);
+          expect(order).toEqual([
+            `out Watching ${folder}. Press Ctrl-C to stop watching. The plugin keeps running.`,
+            "out Reloaded weather: the handshake finished.",
+            "err weather crashed after the handshake. If its start() failed, the server log says why.",
+            "err Reloaded weather, but it isn't running: crashed. The server log says why.",
+          ]);
+        }),
+      ),
+  );
+  it.live("keeps waiting for the reply when a crash notice arrives first", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const stateDir = yield* Effect.promise(() =>
+          mkdtemp(join(base, "state-")),
+        );
+        const folder = join(stateDir, "plugin");
+        yield* Effect.promise(async () => {
+          await mkdir(folder);
+          await writeFile(join(folder, "server.mjs"), "one");
+        });
+        const running = {
+          type: "reloaded",
+          plugin: "weather",
+          state: "running",
+        };
+        let requests = 0;
+        let held: Socket | undefined;
+        const send = (socket: Socket, message: unknown) =>
+          socket.write(`${JSON.stringify(message)}\n`);
+        const server = createServer((socket) => {
+          socket.on("data", () => {
+            requests++;
+            if (requests === 2) {
+              send(socket, { type: "crashed", plugin: "weather" });
+              held = socket;
+            } else {
+              send(socket, running);
+            }
+          });
+        });
+        yield* Effect.acquireRelease(
+          Effect.promise(
+            () =>
+              new Promise<void>((done) => {
+                server.listen(join(stateDir, devSocketFile), done);
+              }),
+          ),
+          () =>
+            Effect.promise(
+              () =>
+                new Promise((done) => {
+                  server.close(done);
+                  held?.destroy();
+                }),
+            ),
+        );
+        const { out, err, layer } = capture();
+        const watching = yield* pluginDev({
+          stateDir,
+          folder,
+          every: "10 millis",
+        }).pipe(Effect.provide(layer), Effect.forkChild);
+        yield* until(() => out.length === 2);
+        yield* Effect.promise(() =>
+          writeFile(join(folder, "server.mjs"), "two"),
+        );
+        yield* until(() => err.length === 1);
+        yield* Effect.promise(() =>
+          writeFile(join(folder, "server.mjs"), "three"),
+        );
+        yield* Effect.sleep("200 millis");
+        expect(requests).toBe(2);
+        if (held) send(held, running);
+        yield* until(() => requests === 3 && out.length === 4);
+        yield* Fiber.interrupt(watching);
+        expect(err).toEqual([
+          "weather crashed after the handshake. If its start() failed, the server log says why.",
+        ]);
+      }),
+    ),
   );
 });
