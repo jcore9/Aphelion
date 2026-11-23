@@ -168,6 +168,40 @@ Plugins live in the `plugin-files` volume. A volume is a folder that Docker keep
 
 [Running plugins on the server](../reference/plugins.md#permissions) explains the approval. To write a plugin, see [Write your first server plugin](write-your-first-server-plugin.md).
 
+## Update a plugin
+
+A plugin whose manifest names a GitHub `repository` updates from that repository's releases. Aphelion checks that GitHub's release workflow built each release, and installs it only after you approve it. The server keeps running while the plugin switches version. Run these steps in `/opt/aphelion/deploy` while the service runs.
+
+1. Check for a newer release and preview it. Use the plugin's `id`, such as `aphelion-test-plugin`.
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion plugin update <id>
+   ```
+
+   When the latest release is the installed version, the command prints `<id> is already on <version>, the latest release.` and you are done. Otherwise it prints the two versions, the permissions the new version adds or drops, and an `--approve` value.
+
+2. If you accept the changes, repeat the command with the `--approve` value it printed.
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion plugin update <id> --approve <value>
+   ```
+
+   The command installs the release and restarts the plugin on it. It prints `Updated <id> from <old version> to <new version>.` and then `<id> <new version> runs.`
+
+If the new version doesn't start, Aphelion goes back to the old version on its own, says so, and exits with code 1. The server log says why the new version stopped.
+
+The command refuses a release that GitHub's attestation doesn't vouch for, with one sentence that says why. Nothing changes, and the running version keeps running. [Updates](../reference/plugins.md#updates) lists every check and limit.
+
+## Go back a version
+
+Aphelion keeps the version before the current one. To go back to it, run:
+
+```sh
+sudo docker compose exec -T --user harness aphelion aphelion plugin rollback <id>
+```
+
+The command prints `Went back from <id> <current version> to <earlier version>.` and then `<id> <earlier version> runs.` It deletes the version it left, so you can go back only once. To return to the newer version, [update the plugin](#update-a-plugin) again.
+
 ## Check the network boundary
 
 The container must not reach your LAN, the host or other tailnet devices ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`host/network-check`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/network-check) connects to six targets as `aphelion-bot` inside the running container. Give it, in order:

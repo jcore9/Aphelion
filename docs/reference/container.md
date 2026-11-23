@@ -40,7 +40,7 @@ The image has no `sudo`. The build removes the Ubuntu image's default `ubuntu` u
 | `/var/lib/aphelion-bots` | `aphelion-bot:aphelion-bot` | `0750` | Volume `bots` | One folder per bot |
 | `/var/lib/aphelion-secrets` | `aphelion-secrets:aphelion-secrets` | `0700` | Volume `secrets` | The broker's encrypted store |
 | `/var/lib/aphelion-plugins` | `aphelion-plugins:aphelion-plugins` | `0700` | Volume `plugin-data` | One data folder per plugin |
-| `/opt/aphelion/plugins` | `harness:harness` | `0755` | Volume `plugin-files` | The installed plugins, one folder per plugin |
+| `/opt/aphelion/plugins` | `harness:harness` | `0755` | Volume `plugin-files` | The installed plugins: the folders you copied in, and a folder `<id>@<version>` for each release that [`plugin update`](plugins.md#updates) installed |
 | `/run/aphelion-secrets` | `aphelion-secrets:harness` | `2710` | Memory | The broker's socket |
 | `/run/secrets/bootstrap` | `root:root` | `0400` | File from the host's `/run/credentials/aphelion.service/` | The [bootstrap key](secrets.md#the-bootstrap-key). It is a file, not a folder. |
 | `/run` | `root:root` | `0755` | Memory | Runtime files |

@@ -8,6 +8,8 @@
 | --- | --- |
 | `aphelion --headless` | Checks the config, then starts the server. The container runs this. |
 | `aphelion config check` | Checks the config files, the modes of the config and state folders and, with `--compose`, the ports a Compose file publishes |
+| `aphelion plugin update ID` | Previews the latest GitHub release of plugin `ID`, and with `--approve` installs it and restarts the plugin on it |
+| `aphelion plugin rollback ID` | Goes back to the version of plugin `ID` before the current one, and restarts the plugin on it |
 | `aphelion plugin dev FOLDER` | Reloads the approved plugin in `FOLDER` through the running server, and again after each change to the folder. Works only in [dev mode](plugins.md#dev-mode). |
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
@@ -20,7 +22,9 @@
 | Option | Used by | Default | Meaning |
 | --- | --- | --- | --- |
 | `--config-dir DIR` | `--headless`, `config check` | `/etc/aphelion` | The folder with the [config files](config.md) |
-| `--state-dir DIR` | `--headless`, `config check`, `plugin dev`, `device` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
+| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
+| `--plugins-dir DIR` | `plugin update`, `plugin rollback` | `/opt/aphelion/plugins` | An absolute path. The folder where updates put each release, as `<id>@<version>` |
+| `--approve DIGEST` | `plugin install`, `plugin update` | none | The value the preview printed. It approves exactly what the preview showed. |
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
 | `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
@@ -137,6 +141,33 @@ The command connects to the [control socket](plugins.md#control-socket), `plugin
 | `Refused: REASON` | The server didn't reload. The reason says why, for example that the folder isn't approved or that the manifest asks for a permission that wasn't granted. The command keeps watching. Standard error. |
 
 The command exits with code 1 and a message if it can't reach the control socket, or if the server runs without `--plugin-dev`. If the server closes the connection, for example when it restarts, the command prints `aphelion: the server closed the control connection` and exits with code 1. Otherwise it runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
+
+## `aphelion plugin update ID`
+
+```sh
+aphelion plugin update ID [--approve DIGEST] [--state-dir DIR] [--plugins-dir DIR]
+```
+
+Updates plugin `ID` from the GitHub repository its manifest names. Without `--approve`, the command downloads and checks the latest release, then prints a preview and changes nothing. With the value the preview printed, it does the same checks again, installs the release, and asks the server to restart the plugin through the [control socket](plugins.md#control-socket). [Updates](plugins.md#updates) lists what the command checks and its limits.
+
+| Output | Meaning |
+| --- | --- |
+| `Plugin ID can update from OLD to NEW.` | The first preview line. Next come the line about the attestation, one `adds` or `drops` line for each changed permission or `No permission changes.`, and the line with the `--approve` value. Standard output, exit code 0. |
+| `ID is already on VERSION, the latest release.` | Nothing to do. Standard output, exit code 0. |
+| `Updated ID from OLD to NEW.` | The release is installed. The next line says `ID NEW runs.`, `ID has no server part to restart.`, or `The server isn't running, so ID starts on NEW when the server starts.` Standard output, exit code 0. |
+| `ID NEW didn't start (REASON), so Aphelion went back to OLD.` | The new version didn't reach `running`. Aphelion restarted the old version and deleted the new one. The next line says how the old version runs. Standard error, exit code 1. |
+| `The approval doesn't match this release's files, permissions or the installed version. Preview the update again.` | The `--approve` value is wrong or out of date. Standard error, exit code 1. |
+| Any other sentence | A refusal, such as a release whose attestation doesn't match. Nothing changed. Standard error, exit code 1. |
+
+The command reads `APHELION_GITHUB_API` for tests only ([testing with a local GitHub](plugins.md#testing-with-a-local-github)).
+
+## `aphelion plugin rollback ID`
+
+```sh
+aphelion plugin rollback ID [--state-dir DIR] [--plugins-dir DIR]
+```
+
+Makes the version before the current one current again, restarts the plugin on it, and deletes the version it left. It prints `Went back from ID CURRENT to EARLIER.` and then a line that says how `EARLIER` runs, as `plugin update` does. When the earlier version doesn't reach `running`, that line goes to standard error and the exit code is 1. When there is no earlier version, it prints `ID has no earlier version to go back to.` on standard error and exits with code 1.
 
 ## `aphelion device add NAME`
 

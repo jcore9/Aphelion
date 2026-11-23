@@ -121,22 +121,23 @@ Pick the options marked "owner" or "proposed" above. The rules that follow are i
 
 ### How a release is checked
 
-- The verifier is `@sigstore/verify` 4.1.3 with `@sigstore/bundle` 5.0.1, pinned exactly. It needs one transparency-log entry and one certificate-log entry. The issuer must be `https://token.actions.githubusercontent.com`.
+- The verifier is `@sigstore/verify` 4.1.3 with `@sigstore/bundle` 5.0.1 and `@sigstore/protobuf-specs` 0.5.2, pinned exactly. It needs one transparency-log entry and one certificate-log entry. The issuer must be `https://token.actions.githubusercontent.com`.
 - **The exact identity rule.** The signer's identity must equal `https://github.com/<repository>/.github/workflows/release.yml@refs/tags/v<version>`. The `<owner>/<name>` part is compared without regard to case, and every other part exactly.
 - **The checks the library doesn't do.** The library does not compare the signed statement with the file you downloaded. So the server checks, on the verified statement, that its type is `https://in-toto.io/Statement/v1`, that its predicate type is `https://slsa.dev/provenance/v1`, that it has exactly one subject named `aphelion-plugin.tar`, and that the subject's SHA-256 equals the hash of the downloaded bytes. All of this runs before the archive is opened.
+- After unpacking, the archive's manifest must name the installed plugin's ID, the tag's version, and the installed repository, compared without regard to case. Its API range must include the host's.
 - The trust root is `updates/trusted-root.json`, copied from `sigstore/root-signing`. It is never fetched at run time. A refusal for an unknown key says that the release is signed with a key this Aphelion doesn't know, or isn't genuine, and to upgrade Aphelion.
 
 ### Downloads and limits
 
 - Only `api.github.com`, `github.com`, `objects.githubusercontent.com` and `release-assets.githubusercontent.com`, over `https` on the default port, with no credentials. Redirects are followed by hand, at most 3 hops, each checked. Each request times out after 30 seconds.
 - Limits, counted on the streamed bytes: release JSON 1 MiB, bundle 1 MiB, archive 32 MiB.
-- Unpacking accepts only files and folders. It refuses links, devices, PAX headers and GNU long names, unsafe names, duplicate paths, and archives over 1000 entries, 16 MiB per file, 64 MiB in total, 32 path segments or 255 bytes per segment. It ignores the archive's modes and owners, and writes into a new staging folder with files opened exclusively.
+- Unpacking accepts only files and folders. It refuses links, devices, PAX headers and GNU long names, unsafe names, duplicate paths, and archives over 1000 entries, 16 MiB per file, 64 MiB in total or 32 path segments. The ustar format itself keeps each part of a name to at most 155 bytes. It ignores the archive's modes and owners, and writes into a new staging folder with files opened exclusively.
 - A rate limit is reported with its reset time. Redirect query strings are never logged.
 - **Test-only setting.** `APHELION_GITHUB_API`, for example `http://127.0.0.1:8099`, makes that one origin the API base and the only allowed host, and allows plain `http` for it. Verification doesn't change. There is no test trust root and no switch that turns verification off.
 
 ### Where files live, and what an approval covers
 
-- The `plugin-files` volume is mounted at `/opt/aphelion/plugins`, owned by `harness:harness` with mode `0755`. Each version is `<id>/<version>/`. Unpacking happens in `.staging/` on the same volume, so the final move is one atomic `rename`. One lock file covers every install, update and rollback.
+- The `plugin-files` volume is mounted at `/opt/aphelion/plugins`, owned by `harness:harness` with mode `0755`. Each release version is `<id>@<version>/`. The install guide copies a folder install to `<id>/`, so a release at `<id>/<version>/` would land inside that folder and change its files hash. A plugin ID can't hold `@`. Unpacking happens in `.staging/` on the same volume, so the final move is one atomic `rename`. One lock file covers every install, update and rollback.
 - An approval covers the plugin's ID, the version it moves from and to, its folder, the sorted permissions, and one hash of every file in the folder. Hidden files count, and a symbolic link is refused.
 - Grants belong to the running version. A switch can't hand the old process the new version's grants.
 - Both `host.start` and the host's own automatic-restart path check three things before they start a plugin: the manifest's ID and version match the approval, the folder's files hash to the approved value, and the manifest's permissions are within the granted ones. A mismatch refuses the start, with a plain reason in the log.
@@ -146,10 +147,10 @@ Pick the options marked "owner" or "proposed" above. The rules that follow are i
 
 ### How an update runs
 
-- `check` reads the latest release. `prepare` downloads, verifies, unpacks, hashes and prints the permission changes and the approve command. `apply` runs under the lock, compares the token, moves the staging folder into place, records the version and grants in one database transaction, restarts the plugin, and cleans up. The CLI runs `prepare` on both calls, so nothing is cached between the preview and `--approve`.
+- `prepareUpdate` reads the latest release, downloads, verifies, unpacks, hashes, and works out the permission changes and the approval token. `applyUpdate` compares the token, moves the staging folder into place, records the version and grants in one database transaction, restarts the plugin, and cleans up. The CLI holds the lock across both, and runs `prepareUpdate` on both calls, so nothing is cached between the preview and `--approve`.
 - The control socket is `<state-dir>/plugin-control.sock`, mode `0600`. `restart` takes only a plugin ID, reads the approved record, and waits up to 15 seconds for the plugin to settle. `reload` is refused with "dev mode is off" unless the server runs with `--plugin-dev`.
 - **Rollback is one step and needs no new approval.** The previous version was approved already. `rollback` refuses when there is no previous version, switches back, restarts, and deletes the version it left.
-- When the new version doesn't reach `running`, the server goes back automatically, restarts the old version, deletes the failed one, and reports both states.
+- When a new version with a server part doesn't reach `running`, the update command goes back automatically, restarts the old version, deletes the failed one, and reports both states.
 - When the server isn't running, the files and the record are kept. The CLI says that the plugin starts on the new version when the server starts, and exits with 0.
 - After a switch, versions that are neither current nor previous are deleted.
 
@@ -160,9 +161,9 @@ On this machine, with Bun 1.4.5, the verifier checked a real GitHub attestation 
 ## Consequences
 
 - **Plugin authors** name the repository in the manifest (`create:plugin --repository owner/name` writes it), keep the generated `release.yml`, commit `bun.lock`, and push a `v` tag. The workflow checks the tag against the manifest, packs, attests and publishes the two assets. Every `uses:` in it is pinned to a full commit SHA.
-- **Operators** copy existing plugins into the `plugin-files` volume once, approve each installed plugin once more after upgrading, and use `aphelion plugin update <id>` and `rollback`. To refresh the trust root, run `scripts/update-trusted-root.ts`, review the printed key IDs, and open a PR.
+- **Operators** copy existing plugins into the `plugin-files` volume once, approve each installed plugin once more after upgrading, and use `aphelion plugin update <id>` and `rollback`. To refresh the trust root, run `bun scripts/update-trusted-root.ts`, review the printed key IDs, and open a PR.
 - The contract test's write probe now expects `EACCES` for a plugin, where it expected `EROFS`. The socket check now expects a `0600` socket owned by `harness` in a plain run, with `reload` refused.
-- **Left for [#65](https://github.com/jcore9/Aphelion/issues/65):** the update button in the app, which calls the same functions inside the server. Automatic updates also come later, in one place, since `needsApproval` returns `true` for now.
+- **Left for [#65](https://github.com/jcore9/Aphelion/issues/65):** the update button in the app, which calls the same functions inside the server. Automatic updates also come later. Today every update shows the preview and waits for `--approve`.
 - Out of scope: private repositories and GitHub tokens, a first install straight from a release, [#161](https://github.com/jcore9/Aphelion/issues/161), [#168](https://github.com/jcore9/Aphelion/issues/168), and how client parts are delivered.
 - The unauthenticated GitHub API allows 60 requests an hour. That is the limit until a token option exists, and the server reports the reset time when it hits it.
 
