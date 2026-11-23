@@ -9,12 +9,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  Decrypter,
-  Encrypter,
-  generateIdentity,
-  identityToRecipient,
-} from "age-encryption";
+import { Decrypter, Encrypter, identityToRecipient } from "age-encryption";
 import { z } from "zod";
 import { Secret } from "./secret";
 
@@ -76,29 +71,62 @@ async function readPrivateFile(
   return await readFile(path);
 }
 
-async function loadIdentity(directory: string, uid: number): Promise<string> {
-  const path = join(directory, "identity.agekey");
-  const existing = await readPrivateFile(path, uid);
-  if (existing) return existing.toString("utf8");
+export type LocalStoreRefusalReason =
+  | "The secrets store holds a plain-text key from before the host credential"
+  | "The bootstrap key is not a valid age identity"
+  | "The bootstrap key does not match this secrets store";
 
-  if ((await readdir(directory)).some((name) => name.endsWith(".age"))) {
-    const identity = await readPrivateFile(path, uid);
-    if (identity) return identity.toString("utf8");
-    throw new Error("Secrets store identity is missing");
-  }
+export class LocalStoreRefusal extends Error {
+  override name = "LocalStoreRefusal";
 
-  try {
-    // The first opener installs the identity without replacing another opener's key.
-    await publish(directory, path, await generateIdentity(), link);
-  } catch (error) {
-    if (!hasCode(error, "EEXIST")) throw error;
+  constructor(readonly reason: LocalStoreRefusalReason) {
+    super(reason);
   }
-  const identity = await readPrivateFile(path, uid);
-  if (!identity) throw new Error("Secrets store identity is missing");
-  return identity.toString("utf8");
 }
 
-export async function openLocalStore(directory: string) {
+async function recipientOf(key: Secret): Promise<string> {
+  try {
+    return await identityToRecipient(key.reveal());
+  } catch {
+    throw new LocalStoreRefusal(
+      "The bootstrap key is not a valid age identity",
+    );
+  }
+}
+
+async function checkRecipient(
+  directory: string,
+  uid: number,
+  recipient: string,
+  decrypter: Decrypter,
+): Promise<void> {
+  const path = join(directory, "recipient.pub");
+  const mismatch = new LocalStoreRefusal(
+    "The bootstrap key does not match this secrets store",
+  );
+  let recorded = await readPrivateFile(path, uid);
+  if (!recorded) {
+    const entry = (await readdir(directory))
+      .filter((name) => name.endsWith(".age"))
+      .sort()[0];
+    const encrypted =
+      entry && (await readPrivateFile(join(directory, entry), uid));
+    if (encrypted) {
+      await decrypter.decrypt(encrypted).catch(() => {
+        throw mismatch;
+      });
+    }
+    try {
+      await publish(directory, path, `${recipient}\n`, link);
+    } catch (error) {
+      if (!hasCode(error, "EEXIST")) throw error;
+    }
+    recorded = await readPrivateFile(path, uid);
+  }
+  if (recorded?.toString("utf8").trim() !== recipient) throw mismatch;
+}
+
+export async function openLocalStore(directory: string, key: Secret) {
   const uid = process.getuid?.();
   const info = await lstat(directory);
   if (
@@ -109,11 +137,22 @@ export async function openLocalStore(directory: string) {
   ) {
     throw new Error("Unsafe secrets store directory");
   }
-  const identity = await loadIdentity(directory, uid);
+  const legacy = await lstat(join(directory, "identity.agekey")).catch(
+    (error: unknown) => {
+      if (!hasCode(error, "ENOENT")) throw error;
+    },
+  );
+  if (legacy) {
+    throw new LocalStoreRefusal(
+      "The secrets store holds a plain-text key from before the host credential",
+    );
+  }
+  const recipient = await recipientOf(key);
   const encrypter = new Encrypter();
-  encrypter.addRecipient(await identityToRecipient(identity));
+  encrypter.addRecipient(recipient);
   const decrypter = new Decrypter();
-  decrypter.addIdentity(identity);
+  decrypter.addIdentity(key.reveal());
+  await checkRecipient(directory, uid, recipient, decrypter);
 
   const entryPath = (name: string) =>
     join(directory, `${createHash("sha256").update(name).digest("hex")}.age`);
