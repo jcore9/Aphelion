@@ -113,3 +113,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0054](decisions/0054-graceful-plugin-stop-deadlines.md) | At service stop each plugin gets 5 seconds with a 10-second cap for all, and the SDK waits up to 3 seconds for running event handlers before cleanup | Proposed |
 | [0055](decisions/0055-compose-check-server-listener.md) | With `--compose`, the config check requires the server to listen on 0.0.0.0 port 7400 | Proposed |
 | [0056](decisions/0056-test-host-event-limit-and-dev-crash-notice.md) | The test host rejects an event the real host would refuse, and `plugin dev` reports a crash after the handshake | Proposed |
+| [0057](decisions/0057-plugin-updates-from-github-releases.md) | The server updates a plugin from its GitHub releases, proven genuine by an artifact attestation, on the owner's approval and with no restart | Proposed |
