@@ -140,7 +140,7 @@ Where the server listens for HTTP and WebSocket connections (decisions 0016 and 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `version` | `1` | yes | The file's format version. Aphelion migrates older ones. |
-| `address` | string | yes | The address the server listens on. In the container that's 0.0.0.0, the container's own interface. The Compose file decides which host address the port is published on. |
-| `port` | integer | yes | The TCP port the server listens on. Normally 7400. |
+| `address` | string | yes | The address the server listens on. In the container it must be 0.0.0.0, the container's own interface, and `aphelion config check --compose` refuses any other. The Compose file decides which host address the port is published on. |
+| `port` | integer | yes | The TCP port the server listens on. In the container it must be 7400, the only port the host firewall lets in, and `aphelion config check --compose` refuses any other. |
 
 <!-- End of generated section -->

@@ -176,23 +176,32 @@ test("device add revokes the device when the token can't be printed", async () =
 }, 20_000);
 
 test("config check --compose - reads a pipe", async () => {
-  const child = spawn(
-    process.execPath,
-    [main, "config", "check", ...dirs(), "--compose", "-"],
-    { stdio: ["pipe", "pipe", "pipe"] },
-  );
-  let stdout = "";
-  child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-  child.stdin.end(
-    "services:\n  aphelion:\n    ports: ['100.71.226.67:7400:7400']\n",
-  );
-  const code = await new Promise((resolve) => {
-    child.on("close", resolve);
-  });
-  expect(code).toBe(0);
-  expect(stdout).toBe(
-    "Config OK, and the Compose file publishes ports only on the tailnet.\n",
-  );
+  const serverFile = join(configDir, "server.yaml");
+  await writeFile(serverFile, "version: 1\naddress: 0.0.0.0\nport: 7400\n");
+  try {
+    const child = spawn(
+      process.execPath,
+      [main, "config", "check", ...dirs(), "--compose", "-"],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stdin.end(
+      "services:\n  aphelion:\n    ports: ['100.71.226.67:7400:7400']\n",
+    );
+    const code = await new Promise((resolve) => {
+      child.on("close", resolve);
+    });
+    expect(code).toBe(0);
+    expect(stdout).toBe(
+      "Config OK. The Compose file publishes ports only on the tailnet, and server.yaml sets address 0.0.0.0 and port 7400.\n",
+    );
+  } finally {
+    await writeFile(
+      serverFile,
+      `version: 1\naddress: 127.0.0.1\nport: ${String(port)}\n`,
+    );
+  }
 }, 20_000);
 
 test("aphelion --headless starts installed plugins through the runner pipe", async () => {

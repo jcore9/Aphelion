@@ -131,7 +131,7 @@ sudo systemctl start aphelion
 
 1. It waits up to 120 seconds for `APHELION_TAILNET_ADDRESS` to appear on the tailnet interface, `tailscale0`. Docker can't publish a port on an address that doesn't exist yet.
 2. It installs the [host firewall](../reference/container.md#network) again. Firewall rules don't survive a reboot, so every start installs them.
-3. It runs `aphelion config check` on the rendered Compose file, as `harness`. The check refuses a port published anywhere but the tailnet.
+3. It runs `aphelion config check` on the rendered Compose file, as `harness`. The check refuses a port published anywhere but the tailnet. It also refuses a `server.yaml` that the published port can't reach: the server must listen on address `0.0.0.0` and port 7400 ([decision 0055](../decisions/0055-compose-check-server-listener.md)).
 
 If any step fails, the service doesn't start. Then the service runs `docker compose up` in the foreground. If the container stops with an error, systemd starts it again after 10 seconds.
 

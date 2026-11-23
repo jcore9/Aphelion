@@ -15,6 +15,8 @@ The server listens on the `address` and `port` in [`server.yaml`](config.md#serv
 
 `0.0.0.0` means every network interface of the container. The container has its own interfaces, separate from the host's. The host's network is reached only through the published port, so the Compose file decides which host address exposes the server ([decision 0016](../decisions/0016-one-docker-container.md)).
 
+In the container, the address must be `0.0.0.0` and the port must be 7400. Compose forwards connections to the container's own interface, so a server on `127.0.0.1` never sees them. The host firewall lets connections into the container only on port 7400. [`aphelion config check --compose`](cli.md#checking-the-compose-file) refuses any other address or port ([decision 0055](../decisions/0055-compose-check-server-listener.md)).
+
 Every process inside the container can reach the server on `127.0.0.1`, bots included. For that reason, the server trusts no request because of where it comes from ([decision 0022](../decisions/0022-bot-network-boundary.md)).
 
 ## What `/health` returns
@@ -88,7 +90,7 @@ Compression stays off, so a small compressed message can't expand into a large o
 
 The Compose file must publish the server's port only on the host's tailnet address. The tailnet is the private network that Tailscale builds between the owner's devices. Its IPv4 addresses are in the range `100.64.0.0/10`, which runs from `100.64.0.0` to `100.127.255.255`.
 
-`checkComposePorts(file, text)` reads the output of `docker compose config`, as YAML or as the JSON that `--format json` prints, and lists every port that breaks the rule. That command prints the Compose model that Docker will run. It fills in variables such as `${TAILNET_IP}`, and merges `include`, `extends` and override files such as `compose.override.yaml` into one file. `aphelion config check --compose -` reads that output from standard input and runs the check on it. [The `aphelion` command](cli.md#checking-the-compose-file) shows the command line.
+`checkComposePorts(file, text, serverPort)` reads the output of `docker compose config`, as YAML or as the JSON that `--format json` prints, and lists every port that breaks the rule. That command prints the Compose model that Docker will run. It fills in variables such as `${TAILNET_IP}`, and merges `include`, `extends` and override files such as `compose.override.yaml` into one file. `aphelion config check --compose -` reads that output from standard input and runs the check on it. It passes `serverPort`, the port from `server.yaml`, so the check also compares each port of the `aphelion` service with it. `checkServerListener` checks the address and port themselves against `composeListener`, `0.0.0.0` port 7400. [The `aphelion` command](cli.md#checking-the-compose-file) shows the command line.
 
 The check looks at every published port of every service, not only the server's port, because nothing else in the container should be published ([decision 0022](../decisions/0022-bot-network-boundary.md)). The owner confirmed this rule on 2026-11-22.
 
@@ -125,7 +127,7 @@ compose.yaml:5:9: services.aphelion.ports[0]: publishes the port on every host a
 
 ### What the check guarantees
 
-When the check passes, every port the file publishes is bound only to a tailnet address, on bridge networks in NAT mode. It says nothing about the host itself. The host firewall from [decision 0022](../decisions/0022-bot-network-boundary.md) is the second layer, and it blocks the container from the LAN whatever the Compose file says.
+When the check passes, every port the file publishes is bound only to a tailnet address, on bridge networks in NAT mode. `aphelion config check --compose` adds a second check, with the `server.yaml` values: every port the `aphelion` service publishes forwards to the server's TCP port, and the server listens on `0.0.0.0` port 7400 ([checking the Compose file](cli.md#checking-the-compose-file)). It says nothing about the host itself. The host firewall from [decision 0022](../decisions/0022-bot-network-boundary.md) is the second layer, and it blocks the container from the LAN whatever the Compose file says.
 
 The check parses the YAML with the `yaml` package and checks its shape with Zod. The server's own validation uses Zod, not Effect's `Schema` module. The owner decided this on 2026-11-22 ([decision 0041](../decisions/0041-effect-in-server-and-cli.md#owner-decision-2026-11-22)).
 
@@ -138,4 +140,4 @@ The check parses the YAML with the `yaml` package and checks its shape with Zod.
 | [`apps/server/src/http/socket.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/http/socket.ts) | One WebSocket: reads frames and closes it when a frame is bad or the token ends |
 | [`apps/server/src/http/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/http/index.ts) | `serveHttp({ address, port }, db)`, which starts the server |
 | [`apps/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/http-server.ts) | The Bun listener and its WebSocket limits, the only file that imports `@effect/platform-bun` |
-| [`apps/server/src/config/compose.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/config/compose.ts) | `checkComposePorts` |
+| [`apps/server/src/config/compose.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/config/compose.ts) | `checkComposePorts`, `checkServerListener` and `composeListener` |

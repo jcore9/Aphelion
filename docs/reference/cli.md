@@ -87,6 +87,21 @@ A run with problems prints each one, then the count on standard error, and exits
 
 With `--compose`, the check also runs [the Compose port rule](server.md#the-compose-port-rule) on the Compose file. Every port that any service publishes must be on a tailnet address, in `100.64.0.0/10`.
 
+It also checks that a published port can reach the server ([decision 0055](../decisions/0055-compose-check-server-listener.md)):
+
+- `address` in `server.yaml` must be `0.0.0.0`. Compose forwards connections to the container's own network interface, and a server on `127.0.0.1` never sees them.
+- `port` in `server.yaml` must be `7400`, the only port that the [host firewall](container.md#network) lets into the container.
+- Every port that the `aphelion` service publishes must forward to the server's TCP port. The first number, the host port, may differ: `"100.71.226.67:8443:7400"` passes. A service that publishes no port passes this rule.
+
+Without `--compose`, any valid address and port pass, so the server can run from source on `127.0.0.1`. A check of a `server.yaml` with `address: 127.0.0.1` and `port: 7401` against the shipped Compose file prints:
+
+```
+/etc/aphelion/server.yaml: address: is 127.0.0.1. With --compose it must be 0.0.0.0, so a published port can reach the server inside the container.
+/etc/aphelion/server.yaml: port: is 7401. With --compose it must be 7400, the port the host firewall opens.
+compose (stdin):58:9: services.aphelion.ports[0]: forwards to container port 7400, but it must forward to TCP port 7401, the server's port in server.yaml.
+3 problems found.
+```
+
 The check reads the output of `docker compose config`, not the Compose file itself. That command fills in variables such as `${TAILNET_IP}` and merges override files, so the check sees what Docker will run. The owner decided this on 2026-11-22. Add `--profile '*'` so that services in optional profiles are checked too. Docker Compose 5.8 accepts it.
 
 The container can't run Docker, because it never gets the Docker socket ([decision 0016](../decisions/0016-one-docker-container.md)). So Docker runs on the host, and its output goes to the check in the container through standard input:
