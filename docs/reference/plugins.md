@@ -67,7 +67,7 @@ The host has a similar limit the other way. If more than about 16 MiB, or more t
 
 ### When your plugin stops
 
-The host sends `shutdown` when the owner stops your plugin and when the Aphelion service stops. Your plugin then has 5 seconds to exit. After that the runner kills it, and anything it hasn't saved is lost. Once the host has sent `shutdown`, it ignores everything your plugin writes. Treat a closed standard input like `shutdown`.
+The host sends `shutdown` when the owner stops your plugin and when the Aphelion service stops. Your plugin then has 5 seconds to exit, in both cases. After that the runner kills it, and anything it hasn't saved is lost. Once the host has sent `shutdown`, it ignores everything your plugin writes. Treat a closed standard input like `shutdown`.
 
 The SDK does this for you, in this order:
 
@@ -140,7 +140,7 @@ Each plugin with a server part is in one of these states. The host's `status` ca
 | `installed` | The host knows the plugin and hasn't started it. |
 | `starting` | The runner started the process, and the host waits for the `initialize` reply. |
 | `running` | The plugin answered `initialize`. It gets the events it subscribed to and was granted. |
-| `stopping` | The host sent `shutdown` and waits 5 seconds before the runner kills the plugin. A plugin that is still starting is killed at once. |
+| `stopping` | The host sent `shutdown` and waits 5 seconds before the runner kills the plugin. A plugin that is still starting is killed at once. When the server stops, every plugin is in this state at the same time. |
 | `crashed` | The plugin crashed. The host restarts it after the wait in [Crashes and restarts](#crashes-and-restarts). |
 | `stopped` | The plugin was stopped on request, or it crashed too often. |
 
@@ -225,6 +225,17 @@ bun /usr/local/lib/aphelion/plugin-runner.js --bun /usr/local/bin/bun --data /va
 | `--bun` | The Bun that runs the runner | The Bun binary that starts each plugin. |
 | `--data` | `/var/lib/aphelion-plugins` | The folder that holds one data folder per plugin. |
 
-The runner logs to its standard error. It logs an error if it couldn't kill every process of a plugin. When the server stops, the host tells the runner to stop every plugin. When the pipe closes, the runner kills every plugin and exits.
+The runner logs to its standard error. It logs an error if it couldn't kill every process of a plugin. When the pipe closes, the runner kills every plugin and exits.
+
+### When the server stops
+
+The host stops every plugin before it closes the pipe to the runner ([decision 0054](../decisions/0054-graceful-plugin-stop-deadlines.md)):
+
+1. It logs `the plugin host is stopping every plugin` and stops taking `start` requests.
+2. It sends `shutdown` to every running plugin at the same time. A plugin that is still starting is killed at once. A plugin that waits to restart after a crash stays stopped.
+3. Each plugin gets the usual 5 seconds to exit. The runner kills a plugin that is still running after that.
+4. The whole stop takes at most 10 seconds. If a plugin still hasn't stopped after 9 seconds, the host logs which ones and tells the runner to kill them. It then closes the pipe, and the runner kills anything left.
+
+The 10 seconds fit inside the 20 seconds that the container's launcher gives the server to exit. See [Stopping](container.md#stopping).
 
 If the server closes its end first, the runner logs `the plugin runner couldn't write to the server` and exits when its standard input closes.
