@@ -139,6 +139,43 @@ describe("createTestHost", () => {
     await host.stop();
   });
 
+  test("fails a network response larger than 64 KiB, as the real host does", async () => {
+    const host = hostWith([{ kind: "network", name: "api.example.com" }]);
+    host.respondToGet("https://api.example.com/big", () => ({
+      status: 200,
+      body: "x".repeat(64 * 1024 + 1),
+    }));
+    host.respondToGet("https://api.example.com/fits", () => ({
+      status: 200,
+      body: "x".repeat(64 * 1024),
+    }));
+    const { plugin, ctx } = capture();
+    await host.start(plugin);
+    expect(
+      await outcome(ctx().network.get("https://api.example.com/big")),
+    ).toEqual({ code: -32003, message: "Operation failed" });
+    expect(
+      (await ctx().network.get("https://api.example.com/fits")).body,
+    ).toHaveLength(64 * 1024);
+    await host.stop();
+  });
+
+  test("keeps delivering events after a publish that can't be serialized", async () => {
+    const host = hostWith([{ kind: "events", name: "demo.ping" }]);
+    const seen: unknown[] = [];
+    await host.start({
+      async start(ctx) {
+        await ctx.events.subscribe("demo.ping", (data) => {
+          seen.push(data);
+        });
+      },
+    });
+    await expect(host.publish("demo.ping", { n: 1n })).rejects.toThrow();
+    await host.publish("demo.ping", { n: 2 });
+    expect(seen).toEqual([{ n: 2 }]);
+    await host.stop();
+  });
+
   test("runs two network requests from the plugin one after the other", async () => {
     const host = hostWith([{ kind: "network", name: "api.example.com" }]);
     let active = 0;

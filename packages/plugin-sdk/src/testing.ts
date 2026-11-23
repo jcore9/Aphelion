@@ -60,7 +60,8 @@ export interface TestHost {
 
 type ServerManifest = Extract<PluginManifest, { server: object }>;
 
-const secretOperationTimeoutMs = 5000;
+const operationTimeoutMs = 5000;
+const maxResponseBytes = 64 * 1024;
 const initializeId = 1;
 
 function serverManifest(data: unknown): ServerManifest {
@@ -101,18 +102,21 @@ function lineQueue() {
       return Promise.resolve({ done: true, value: undefined });
     },
   };
+  const pushLine = (line: string) => {
+    if (ended) return;
+    if (waiting) {
+      const resolve = waiting;
+      waiting = undefined;
+      resolve({ done: false, value: line });
+    } else {
+      queued.push(line);
+    }
+  };
   return {
-    push(message: unknown) {
-      if (ended) return;
-      const line = JSON.stringify(message);
-      if (waiting) {
-        const resolve = waiting;
-        waiting = undefined;
-        resolve({ done: false, value: line });
-      } else {
-        queued.push(line);
-      }
+    push: (message: unknown) => {
+      pushLine(JSON.stringify(message));
     },
+    pushLine,
     end,
     input: { [Symbol.asyncIterator]: () => iterator },
   };
@@ -132,15 +136,15 @@ const refuse = ({ code, message }: RpcError): CallOutcome => ({
   error: { code, message },
 });
 
-async function withinTimeout(work: () => MaybePromise<unknown>) {
+async function withinTimeout<T>(work: () => MaybePromise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       reject(new Error("timed out"));
-    }, secretOperationTimeoutMs);
+    }, operationTimeoutMs);
   });
   try {
-    await Promise.race([Promise.resolve().then(work), timedOut]);
+    return await Promise.race([Promise.resolve().then(work), timedOut]);
   } finally {
     clearTimeout(timer);
   }
@@ -184,7 +188,9 @@ export function createTestHost(manifestData: unknown): TestHost {
     const respond = responses.get(url.href);
     if (!respond) return refuse(rpcErrors.operationFailed);
     try {
-      const { status, body } = await respond();
+      const { status, body } = await withinTimeout(respond);
+      if (new TextEncoder().encode(body).byteLength > maxResponseBytes)
+        return refuse(rpcErrors.operationFailed);
       return { result: { status, body } };
     } catch {
       return refuse(rpcErrors.operationFailed);
@@ -280,9 +286,10 @@ export function createTestHost(manifestData: unknown): TestHost {
     async publish(name, data) {
       if (!running || !subscriptions.has(name) || !allows("events", name))
         return;
+      const line = JSON.stringify(notification(methods.event, { name, data }));
       const delivered = adoptLater();
       deliveries.push(delivered.adopt);
-      toPlugin.push(notification(methods.event, { name, data }));
+      toPlugin.pushLine(line);
       await delivered.promise;
     },
     async stop() {

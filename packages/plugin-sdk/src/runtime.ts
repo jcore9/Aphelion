@@ -55,7 +55,7 @@ export async function serve(
 ): Promise<void> {
   const pending = new Map<RpcId, PendingCall>();
   const handlers = new Map<string, Handler>();
-  const halted = Promise.withResolvers<IteratorReturnResult<undefined>>();
+  let interrupt: (() => void) | undefined;
   let nextId = 1;
   let writing = Promise.resolve();
   let exclusive: Promise<unknown> = Promise.resolve();
@@ -134,7 +134,7 @@ export async function serve(
         return;
       }
       failed = { error };
-      halted.resolve({ done: true, value: undefined });
+      interrupt?.();
     });
   };
 
@@ -166,40 +166,57 @@ export async function serve(
   };
 
   const input = io.input[Symbol.asyncIterator]();
-  for (;;) {
-    const next = await Promise.race([input.next(), halted.promise]);
-    if (next.done) break;
-    const message = parse(next.value);
-    if (!message) {
-      io.log("the host sent a line that isn't a JSON-RPC message");
-      continue;
-    }
-    if ("method" in message) {
-      if ("id" in message) {
-        if (message.method === methods.initialize && !started) {
-          const params = initializeParams.safeParse(message.params);
-          if (!params.success) {
-            await send(failure(message.id, rpcErrors.invalidParams));
-            continue;
-          }
-          await send(success(message.id, {}));
-          started = start(context(params.data.plugin, params.data.api));
-        } else {
-          await send(failure(message.id, rpcErrors.methodNotFound));
-        }
-      } else if (message.method === methods.shutdown) {
-        break;
-      } else if (message.method === methods.event && started) {
-        deliver(message.params);
+  const read = () =>
+    new Promise<IteratorResult<string>>((resolve, reject) => {
+      interrupt = () => {
+        resolve({ done: true, value: undefined });
+      };
+      input.next().then(resolve, reject);
+    });
+  const receive = async () => {
+    while (!failed) {
+      const next = await read();
+      if (next.done) return;
+      const message = parse(next.value);
+      if (!message) {
+        io.log("the host sent a line that isn't a JSON-RPC message");
+        continue;
       }
-    } else if ("result" in message) {
-      settle(message.id, { result: message.result });
-    } else if (message.id !== null) {
-      settle(message.id, { error: new HostError(message.error) });
+      if ("method" in message) {
+        if ("id" in message) {
+          if (message.method === methods.initialize && !started) {
+            const params = initializeParams.safeParse(message.params);
+            if (!params.success) {
+              await send(failure(message.id, rpcErrors.invalidParams));
+              continue;
+            }
+            await send(success(message.id, {}));
+            started = start(context(params.data.plugin, params.data.api));
+          } else {
+            await send(failure(message.id, rpcErrors.methodNotFound));
+          }
+        } else if (message.method === methods.shutdown) {
+          break;
+        } else if (message.method === methods.event && started) {
+          deliver(message.params);
+        }
+      } else if ("result" in message) {
+        settle(message.id, { result: message.result });
+      } else if (message.id !== null) {
+        settle(message.id, { error: new HostError(message.error) });
+      }
     }
+  };
+
+  let broken: { readonly error: unknown } | undefined;
+  try {
+    await receive();
+  } catch (error) {
+    broken = { error };
   }
 
   closed = true;
+  interrupt = undefined;
   void input.return?.();
   for (const waiting of pending.values()) {
     waiting.reject(new Error("the plugin is shutting down"));
@@ -217,4 +234,5 @@ export async function serve(
     io.log(`the plugin's cleanup failed: ${describeError(error)}`);
   }
   await writing;
+  if (broken) throw broken.error;
 }

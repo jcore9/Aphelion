@@ -260,6 +260,41 @@ describe("runPlugin", () => {
     expect(cleanups).toBe(1);
   });
 
+  test("runs cleanup and rethrows when reading from the host fails", async () => {
+    const lines = [
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { api: "0.2.1", plugin: "demo" },
+      }),
+    ];
+    let cleanups = 0;
+    const run = runPlugin(
+      {
+        start: () => () => {
+          cleanups++;
+        },
+      },
+      {
+        input: {
+          [Symbol.asyncIterator]: () => ({
+            next: async () => {
+              await Promise.resolve();
+              const line = lines.shift();
+              if (line === undefined) throw new Error("stdin broke");
+              return { done: false, value: line };
+            },
+          }),
+        },
+        write: () => Promise.resolve(),
+        log: () => undefined,
+      },
+    );
+    await expect(run).rejects.toThrow("stdin broke");
+    expect(cleanups).toBe(1);
+  });
+
   test("fails when start throws after the handshake", async () => {
     const host = scriptedHost();
     const run = runPlugin(
