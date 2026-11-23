@@ -7,7 +7,8 @@
     "test": "bun --bun vitest run --pool=threads",
     "typecheck": "tsc --noEmit",
     "build": "bun build src/index.ts --target=bun --outfile dist/server.mjs && bun build-manifest.ts",
-    "watch": "bun build-manifest.ts && bun build src/index.ts --target=bun --outfile dist/server.mjs --watch"
+    "watch": "bun build-manifest.ts && bun build src/index.ts --target=bun --outfile dist/server.mjs --watch",
+    "package": "rm -rf release && mkdir release && tar --format=ustar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf release/aphelion-plugin.tar -C dist ."
   },
   "dependencies": {
     "@aphelion/plugin-sdk": "workspace:*"
