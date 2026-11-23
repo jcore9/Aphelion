@@ -384,8 +384,11 @@ touch_bundle 2 3
 wait_for_log 'dev plugin build-3 started as uid 10004'
 [[ $(server_pid) == "$first_server" ]] || fail "the server restarted during a plugin reload"
 [[ $(plugin_runs) == 1 ]] || fail "more than one copy of the dev plugin runs"
-[[ $(grep -cF "Reloaded dev-probe: running" "$dev_out") -ge 2 ]] ||
+[[ $(grep -cF "Reloaded dev-probe: the handshake finished." "$dev_out") -ge 2 ]] ||
   fail "plugin dev printed no reload replies: $(cat "$dev_out")"
+if grep -qF "crashed after the handshake" "$dev_out"; then
+  fail "plugin dev reported a crash for a reload: $(cat "$dev_out")"
+fi
 other=$("${dev_compose[@]}" exec -T --user harness "$service" \
   timeout 3 aphelion plugin dev /opt/aphelion/plugins/contract-probe 2>&1 || true)
 grep -qF "Refused: dev mode reloads only /opt/aphelion/dev-plugin" <<<"$other" ||
