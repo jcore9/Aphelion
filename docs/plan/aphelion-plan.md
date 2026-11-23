@@ -706,7 +706,7 @@ Issue-sized tasks for every milestone, each with acceptance criteria and depende
 | M0-12 | Linux install script and systemd unit | Creates the ~~harness user and bot users~~ `harness` and `aphelion-bot` users ([0006](../decisions/0006-shared-bot-user.md)) without sudo, sets directory permissions, installs a hardened unit; service survives a reboot; install guide written | ~~M0-11~~ M0-11, M0-18 ([0035](../decisions/0035-codex-login-sandbox-approvals.md)) |
 | M0-13 | Plugin host v0 | Manifest schema, API-range check, one process per plugin over JSON-RPC, permission grants stored and enforced; a sample plugin passes and an out-of-range plugin is refused; API reference generated into the docs | M0-04, M0-07, M0-16 |
 | M0-14 | Secrets broker v0 | Secret wrapper, reference syntax, local age-encrypted store, bootstrap secret via systemd-creds; test proves values never land in logs or the database | M0-08 |
-| M0-15 | 1Password backend plugin | Resolves op:// references with a read-only service account through the official SDK | M0-13, M0-14 |
+| M0-15 | 1Password backend plugin (moved to M3 by [decision 0053](../decisions/0053-1password-token-and-move-to-m3.md)) | Resolves op:// references with a read-only service account through the official SDK | M0-13, M0-14 |
 
 M0-16 sits out of numeric order so that every existing ID, and every reference to it in later milestones, stays the same.
 

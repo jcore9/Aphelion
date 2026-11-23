@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-21
 - Decided by: project owner
-- Amended by: [decision 0042](0042-plugin-server-and-client-parts.md) (a plugin never receives a value; the host injects it only into the operation it makes for the plugin), [decision 0050](0050-bootstrap-key-is-the-store-key.md) (the bootstrap secret is the local store's age key, not the service account token)
+- Amended by: [decision 0042](0042-plugin-server-and-client-parts.md) (a plugin never receives a value; the host injects it only into the operation it makes for the plugin), [decision 0050](0050-bootstrap-key-is-the-store-key.md) (the bootstrap secret is the local store's age key, not the service account token), [decision 0053](0053-1password-token-and-move-to-m3.md) (M0-15 moved to M3)
 - Amends: the plan's "Secure entry, like Grok Bot's secure forms" (first-use approval per connector), and M0-15
 
 ## Context

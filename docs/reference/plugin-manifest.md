@@ -129,7 +129,7 @@ When the host loads a plugin, it checks its own `pluginApiVersion` against the p
 
 ## Secret backends
 
-A secret backend is a plugin that turns a secret reference, such as `op://vault/item/field`, into the secret's value. The 1Password plugin (M0-15) is the first. A backend does two things:
+A secret backend is a plugin that turns a secret reference, such as `op://vault/item/field`, into the secret's value. The 1Password plugin is the first. It comes in M3 ([#17](https://github.com/jcore9/Aphelion/issues/17)). A backend does two things:
 
 1. It lists the schemes it handles in `contributes.secretSchemes`. A scheme is the part before `://`, such as `op`.
 2. It implements the `SecretBackend` type from `@aphelion/plugin-sdk`:

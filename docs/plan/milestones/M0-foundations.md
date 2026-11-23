@@ -38,7 +38,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-12] | Container image, Compose file and host unit | feature, server, security, **risk/security** | M0-11, M0-18 |
 | [M0-13] | Plugin host v0 | feature, plugins, **risk/security** | M0-04, M0-07, M0-16 |
 | [M0-14] | Secrets broker v0 | feature, security, **risk/security** | M0-08 |
-| [M0-15] | 1Password backend plugin | feature, plugins, security, **risk/security** | M0-13, M0-14 |
+| [M0-15] | ~~1Password backend plugin~~ Moved to M3 ([decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md)) | feature, plugins, security, **risk/security** | M0-13, M0-14 |
 
 Seven of the eighteen work issues carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
 
@@ -74,8 +74,6 @@ flowchart LR
   m07 --> m13["M0-13 plugin host"]
   m16 --> m13
   m08 --> m14["M0-14 secrets broker"]
-  m13 --> m15["M0-15 1Password"]
-  m14 --> m15
   m12 --> exit(["Exit test"])
 ```
 
@@ -86,8 +84,10 @@ flowchart LR
 | 3 | M0-04 merges | M0-05, M0-16, M0-06, M0-07 |
 | 4 | Its dependencies merge | M0-08, M0-09, M0-13 |
 | 5 | Its dependencies merge | M0-10, M0-14 |
-| 6 | Its dependencies merge | M0-11, M0-15 |
+| 6 | Its dependencies merge | M0-11, ~~M0-15~~ |
 | 7 | M0-11 and M0-18 merge | M0-12, then the exit test |
+
+> Amended by [decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md). M0-15 moved to M3, so the graph no longer shows it and wave 6 holds only M0-11. Six of the seventeen remaining work issues carry `risk/security`.
 
 The critical path is M0-03, M0-04, M0-16, M0-09, M0-10, M0-11, M0-12. M0-04 waits for M0-03 because the spike checks that Bun runs the SDKs the project depends on ([decision 0007](../../decisions/0007-bun-runtime.md)) before the scaffold commits to it.
 
@@ -257,6 +257,8 @@ A minimal init starts the four processes as their users. A fifth volume holds `/
 **M0-15, 1Password backend.** A plugin that resolves `op://` references through the official SDK with a read-only service account limited to one vault. It works like Grok Bot's 1Password integration: per-item approval, 30-day grants, revocation, and values never shown to bots ([decision 0020](../../decisions/0020-1password-grok-bot-style.md)). The service account token is the bootstrap secret from M0-14. M0-03 confirms the SDK works on Bun first. CI testing depends on [Q7](#q7-a-live-1password-test-in-ci).
 
 > Amended by [decision 0050](../../decisions/0050-bootstrap-key-is-the-store-key.md). The service account token is not the bootstrap secret. M0-15 decides where the token lives, for example as a `local://` entry.
+>
+> Amended by [decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md). M0-15 moved to M3. The token lives in the local store as `local://1password/service-account-token`.
 
 ## Keeping it extensible
 
@@ -264,7 +266,9 @@ The isolation in this milestone (users, runners, the container) must not leak in
 
 1. **Plugin authors write against `plugin-sdk` only.** The SDK exposes typed APIs for events, settings, storage and secrets. Unix users, runner sockets, Docker, the database and Bun-only APIs are host concerns, and nothing in the SDK mentions them. A plugin that works in the test host works in the container unchanged.
 2. **Plugins are testable without Aphelion running.** `plugin-sdk` ships a test host with fake events, grants and secrets ([M0-13e]), so a plugin's Vitest suite runs in seconds with no container and no server.
-3. **First-party features are plugins on the same public API.** The 1Password backend ([M0-15]) is the first, built from the starter template. If it needs something the SDK doesn't offer, the SDK gets it; there's no private back door. M1's Claude adapter is the second.
+3. **First-party features are plugins on the same public API.** M1's Claude adapter is the first, built from the starter template. If it needs something the SDK doesn't offer, the SDK gets it; there's no private back door. The 1Password backend ([M0-15]) is the second, in M3.
+
+   > Amended by [decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md). The original said: "The 1Password backend ([M0-15]) is the first, ... M1's Claude adapter is the second."
 4. **One manifest declares everything.** What a plugin contributes and what it needs (events, secrets, network hosts, UI slots, screens) lives in its manifest. The host reads permissions from there, and there's no other registration step.
 5. **Versioned from day one.** The plugin API follows semver, each plugin declares the API range it supports, the reference is generated from the types ([M0-13d]), and a breaking change gets `risk/breaking` and a migration note.
 6. **Named extension points.** Each kind of plugin (bot adapter, connector, secret backend, notifier, trigger, reviewer, usage collector) gets one interface in `plugin-sdk` when its milestone starts; M0 defines the secret backend interface. Inside the server, the swappable edges (store, process spawner, HTTP server) sit behind interfaces too ([decision 0007](../../decisions/0007-bun-runtime.md)). Only the server and the CLI use the Effect library, and plugin authors never need it ([decision 0041](../../decisions/0041-effect-in-server-and-cli.md)).
