@@ -11,6 +11,7 @@ import { readManifest } from "../plugins/manifest-file";
 import { filesDigest } from "../plugins/tree-digest";
 import { withFilesLock } from "../plugins/updates/files-lock";
 import { UpdateRefused } from "../plugins/updates/refused";
+import { isReleaseDirectoryName } from "../plugins/updates/release-path";
 import { databaseFile, withStore } from "./device";
 import { failed } from "./failure";
 import { CliIo } from "./io";
@@ -40,7 +41,8 @@ const managedBy = (pluginsDir: string, folder: string) => {
   }
   const [top = ""] = path.split(sep);
   if (top === ".staging") return "inside .staging, where plugin update unpacks";
-  if (top.includes("@")) return "a release folder that plugin update manages";
+  if (isReleaseDirectoryName(top))
+    return "a release folder that plugin update manages";
   return undefined;
 };
 

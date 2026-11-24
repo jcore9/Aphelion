@@ -231,11 +231,13 @@ test("a release older than the installed version is refused", async () => {
 
 test("a release for another plugin id is refused", async () => {
   const context = await setup();
+  const folder = join(context.root, "other-plugin");
+  await mkdir(folder);
   recordVersion(context.db, {
     plugin: "other-plugin",
     version: "1.0.0",
     source: "folder",
-    folder: context.root,
+    folder,
     filesDigest: "digest",
     repository,
     grants: [],
@@ -289,6 +291,43 @@ test("a version that doesn't reach running is rolled back at once", async () => 
   ]);
   expect(versions(context.db)).toEqual(["0.9.0 folder", "1.0.0 folder"]);
   expect(await exists(join(context.pluginsDir, `${plugin}@1.1.0`))).toBe(false);
+});
+
+test("an update keeps both releases when restarting either version fails", async () => {
+  const context = await setup();
+  await installFolder(context, "0.9.0");
+  expect(await update(context.updates({ latest: "1.0.0" }))).toEqual(
+    Exit.succeed({ kind: "switched", outcome: { kind: "running" } }),
+  );
+  const exit = await update(
+    context.updates({
+      outcomes: [
+        { kind: "restarted", state: "crashed" },
+        { kind: "restarted", state: "stopped" },
+      ],
+    }),
+  );
+  expect(exit).toEqual(
+    Exit.succeed({
+      kind: "rolled back",
+      failed: "it is crashed",
+      outcome: { kind: "not running", detail: "it is stopped" },
+    }),
+  );
+  expect(readInstall(context.db, plugin)).toMatchObject({
+    current: { version: "1.0.0" },
+    previous: { version: "0.9.0" },
+  });
+  expect(versions(context.db)).toEqual([
+    "0.9.0 folder",
+    "1.0.0 release",
+    "1.1.0 release",
+  ]);
+  expect((await readdir(context.pluginsDir)).sort()).toEqual([
+    ".staging",
+    `${plugin}@1.0.0`,
+    `${plugin}@1.1.0`,
+  ]);
 });
 
 test("a client-only plugin and a stopped server keep the new version", async () => {
@@ -498,4 +537,59 @@ test("an update and a rollback clear a release folder that no approval names, an
   await mkdir(leftover);
   await Effect.runPromise(rollback(context.updates(), plugin));
   expect(await exists(leftover)).toBe(false);
+});
+
+test("cleanup keeps approved descendants through aliases and removes only unapproved managed files", async () => {
+  const context = await setup();
+  await installFolder(context, "1.0.0");
+  const dir = context.pluginsDir;
+  const release = join(dir, `${plugin}@1.1.0`);
+  const orphan = join(dir, `${plugin}@0.5.0`);
+  const ordinary = join(dir, `${plugin}@notes`);
+  const staging = join(dir, ".staging");
+  await mkdir(staging, { mode: 0o755 });
+  const staleStage = join(staging, "release-stale");
+  const approvedStage = join(staging, "release-kept", "nested");
+  for (const path of [orphan, ordinary, staleStage, approvedStage]) {
+    await mkdir(path, { recursive: true });
+  }
+  const alias = join(context.root, "plugins-alias");
+  await symlink(dir, alias);
+  const approve = (id: string, folder: string) => {
+    recordVersion(context.db, {
+      plugin: id,
+      version: "1.0.0",
+      source: "folder",
+      folder,
+      filesDigest: "digest",
+      repository: undefined,
+      grants: [],
+    });
+  };
+  approve("staged", join(alias, ".staging", "release-kept", "nested"));
+  expect(await update(context.updates())).toEqual(
+    Exit.succeed({ kind: "switched", outcome: { kind: "running" } }),
+  );
+  expect(await exists(orphan)).toBe(false);
+  expect(await exists(staleStage)).toBe(false);
+  expect(await exists(ordinary)).toBe(true);
+  expect(await exists(approvedStage)).toBe(true);
+
+  const nested = join(release, "nested");
+  await mkdir(nested);
+  await writeFile(join(nested, "keep.txt"), "approved");
+  approve("nested", join(alias, `${plugin}@1.1.0`, "nested"));
+  expect(
+    (await Effect.runPromise(rollback(context.updates(), plugin))).kind,
+  ).toBe("switched");
+  expect(await exists(join(nested, "keep.txt"))).toBe(true);
+  expect(await exists(approvedStage)).toBe(true);
+
+  const prepared = await preview(context.updates()).catch(
+    (error: unknown) => error,
+  );
+  expect(prepared).toMatchObject({
+    reason: `${release} already exists. Move it away, then update again.`,
+  });
+  expect(await exists(join(nested, "keep.txt"))).toBe(true);
 });

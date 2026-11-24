@@ -18,6 +18,7 @@ import { Context, Effect, Layer, type Scope } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import { PluginHost, pluginHostLayer, RunnerLink } from "./host";
+import { startFixture } from "./host-fixture";
 import { PluginGrants } from "./grants";
 import { pipeLink } from "./link";
 import {
@@ -217,6 +218,7 @@ const startRunner = (
         Layer.provide(Layer.succeed(RunnerLink, link)),
         Layer.provide(
           Layer.succeed(PluginGrants, {
+            hasApproval: () => Effect.succeed(true),
             allows: () => Effect.succeed(true),
           }),
         ),
@@ -278,7 +280,7 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
             canary,
           );
 
-          yield* host.start(folder);
+          yield* startFixture(host, folder);
           yield* poll(host.status("sampler"), (s) => s?.state === "running");
           expect(
             yield* poll(Effect.sync(sleepers), (count) => count === 5),
@@ -322,10 +324,10 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
           ).toBe(0);
 
           for (const plugin of ["careless", "linked", "borrower"]) {
-            yield* host.start(join(installed, plugin));
+            yield* startFixture(host, join(installed, plugin));
             yield* poll(host.status(plugin), (s) => s?.state === "crashed");
           }
-          yield* host.start(join(base, "loose", "exposed"));
+          yield* startFixture(host, join(base, "loose", "exposed"));
           yield* poll(host.status("exposed"), (s) => s?.state === "crashed");
           expect(refusal(logs, "exposed")).toBe(
             "the plugin user can change a folder above the plugin's folder",
@@ -361,7 +363,7 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
             logs,
             "unused",
           );
-          yield* host.start(folder);
+          yield* startFixture(host, folder);
           yield* poll(host.status("sampler"), (s) => s?.state === "crashed");
           expect(refusal(logs, "sampler")).toBe(
             "the plugin user owns a file in the plugin's folder",

@@ -149,16 +149,16 @@ The command exits with code 1 and a message if it can't reach the control socket
 aphelion plugin update ID [--approve DIGEST] [--state-dir DIR] [--plugins-dir DIR]
 ```
 
-Updates plugin `ID` from the GitHub repository its manifest names. Without `--approve`, the command downloads and checks the latest release, then prints a preview and changes nothing. With the value the preview printed, it does the same checks again, installs the release, and asks the server to restart the plugin through the [control socket](plugins.md#control-socket). [Updates](plugins.md#updates) lists what the command checks and its limits.
+Updates plugin `ID` from the GitHub repository its manifest names. Without `--approve`, the command downloads and checks the latest release, then prints a preview. The preview can clear abandoned staging files and release folders, and leaves installed versions and approvals in place. With the value the preview printed, it does the same checks again, installs the release, and asks the server to restart the plugin through the [control socket](plugins.md#control-socket). [Updates](plugins.md#updates) lists what the command checks and its limits.
 
 | Output | Meaning |
 | --- | --- |
 | `Plugin ID can update from OLD to NEW.` | The first preview line. Next come the line about the attestation, one `adds` or `drops` line for each changed permission or `No permission changes.`, and the line with the `--approve` value. Standard output, exit code 0. |
 | `ID is already on VERSION, the latest release. If the server still runs an older version, run aphelion plugin restart ID.` | Nothing to install. If an earlier `--approve` run was stopped before it restarted the plugin, run [`plugin restart`](#aphelion-plugin-restart-id). Standard output, exit code 0. |
 | `Updated ID from OLD to NEW.` | The release is installed. The next line says `ID NEW runs.`, `ID has no server part to restart.`, or `The server isn't running, so ID starts on NEW when the server starts.` Standard output, exit code 0. |
-| `ID NEW didn't start (REASON), so Aphelion went back to OLD.` | The new version failed to start or stopped during the 10-second watch. Aphelion restarted the old version and deleted the new one. The next line says how the old version runs. Standard error, exit code 1. |
+| `ID NEW didn't start (REASON), so Aphelion went back to OLD.` | The new version failed to start or stopped during the 10-second watch. Aphelion tries to restart the old version. If that fails too, Aphelion keeps both versions and their approvals. The next line reports the old version's state. Standard error, exit code 1. |
 | `The approval doesn't match this release's files, permissions or the installed version. Preview the update again.` | The `--approve` value is wrong or out of date. Standard error, exit code 1. |
-| Any other sentence | A refusal, such as a release whose attestation doesn't match. Nothing changed. Standard error, exit code 1. |
+| Any other sentence | A refusal, such as a release whose attestation doesn't match. Standard error, exit code 1. |
 
 The command reads `APHELION_GITHUB_API` for tests only ([testing with a local GitHub](plugins.md#testing-with-a-local-github)).
 

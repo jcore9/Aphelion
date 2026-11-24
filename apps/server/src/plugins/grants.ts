@@ -18,16 +18,13 @@ export interface Permission {
 export class PluginGrants extends Context.Service<
   PluginGrants,
   {
+    readonly hasApproval: (approval: Approval) => Effect.Effect<boolean>;
     readonly allows: (
       approval: Approval,
       permission: Permission,
     ) => Effect.Effect<boolean>;
   }
->()("aphelion/plugins/PluginGrants") {
-  static readonly refuseAll = Layer.succeed(PluginGrants, {
-    allows: () => Effect.succeed(false),
-  });
-}
+>()("aphelion/plugins/PluginGrants") {}
 
 export const permissionList = (manifest: PluginManifest): Permission[] =>
   permissionKinds.flatMap((kind) =>
@@ -42,25 +39,28 @@ export function declaresPermission(
   return names.includes(name);
 }
 
-export const sqlitePluginGrants = (db: Database) =>
-  Layer.succeed(PluginGrants, {
-    allows: ({ id, version, folder, filesDigest }, { kind, name }) =>
-      Effect.try(
-        () =>
-          db.all(
-            `SELECT 1 FROM plugin_grants g JOIN plugin_versions v
-               ON v.plugin = g.plugin AND v.version = g.version
-             WHERE g.plugin = ? AND g.version = ? AND g.kind = ? AND g.name = ?
-               AND v.folder = ? AND (? IS NULL OR v.files_digest = ?)`,
-            [
-              id,
-              version,
-              kind,
-              name,
-              folder,
-              filesDigest ?? null,
-              filesDigest ?? null,
-            ],
-          ).length > 0,
-      ).pipe(Effect.orElseSucceed(() => false)),
+const approvedVersion = `SELECT 1 FROM plugin_versions v
+  WHERE v.plugin = ? AND v.version = ? AND v.folder = ?
+    AND (? IS NULL OR v.files_digest = ?)`;
+
+const approvalParams = ({ id, version, folder, filesDigest }: Approval) =>
+  [id, version, folder, filesDigest ?? null, filesDigest ?? null] as const;
+
+export const sqlitePluginGrants = (db: Database) => {
+  const exists = (sql: string, params: readonly (string | null)[]) =>
+    Effect.try(() => db.all(sql, params).length > 0).pipe(
+      Effect.orElseSucceed(() => false),
+    );
+  return Layer.succeed(PluginGrants, {
+    hasApproval: (approval) =>
+      exists(approvedVersion, approvalParams(approval)),
+    allows: (approval, { kind, name }) =>
+      exists(
+        `${approvedVersion}
+         AND EXISTS (SELECT 1 FROM plugin_grants g
+           WHERE g.plugin = v.plugin AND g.version = v.version
+             AND g.kind = ? AND g.name = ?)`,
+        [...approvalParams(approval), kind, name],
+      ),
   });
+};

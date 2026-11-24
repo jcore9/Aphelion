@@ -15,6 +15,7 @@ import { expect, it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Layer, Queue, Stream } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
+import { startFixture } from "./host-fixture";
 import { PluginGrants } from "./grants";
 import {
   MessageNotSent,
@@ -41,8 +42,8 @@ const manifest = {
   api: "^0.2.0",
   server: { entry: "index.js" },
   permissions: {
-    events: ["demo.ping", "demo.other"],
-    network: ["api.example.com", "other.example.com"],
+    events: ["demo.ping"],
+    network: ["api.example.com"],
     secrets: [reference],
   },
 };
@@ -221,6 +222,7 @@ function realHost(plugin: ServerPlugin) {
     }),
   );
   const grantsLayer = Layer.succeed(PluginGrants, {
+    hasApproval: () => Effect.succeed(true),
     allows: (_approval, permission) =>
       Effect.succeed(
         grants.some(
@@ -266,7 +268,7 @@ describe("an SDK plugin", () => {
           Effect.promise(() => rm(folder, { recursive: true, force: true })),
         );
         const host = yield* PluginHost;
-        yield* host.start(folder);
+        yield* startFixture(host, folder);
         yield* waitUntil(
           () => real.outcomes.length === expectedOutcomes.length,
         );
@@ -347,7 +349,7 @@ describe("an SDK plugin", () => {
           Effect.promise(() => rm(folder, { recursive: true, force: true })),
         );
         const host = yield* PluginHost;
-        yield* host.start(folder);
+        yield* startFixture(host, folder);
         yield* waitUntil(() =>
           logs.some((entry) => entry["line"] === "subscribed"),
         );

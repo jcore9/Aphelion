@@ -128,7 +128,7 @@ interface Slot {
   readonly id: string;
   readonly mailbox: Queue.Queue<SlotInput>;
   folder: string;
-  approval: Approval | undefined;
+  approval: Approval;
   manifest: ServerManifest;
   state: LifecycleState;
   subscriptions: Set<string>;
@@ -171,17 +171,9 @@ export const pluginHostLayer = (options: HostOptions) =>
       const stopDeadlineMs = options.stopDeadlineMs ?? defaultStopDeadlineMs;
       const slots = new Map<string, Slot>();
 
-      const runApproval = (slot: Slot): Approval =>
-        slot.approval ?? {
-          id: slot.id,
-          version: slot.manifest.version,
-          folder: slot.folder,
-          filesDigest: undefined,
-        };
-
       const mayUse = (slot: Slot, permission: Permission) =>
         declaresPermission(slot.manifest, permission)
-          ? grants.allows(runApproval(slot), permission)
+          ? grants.allows(slot.approval, permission)
           : Effect.succeed(false);
 
       const refusal = (
@@ -197,6 +189,9 @@ export const pluginHostLayer = (options: HostOptions) =>
           ) {
             return `the plugin is ${manifest.id} ${manifest.version}, but ${approval.id} ${approval.version} was approved. ${again}`;
           }
+          if (folder !== approval.folder) {
+            return `the plugin folder doesn't match its approval. ${again}`;
+          }
           if (approval.filesDigest !== undefined) {
             const digest = yield* Effect.result(filesDigest(folder));
             if (digest._tag === "Failure") {
@@ -205,6 +200,9 @@ export const pluginHostLayer = (options: HostOptions) =>
             if (digest.success !== approval.filesDigest) {
               return `the plugin's files changed since they were approved. ${again}`;
             }
+          }
+          if (!(yield* grants.hasApproval(approval))) {
+            return `the plugin's approval is no longer present. ${again}`;
           }
           const ungranted = yield* Effect.filter(
             permissionList(manifest),
@@ -374,9 +372,11 @@ export const pluginHostLayer = (options: HostOptions) =>
                 return;
               }
               const { manifest } = loaded.success;
-              const refused =
-                slot.approval &&
-                (yield* refusal(slot.folder, manifest, slot.approval));
+              const refused = yield* refusal(
+                slot.folder,
+                manifest,
+                slot.approval,
+              );
               if (refused) {
                 logger.error(
                   "a plugin changed since it was approved, so it won't start",
@@ -647,8 +647,17 @@ export const pluginHostLayer = (options: HostOptions) =>
       const start = (path: string, approval?: Approval) =>
         Effect.gen(function* () {
           const { manifest, folder } = yield* readManifest(path);
-          const refused =
-            approval && (yield* refusal(folder, manifest, approval));
+          if (approval === undefined) {
+            return yield* new PluginRefused({
+              folder: path,
+              issues: [
+                {
+                  message: `the plugin has no approval. Run aphelion plugin install ${folder} to approve it.`,
+                },
+              ],
+            });
+          }
+          const refused = yield* refusal(folder, manifest, approval);
           if (refused) {
             return yield* new PluginRefused({
               folder: path,

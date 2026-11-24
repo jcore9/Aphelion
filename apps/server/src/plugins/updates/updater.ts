@@ -8,7 +8,15 @@ import {
   rename,
   rm,
 } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { Effect } from "effect";
 import { gt } from "semver";
 import type { Database } from "../../store/database";
@@ -26,6 +34,7 @@ import { readManifest } from "../manifest-file";
 import { filesDigest } from "../tree-digest";
 import type { GithubClient } from "./github";
 import { UpdateRefused } from "./refused";
+import { isReleaseDirectoryName } from "./release-path";
 import { readTar, writeEntries } from "./tar";
 import { verifyRelease } from "./verify";
 
@@ -103,6 +112,41 @@ const installed = (db: Database, plugin: string) => {
 
 const stagingRoot = (pluginsDir: string) => join(pluginsDir, ".staging");
 
+const contains = (parent: string, path: string) => {
+  const child = relative(parent, path);
+  return child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+};
+
+const approvedFolders = async (db: Database) => {
+  const folders = new Set<string>();
+  for (const row of db.all("SELECT DISTINCT folder FROM plugin_versions")) {
+    const folder = String(row["folder"]);
+    folders.add(resolve(folder));
+    try {
+      folders.add(await realpath(folder));
+    } catch (error) {
+      if (!(
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      )) {
+        throw error;
+      }
+    }
+  }
+  return folders;
+};
+
+const removeUnapproved = async (
+  path: string,
+  approved: ReadonlySet<string>,
+) => {
+  for (const folder of approved) {
+    if (contains(path, folder) || contains(folder, path)) return;
+  }
+  await rm(path, { recursive: true, force: true });
+};
+
 const sweep = ({ db, pluginsDir: given }: Updates) =>
   Effect.gen(function* () {
     const pluginsDir = yield* attempt(() => realpath(given)).pipe(
@@ -111,37 +155,51 @@ const sweep = ({ db, pluginsDir: given }: Updates) =>
       ),
     );
     yield* attempt(async () => {
-      await rm(stagingRoot(pluginsDir), { recursive: true, force: true });
-      await mkdir(stagingRoot(pluginsDir), { mode: 0o700 });
-      await chmod(stagingRoot(pluginsDir), 0o700);
-      const named = new Set(
-        db
-          .all("SELECT folder FROM plugin_versions")
-          .map((row) => String(row["folder"])),
-      );
+      const approved = await approvedFolders(db);
       for (const entry of await readdir(pluginsDir, { withFileTypes: true })) {
-        const folder = join(pluginsDir, entry.name);
-        if (
-          entry.isDirectory() &&
-          entry.name.includes("@") &&
-          !named.has(folder)
-        ) {
-          await rm(folder, { recursive: true, force: true });
+        const path = join(pluginsDir, entry.name);
+        if (entry.name === ".staging") {
+          if (entry.isDirectory()) {
+            for (const child of await readdir(path)) {
+              await removeUnapproved(join(path, child), approved);
+            }
+          } else {
+            await removeUnapproved(path, approved);
+          }
+        } else if (entry.isDirectory() && isReleaseDirectoryName(entry.name)) {
+          await removeUnapproved(path, approved);
         }
       }
     });
     return pluginsDir;
   });
 
-const stagingFolder = (pluginsDir: string) =>
+const stagingFolder = (db: Database, pluginsDir: string) =>
   Effect.acquireRelease(
     attempt(async () => {
-      const folder = await mkdtemp(join(stagingRoot(pluginsDir), "release-"));
+      const root = stagingRoot(pluginsDir);
+      for (const folder of await approvedFolders(db)) {
+        if (contains(folder, root)) {
+          throw refuse(
+            `${root} is inside an approved plugin folder and can't be used for updates.`,
+          );
+        }
+      }
+      await mkdir(root, { mode: 0o700, recursive: true });
+      const stat = await lstat(root);
+      if (!stat.isDirectory() || (stat.mode & 0o022) !== 0) {
+        throw refuse(
+          `${root} must be a directory writable only by its owner for plugin updates.`,
+        );
+      }
+      const folder = await mkdtemp(join(root, "release-"));
       await chmod(folder, 0o755);
       return folder;
     }),
     (folder) =>
-      Effect.promise(() => rm(folder, { recursive: true, force: true })),
+      Effect.promise(async () =>
+        removeUnapproved(folder, await approvedFolders(db)),
+      ),
   );
 
 const releaseFolder = (pluginsDir: string, plugin: string, version: string) =>
@@ -233,7 +291,7 @@ export const prepareUpdate = (updates: Updates, plugin: string) =>
         `The release's archive is refused: ${unpacked.reason}.`,
       );
     }
-    const staging = yield* stagingFolder(pluginsDir);
+    const staging = yield* stagingFolder(db, pluginsDir);
     yield* attempt(() => writeEntries(unpacked.entries, staging));
     const manifest = yield* checkManifest(
       staging,
@@ -327,15 +385,17 @@ const prune = (updates: Updates, plugin: string) =>
       }
       return rows
         .filter((row) => row["source"] === "release")
-        .map((row) => String(row["folder"]))
-        .filter(
-          (folder) =>
-            db.all("SELECT 1 FROM plugin_versions WHERE folder = ?", [folder])
-              .length === 0,
-        );
+        .map((row) => resolve(String(row["folder"])));
     });
+    const pluginsDir = await realpath(updates.pluginsDir);
+    const approved = await approvedFolders(db);
     for (const folder of folders) {
-      await rm(folder, { recursive: true, force: true });
+      if (
+        dirname(folder) === pluginsDir &&
+        isReleaseDirectoryName(basename(folder))
+      ) {
+        await removeUnapproved(folder, approved);
+      }
     }
   });
 
@@ -367,7 +427,9 @@ export const applyUpdate = (
       }),
     ).pipe(
       Effect.tapError(() =>
-        Effect.promise(() => rm(next.folder, { recursive: true, force: true })),
+        Effect.promise(async () =>
+          removeUnapproved(next.folder, await approvedFolders(db)),
+        ),
       ),
     );
     const outcome = yield* switchOutcome(updates, plugin);
@@ -379,7 +441,7 @@ export const applyUpdate = (
       pointTo(db, plugin, from.version, previous);
     });
     const restored = yield* switchOutcome(updates, plugin);
-    yield* prune(updates, plugin);
+    if (restored.kind !== "not running") yield* prune(updates, plugin);
     return {
       kind: "rolled back",
       failed: outcome.detail,

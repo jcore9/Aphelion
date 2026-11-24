@@ -26,7 +26,7 @@ import { restartPlugin } from "./control-client";
 import type { InstallRecord } from "./approvals";
 import { PluginHost, pluginHostLayer, RunnerLink } from "./host";
 import { defaultRestartPolicy, type RestartPolicy } from "./lifecycle";
-import { PluginGrants } from "./grants";
+import { fixtureGrants } from "./host-fixture";
 import { readManifest } from "./manifest-file";
 import { filesDigest } from "./tree-digest";
 import type { RunnerReply, RunnerRequest } from "./runner-protocol";
@@ -181,10 +181,7 @@ const withHost = <A, E>(
     : pluginHostLayer({ logger });
   return test(runner.starts, runner.exit, runner.folders, runner.close).pipe(
     Effect.provide(
-      hostLayer.pipe(
-        Layer.provide(runner.layer),
-        Layer.provide(PluginGrants.refuseAll),
-      ),
+      hostLayer.pipe(Layer.provide(runner.layer), Layer.provide(fixtureGrants)),
     ),
   );
 };

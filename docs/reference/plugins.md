@@ -176,10 +176,10 @@ The value stops working when any of these parts changes. So a value printed befo
 
 The install command records each approved version with its folder, its files digest and its grants, in SQLite. A grant belongs to one version of a plugin. When you approve a new version, the server keeps the version it replaces as the previous one. Approving the same version again replaces that version's folder, digest and grants.
 
-The server starts the current version of every installed plugin when it starts, so restart the server after an install. Before every start, and before every automatic restart after a crash, the host checks three things:
+The server starts the current version of every installed plugin when it starts, so restart the server after an install. Before every start, and before every automatic restart after a crash, the host checks the approval and requested permissions.
 
-- The manifest's `id` and `version` match the approved version.
-- The files digest of the folder matches the approved one.
+- The manifest's `id`, `version`, and canonical folder still have an approval, even when the plugin requests no permissions.
+- The files digest of the folder matches the approved one. Dev mode skips this check for the configured dev folder.
 - The manifest asks only for permissions that were granted to that version.
 
 If a check fails, the plugin doesn't start. An automatic restart logs `a plugin changed since it was approved, so it won't start`, with the reason. A running plugin keeps the grants of the version it started with, even after you approve a newer version.
@@ -216,7 +216,7 @@ aphelion-test-plugin 1.1.0 runs.
 
 When the server isn't running, the second line is `The server isn't running, so aphelion-test-plugin starts on 1.1.0 when the server starts.` The command still exits with code 0. For a plugin with only a client part, the second line is `aphelion-test-plugin has no server part to restart.`
 
-When a plugin with a server part fails to start or stops during the 10-second watch, the command goes back at once. It points the plugin at the old version again, restarts it, deletes the new version's files and records, and exits with code 1. Standard error then says which state the new version reached and where the old one is now, for example `aphelion-test-plugin 1.1.0 didn't start (it is crashed), so Aphelion went back to 1.0.0.`
+When a plugin with a server part fails to start or stops during the 10-second watch, the command goes back at once. It points the plugin at the old version again and tries to restart it. If that restart fails too, Aphelion keeps both versions and their approvals. After a successful restart, Aphelion drops the failed version's approval and removes its files if no approval still names them. The command exits with code 1. Standard error then says which state the new version reached and where the old one is now, for example `aphelion-test-plugin 1.1.0 didn't start (it is crashed), so Aphelion went back to 1.0.0.`
 
 When the latest release is the installed version, the command prints `aphelion-test-plugin is already on 1.1.0, the latest release. If the server still runs an older version, run aphelion plugin restart aphelion-test-plugin.` and exits with code 0. If an `--approve` run stops after recording the new version and before asking for the restart, the server can still run the older version. `aphelion plugin restart ID` asks the server to restart the plugin on its approved version. `plugin update` never goes to an older version. It refuses a latest release that is older than the installed version.
 
@@ -273,7 +273,7 @@ Aphelion sends no GitHub token, so public repositories work and private ones don
 #### Where the files go
 
 - A release is unpacked first into `.staging` in the plugins folder, then moved to `<id>@<version>`, such as `/opt/aphelion/plugins/aphelion-test-plugin@1.1.0`. Folders get mode `0755` and files `0644`, whatever the archive says.
-- At the start of every update and rollback, Aphelion empties `.staging` and deletes each `<id>@<version>` folder in the plugins folder that no approved version names. Such a folder is left over from an update that was stopped while it moved the release into place, so the next update can install that version again. A folder that an approved version names is never deleted, and an update to its version is refused with `FOLDER already exists. Move it away, then update again.`
+- At the start of every update and rollback, Aphelion removes abandoned staging files and unapproved `<id>@<version>` directories. This recovers a release folder left by an interrupted update so the next update can install it again. Cleanup keeps a folder if deleting it would remove an approved folder or its contents. An update whose destination still exists reports `FOLDER already exists. Move it away, then update again.`
 - After a switch that worked, Aphelion deletes the records of versions that are neither current nor previous. It deletes a release's folder, at the path its record names, only when no other approved version names that folder. It never deletes a folder that you installed with `plugin install`.
 - `plugin install` refuses a folder inside `.staging`, or a release folder `<id>@<version>` in the plugins folder, with `FOLDER is a release folder that plugin update manages, so it can't be installed as a folder. Copy it to another folder first.` It compares real paths, so a symbolic link to the plugins folder doesn't get around it.
 - `plugin install`, `plugin update` and `plugin rollback` take turns through a kernel lock on the file `plugin-files.lock` in the state folder. A second command refuses with `Another plugin install, update or rollback is running, so try again when it finishes.` The kernel drops the lock when the command that holds it ends, even when it is killed, so a lock is never left behind.

@@ -1,6 +1,7 @@
 import { releaseArchiveName, releaseBundleName } from "@aphelion/plugin-sdk";
 import { z } from "zod";
 import { UpdateRefused } from "./refused";
+import { isReleaseVersion } from "./release-path";
 
 export interface Release {
   readonly version: string;
@@ -36,9 +37,6 @@ const releaseSchema = z.object({
     }),
   ),
 });
-
-const fullReleaseTag =
-  /^v((?:0|[1-9]\d{0,14})\.(?:0|[1-9]\d{0,14})\.(?:0|[1-9]\d{0,14}))$/;
 
 const refuse = (reason: string) => new UpdateRefused({ reason });
 
@@ -191,8 +189,13 @@ export function githubClient(options: {
         throw refuse(`GitHub's answer for ${repository} isn't a release.`);
       }
       const { tag_name: tag, draft, prerelease, assets } = release.data;
-      const version = fullReleaseTag.exec(tag)?.[1];
-      if (version === undefined || draft || prerelease) {
+      const version = tag.slice(1);
+      if (
+        !tag.startsWith("v") ||
+        !isReleaseVersion(version) ||
+        draft ||
+        prerelease
+      ) {
         throw refuse(
           `The latest release of ${repository}, ${JSON.stringify(tag)}, isn't a full release tagged v and a version such as v1.2.0.`,
         );

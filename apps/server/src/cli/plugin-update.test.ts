@@ -398,9 +398,16 @@ test("plugin install refuses a folder that plugin update manages", async () => {
       ],
     });
   }
-  const copy = join(pluginsDir, plugin);
-  await unpackFixture(copy);
-  expect((await install(copy)).code).toBe(0);
+  for (const name of [
+    plugin,
+    `${plugin}@notes`,
+    `${plugin}@1.0.0-beta`,
+    "Not-A-Plugin@1.0.0",
+  ]) {
+    const copy = join(pluginsDir, name);
+    await unpackFixture(copy);
+    expect((await install(copy)).code).toBe(0);
+  }
 });
 
 test("plugin restart prints the server's answer", async () => {
