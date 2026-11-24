@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import process from "node:process";
 
 const [releases, port = "8099"] = process.argv.slice(2);
 if (releases === undefined) {
