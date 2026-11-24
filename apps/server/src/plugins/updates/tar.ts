@@ -89,6 +89,8 @@ function read(archive: Uint8Array): TarEntry[] {
   const seen = new Set<string>();
   const files = new Set<string>();
   const folders = new Set<string>();
+  let count = 0;
+  let root = false;
   let total = 0;
   let offset = 0;
   while (offset + block <= archive.length) {
@@ -128,10 +130,15 @@ function read(archive: Uint8Array): TarEntry[] {
       refuse("a file's padding isn't zero");
     }
     offset = start + padded;
+    if (count === tarLimits.entries) refuse("it holds more than 1000 entries");
+    count++;
     const path = entryPath(raw, folder);
-    if (path === undefined) continue;
-    if (entries.length === tarLimits.entries) {
-      refuse("it holds more than 1000 entries");
+    if (path === undefined) {
+      if (!folder)
+        refuse(`${JSON.stringify(raw)} is the root but isn't a folder`);
+      if (root) refuse("it holds the root folder twice");
+      root = true;
+      continue;
     }
     if (seen.has(path)) {
       refuse(`it holds ${JSON.stringify(path)} twice`);

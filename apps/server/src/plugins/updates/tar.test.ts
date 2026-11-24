@@ -149,6 +149,18 @@ describe("readTar", () => {
     ]);
   });
 
+  test("reads one root folder entry and refuses any other root entry", () => {
+    expect(paths(tar({ name: "./", type: "5" }, { name: "./a.js" }))).toEqual([
+      "file a.js",
+    ]);
+    expect(
+      reason(tar({ name: "./", type: "5" }, { name: "./", type: "5" })),
+    ).toBe("it holds the root folder twice");
+    expect(reason(tar({ name: "./", data: "lost" }))).toBe(
+      '"./" is the root but isn\'t a folder',
+    );
+  });
+
   test("refuses a wrong checksum but accepts the right one", () => {
     const archive = tar({ name: "a.js", data: "x" });
     expect(reason(archive)).toBeUndefined();
@@ -192,6 +204,11 @@ describe("readTar", () => {
     }));
     expect(reason(tar(...many))).toBe("it holds more than 1000 entries");
     expect(paths(tar(...many.slice(1)))).toHaveLength(tarLimits.entries);
+    const withRoot = [{ name: "./", type: "5" }, ...many.slice(1)];
+    expect(reason(tar(...withRoot))).toBe("it holds more than 1000 entries");
+    expect(paths(tar(...withRoot.slice(0, -1)))).toHaveLength(
+      tarLimits.entries - 1,
+    );
     const deep = Array.from({ length: tarLimits.segments + 1 }, () => "d");
     expect(reason(tar({ prefix: deep.slice(1).join("/"), name: "d" }))).toBe(
       `"${deep.join("/")}" is nested too deep`,
