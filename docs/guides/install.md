@@ -8,6 +8,7 @@ The install was tested in parts on Debian 13 with Docker 29.10 and Compose 5.8 o
 
 - Ubuntu 26.04 LTS ([decision 0011](../decisions/0011-ubuntu-lts.md)).
 - Docker Engine and the Compose plugin, installed from [Docker's Ubuntu repository](https://docs.docker.com/engine/install/ubuntu/). Keep Docker's default iptables firewall. The host firewall was tested only with it.
+- A 64-bit x86 processor with SSE4.2, a set of processor instructions that Bun, the program that runs the server, needs. Check with `grep -c sse4_2 /proc/cpuinfo`. It must print a number above 0. A virtual machine can hide the instructions from Ubuntu. In Proxmox, set the VM's CPU type to `host` (VM, Hardware, Processors, Edit, Type), then stop the VM fully and start it again. A reboot from inside the VM doesn't apply the change. Proxmox's `x86-64-v2-AES` type wasn't tested, so run the same check if you use it. arm64 hosts come in M1 ([#180](https://github.com/jcore9/Aphelion/issues/180)).
 - Tailscale, signed in. `tailscale ip -4` prints the host's tailnet address.
 - `git`, and an account with `sudo`.
 
@@ -45,6 +46,8 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
    The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens it. The bootstrap key unlocks it ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
 
    The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a whole key, the script stops and leaves the file and the service as they are.
+
+   When it creates the key, the script may print `Credential secret file '/var/lib/systemd/credential.secret' is not located on encrypted media, using anyway.` `systemd-creds` prints this when its host key, the key it encrypts the bootstrap key with, sits on a disk that isn't encrypted. On a host without a TPM, a security chip on the motherboard, that host key is the only protection, so anyone who copies the whole disk can decrypt the bootstrap key. [Decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md#what-it-protects) accepts this. Encrypting the host's disk closes the gap.
 
 5. Make a recovery copy of the bootstrap key, as [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) describes. Do it before you store any secret. If the host's disk fails, this copy is the only way to read the store on a new host.
 
@@ -441,11 +444,24 @@ sudo host/network-check 10.0.0.1:80 10.0.0.133:22 100.71.226.67:22 100.93.139.95
 
 The script first connects to each target from the host itself, and stops if one doesn't answer. Pick targets with an open port. The first five must then print `blocked`, which means the connection from the container timed out because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The script exits with code 1 if any check fails, and with code 2 if a target is malformed or the container isn't running.
 
-Other tools that change iptables' `mangle` table can remove the rules while the server runs. Two common ones are `sudo ufw reload` when `MANAGE_BUILTINS=yes` is set in `/etc/default/ufw`, and reloading `/etc/nftables.conf`, which starts with `flush ruleset`. After either one, restart the service so the preflight installs the rules again, and run the check again:
+A firewall reload can remove Aphelion's rules while the server runs. The M0 exit test tried two `ufw` settings on Ubuntu 26.04 with Docker 29.10, with ufw turned on:
+
+- With ufw's default setting, `MANAGE_BUILTINS=no` in `/etc/default/ufw`, `sudo ufw reload` left Aphelion's rules in place, and the check still passed.
+- With `MANAGE_BUILTINS=yes`, `sudo ufw reload` removed the rules that send traffic into Aphelion's chains, and deleted Docker's own `DOCKER` chain. The check then showed the container connecting to the host's LAN, tailnet and bridge addresses, and failing to reach `1.1.1.1:443`. Restarting `aphelion` didn't help. `sudo journalctl -u aphelion` showed this line every 10 seconds:
+
+  ```text
+  failed to set up container networking: ... iptables failed: iptables --wait -t filter -I DOCKER ... iptables: No chain/target/match by that name.
+  ```
+
+After a `ufw reload` with `MANAGE_BUILTINS=yes`, restart Docker, not only Aphelion. Docker rebuilds its chains, and `aphelion.service` restarts with it and installs Aphelion's rules again as it starts.
 
 ```sh
-sudo systemctl restart aphelion
+sudo systemctl restart docker
 ```
+
+Once Aphelion runs again, run the network check above again.
+
+Reloading a file that contains `flush ruleset`, such as `/etc/nftables.conf`, can clear Docker's and Aphelion's rules too, when `iptables` uses the nftables backend. This wasn't tested. After such a reload, restart Docker the same way and run the check again.
 
 ## Logs
 

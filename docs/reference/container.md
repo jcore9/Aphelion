@@ -128,7 +128,7 @@ Decision 0022 named Docker's `DOCKER-USER` chain as the place for these rules. T
 
 The script builds each new chain under a temporary name, puts it in front of the old one, and only then removes the old one. A running container is never left without rules, even when an earlier run stopped partway. Only one run of the script changes the rules at a time. Set `APHELION_TAILNET_INTERFACE` in `deploy/.env` if Tailscale's interface has another name.
 
-The rules stay in place until something removes them. The preflight installs them again at every start. A tool that flushes the `mangle` table while the server runs, such as `ufw reload` with `MANAGE_BUILTINS=yes`, removes them until the next start ([Check the network boundary](../guides/install.md#check-the-network-boundary)).
+The rules stay in place until something removes them. The preflight installs them again at every start of `aphelion.service`. A tool that changes the `mangle` table while the server runs, such as `ufw reload` with `MANAGE_BUILTINS=yes`, can remove them. That reload also deleted Docker's own chain in the M0 exit test, so the next start failed until Docker restarted ([Check the network boundary](../guides/install.md#check-the-network-boundary)).
 
 Names still resolve. Docker's resolver in the container sends its queries from the host's network, outside these rules. Docker 29.10 reported this as `ExtServers: [host(...)]` in the container's `/etc/resolv.conf`.
 
