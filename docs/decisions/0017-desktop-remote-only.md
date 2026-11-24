@@ -4,6 +4,7 @@
 - Date: 2026-11-21
 - Decided by: project owner
 - Amends: the plan's "One app, two modes" and Must do (v1), [0009](0009-electron-desktop-shell.md) (local mode), [0016](0016-one-docker-container.md) (desktop local mode), M5-15
+- Amended by: [0060](0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) (the desktop app also builds for macOS and Windows)
 
 ## Context
 

@@ -5,6 +5,7 @@
 - Decided by: project owner
 - Proposed by: the container image PR ([#14](https://github.com/jcore9/Aphelion/issues/14))
 - Amends: [decision 0016](0016-one-docker-container.md) (what the image contains), the M0 plan's M0-12 note, and issue [#14](https://github.com/jcore9/Aphelion/issues/14)
+- Amended by: [0060](0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) (one checksum per architecture, x86-64 and arm64)
 
 ## Context
 

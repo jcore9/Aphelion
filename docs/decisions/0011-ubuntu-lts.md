@@ -4,6 +4,7 @@
 - Date: 2026-11-21
 - Decided by: project owner
 - Answers: M0 plan, Q3
+- Amended by: [0060](0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) (the image also builds for arm64)
 
 ## Context
 

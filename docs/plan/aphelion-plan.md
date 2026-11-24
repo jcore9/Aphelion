@@ -32,7 +32,9 @@ Aphelion is a self-hosted bot application, not a coding app. Its bots are persis
 **Not in v1**
 
 - Coding features: code editor, diff review, terminals. Coding is delegated to dedicated tools over MCP.
-- macOS and Windows (the isolation model relies on Linux users, systemd and root-owned configs).
+- A macOS or Windows server. The server stays on Linux in Docker. The desktop app builds for macOS and Windows.
+
+  > Amended by [decision 0060](../decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md). The original said: "macOS and Windows (the isolation model relies on Linux users, systemd and root-owned configs)."
 - Voice, embedded browser, computer use.
 - Multi-user accounts, teams, or anything public-facing.
 - Native mobile app and WebRTC (protocol is designed for them; built later).
@@ -180,9 +182,9 @@ flowchart TB
 
 Clients reach the harness only over Tailscale. Bots send permission requests back to the policy engine and reach third-party services only through the gateway.
 
-**One app, two modes.** v1 supports Linux only. Aphelion runs only as the server container, with its protections, and every client connects to it. The server runs on Bun as `aphelion --headless`. The desktop app is Electron wrapping the same web client that the PWA serves. It connects to a server over Tailscale and never bundles or starts one. To use Aphelion on one machine, run the container on that machine and connect the desktop app to it. Electron is the shell because it renders with the same Chromium engine on every Linux distro. The server never loads Electron, so a server needs no GUI libraries.
+**One app, two modes.** The server runs on Linux only. The desktop app runs on Linux, macOS and Windows. Aphelion runs only as the server container, with its protections, and every client connects to it. The server runs on Bun as `aphelion --headless`. The desktop app is Electron wrapping the same web client that the PWA serves. It connects to a server over Tailscale and never bundles or starts one. To use Aphelion on one machine, run the container on that machine and connect the desktop app to it. Electron is the shell because it renders with the same Chromium engine on every Linux distro. The server never loads Electron, so a server needs no GUI libraries.
 
-> Amended by [decision 0007](../decisions/0007-bun-runtime.md) (Bun), [decision 0009](../decisions/0009-electron-desktop-shell.md) (why Electron) and [decision 0017](../decisions/0017-desktop-remote-only.md) (no local mode). The original said: "v1 supports Linux only. The same Aphelion install runs headless when started with `aphelion --headless` (server only, for a VM or an always-on machine) and otherwise opens the desktop app. The desktop app wraps the same web client and either starts a local server or connects to a remote headless instance over Tailscale. In local mode the gateway and bots still run as separate Unix users on the same machine, which is weaker isolation than a separate gateway host, and the client says so. Electron is the default shell because the server already runs on Node, but headless mode must start the Node server without loading Electron, so a server VM doesn't need any GUI libraries."
+> Amended by [decision 0007](../decisions/0007-bun-runtime.md) (Bun), [decision 0009](../decisions/0009-electron-desktop-shell.md) (why Electron), [decision 0017](../decisions/0017-desktop-remote-only.md) (no local mode) and [decision 0060](../decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) (the desktop app also runs on macOS and Windows). The original said: "v1 supports Linux only. The same Aphelion install runs headless when started with `aphelion --headless` (server only, for a VM or an always-on machine) and otherwise opens the desktop app. The desktop app wraps the same web client and either starts a local server or connects to a remote headless instance over Tailscale. In local mode the gateway and bots still run as separate Unix users on the same machine, which is weaker isolation than a separate gateway host, and the client says so. Electron is the default shell because the server already runs on Node, but headless mode must start the Node server without loading Electron, so a server VM doesn't need any GUI libraries."
 
 ## Components
 
@@ -785,7 +787,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M5-12 | Declarative theme animations | CSS keyframes and Lottie bound to bot states; reduced motion respected; animations pause when hidden | M5-11 |
 | M5-13 | Plugin and theme install flow | Install from npm, git or a local folder; lockfile with checksums; permission prompt and diff on update; an on/off switch per bot for each installed plugin that gives bots tools, with server-wide plugins left out of the list ([0058](../decisions/0058-specialized-bots.md)) | M0-13, M5-01 |
 | M5-14 | Example plugins | Animated avatar plugin, and a second theme that restyles every screen with no code changes | M5-12, M5-13 |
-| M5-15 | Electron desktop shell | Local server mode and remote connect mode; local mode shows the weaker-isolation notice; AppImage and .deb builds | M5-01, M0-11 |
+| M5-15 | Electron desktop shell | ~~Local server mode and remote connect mode; local mode shows the weaker-isolation notice; AppImage and .deb builds~~ Connect mode only ([0017](../decisions/0017-desktop-remote-only.md)). Builds for Linux (AppImage and .deb), macOS (Apple Silicon and Intel) and Windows 10 and 11, Home included ([0060](../decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md)). | M5-01, M0-11 |
 | M5-16 | Signed releases | Signed headless and desktop builds, changelog and update path | M5-15 |
 
 ## M6 · Routines (v1.0)
