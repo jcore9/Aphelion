@@ -42,7 +42,7 @@ Host mode fails on the Codex check. Codex CLI 0.172.0 on Linux, `workspace-write
 | List `~/.ssh` | Allowed (measured) |
 | Network | A DNS lookup failed (measured). No other network check was run. |
 
-Host mode is rejected because the sandbox let a command read the canary outside the work folder, and the sign-in file is readable. Reads are not confined by default. Once Claude Code's sandbox is enabled, its [sandboxing docs](https://code.claude.com/docs/en/sandboxing) say the default is "read access to the entire computer, except certain denied directories" and that the default "still allows reading credential files" (docs). That default applies to shell commands. Claude's sandbox was not run, because it needs a signed-in session.
+Host mode is rejected because the sandbox let a command read the canary outside the work folder, and the sign-in file is readable. Once Claude Code's sandbox is enabled, its [sandboxing docs](https://code.claude.com/docs/en/sandboxing) say the default is "read access to the entire computer, except certain denied directories" and that the default "still allows reading credential files" (docs). That default applies to shell commands. Claude's sandbox was not run, because it needs a signed-in session.
 
 Mac and Windows facts for the later VM installer:
 
