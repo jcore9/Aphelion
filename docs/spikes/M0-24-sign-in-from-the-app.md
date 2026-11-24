@@ -17,7 +17,7 @@ The issue asked whether the owner can sign in to Claude Code, Grok Build and Cod
 
 - **The command in decision 0019 is wrong for Claude.** There is no `claude login`. The command is `claude auth login` (measured). This PR corrects 0019.
 - **The status light is possible for Claude and Codex, and pending for Grok.** Claude and Codex each have a status command that exits with 1 when signed out (measured). Grok 1.0.92 has none that I found, and its best candidate exits 0 when signed out, so Grok's light needs another way to tell (section 2).
-- **Whether sign-in works inside the container as `aphelion-bot` is not determined.** The first prompt of each tool appears there (measured). No sign-in was completed.
+- **Whether sign-in works inside the container as `aphelion-bot` is not determined.** The first prompt of each tool appears there (measured). No sign-in was completed. **Update, 2026-11-24:** the M0 exit test ([#187](https://github.com/jcore9/Aphelion/issues/187)) determined it for Claude Code 2.1.331. Grok and Codex stay undetermined.
 - **The terms of the three vendors do not decide this.** The owner runs the official tool in a shell. Section 3 records what each vendor's terms say, for any future panel.
 - **Other apps do both.** T3 Code opens its own terminal with the login command ready, which is close to the owner's choice. Three apps relay the pasted code. The public sources I read show no action by Anthropic against them.
 
@@ -28,6 +28,7 @@ Made on 2026-11-24.
 1. **No sign-in panel. A sign-in guide plus a status light.** The app gets a page. For each installed tool it shows the exact command to run in a shell in the container as `aphelion-bot`, for example `sudo docker compose exec --user aphelion-bot aphelion grok login --device-auth`. It also says what the owner will see. Next to it is a signed in or not light for Claude and Codex. Grok's light is pending until a reliable status command is verified (section 2). Aphelion gets the light by running the tool's own status command and showing only yes or no. Aphelion never runs a login, never sees or relays a code, and never reads a token file. Decision 0019 stays as written, so there is no decision record 0060. The owner's reason: walking the user through signing in with the CLI themselves makes the terms and token-handling questions go away.
    - **The trade-off.** The owner still opens a shell. That is what the issue hoped to avoid.
 2. **No live sign-in.** The owner stopped the live Grok run before approving it and dropped the live Codex run. Signing in inside the container as `aphelion-bot` is therefore not determined. The guide's first real use shows it, in [#155](https://github.com/jcore9/Aphelion/issues/155) or the M0 exit test. M0-17 already listed "login inside the container is not determined".
+   - **Update, 2026-11-24:** the M0 exit test ran Claude's sign-in. See "What stays undetermined".
 3. **OpenCode is out of scope.** It stays open for #155.
 
 ## Words used here
@@ -228,6 +229,7 @@ Aphelion's host is a headless server. The owner reaches it over Tailscale from a
 ## What stays undetermined
 
 - **Sign-in inside the container as `aphelion-bot`.** Whether each tool finishes, where its file lands, its owner and mode, and whether the device flows survive a closed shell. The guide's first real use shows it. Run it in #155 or the M0 exit test, and check each file by owner, mode and size only.
+  - **Update, 2026-11-24: determined for Claude Code 2.1.331 by the M0 exit test ([#187](https://github.com/jcore9/Aphelion/issues/187); [results](../plan/milestones/M0-exit-test.md#claude-sign-in-inside-the-container)).** Sign-in as `aphelion-bot` worked with the paste-code flow. The file was `aphelion-bot aphelion-bot 600`. `harness` and `aphelion-plugins` could not read it. A `claude -p` request completed. Grok and Codex stay undetermined.
 - **What each status command prints signed in.** Check that no email or account name leaks into Aphelion's logs.
 - **Grok's status command.** The light for Grok waits on this.
 - **Codex's ChatGPT setting.** What the failure looks like when device-code login is not enabled.

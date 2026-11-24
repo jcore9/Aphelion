@@ -2,7 +2,7 @@
 
 This guide installs Aphelion's server on an Ubuntu host. The server runs in one Docker container ([the container](../reference/container.md)). A systemd service, `aphelion.service`, starts it at boot. Devices reach it only over your tailnet.
 
-The install was tested in parts on Debian 13 with Docker 29.10 and Compose 5.8 on x86-64. The M0 exit test runs the whole guide on a fresh Ubuntu VM.
+The install was tested in parts on Debian 13 with Docker 29.10 and Compose 5.8 on x86-64. The M0 exit test, on 2026-11-24, ran the install on Ubuntu 26.04.1 on a Proxmox VM, and restored its backup on an existing Ubuntu 24.04.5 machine ([results](../plan/milestones/M0-exit-test.md)).
 
 ## What you need
 
@@ -113,7 +113,7 @@ Put the bootstrap key on the new host before you run `host/install`, so that the
 
 5. Follow [Install](#install) steps 1 to 4. Stop there and don't start the service. If you start it now, the secrets broker creates an empty store. Don't reboot either: `host/install` enables the service, so it starts at boot. Then follow [Back up and restore](#back-up-and-restore) to put your data back.
 
-The key alone restores nothing. The secrets themselves are in the `secrets` volume. [Back up and restore](#back-up-and-restore) moves that volume and the other five to a new host. The commands were run with Docker on a development machine and test data. The M0 exit test runs them on two fresh VMs. The guide has not yet been tested on a host that holds real secrets. The broker refuses to start if the key doesn't match a store it finds, and the log then shows `The bootstrap key does not match this secrets store`.
+The key alone restores nothing. The secrets themselves are in the `secrets` volume. [Back up and restore](#back-up-and-restore) moves that volume and the other five to a new host. The commands were run with Docker on a development machine and test data. The M0 exit test restored test data from an Ubuntu 26.04 VM on an existing Ubuntu 24.04 machine. That machine also held the backup, so the archive was copied locally instead of fetched over `ssh`. All three checks passed. The guide has not yet been tested on a host that holds real secrets. The broker refuses to start if the key doesn't match a store it finds, and the log then shows `The bootstrap key does not match this secrets store`.
 
 ## Back up and restore
 

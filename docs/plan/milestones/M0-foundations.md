@@ -374,6 +374,8 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 7. Restore drill, on two fresh VMs, A and B, with test data only. On A, follow [Rehearse with test data](../../guides/install.md#rehearse-with-test-data) and [Back up](../../guides/install.md#back-up). On B, follow [Restore on new hardware](../../guides/install.md#restore-on-new-hardware) with the key from A's recovery copy, then [Restore on the new host](../../guides/install.md#restore-on-the-new-host) and [Check the restore](../../guides/install.md#check-the-restore). Three checks must pass: the test secret reads back, the test plugin starts with no new approval, and the test device is in the database. A check that fails is written in the retro note, not hidden. If restore doesn't work, the steps stay in the guide and a follow-up issue is filed ([decision 0059](../../decisions/0059-backup-and-restore-drill.md)). The output of the drill, with secrets removed, also goes into the #168 PR. Don't record the output of the steps that print or paste the bootstrap key.
 8. The output of each step goes into the retro note.
 
+The [exit test results](M0-exit-test.md) record the run of 2026-11-24.
+
 ## Docs M0 produces
 
 | Doc | Issues |
@@ -395,6 +397,8 @@ Run on a fresh Ubuntu Server LTS VM ([decision 0011](../../decisions/0011-ubuntu
 ## Retro
 
 Written when M0 closes.
+
+The exit test passed on 2026-11-24. See the [exit test results](M0-exit-test.md).
 
 [M0-00]: https://github.com/jcore9/Aphelion/issues/1
 [M0-01]: https://github.com/jcore9/Aphelion/issues/2
