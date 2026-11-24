@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readdir,
+  readlink,
   realpath,
   rename,
   rm,
@@ -117,32 +118,73 @@ const contains = (parent: string, path: string) => {
   return child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
 };
 
-const approvedFolders = async (db: Database) => {
-  const folders = new Set<string>();
-  for (const row of db.all("SELECT DISTINCT folder FROM plugin_versions")) {
-    const folder = String(row["folder"]);
-    folders.add(resolve(folder));
-    try {
-      folders.add(await realpath(folder));
-    } catch (error) {
-      if (!(
+const traceFolder = async (folder: string, entries: Set<string>) => {
+  let current = isAbsolute(folder) ? sep : process.cwd();
+  const parts = folder.split(sep).reverse();
+  let links = 0;
+  entries.add(current);
+
+  while (parts.length > 0) {
+    const part = parts.pop();
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      current = dirname(current);
+      continue;
+    }
+
+    const entry = join(current, part);
+    entries.add(entry);
+    const stat = await lstat(entry).catch((error: unknown) => {
+      if (
         error instanceof Error &&
         "code" in error &&
         error.code === "ENOENT"
-      )) {
-        throw error;
+      ) {
+        return undefined;
       }
+      throw error;
+    });
+    if (stat === undefined) return entry;
+    if (stat.isDirectory()) {
+      current = entry;
+      continue;
     }
+    if (!stat.isSymbolicLink() || ++links > 40) {
+      throw refuse(
+        `Can't resolve the approved plugin folder ${folder} for cleanup.`,
+      );
+    }
+    const target = new TextDecoder("utf-8", {
+      fatal: true,
+      ignoreBOM: true,
+    }).decode(await readlink(entry, { encoding: "buffer" }));
+    if (isAbsolute(target)) current = sep;
+    // Expand the target before consuming any remaining components, including "..".
+    parts.push(...target.split(sep).reverse());
   }
-  return folders;
+  return current;
+};
+
+const approvedPaths = async (db: Database) => {
+  const folders = new Set<string>();
+  const entries = new Set<string>();
+  for (const row of db.all("SELECT DISTINCT folder FROM plugin_versions")) {
+    const folder = String(row["folder"]);
+    folders.add(resolve(folder));
+    folders.add(await traceFolder(folder, entries));
+  }
+  return { folders, entries };
 };
 
 const removeUnapproved = async (
   path: string,
-  approved: ReadonlySet<string>,
+  { folders, entries }: Awaited<ReturnType<typeof approvedPaths>>,
 ) => {
-  for (const folder of approved) {
+  for (const folder of folders) {
     if (contains(path, folder) || contains(folder, path)) return;
+  }
+  for (const entry of entries) {
+    if (contains(path, entry)) return;
   }
   await rm(path, { recursive: true, force: true });
 };
@@ -155,7 +197,7 @@ const sweep = ({ db, pluginsDir: given }: Updates) =>
       ),
     );
     yield* attempt(async () => {
-      const approved = await approvedFolders(db);
+      const approved = await approvedPaths(db);
       for (const entry of await readdir(pluginsDir, { withFileTypes: true })) {
         const path = join(pluginsDir, entry.name);
         if (entry.name === ".staging") {
@@ -178,7 +220,8 @@ const stagingFolder = (db: Database, pluginsDir: string) =>
   Effect.acquireRelease(
     attempt(async () => {
       const root = stagingRoot(pluginsDir);
-      for (const folder of await approvedFolders(db)) {
+      const { folders } = await approvedPaths(db);
+      for (const folder of folders) {
         if (contains(folder, root)) {
           throw refuse(
             `${root} is inside an approved plugin folder and can't be used for updates.`,
@@ -198,7 +241,7 @@ const stagingFolder = (db: Database, pluginsDir: string) =>
     }),
     (folder) =>
       Effect.promise(async () =>
-        removeUnapproved(folder, await approvedFolders(db)),
+        removeUnapproved(folder, await approvedPaths(db)),
       ),
   );
 
@@ -388,7 +431,7 @@ const prune = (updates: Updates, plugin: string) =>
         .map((row) => resolve(String(row["folder"])));
     });
     const pluginsDir = await realpath(updates.pluginsDir);
-    const approved = await approvedFolders(db);
+    const approved = await approvedPaths(db);
     for (const folder of folders) {
       if (
         dirname(folder) === pluginsDir &&
@@ -428,7 +471,7 @@ export const applyUpdate = (
     ).pipe(
       Effect.tapError(() =>
         Effect.promise(async () =>
-          removeUnapproved(next.folder, await approvedFolders(db)),
+          removeUnapproved(next.folder, await approvedPaths(db)),
         ),
       ),
     );

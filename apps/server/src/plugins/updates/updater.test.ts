@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rm,
   stat,
@@ -592,4 +593,74 @@ test("cleanup keeps approved descendants through aliases and removes only unappr
     reason: `${release} already exists. Move it away, then update again.`,
   });
   expect(await exists(join(nested, "keep.txt"))).toBe(true);
+});
+
+test("sweep keeps directory entries crossed by an approved link chain", async () => {
+  const context = await setup();
+  await installFolder(context, "1.0.0");
+  const release = join(context.pluginsDir, "bridge@1.0.0");
+  const waypoint = join(context.pluginsDir, "waypoint@1.0.0");
+  const orphan = join(context.pluginsDir, "orphan@1.0.0");
+  const staging = join(context.pluginsDir, ".staging");
+  const staleStage = join(staging, "release-stale");
+  const stage = join(staging, "release-bridge");
+  const target = join(context.root, "target");
+  for (const folder of [release, waypoint, orphan, staleStage, stage, target]) {
+    await mkdir(folder, { recursive: true });
+  }
+  await writeFile(join(target, "keep.txt"), "approved");
+  await symlink("../../../target", join(stage, "target"));
+  await symlink("../.staging/release-bridge", join(release, "stage"));
+  const alias = join(context.root, "alias");
+  await symlink("plugins/waypoint@1.0.0/../bridge@1.0.0/stage", alias);
+  recordVersion(context.db, {
+    plugin: "linked-folder",
+    version: "1.0.0",
+    source: "folder",
+    folder: join(alias, "target"),
+    filesDigest: "digest",
+    repository: undefined,
+    grants: [],
+  });
+
+  expect(await preview(context.updates({ latest: "1.0.0" }))).toEqual({
+    kind: "up to date",
+    version: "1.0.0",
+  });
+  expect(await readFile(join(alias, "target", "keep.txt"), "utf8")).toBe(
+    "approved",
+  );
+  expect(await exists(orphan)).toBe(false);
+  expect(await exists(staleStage)).toBe(false);
+});
+
+test("prune keeps an old release directory crossed by another approval", async () => {
+  const context = await setup();
+  const folder = await installFolder(context, "1.0.0");
+  expect(await update(context.updates())).toEqual(
+    Exit.succeed({ kind: "switched", outcome: { kind: "running" } }),
+  );
+  const release = join(context.pluginsDir, `${plugin}@1.1.0`);
+  const alias = join(context.root, "alias");
+  await writeFile(join(folder, "keep.txt"), "approved");
+  await symlink(folder, join(release, "target"));
+  await symlink(join(release, "target"), alias);
+  recordVersion(context.db, {
+    plugin: "linked-folder",
+    version: "1.0.0",
+    source: "folder",
+    folder: alias,
+    filesDigest: "digest",
+    repository: undefined,
+    grants: [],
+  });
+
+  expect(
+    await Effect.runPromise(rollback(context.updates(), plugin)),
+  ).toMatchObject({
+    kind: "switched",
+    to: "1.0.0",
+  });
+  expect(versions(context.db)).toEqual(["1.0.0 folder", "1.0.0 folder"]);
+  expect(await readFile(join(alias, "keep.txt"), "utf8")).toBe("approved");
 });
