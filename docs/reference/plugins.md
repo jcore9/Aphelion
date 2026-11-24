@@ -192,6 +192,8 @@ The host identifies `network.get` requests by the plugin's own channel. The requ
 
 ### Updates
 
+The host checks a folder install's files just before the runner starts them, so leave the files unchanged while the folder is installed.
+
 A plugin whose manifest names a `repository` updates from that repository's GitHub releases. Each update waits for your approval. The server keeps running, and only the plugin restarts. [Update a plugin](../guides/install.md#update-a-plugin) shows the commands in the container.
 
 `aphelion plugin update ID` reads the repository's latest full release, downloads it, checks it, and prints a preview. Nothing is installed yet.
@@ -200,7 +202,7 @@ A plugin whose manifest names a `repository` updates from that repository's GitH
 Plugin aphelion-test-plugin can update from 1.0.0 to 1.1.0.
 GitHub attests that jcore9-bot/aphelion-test-plugin's release workflow built 1.1.0 from tag v1.1.0.
 adds	events	"bot.status"
-Review the changes above. To install 1.1.0 and grant its permissions, repeat the command with --approve 7acafce2e348d79f9ac8f77e3a7c2503ae356492758a34915e4500a9528963c4
+Review the changes above. To install 1.1.0 and grant its permissions, repeat the command with --approve <value it printed>
 ```
 
 A line that starts with `adds` names a permission the new version asks for. A line that starts with `drops` names one it no longer asks for. When the list doesn't change, the preview says `No permission changes.` The `--approve` value is a SHA-256 hash of two approvals: the installed version's (its version, folder, files digest and grants) and the release's (its version, final folder, files digest and permissions). It has its own label, so a value from `plugin install` never works here. The command downloads and checks the release again on the approving run, so the value works only while both stay the same. If you approve the installed version again in between, even at the same version, preview the update again.
@@ -214,9 +216,9 @@ aphelion-test-plugin 1.1.0 runs.
 
 When the server isn't running, the second line is `The server isn't running, so aphelion-test-plugin starts on 1.1.0 when the server starts.` The command still exits with code 0. For a plugin with only a client part, the second line is `aphelion-test-plugin has no server part to restart.`
 
-When a plugin with a server part doesn't reach `running` on the new version, the command goes back at once. It points the plugin at the old version again, restarts it, deletes the new version's files and records, and exits with code 1. Standard error then says which state the new version reached and where the old one is now, for example `aphelion-test-plugin 1.1.0 didn't start (it is crashed), so Aphelion went back to 1.0.0.`
+When a plugin with a server part fails to start or stops during the 10-second watch, the command goes back at once. It points the plugin at the old version again, restarts it, deletes the new version's files and records, and exits with code 1. Standard error then says which state the new version reached and where the old one is now, for example `aphelion-test-plugin 1.1.0 didn't start (it is crashed), so Aphelion went back to 1.0.0.`
 
-When the latest release is the installed version, the command prints `aphelion-test-plugin is already on 1.1.0, the latest release. If the server still runs an older version, run aphelion plugin restart aphelion-test-plugin.` and exits with code 0. The server still runs an older version only when an `--approve` run was stopped after it recorded the new version and before it asked for the restart. `aphelion plugin restart ID` asks the server to restart the plugin on its approved version. `plugin update` never goes to an older version. It refuses a latest release that is older than the installed version.
+When the latest release is the installed version, the command prints `aphelion-test-plugin is already on 1.1.0, the latest release. If the server still runs an older version, run aphelion plugin restart aphelion-test-plugin.` and exits with code 0. If an `--approve` run stops after recording the new version and before asking for the restart, the server can still run the older version. `aphelion plugin restart ID` asks the server to restart the plugin on its approved version. `plugin update` never goes to an older version. It refuses a latest release that is older than the installed version.
 
 `aphelion plugin rollback ID` goes back one version and restarts the plugin on it:
 
@@ -225,7 +227,7 @@ Went back from aphelion-test-plugin 1.1.0 to 1.0.0.
 aphelion-test-plugin 1.0.0 runs.
 ```
 
-When the earlier version doesn't reach `running`, the rollback undoes itself. The plugin points at the version it left again, with the earlier one as previous, and restarts on it. Nothing is deleted. Standard error says what happened, for example `aphelion-test-plugin 1.0.0 didn't start (it is crashed), so Aphelion stayed on 1.1.0.`, and the command exits with code 1.
+When the earlier version fails to start or stops during the 10-second watch, the rollback undoes itself. The plugin points at the version it left again, with the earlier one as previous, and restarts on it. Nothing is deleted. Standard error says what happened, for example `aphelion-test-plugin 1.0.0 didn't start (it is crashed), so Aphelion stayed on 1.1.0.`, and the command exits with code 1.
 
 The server keeps two versions of each plugin, the current one and the one before it. A rollback makes the one before current, and deletes the version it left. So a second rollback is refused with `aphelion-test-plugin has no earlier version to go back to.` To return to the newer version, run `plugin update` again.
 
@@ -235,7 +237,7 @@ Every refusal is one sentence on standard error, with exit code 1.
 
 The release workflow that `create:plugin` generates makes releases in this form ([publish a release](../guides/write-your-first-server-plugin.md#publish-a-release)):
 
-- The tag is `v` and the manifest's `version`, such as `v1.1.0`. The version has three numbers and no pre-release part.
+- The tag is `v` and the manifest's `version`, such as `v1.1.0`. For updates, use three numbers such as `1.1.0`. The release workflow rejects build metadata such as `+build`.
 - The release is a full release, not a draft or a pre-release. `plugin update` reads only GitHub's latest release.
 - The asset `aphelion-plugin.tar` is a plain POSIX ustar archive with no compression. It holds the contents of the plugin's `dist/` folder at its root. A leading `./` on each name is fine.
 - The asset `aphelion-plugin.tar.sigstore.json` is the attestation that `actions/attest-build-provenance` wrote for that archive.
@@ -321,10 +323,10 @@ The socket takes one JSON request per line, and answers each one on one line:
 
 | Request | Answer |
 | --- | --- |
-| `{"type":"restart","plugin":"ID"}` | The server stops the plugin, starts its approved version with every check in [permissions](#permissions), and waits up to 15 seconds for the run to settle. It answers `{"type":"restarted","plugin":"ID","state":"STATE"}`. |
+| `{"type":"restart","plugin":"ID"}` | The server stops the plugin, starts its approved version with every check in [permissions](#permissions), and waits up to 15 seconds for the run to settle. Once the run reaches `running`, the server watches it for 10 more seconds and reports the state the run enters if it stops running during that watch. It answers `{"type":"restarted","plugin":"ID","state":"STATE"}`. |
 | `{"type":"reload","folder":"FOLDER"}` | Only in [dev mode](#dev-mode). Without `--plugin-dev`, the server answers `{"type":"refused","reason":"dev mode is off"}`. |
 
-`plugin update` and `plugin rollback` send `restart` after they switch the version. A request the server can't carry out gets `{"type":"refused","reason":"..."}`, for example for a plugin that isn't installed. Requests run one at a time, and each connection may have one request waiting for an answer. A request sent before the last one was answered is refused, and so is a line longer than 64 KiB. The socket can't approve a plugin, and it starts only approved versions.
+`plugin update` and `plugin rollback` send `restart` after they switch the version. `plugin restart` sends the same request for the approved version. A request the server can't carry out gets `{"type":"refused","reason":"..."}`, for example for a plugin that isn't installed. Requests run one at a time, and each connection may have one request waiting for an answer. A request sent before the last one was answered is refused, and so is a line longer than 64 KiB. The socket can't approve a plugin, and it starts only approved versions.
 
 ### Isolation between plugins
 

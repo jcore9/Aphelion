@@ -156,7 +156,7 @@ Updates plugin `ID` from the GitHub repository its manifest names. Without `--ap
 | `Plugin ID can update from OLD to NEW.` | The first preview line. Next come the line about the attestation, one `adds` or `drops` line for each changed permission or `No permission changes.`, and the line with the `--approve` value. Standard output, exit code 0. |
 | `ID is already on VERSION, the latest release. If the server still runs an older version, run aphelion plugin restart ID.` | Nothing to install. If an earlier `--approve` run was stopped before it restarted the plugin, run [`plugin restart`](#aphelion-plugin-restart-id). Standard output, exit code 0. |
 | `Updated ID from OLD to NEW.` | The release is installed. The next line says `ID NEW runs.`, `ID has no server part to restart.`, or `The server isn't running, so ID starts on NEW when the server starts.` Standard output, exit code 0. |
-| `ID NEW didn't start (REASON), so Aphelion went back to OLD.` | The new version didn't reach `running`. Aphelion restarted the old version and deleted the new one. The next line says how the old version runs. Standard error, exit code 1. |
+| `ID NEW didn't start (REASON), so Aphelion went back to OLD.` | The new version failed to start or stopped during the 10-second watch. Aphelion restarted the old version and deleted the new one. The next line says how the old version runs. Standard error, exit code 1. |
 | `The approval doesn't match this release's files, permissions or the installed version. Preview the update again.` | The `--approve` value is wrong or out of date. Standard error, exit code 1. |
 | Any other sentence | A refusal, such as a release whose attestation doesn't match. Nothing changed. Standard error, exit code 1. |
 
@@ -168,7 +168,7 @@ The command reads `APHELION_GITHUB_API` for tests only ([testing with a local Gi
 aphelion plugin rollback ID [--state-dir DIR] [--plugins-dir DIR]
 ```
 
-Makes the version before the current one current again, restarts the plugin on it, and deletes the version it left. It prints `Went back from ID CURRENT to EARLIER.` and then a line that says how `EARLIER` runs, as `plugin update` does. When the earlier version doesn't reach `running`, that line goes to standard error and the exit code is 1. When there is no earlier version, it prints `ID has no earlier version to go back to.` on standard error and exits with code 1.
+Makes the version before the current one current again, restarts the plugin on it, and deletes the version it left. It prints `Went back from ID CURRENT to EARLIER.` and then a line that says how `EARLIER` runs, as `plugin update` does. If the earlier version fails to start or stops during the 10-second watch, Aphelion restores the version it left and keeps both approvals. It prints `ID EARLIER didn't start (REASON), so Aphelion stayed on CURRENT.` followed by the state of `CURRENT` on standard error and exits with code 1. When there is no earlier version, it prints `ID has no earlier version to go back to.` on standard error and exits with code 1.
 
 ## `aphelion plugin restart ID`
 

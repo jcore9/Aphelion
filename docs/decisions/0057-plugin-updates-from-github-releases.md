@@ -115,7 +115,7 @@ Pick the options marked "owner" or "proposed" above. The rules that follow are i
 
 ### What a release looks like
 
-- The tag is `v<version>`, and `<version>` equals the manifest's `version`. The release is a full release (not a draft, not a pre-release), and the version is strict semver with no pre-release part.
+- The tag is `v<version>`, and `<version>` equals the manifest's `version`. The release is a full release (not a draft, not a pre-release), and the version is strict semver with no pre-release part or build metadata. The workflow publishes pre-release versions as pre-releases and refuses versions with build metadata such as `+build`.
 - The archive asset is `aphelion-plugin.tar`. It holds the plugin's `dist/` folder at its root, and a leading `./` is accepted. The bundle asset is `aphelion-plugin.tar.sigstore.json`.
 - The manifest gets an optional `repository` field, `owner/name`, with no URL form. The plugin API version goes from 0.2.1 to 0.2.2, because the field only adds to the API.
 
@@ -137,9 +137,10 @@ Pick the options marked "owner" or "proposed" above. The rules that follow are i
 
 ### Where files live, and what an approval covers
 
-- The `plugin-files` volume is mounted at `/opt/aphelion/plugins`, owned by `harness:harness` with mode `0755`. Each release version is `<id>@<version>/`. The install guide copies a folder install to `<id>/`, so a release at `<id>/<version>/` would land inside that folder and change its files hash. A plugin ID can't hold `@`. Unpacking happens in `.staging/` on the same volume, so the final move is one atomic `rename`. One lock file covers every install, update and rollback.
-- An approval covers the plugin's ID, the version it moves from and to, its folder, the sorted permissions, and one hash of every file in the folder. Hidden files count, and a symbolic link is refused.
-- Grants belong to the running version. A switch can't hand the old process the new version's grants.
+- The `plugin-files` volume is mounted at `/opt/aphelion/plugins`, owned by `harness:harness` with mode `0755`. Each release version is `<id>@<version>/`. The install guide copies a folder install to `<id>/`, so a release at `<id>/<version>/` would land inside that folder and change its files hash. A plugin ID can't hold `@`. Unpacking happens in `.staging/` on the same volume, so the final move is one atomic `rename`. Every install, update and rollback holds a kernel lock on `plugin-files.lock` in the state folder. The kernel releases the lock when the command ends.
+- An approval records the plugin's ID, version, folder, sorted permissions, and one hash of every file in the folder. Hidden files count, and a symbolic link is refused.
+- The update token covers the current and proposed approvals. It includes both versions, folders, file hashes, and permission lists. It uses a separate label from the install token. The database transaction checks the current approval again before replacing it.
+- Each run checks grants against the approval it started with. The version and folder must still match. The files hash must also match outside dev mode.
 - Both `host.start` and the host's own automatic-restart path check three things before they start a plugin: the manifest's ID and version match the approval, the folder's files hash to the approved value, and the manifest's permissions are within the granted ones. A mismatch refuses the start, with a plain reason in the log.
 - **Existing approvals need one more approval.** Migration 0006 carries no data over.
 - **Dev mode approves by permissions only**, because every edit changes the file hashes. Only the canonical dev folder gets this treatment.
@@ -148,11 +149,13 @@ Pick the options marked "owner" or "proposed" above. The rules that follow are i
 ### How an update runs
 
 - `prepareUpdate` reads the latest release, downloads, verifies, unpacks, hashes, and works out the permission changes and the approval token. `applyUpdate` compares the token, moves the staging folder into place, records the version and grants in one database transaction, restarts the plugin, and cleans up. The CLI holds the lock across both, and runs `prepareUpdate` on both calls, so nothing is cached between the preview and `--approve`.
-- The control socket is `<state-dir>/plugin-control.sock`, mode `0600`. `restart` takes only a plugin ID, reads the approved record, and waits up to 15 seconds for the plugin to settle. `reload` is refused with "dev mode is off" unless the server runs with `--plugin-dev`.
-- **Rollback is one step and needs no new approval.** The previous version was approved already. `rollback` refuses when there is no previous version, switches back, restarts, and deletes the version it left.
-- When a new version with a server part doesn't reach `running`, the update command goes back automatically, restarts the old version, deletes the failed one, and reports both states.
+- The control socket is `<state-dir>/plugin-control.sock`, mode `0600`. `restart` takes only a plugin ID, reads the approved record, and waits up to 15 seconds for the plugin to settle. Once the run reaches `running`, the server watches it for 10 more seconds, as the owner chose. If the run leaves that state, the reply reports the new state. The client waits up to 90 seconds for a reply.
+- During boot, the socket opens before plugins start. Boot and restart requests take turns, and boot reads the current approval for each plugin just before it starts it. `reload` is refused with "dev mode is off" unless the server runs with `--plugin-dev`.
+- **Rollback is one step and needs no new approval.** The previous version was approved already. `rollback` refuses when there is no previous version, switches back and restarts. If the earlier version fails to start or stops during the watch, Aphelion restores both approval pointers and restarts the version it left.
+- When a new version with a server part fails to start or stops during the watch, the update command goes back automatically, restarts the old version, deletes the failed one, and reports both states.
 - When the server isn't running, the files and the record are kept. The CLI says that the plugin starts on the new version when the server starts, and exits with 0.
-- After a switch, versions that are neither current nor previous are deleted.
+- If an update recorded the new version but stopped before restarting it, `aphelion plugin restart <id>` starts the approved version.
+- Pruning drops old version records first. It deletes only release folders with no remaining approval. Both update and rollback remove abandoned staging files and unreferenced release folders before proceeding.
 
 ### What the spike measured
 
