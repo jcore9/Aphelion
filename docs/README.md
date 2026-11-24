@@ -33,6 +33,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 - [M0-03: headless without Electron, on Bun](spikes/M0-03-headless-on-bun.md)
 - [M0-17: Codex headless on a ChatGPT login](spikes/M0-17-codex-headless.md)
 - [M0-18: per-bot isolation with user namespaces](spikes/M0-18-namespaces.md)
+- [M0-24: signing in to AI tools from the app](spikes/M0-24-sign-in-from-the-app.md)
 - [M0-10b: Tailscale `whois` from inside the container](spikes/M0-10b-tailscale-whois.md)
 
 ## Reference

@@ -7,6 +7,8 @@
 - Amended by: [0034](0034-vendor-protocol-per-cli.md) (the first guardrail names no ACP adapter; each CLI runs through its vendor's own protocol)
 - Amended by: [0035](0035-codex-login-sandbox-approvals.md) (Codex joins on a ChatGPT login under these guardrails)
 
+Corrected on 2026-11-24: the Claude command is `claude auth login` ([M0-24 finding](../spikes/M0-24-sign-in-from-the-app.md)).
+
 ## Context
 
 M0-01 and M0-02 confirmed that both CLIs run headless on a subscription login with no API key. Neither vendor's published terms address one person running their own copy of an open-source tool. The plan said a spike that found the terms unclear would stop and ask the owner. The quotes are in the [M0-01 finding](../spikes/M0-01-claude-over-acp.md) and in the M0-02 finding ([#3](https://github.com/jcore9/Aphelion/issues/3)).
@@ -24,7 +26,7 @@ Option 1. The owner's position is that both vendors allow their CLIs to be drive
 Guardrails, which hold even if the vendors' wording changes:
 
 - **Unmodified binaries.** Aphelion runs the official, unmodified `claude` and `grok` CLIs, and the official ACP adapter, at pinned versions. It never patches them.
-- **Sign-in through the vendor's own flow.** The owner signs in with `claude login` and `grok login`, run as `aphelion-bot` inside the container. Aphelion never asks for, reads, copies, logs or transmits the CLIs' tokens. The CLIs keep their own credential files in the bot user's home, and the broker doesn't hold them.
+- **Sign-in through the vendor's own flow.** The owner signs in with `claude auth login` and `grok login`, run as `aphelion-bot` inside the container. Aphelion never asks for, reads, copies, logs or transmits the CLIs' tokens. The CLIs keep their own credential files in the bot user's home, and the broker doesn't hold them.
 - **One person's own subscription.** Aphelion is self-hosted by the person whose subscription it uses. It never routes one person's login on behalf of other people, and the docs say so.
 - **API keys stay possible.** Each provider can be switched to an API key per bot, through the secrets broker, for anyone who wants it.
 
