@@ -5,7 +5,7 @@
 - Decided by: project owner
 - Proposed by: the M0-19 PR ([#161](https://github.com/jcore9/Aphelion/issues/161))
 - Answers: [#161](https://github.com/jcore9/Aphelion/issues/161), the four questions on how specialized bots get their connectors and plugins
-- Amends: the plan's Goals, its Bot registry row, and the issue rows for M3-06, M4-02 and M5-13. [0042](0042-plugin-server-and-client-parts.md), because a plugin's one-time grant now sits under a per-bot switch.
+- Amends: the plan's Goals, its Bot registry row, its git credential helper, and the issue rows for M3-03, M3-05, M3-06, M4-02 and M5-13. [0042](0042-plugin-server-and-client-parts.md), because a plugin's one-time grant now sits under a per-bot switch. [0010](0010-bot-folders.md), because changing a bot's plugins asks the owner, as changing its connectors already does.
 - Relies on: [0020](0020-1password-grok-bot-style.md) (1Password grants stay per item, per consumer and per bot), [0042](0042-plugin-server-and-client-parts.md) (a plugin is granted once, for the whole server), [0038](0038-plugin-manifest-and-api-range.md) (the host reads a plugin's contributions from its manifest)
 
 ## Context
@@ -69,6 +69,8 @@ A new bot starts with no connectors and no plugins. The create screen shows what
 
 - A plugin's permissions are approved once, for the whole server, as [decision 0042](0042-plugin-server-and-client-parts.md) and [the plugin reference](../reference/plugins.md) say. No per-bot narrowing of a plugin's grant exists.
 - Each bot has an on/off switch for each plugin and each connector. The switch answers one question: which bots may use it. A bot that has it off can't see the plugin's tools, and its calls to them are refused.
+- The switch covers every way a bot reaches a connector. The harness MCP endpoint checks it when it lists a bot's tools and again on every call. The git credential helper gives no GitHub token to a bot that doesn't have the GitHub connector switched on.
+- A bot can't switch its own plugins or connectors, or another bot's, without the owner. [Decision 0010](0010-bot-folders.md) already makes a change to a bot's connectors always ask the owner. This record adds its plugins to that row.
 - Finer control comes from the policy engine. For example, one bot can be read-only on GitHub through a rule scoped to that bot, that connector and those tools.
 - 1Password item grants stay per item, per consumer and per bot, as [decision 0020](0020-1password-grok-bot-style.md) says.
 
@@ -78,8 +80,8 @@ A plugin must be approved before a bot can switch it on. The switch never gives 
 
 A **bot preset** is a file that holds one bot's setup. It names the bot's instructions, provider, model, connectors and plugins. It never holds an approval, a grant or a secret.
 
-- The owner can export a bot to a preset file and import one. Bots are already YAML in the config directory, and a preset uses the same format.
-- Importing asks the owner to approve anything missing: a plugin that isn't installed, a permission that isn't granted, a connector that isn't connected. The imported bot gets nothing the owner hasn't approved.
+- The owner can export a bot to a preset file and import one. Export writes only the fields listed above.
+- On import, the connectors and plugins a preset names are requests, not permissions. Approvals, grants and credentials always come from the server that imports it. Importing asks the owner to approve anything missing: a plugin that isn't installed, a permission that isn't granted, a connector that isn't connected. The imported bot gets nothing the owner hasn't approved.
 - A preset is not a policy mode preset. The policy engine's modes (Strict, Balanced and the others) set how much a bot's actions are gated. A bot preset sets what a bot is made of. The two never replace each other.
 - **Later, not planned now:** presets that a plugin ships inside itself. They wait for a later milestone and have no issue yet.
 
@@ -87,7 +89,7 @@ A **bot preset** is a file that holds one bot's setup. It names the bot's instru
 
 The host decides from the manifest, with no extra setting. The rule:
 
-> A plugin appears on a bot's list when its manifest contributes something a bot calls: a tool, a connector or a custom MCP server. Every other plugin serves the server or the app, is always on, and never appears on a bot's list.
+> A plugin appears on a bot's list when its manifest contributes something a bot calls: a tool, a connector or a custom MCP server. Every other plugin serves the server or the app. It has no per-bot switch and never appears on a bot's list, but it is still limited to the permissions the owner granted it.
 
 The manifest fields that exist today are `server`, `client`, `permissions.events`, `permissions.secrets`, `permissions.network`, `permissions.uiSlots`, `contributes.secretSchemes` and `contributes.screens`. None of them gives a bot a tool, so today no plugin is on a bot's list. The connector contract (M3-02) adds the contribution that names tools and connectors. This record doesn't invent its field name.
 
@@ -97,22 +99,22 @@ The manifest fields that exist today are `server`, `client`, `permissions.events
 | Secret backend (`contributes.secretSchemes`) | No | It serves the secrets broker, not a bot. A bot never sees the values it resolves. |
 | Theme | No | It changes how the app looks. |
 | Notifier | No | It sends notices to the owner. |
-| UI plugin, including one that shows bot status (`permissions.uiSlots`, `contributes.screens`) | No | It serves the app. |
-| Bot adapter | No | A bot picks its adapter through its `provider` field. The list is for what a bot may call, and an adapter runs the bot itself. |
-| Reviewer | No | The policy engine picks the reviewer for each rule. A reviewer sees only an action, never a bot's tools. |
-| Routine trigger | No | A routine's definition names its trigger. It starts runs. A bot doesn't call it. |
+| UI plugin, including one that shows bot status (`permissions.uiSlots`, `contributes.screens`) | No | It serves the app. Which bots' events it may receive is still open (see Consequences). |
+| Bot adapter | No | A bot's `provider` field selects its adapter. The list is for what a bot may call, and an adapter runs the bot itself. |
+| Reviewer | No | The policy engine calls the reviewer when no static rule matches ([0029](0029-hosted-reviewer-model.md)). A bot never calls it. |
+| Routine trigger | No | A routine's definition selects its trigger. It starts runs. A bot doesn't call it. |
 
-A plugin that does both, such as a connector with a client part that draws a screen, is on the list, because it contributes a tool.
+A connector with a client part that draws a screen is on the list, because it contributes a tool.
 
 ## Consequences
 
 - The plan's Goals gain a paragraph on specialized bots. Its Bot registry row says a bot also lists its connectors and plugins. The rows for M3-06, M4-02 and M5-13 say what each adds. The plan's text on custom MCP servers already scopes each server to specific bots, and now agrees with the rest.
 - [The plugin reference](../reference/plugins.md) gains a short section on how a grant and a bot's switch combine, and which plugins are server-wide.
-- M4-02 builds the registry's per-bot lists and the create screen's checklist. M3-06 builds the per-bot switch for custom MCP servers. M5-13 builds the switch for installed plugins, and the install screen shows which bots a new plugin could be turned on for.
+- M4-02 builds the registry's per-bot lists and the create screen's checklist. M3-03 checks the switch on the harness MCP endpoint, and M3-05 checks it in the git credential helper. M3-06 builds the per-bot switch for custom MCP servers. M5-13 builds the switch for installed plugins. M4-09's bot management tools ask the owner before changing a bot's plugins.
 - The M0 plan gains M0-19 for this docs work, in wave 1. It depends only on M0-00, and it blocks nothing in M0.
 - Cost: a plugin that is on for a bot has its whole grant for that bot. Narrowing by bot depends on the policy engine's rules, which arrive in M2 and are edited in M5-09.
-- **Open case: events.** A UI plugin's `permissions.events` grant covers every bot's events. The owner can't give one UI plugin the events of only some bots. Decide this when M5-11 defines which events a client part receives.
-- **Open case: a plugin that is both.** A plugin that adds tools and also is a bot adapter would be on the list for its tools, but its adapter role would stay server-wide. Decide this if the first such plugin appears.
+- **Open case: events.** This record doesn't say whether a UI plugin's `permissions.events` grant covers every bot's events or only some bots'. Decide this when M5-11 defines which events a client part receives.
+- **Open case: a plugin with mixed roles.** How the switch applies to a plugin that adds tools and is also, for example, a bot adapter or a secret backend is open. Decide this when the first such plugin appears.
 - Not decided here: the exact YAML shape of a bot preset, the screen layouts, and how the app shows a plugin that was switched on and later uninstalled. M4-02 and M5-13 settle these.
 
 Revisit this record when:

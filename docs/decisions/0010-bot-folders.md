@@ -5,6 +5,7 @@
 - Decided by: project owner
 - Amended by: [decision 0022](0022-bot-network-boundary.md) (the server reads bot files only through a helper that refuses symlinks)
 - Amended by: [decision 0016](0016-one-docker-container.md) (no per-bot systemd units; the runner starts bots)
+- Amended by: [decision 0058](0058-specialized-bots.md) (changing a bot's plugins always asks you, like its connectors)
 - Amends: [decision 0006](0006-shared-bot-user.md) (which bot changes need approval)
 
 ## Context
@@ -45,7 +46,7 @@ Any bot can read and edit any bot's folder, so a chief of staff can rewrite anot
 | Read another bot's definition | Tool | allow |
 | Change model | Tool | reviewer (asks you until M8 adds the reviewer) |
 | Create or archive a bot | Tool | always asks you |
-| Change provider, connectors, approval profile or folder | Tool | always asks you |
+| Change provider, connectors, plugins ([0058](0058-specialized-bots.md)), approval profile or folder | Tool | always asks you |
 | Edit its own definition or approval profile, or the policy file | n/a | denied by the hard floor |
 
 ## Consequences

@@ -355,7 +355,7 @@ Every connector implements the same interface, so GitHub, Forgejo, Notion and Gm
 - **Event source (optional):** webhook or polling, so routines can trigger on "new issue" or "PR review requested".
 - **Per-tool policy:** allow, reviewer or ask you, editable per connector and per bot in the Connections page.
 
-Bots reach connectors through one MCP endpoint the harness hosts. Each bot session gets its own short-lived bearer token for that endpoint, so the harness knows which bot made each call. The endpoint offers a bot only the connectors that bot may use ([decision 0058](../decisions/0058-specialized-bots.md)).
+Bots reach connectors through one MCP endpoint the harness hosts. Each bot session gets its own short-lived bearer token for that endpoint, so the harness knows which bot made each call. The endpoint offers a bot only the connectors that bot may use, and refuses calls to any other ([decision 0058](../decisions/0058-specialized-bots.md)).
 
 **GitHub connector design**
 
@@ -363,7 +363,7 @@ Use your own private GitHub App, installed only on the repos you choose. The gat
 
 - **Acting as the app (default):** bot actions show up as the app's bot account, which keeps a clean audit trail separate from your own activity.
 - **Acting as you (optional):** a user access token via device flow, for things only your account can do. These expire after 8 hours with a 6-month refresh token, so keep it off unless needed.
-- **Git access:** bots still clone and push with plain git. A git credential helper on the VM asks the harness for a token per operation: fetch gets a read-only token, push goes through the policy engine first. No long-lived git credential ever lands on the VM.
+- **Git access:** bots still clone and push with plain git. A git credential helper on the VM asks the harness for a token per operation: fetch gets a read-only token, push goes through the policy engine first. No long-lived git credential ever lands on the VM. The helper gives no token to a bot that doesn't have the GitHub connector switched on ([decision 0058](../decisions/0058-specialized-bots.md)).
 - **Events:** start with polling (notifications and repo events every few minutes). Webhooks need a public URL, which means Tailscale Funnel or a relay; add that later if polling is too slow.
 - **Backstops:** branch protection on default branches, and never grant the app Administration, Secrets or Workflows permissions.
 
@@ -745,9 +745,9 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M3-01 | Gateway service | Runs on a separate host or as a separate local user; authenticated channel to the harness; hosts the secrets broker | M0-14 |
 | M3-02 | Connector plugin contract | Manifest with tools, risk classes and provider permissions; auth flow; handlers; optional event source | M0-13 |
 | M0-15 | 1Password backend plugin (moved from M0 by [0053](../decisions/0053-1password-token-and-move-to-m3.md)) | Resolves op:// references with a read-only service account through the official SDK; grants per consumer, bot and item ([0020](../decisions/0020-1password-grok-bot-style.md)) through the approval protocol. Connectors whose secrets are `op://` references need it | M0-13, M0-14, M2-06 |
-| M3-03 | Harness MCP endpoint | One endpoint per bot session with a short-lived bearer token; aggregates connector tools; every call goes through the policy engine | M3-02, M2-04 |
+| M3-03 | Harness MCP endpoint | One endpoint per bot session with a short-lived bearer token; aggregates connector tools; every call goes through the policy engine; lists and accepts calls only for the connectors the bot has switched on ([0058](../decisions/0058-specialized-bots.md)) | M3-02, M2-04 |
 | M3-04 | GitHub App connector | App ID and key reference in config; per-call installation tokens scoped to one repo and one permission; tools and default policy from the main plan | M3-01, M3-03 |
-| M3-05 | Git credential helper | Fetch gets a read-only token and push goes through approval; a test proves no long-lived credential exists on the bot VM | M3-04 |
+| M3-05 | Git credential helper | Fetch gets a read-only token and push goes through approval; a test proves no long-lived credential exists on the bot VM; no token for a bot without the GitHub connector switched on ([0058](../decisions/0058-specialized-bots.md)) | M3-04 |
 | M3-06 | Custom MCP servers | stdio and Streamable HTTP; secret injection; tool discovery; new tools default to ask; hash pinning disables a changed tool; per-bot enablement, an on/off switch per bot that is off for every bot until the owner turns it on ([0058](../decisions/0058-specialized-bots.md)) | M3-03 |
 | M3-07 | Secure secret entry | Form posts straight to the broker; the value never appears in chat, logs or the harness database | M3-01 |
 | M3-08 | Work data API | Read-only GitHub queries for pull requests (checks, reviews, author) and issues (labels, assignees), cached and polled, exposed to clients as `work.updated` events | M3-04 |
@@ -778,7 +778,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M5-05 | Bot map | Live graph of bots colored by state, edges for active messages and handoffs, routines as attached nodes; click opens the chat or thread | M5-02, M4-05, M4-06 |
 | M5-06 | Work view | Pull requests and issues from connected repos with filters, checks and review state; bot-created items marked; links out to GitHub | M5-01, M3-08 |
 | M5-07 | Assign to bot | Any issue or PR can be sent to a bot from the Work view, starting a task with the item as context (`work.assign`) | M5-06, M4-03 |
-| M5-08 | Connections page | Connect GitHub, register custom MCP servers, edit per-tool policy and which bots may use each connector | M3-06, M5-01 |
+| M5-08 | Connections page | Connect GitHub, register custom MCP servers, edit per-tool policy | M3-06, M5-01 |
 | M5-09 | Policy editor | Presets, rules and messaging allowlists editable in the UI and kept in sync with the policy file | M2-07, M4-07, M5-01 |
 | M5-10 | Command palette | Ctrl+K reaches every action | M5-01 |
 | M5-11 | UI slots and plugin sandbox | Named slots including the map; sandboxed iframes with a message API; status-only and chat-content permissions enforced | M5-02, M0-13 |
