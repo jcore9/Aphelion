@@ -5,6 +5,7 @@ import { defaultConfigDir } from "../config";
 import { deviceId, deviceName, lifetimeDays } from "../devices";
 
 export const defaultStateDir = "/var/lib/aphelion";
+export const defaultPluginsDir = "/opt/aphelion/plugins";
 
 const options = {
   help: { type: "boolean", short: "h" },
@@ -12,6 +13,7 @@ const options = {
   headless: { type: "boolean" },
   "config-dir": { type: "string" },
   "state-dir": { type: "string" },
+  "plugins-dir": { type: "string" },
   compose: { type: "string" },
   days: { type: "string" },
   approve: { type: "string" },
@@ -46,8 +48,27 @@ export type Command =
   | {
       readonly kind: "plugin install";
       readonly stateDir: string;
+      readonly pluginsDir: string;
       readonly folder: string;
       readonly approve: string | undefined;
+    }
+  | {
+      readonly kind: "plugin update";
+      readonly stateDir: string;
+      readonly pluginsDir: string;
+      readonly plugin: string;
+      readonly approve: string | undefined;
+    }
+  | {
+      readonly kind: "plugin rollback";
+      readonly stateDir: string;
+      readonly pluginsDir: string;
+      readonly plugin: string;
+    }
+  | {
+      readonly kind: "plugin restart";
+      readonly stateDir: string;
+      readonly plugin: string;
     }
   | {
       readonly kind: "plugin dev";
@@ -96,8 +117,19 @@ const grammar: Record<
   "plugin install": {
     words: 2,
     operand: "folder",
-    flags: ["state-dir", "approve"],
+    flags: ["state-dir", "plugins-dir", "approve"],
   },
+  "plugin update": {
+    words: 2,
+    operand: "plugin id",
+    flags: ["state-dir", "plugins-dir", "approve"],
+  },
+  "plugin rollback": {
+    words: 2,
+    operand: "plugin id",
+    flags: ["state-dir", "plugins-dir"],
+  },
+  "plugin restart": { words: 2, operand: "plugin id", flags: ["state-dir"] },
   "plugin dev": { words: 2, operand: "folder", flags: ["state-dir"] },
   "device list": { words: 2, flags: ["state-dir"] },
   "device revoke": { words: 2, operand: "id", flags: ["state-dir"] },
@@ -237,6 +269,11 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
   const configDir = values["config-dir"] ?? defaultConfigDir;
   const stateDir = values["state-dir"] ?? defaultStateDir;
   const operand = operands[0] ?? "";
+  const pluginsDir = check(
+    "--plugins-dir",
+    absolutePath,
+    values["plugins-dir"] ?? defaultPluginsDir,
+  );
   switch (kind) {
     case "help":
     case "version":
@@ -287,10 +324,31 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
       };
     }
     case "plugin install":
+      if (!pluginsDir.ok) return pluginsDir;
       return {
         ok: true,
-        command: { kind, stateDir, folder: operand, approve: values.approve },
+        command: {
+          kind,
+          stateDir,
+          pluginsDir: pluginsDir.value,
+          folder: operand,
+          approve: values.approve,
+        },
       };
+    case "plugin update":
+    case "plugin rollback": {
+      if (!pluginsDir.ok) return pluginsDir;
+      const base = { stateDir, pluginsDir: pluginsDir.value, plugin: operand };
+      return {
+        ok: true,
+        command:
+          kind === "plugin update"
+            ? { kind, ...base, approve: values.approve }
+            : { kind, ...base },
+      };
+    }
+    case "plugin restart":
+      return { ok: true, command: { kind, stateDir, plugin: operand } };
     case "plugin dev":
       return { ok: true, command: { kind, stateDir, folder: operand } };
     case "device list":

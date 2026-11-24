@@ -26,10 +26,12 @@ function fail(message: string): never {
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
-  options: { id: { type: "string" } },
+  options: { id: { type: "string" }, repository: { type: "string" } },
 });
 if (positionals.length !== 1 || positionals[0] === undefined) {
-  fail("usage: bun run create:plugin <destination> [--id <id>]");
+  fail(
+    "usage: bun run create:plugin <destination> [--id <id>] [--repository <owner/name>]",
+  );
 }
 const destination = resolve(positionals[0]);
 const id = values.id ?? basename(destination);
@@ -48,20 +50,21 @@ const manifest = {
   ...readJson(join(template, pluginManifestFile)),
   id,
   api: `^${pluginApiVersion}`,
+  ...(values.repository === undefined ? {} : { repository: values.repository }),
 };
 const checked = parsePluginManifest(manifest);
 if (!checked.ok) {
   const issues = checked.issues.map(
     ({ field, message }) => `${field ?? "manifest"} ${message}`,
   );
-  fail(`can't use that plugin id: ${issues.join("; ")}`);
+  fail(`can't create the plugin: ${issues.join("; ")}`);
 }
 
 cpSync(template, destination, {
   recursive: true,
   filter: (source) => {
     const [top] = relative(template, source).split("/");
-    return top !== "node_modules" && top !== "dist";
+    return top !== "node_modules" && top !== "dist" && top !== "release";
   },
 });
 writeJson(join(destination, pluginManifestFile), manifest);

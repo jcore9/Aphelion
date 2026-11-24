@@ -3,12 +3,13 @@ import { Context, Effect, Layer } from "effect";
 import { formatIssue } from "../config";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
+import { installedPlugins, readInstall } from "../plugins/approvals";
 import {
-  devControl,
-  devSocketFile,
-  serveDevSocket,
-} from "../plugins/dev-control";
-import { installedPlugins, sqlitePluginGrants } from "../plugins/grants";
+  controlSocketFile,
+  pluginControl,
+  serveControlSocket,
+} from "../plugins/control";
+import { sqlitePluginGrants } from "../plugins/grants";
 import { PluginHost, pluginHostLayer } from "../plugins/host";
 import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
 import type { Database } from "../store";
@@ -36,27 +37,21 @@ const startPlugins = (
         ),
       ),
     );
-    const host = Context.get(services, PluginHost);
-    const installed = installedPlugins(db);
-    for (const { plugin, folder, digest } of installed) {
-      const started = yield* Effect.result(
-        host.start(folder, { id: plugin, digest }),
-      );
-      if (started._tag === "Failure") {
-        logger.error("an installed plugin was refused at startup", {
-          plugin,
-          folder,
-          issues: started.failure.issues.map((issue) => issue.message),
-        });
-      }
-    }
-    logger.info("plugin host started", { installed: installed.length });
+    const control = yield* pluginControl({
+      devFolder,
+      installs: () => installedPlugins(db),
+      install: (plugin) => readInstall(db, plugin),
+    }).pipe(
+      Effect.provideService(PluginHost, Context.get(services, PluginHost)),
+    );
+    yield* serveControlSocket(
+      join(stateDir, controlSocketFile),
+      control.handle,
+      logger,
+    );
+    yield* control.boot(logger);
     if (devFolder !== undefined) {
-      const handle = yield* devControl({
-        folder: devFolder,
-        approvals: () => installedPlugins(db),
-      }).pipe(Effect.provideService(PluginHost, host));
-      yield* serveDevSocket(join(stateDir, devSocketFile), handle, logger);
+      logger.info("plugin dev mode is on", { folder: devFolder });
     }
   });
 

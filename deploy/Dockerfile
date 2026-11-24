@@ -25,7 +25,8 @@ RUN apt-get update \
  && install -d -o aphelion-bot -g aphelion-bot -m 0750 /var/lib/aphelion-bots \
  && install -d -o aphelion-secrets -g aphelion-secrets -m 0700 /var/lib/aphelion-secrets \
  && install -d -o aphelion-plugins -g aphelion-plugins -m 0700 /var/lib/aphelion-plugins \
- && install -d -m 0755 /opt/aphelion/plugins /usr/local/lib/aphelion \
+ && install -d -o harness -g harness -m 0755 /opt/aphelion/plugins \
+ && install -d -m 0755 /usr/local/lib/aphelion \
  && find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
 COPY --from=build --chmod=0755 /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=build --chmod=0755 /src/apps/server/dist/aphelion /src/apps/server/dist/aphelion-secrets /usr/local/bin/

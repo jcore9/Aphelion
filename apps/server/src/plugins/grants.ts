@@ -1,8 +1,9 @@
 import type { PluginManifest } from "@aphelion/plugin-sdk";
 import { Context, Effect, Layer } from "effect";
 import type { Database } from "../store/database";
+import type { Approval } from "./approvals";
 
-const kinds = [
+export const permissionKinds = [
   "events",
   "secrets",
   "network",
@@ -10,28 +11,23 @@ const kinds = [
 ] as const satisfies readonly (keyof PluginManifest["permissions"])[];
 
 export interface Permission {
-  readonly kind: (typeof kinds)[number];
+  readonly kind: (typeof permissionKinds)[number];
   readonly name: string;
 }
 
 export class PluginGrants extends Context.Service<
   PluginGrants,
   {
+    readonly hasApproval: (approval: Approval) => Effect.Effect<boolean>;
     readonly allows: (
-      plugin: string,
+      approval: Approval,
       permission: Permission,
-      folder: string,
-      digest: string,
     ) => Effect.Effect<boolean>;
   }
->()("aphelion/plugins/PluginGrants") {
-  static readonly refuseAll = Layer.succeed(PluginGrants, {
-    allows: () => Effect.succeed(false),
-  });
-}
+>()("aphelion/plugins/PluginGrants") {}
 
 export const permissionList = (manifest: PluginManifest): Permission[] =>
-  kinds.flatMap((kind) =>
+  permissionKinds.flatMap((kind) =>
     [...new Set(manifest.permissions[kind])].map((name) => ({ kind, name })),
   );
 
@@ -43,60 +39,28 @@ export function declaresPermission(
   return names.includes(name);
 }
 
-export function recordGrants(
-  db: Database,
-  installation: {
-    readonly manifest: PluginManifest;
-    readonly folder: string;
-    readonly digest: string;
-  },
-  permissions: readonly Permission[],
-): void {
-  const { manifest, folder, digest } = installation;
-  if (
-    permissions.some((permission) => !declaresPermission(manifest, permission))
-  ) {
-    throw new Error("a grant must be declared in the manifest");
-  }
-  db.transaction(() => {
-    db.run(
-      "INSERT INTO plugin_installs (plugin, folder, digest) VALUES (?, ?, ?) ON CONFLICT (plugin) DO UPDATE SET folder = excluded.folder, digest = excluded.digest",
-      [manifest.id, folder, digest],
+const approvedVersion = `SELECT 1 FROM plugin_versions v
+  WHERE v.plugin = ? AND v.version = ? AND v.folder = ?
+    AND (? IS NULL OR v.files_digest = ?)`;
+
+const approvalParams = ({ id, version, folder, filesDigest }: Approval) =>
+  [id, version, folder, filesDigest ?? null, filesDigest ?? null] as const;
+
+export const sqlitePluginGrants = (db: Database) => {
+  const exists = (sql: string, params: readonly (string | null)[]) =>
+    Effect.try(() => db.all(sql, params).length > 0).pipe(
+      Effect.orElseSucceed(() => false),
     );
-    db.run("DELETE FROM plugin_grants WHERE plugin = ?", [manifest.id]);
-    for (const { kind, name } of permissions) {
-      db.run(
-        "INSERT INTO plugin_grants (plugin, folder, digest, kind, name) VALUES (?, ?, ?, ?, ?)",
-        [manifest.id, folder, digest, kind, name],
-      );
-    }
+  return Layer.succeed(PluginGrants, {
+    hasApproval: (approval) =>
+      exists(approvedVersion, approvalParams(approval)),
+    allows: (approval, { kind, name }) =>
+      exists(
+        `${approvedVersion}
+         AND EXISTS (SELECT 1 FROM plugin_grants g
+           WHERE g.plugin = v.plugin AND g.version = v.version
+             AND g.kind = ? AND g.name = ?)`,
+        [...approvalParams(approval), kind, name],
+      ),
   });
-}
-
-export const sqlitePluginGrants = (db: Database) =>
-  Layer.succeed(PluginGrants, {
-    allows: (plugin, { kind, name }, folder, digest) =>
-      Effect.try(
-        () =>
-          db.all(
-            "SELECT 1 FROM plugin_grants WHERE plugin = ? AND kind = ? AND name = ? AND folder = ? AND digest = ?",
-            [plugin, kind, name, folder, digest],
-          ).length > 0,
-      ).pipe(Effect.orElseSucceed(() => false)),
-  });
-
-export interface Installed {
-  readonly plugin: string;
-  readonly folder: string;
-  readonly digest: string;
-}
-
-export function installedPlugins(db: Database): Installed[] {
-  return db
-    .all("SELECT plugin, folder, digest FROM plugin_installs ORDER BY plugin")
-    .map((row) => ({
-      plugin: String(row["plugin"]),
-      folder: String(row["folder"]),
-      digest: String(row["digest"]),
-    }));
-}
+};

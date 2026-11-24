@@ -10,6 +10,7 @@ import { helpText } from "./help";
 import { CliIo } from "./io";
 import { pluginInstall } from "./plugin";
 import { pluginDev } from "./plugin-dev";
+import { pluginRestart, pluginRollback, pluginUpdate } from "./plugin-update";
 
 export { CliIo, processIo } from "./io";
 export { CliFailure } from "./failure";
@@ -30,6 +31,12 @@ const run = (command: Command) =>
         return yield* deviceAdd(command);
       case "plugin install":
         return yield* pluginInstall(command);
+      case "plugin update":
+        return yield* pluginUpdate(command, process.env["APHELION_GITHUB_API"]);
+      case "plugin rollback":
+        return yield* pluginRollback(command);
+      case "plugin restart":
+        return yield* pluginRestart(command);
       case "plugin dev":
         return yield* pluginDev(command);
       case "device list":

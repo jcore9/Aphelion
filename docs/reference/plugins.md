@@ -154,23 +154,141 @@ A plugin gets an event only if both are true:
 - Its manifest asks for it.
 - The owner granted it.
 
-Put the unpacked plugin in its final, read-only location. Run the install command to preview its permission requests.
+Put the unpacked plugin in its final location, where only you can change it. Run the install command to preview its permission requests.
 
 ```sh
 aphelion plugin install /path/to/plugin
 ```
 
-If you accept the listed permissions, repeat the command with the displayed `--approve` argument. This approves the complete list for that folder and manifest. Installing again replaces the previous grant list for that plugin ID. The approval applies to the displayed folder and manifest. The host reads the manifest again on every launch, including automatic restarts. A changed manifest needs a new approval. Use the same `--state-dir` as the server if you changed the default.
+If you accept the listed permissions, repeat the command with the displayed `--approve` argument. Use the same `--state-dir` as the server if you changed the default.
 
-The install command records the plugin and its grants in SQLite. The server starts every recorded plugin when it starts, so restart the server after an install. The host refuses to start or restart a recorded plugin whose manifest differs from the approved one, and logs `a plugin's manifest changed since it was approved, so it won't start`. In the container, plugins live read-only under `/opt/aphelion/plugins` ([install a plugin](../guides/install.md#install-a-plugin)).
+The approval covers every file in the folder, not only the manifest. The install command computes a digest of the folder: a SHA-256 hash of each file's path and contents, combined into one value. Hidden files count. The command refuses a folder that holds a symbolic link or another special file, more than 1000 files, or more than 64 MiB.
+
+The `--approve` value is a hash of these parts:
+
+- the plugin's `id` and `version`
+- the version that is approved now, if any
+- the folder
+- the permission list
+- the files digest
+
+The value stops working when any of these parts changes. So a value printed before another approval of the same plugin no longer matches. Preview again to get a new one.
+
+The install command records each approved version with its folder, its files digest and its grants, in SQLite. A grant belongs to one version of a plugin. When you approve a new version, the server keeps the version it replaces as the previous one. Approving the same version again replaces that version's folder, digest and grants.
+
+The server starts the current version of every installed plugin when it starts, so restart the server after an install. Before every start, and before every automatic restart after a crash, the host checks the approval and requested permissions.
+
+- The manifest's `id`, `version`, and canonical folder still have an approval, even when the plugin requests no permissions.
+- The files digest of the folder matches the approved one. Dev mode skips this check for the configured dev folder.
+- The manifest asks only for permissions that were granted to that version.
+
+If a check fails, the plugin doesn't start. An automatic restart logs `a plugin changed since it was approved, so it won't start`, with the reason. A running plugin keeps the grants of the version it started with, even after you approve a newer version.
+
+Approvals from before this change don't carry over. After you upgrade Aphelion, approve each installed plugin once more with `plugin install`. In the container, plugins live under `/opt/aphelion/plugins` ([install a plugin](../guides/install.md#install-a-plugin)).
+
+The install command also records the manifest's `repository`, so a plugin installed from a folder can [update](#updates) from that repository's releases.
 
 The host identifies `network.get` requests by the plugin's own channel. The request takes an HTTPS URL using the default port and an exact granted hostname. The host connects to a public IPv4 address, skips redirects, and limits the response to 64 KiB and the request to five seconds. The container's controls for direct network access are a separate boundary.
+
+### Updates
+
+The host checks a folder install's files just before the runner starts them, so leave the files unchanged while the folder is installed.
+
+A plugin whose manifest names a `repository` updates from that repository's GitHub releases. Each update waits for your approval. The server keeps running, and only the plugin restarts. [Update a plugin](../guides/install.md#update-a-plugin) shows the commands in the container.
+
+`aphelion plugin update ID` reads the repository's latest full release, downloads it, checks it, and prints a preview. Nothing is installed yet.
+
+```text
+Plugin aphelion-test-plugin can update from 1.0.0 to 1.1.0.
+GitHub attests that jcore9-bot/aphelion-test-plugin's release workflow built 1.1.0 from tag v1.1.0.
+adds	events	"bot.status"
+Review the changes above. To install 1.1.0 and grant its permissions, repeat the command with --approve <value it printed>
+```
+
+A line that starts with `adds` names a permission the new version asks for. A line that starts with `drops` names one it no longer asks for. When the list doesn't change, the preview says `No permission changes.` The `--approve` value is a SHA-256 hash of two approvals: the installed version's (its version, folder, files digest and grants) and the release's (its version, final folder, files digest and permissions). It has its own label, so a value from `plugin install` never works here. The command downloads and checks the release again on the approving run, so the value works only while both stay the same. If you approve the installed version again in between, even at the same version, preview the update again.
+
+With `--approve`, the command moves the release into place, records it as the current version with its grants, and keeps the version it replaces as the previous one. Then it asks the server, through the [control socket](#control-socket), to restart the plugin:
+
+```text
+Updated aphelion-test-plugin from 1.0.0 to 1.1.0.
+aphelion-test-plugin 1.1.0 runs.
+```
+
+When the server isn't running, the second line is `The server isn't running, so aphelion-test-plugin starts on 1.1.0 when the server starts.` The command still exits with code 0. For a plugin with only a client part, the second line is `aphelion-test-plugin has no server part to restart.`
+
+When a plugin with a server part fails to start or stops during the 10-second watch, the command goes back at once. It points the plugin at the old version again and tries to restart it. If that restart fails too, Aphelion keeps both versions and their approvals. After a successful restart, Aphelion drops the failed version's approval and removes its files if no approval still names them. The command exits with code 1. Standard error then says which state the new version reached and where the old one is now, for example `aphelion-test-plugin 1.1.0 didn't start (it is crashed), so Aphelion went back to 1.0.0.`
+
+When the latest release is the installed version, the command prints `aphelion-test-plugin is already on 1.1.0, the latest release. If the server still runs an older version, run aphelion plugin restart aphelion-test-plugin.` and exits with code 0. If an `--approve` run stops after recording the new version and before asking for the restart, the server can still run the older version. `aphelion plugin restart ID` asks the server to restart the plugin on its approved version. `plugin update` never goes to an older version. It refuses a latest release that is older than the installed version.
+
+`aphelion plugin rollback ID` goes back one version and restarts the plugin on it:
+
+```text
+Went back from aphelion-test-plugin 1.1.0 to 1.0.0.
+aphelion-test-plugin 1.0.0 runs.
+```
+
+When the earlier version fails to start or stops during the 10-second watch, the rollback undoes itself. The plugin points at the version it left again, with the earlier one as previous, and restarts on it. Nothing is deleted. Standard error says what happened, for example `aphelion-test-plugin 1.0.0 didn't start (it is crashed), so Aphelion stayed on 1.1.0.`, and the command exits with code 1.
+
+The server keeps two versions of each plugin, the current one and the one before it. A rollback makes the one before current, and deletes the version it left. So a second rollback is refused with `aphelion-test-plugin has no earlier version to go back to.` To return to the newer version, run `plugin update` again.
+
+Every refusal is one sentence on standard error, with exit code 1.
+
+#### What a release must hold
+
+The release workflow that `create:plugin` generates makes releases in this form ([publish a release](../guides/write-your-first-server-plugin.md#publish-a-release)):
+
+- The tag is `v` and the manifest's `version`, such as `v1.1.0`. For updates, use three numbers such as `1.1.0`. The release workflow rejects build metadata such as `+build`.
+- The release is a full release, not a draft or a pre-release. `plugin update` reads only GitHub's latest release.
+- The asset `aphelion-plugin.tar` is a plain POSIX ustar archive with no compression. It holds the contents of the plugin's `dist/` folder at its root. A leading `./` on each name is fine.
+- The asset `aphelion-plugin.tar.sigstore.json` is the attestation that `actions/attest-build-provenance` wrote for that archive.
+- The archive's `aphelion-plugin.json` has the installed plugin's `id`, the tag's version, and the installed `repository` in any mix of upper and lower case. Its `api` range includes the plugin API that this server runs.
+
+#### What the check proves
+
+An artifact attestation is a signed statement from GitHub that a workflow run built a file with a given SHA-256 hash. GitHub signs it through Sigstore, a public signing service that also records every signature in a public log. Before Aphelion opens the archive, it checks all of these:
+
+- The signature leads back to Sigstore's keys in the trust root that ships with Aphelion, [`trusted-root.json`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/plugins/updates/trusted-root.json). Sigstore's transparency log and certificate log both recorded it.
+- GitHub Actions signed it, for the workflow `.github/workflows/release.yml` of the repository the plugin names, run for the tag `v<version>`.
+- The signed statement describes a build of one file, `aphelion-plugin.tar`, whose SHA-256 equals that of the bytes Aphelion downloaded.
+
+The check doesn't prove that the code is safe. It proves which repository, workflow and tag built the archive. Anyone who can push a tag to that repository can publish a release that passes. Read the permission changes in each preview. The first `plugin install` from a folder decides which repository counts, so check the manifest's `repository` before you approve it.
+
+Aphelion never downloads the trust root while it runs. When Sigstore replaces its keys, an older Aphelion refuses new releases with a message that the release isn't genuine, or is signed with a key this Aphelion doesn't know. Upgrade Aphelion to fix it. Maintainers refresh the file with `bun scripts/update-trusted-root.ts`, which prints the keys it added and removed.
+
+#### Limits
+
+| What | Limit |
+| --- | --- |
+| Hosts | `api.github.com`, `github.com`, `objects.githubusercontent.com` and `release-assets.githubusercontent.com`, over HTTPS on the default port, with no user name or password in the address |
+| Redirects | 3, each checked against the hosts above |
+| Time | 30 seconds for each request |
+| Release information | 1 MiB |
+| `aphelion-plugin.tar.sigstore.json` | 1 MiB |
+| `aphelion-plugin.tar` | 32 MiB |
+| Archive entries | Files and folders only, and at most 1000 of them. No links, devices or extended headers. Every name stays inside the folder, at most 32 levels deep. |
+| Unpacked files | 16 MiB for one file, 64 MiB in all |
+
+Aphelion sends no GitHub token, so public repositories work and private ones don't. GitHub limits requests without a token for each address. When the limit is used up, the refusal says when it resets.
+
+#### Where the files go
+
+- A release is unpacked first into `.staging` in the plugins folder, then moved to `<id>@<version>`, such as `/opt/aphelion/plugins/aphelion-test-plugin@1.1.0`. Folders get mode `0755` and files `0644`, whatever the archive says.
+- At the start of every update and rollback, Aphelion removes abandoned staging files and unapproved `<id>@<version>` directories. This recovers a release folder left by an interrupted update so the next update can install it again. Cleanup keeps approved folders, their contents, and every directory or symbolic link Aphelion passes through to reach them. An update whose destination still exists reports `FOLDER already exists. Move it away, then update again.`
+- After a switch that worked, Aphelion deletes the records of versions that are neither current nor previous. It deletes a release's folder, at the path its record names, only when no other approved version names that folder. It never deletes a folder that you installed with `plugin install`.
+- `plugin install` refuses a folder inside `.staging`, or a release folder `<id>@<version>` in the plugins folder, with `FOLDER is a release folder that plugin update manages, so it can't be installed as a folder. Copy it to another folder first.` It compares real paths, so a symbolic link to the plugins folder doesn't get around it.
+- `plugin install`, `plugin update` and `plugin rollback` take turns through a kernel lock on the file `plugin-files.lock` in the state folder. A second command refuses with `Another plugin install, update or rollback is running, so try again when it finishes.` The kernel drops the lock when the command that holds it ends, even when it is killed, so a lock is never left behind.
+
+`plugin install`, `plugin update` and `plugin rollback` take `--plugins-dir DIR`, `/opt/aphelion/plugins` unless given, and `--state-dir`.
+
+#### Testing with a local GitHub
+
+`APHELION_GITHUB_API` is for tests only. Set it to an origin, such as `http://127.0.0.1:8099`, and `plugin update` sends every request there instead of to GitHub, over plain HTTP if the origin says so. The attestation check doesn't change, so only real attested releases pass. The image contract test runs [`deploy/test/fake-github.mjs`](https://github.com/jcore9/Aphelion/blob/dev/deploy/test/fake-github.mjs) in the container with the releases in [`apps/server/src/plugins/updates/fixtures`](https://github.com/jcore9/Aphelion/tree/dev/apps/server/src/plugins/updates/fixtures). Don't set the variable on a real server.
 
 ### Dev mode
 
 Dev mode lets a plugin author reload one plugin without restarting the server. It is off unless you start the container with the override file [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml). That file mounts the folder named by `APHELION_PLUGIN_DEV_DIR` read-only at `/opt/aphelion/dev-plugin`, and starts the server with `--plugin-dev /opt/aphelion/dev-plugin`.
 
-In dev mode the server opens a Unix socket at `plugin-dev.sock` in its state folder, so `/var/lib/aphelion/plugin-dev.sock` in the container. A Unix socket is a file that two programs on the same machine use to talk. Only `harness` can open it (mode `0600`). The server replaces a socket left over from an earlier run and removes it when it stops. Without `--plugin-dev`, the server opens no socket.
+`plugin dev` talks to the server through the [control socket](#control-socket). In dev mode, the server also accepts reload requests on it.
 
 Preview and approve the mounted folder once, then watch it:
 
@@ -184,15 +302,31 @@ aphelion plugin dev /opt/aphelion/dev-plugin
 
 If that run then crashes before the next reload, the command prints one more line on standard error: `weather crashed after the handshake. If its start() failed, the server log says why.` A stop you asked for, such as another reload or stopping the service, does not print that line. Ctrl-C stops watching. The last run keeps running under the server.
 
-Each reload stops the plugin, waits until it has stopped, reads the approval and the manifest again, and starts a new run through the runner. The runner checks the folder as on any other start, and the plugin runs as `aphelion-plugins` with its approved grants. Reloads run one at a time. The server refuses, with a reason:
+Each reload stops the plugin, waits until it has stopped, reads the approval and the manifest again, and starts a new run through the runner. The runner checks the folder as on any other start, and the plugin runs as `aphelion-plugins` with its approved grants. Reloads run one at a time.
+
+In the dev folder, the approval covers the permissions and the version, not the files. So a code change needs no new approval. The server refuses, with a reason:
 
 - any folder other than the one given to `--plugin-dev`
 - a folder with no approval
-- a manifest that changed since its approval. The plugin then stays stopped until you run `plugin install` with `--approve` again and change a file.
+- a manifest whose `id` or `version` differs from the approved one
+- a manifest that asks for a permission that wasn't granted
+
+After a refusal, the plugin stays stopped until you run `plugin install` with `--approve` again and change a file.
 
 A reload stops every plugin approved for the folder, then starts the one whose `id` the manifest names. So when you rename a plugin and approve the new name, the old name stops.
 
-The socket accepts only reload requests, one at a time per connection. A request sent before the last one was answered is refused. It can't approve a plugin or start one from another folder.
+### Control socket
+
+The server opens a Unix socket at `plugin-control.sock` in its state folder whenever it runs plugins, so `/var/lib/aphelion/plugin-control.sock` in the container. A Unix socket is a file that two programs on the same machine use to talk. Only `harness` can open it (mode `0600`). The server replaces a socket left over from an earlier run and removes it when it stops.
+
+The socket takes one JSON request per line, and answers each one on one line:
+
+| Request | Answer |
+| --- | --- |
+| `{"type":"restart","plugin":"ID"}` | The server stops the plugin, starts its approved version with every check in [permissions](#permissions), and waits up to 15 seconds for the run to settle. Once the run reaches `running`, the server watches it for 10 more seconds and reports the state the run enters if it stops running during that watch. It answers `{"type":"restarted","plugin":"ID","state":"STATE"}`. |
+| `{"type":"reload","folder":"FOLDER"}` | Only in [dev mode](#dev-mode). Without `--plugin-dev`, the server answers `{"type":"refused","reason":"dev mode is off"}`. |
+
+`plugin update` and `plugin rollback` send `restart` after they switch the version. `plugin restart` sends the same request for the approved version. A request the server can't carry out gets `{"type":"refused","reason":"..."}`, for example for a plugin that isn't installed. Requests run one at a time, and each connection may have one request waiting for an answer. A request sent before the last one was answered is refused, and so is a line longer than 64 KiB. The socket can't approve a plugin, and it starts only approved versions.
 
 ### Isolation between plugins
 

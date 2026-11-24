@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync, statSync } from "node:fs";
 import {
   chmod,
@@ -215,19 +214,12 @@ test("aphelion --headless starts installed plugins through the runner pipe", asy
     permissions: {},
   });
   await writeFile(join(folder, "aphelion-plugin.json"), manifest);
-  const digest = createHash("sha256").update(manifest).digest("hex");
-  const approval = createHash("sha256")
-    .update(JSON.stringify([folder, digest]))
-    .digest("hex");
-  const install = start([
-    "plugin",
-    "install",
-    folder,
-    "--approve",
-    approval,
-    "--state-dir",
-    stateDir,
-  ]);
+  const command = ["plugin", "install", folder, "--state-dir", stateDir];
+  const preview = start(command);
+  expect(await preview.exited).toBe(0);
+  const approval = /--approve ([0-9a-f]{64})$/m.exec(preview.stdout())?.[1];
+  expect(approval).toBeDefined();
+  const install = start([...command, "--approve", approval ?? ""]);
   expect(await install.exited).toBe(0);
 
   const child = spawn(
@@ -254,7 +246,12 @@ test("aphelion --headless starts installed plugins through the runner pipe", asy
       entry: "index.js",
     });
     expect(stdout).toContain('"msg":"plugin host started","installed":1');
-    expect(existsSync(join(stateDir, "plugin-dev.sock"))).toBe(false);
+    const socketPath = join(stateDir, "plugin-control.sock");
+    await waitFor(() => existsSync(socketPath));
+    expect(statSync(socketPath).mode & 0o777).toBe(0o600);
+    expect(
+      JSON.parse(await ask(socketPath, { type: "reload", folder })),
+    ).toEqual({ type: "refused", reason: "dev mode is off" });
     replies.end();
     await waitFor(() => stdout.includes("the plugin runner's pipe closed"));
   } finally {
@@ -263,10 +260,22 @@ test("aphelion --headless starts installed plugins through the runner pipe", asy
   expect(await exited).toBe(130);
 }, 20_000);
 
-test("aphelion --headless --plugin-dev opens a private dev socket and removes it on stop", async () => {
+function ask(socketPath: string, request: object) {
+  return new Promise<string>((resolve, reject) => {
+    const socket = createConnection(socketPath);
+    socket.on("error", reject);
+    socket.on("data", (chunk: Buffer) => {
+      resolve(chunk.toString());
+      socket.end();
+    });
+    socket.write(`${JSON.stringify(request)}\n`);
+  });
+}
+
+test("aphelion --headless --plugin-dev opens a private control socket and removes it on stop", async () => {
   const devFolder = join(root, "dev-plugin");
   await mkdir(devFolder);
-  const socketPath = join(stateDir, "plugin-dev.sock");
+  const socketPath = join(stateDir, "plugin-control.sock");
   const child = spawn(
     process.execPath,
     [
@@ -286,15 +295,7 @@ test("aphelion --headless --plugin-dev opens a private dev socket and removes it
   try {
     await waitFor(() => stdout.includes('"msg":"plugin dev mode is on"'));
     expect(statSync(socketPath).mode & 0o777).toBe(0o600);
-    const reply = await new Promise<string>((resolve, reject) => {
-      const socket = createConnection(socketPath);
-      socket.on("error", reject);
-      socket.on("data", (chunk: Buffer) => {
-        resolve(chunk.toString());
-        socket.end();
-      });
-      socket.write(`${JSON.stringify({ type: "reload", folder: root })}\n`);
-    });
+    const reply = await ask(socketPath, { type: "reload", folder: root });
     expect(JSON.parse(reply)).toEqual({
       type: "refused",
       reason: `dev mode reloads only ${devFolder}, not ${JSON.stringify(root)}`,

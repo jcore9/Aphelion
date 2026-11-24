@@ -4,36 +4,50 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
-import { Cause, Effect, Exit, Layer, Queue, Scope } from "effect";
+import {
+  Cause,
+  type Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Queue,
+  Scope,
+} from "effect";
 import { afterAll, beforeAll, describe } from "vitest";
 import { createLogger } from "../log";
 import {
-  devControl,
-  serveDevSocket,
-  type DevReply,
-  type DevResult,
-} from "./dev-control";
-import type { Installed } from "./grants";
+  pluginControl,
+  serveControlSocket,
+  type ControlReply,
+  type ControlResult,
+} from "./control";
+import { restartPlugin } from "./control-client";
+import type { InstallRecord } from "./approvals";
 import { PluginHost, pluginHostLayer, RunnerLink } from "./host";
 import { defaultRestartPolicy, type RestartPolicy } from "./lifecycle";
-import { PluginGrants } from "./grants";
+import { fixtureGrants } from "./host-fixture";
 import { readManifest } from "./manifest-file";
+import { filesDigest } from "./tree-digest";
 import type { RunnerReply, RunnerRequest } from "./runner-protocol";
 
 const logger = createLogger({ level: "error", write: () => undefined });
 
 function fakeRunner(exitAfterReady: boolean) {
   const starts: number[] = [];
+  const folders: string[] = [];
   let reply: (message: RunnerReply) => Effect.Effect<void> = () =>
     Effect.die("the fake runner hasn't started");
   const exit = (plugin: string, run: number) =>
     Effect.suspend(() =>
       reply({ type: "exited", plugin, run, code: 1, signal: null }),
     );
+  let close: Effect.Effect<void> = Effect.die("the fake runner hasn't started");
   const layer = Layer.effect(
     RunnerLink,
     Effect.gen(function* () {
       const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+      close = Queue.end(incoming).pipe(Effect.asVoid);
       reply = (message: RunnerReply) =>
         Queue.offer(incoming, message).pipe(Effect.asVoid);
       return {
@@ -44,6 +58,7 @@ function fakeRunner(exitAfterReady: boolean) {
             switch (request.type) {
               case "start":
                 starts.push(run);
+                folders.push(request.folder);
                 return yield* reply({ type: "started", plugin, run });
               case "stop":
                 return yield* reply({ type: "stopped", plugin, run });
@@ -85,7 +100,7 @@ function fakeRunner(exitAfterReady: boolean) {
       };
     }),
   );
-  return { layer, starts, exit };
+  return { layer, starts, folders, exit, close: Effect.suspend(() => close) };
 }
 
 let base: string;
@@ -105,6 +120,23 @@ const manifest = (version: string) =>
     permissions: {},
   });
 
+const recordOf = (path: string) =>
+  readManifest(path).pipe(
+    Effect.map(({ manifest, folder }): InstallRecord => ({
+      plugin: manifest.id,
+      current: {
+        plugin: manifest.id,
+        version: manifest.version,
+        source: "folder",
+        folder,
+        filesDigest: "not checked in dev mode",
+        repository: undefined,
+        grants: [],
+      },
+      previous: undefined,
+    })),
+  );
+
 const setup = Effect.gen(function* () {
   const root = yield* Effect.promise(() => mkdtemp(join(base, "case-")));
   const folder = join(root, "dev-plugin");
@@ -115,18 +147,14 @@ const setup = Effect.gen(function* () {
       await writeFile(join(path, "aphelion-plugin.json"), manifest("1.0.0"));
     }
   });
-  const approvals: Installed[] = [];
+  const approvals: InstallRecord[] = [];
   const approve = Effect.gen(function* () {
-    const loaded = yield* readManifest(folder);
-    approvals.splice(0, approvals.length, {
-      plugin: loaded.manifest.id,
-      folder: loaded.folder,
-      digest: loaded.digest,
-    });
+    approvals.splice(0, approvals.length, yield* recordOf(folder));
   });
-  const handle = yield* devControl({
-    folder,
-    approvals: () => approvals,
+  const { handle } = yield* pluginControl({
+    devFolder: folder,
+    installs: () => approvals,
+    install: (plugin) => approvals.find((record) => record.plugin === plugin),
   });
   const reload = (path: string) =>
     handle(JSON.stringify({ type: "reload", folder: path })).pipe(
@@ -139,6 +167,8 @@ const withHost = <A, E>(
   test: (
     starts: number[],
     exit: (plugin: string, run: number) => Effect.Effect<void>,
+    folders: string[],
+    close: Effect.Effect<void>,
   ) => Effect.Effect<A, E, PluginHost>,
   options?: {
     readonly exitAfterReady?: boolean;
@@ -149,17 +179,14 @@ const withHost = <A, E>(
   const hostLayer = options?.policy
     ? pluginHostLayer({ logger, policy: options.policy })
     : pluginHostLayer({ logger });
-  return test(runner.starts, runner.exit).pipe(
+  return test(runner.starts, runner.exit, runner.folders, runner.close).pipe(
     Effect.provide(
-      hostLayer.pipe(
-        Layer.provide(runner.layer),
-        Layer.provide(PluginGrants.refuseAll),
-      ),
+      hostLayer.pipe(Layer.provide(runner.layer), Layer.provide(fixtureGrants)),
     ),
   );
 };
 
-describe("plugin dev control", () => {
+describe("plugin dev reloads", () => {
   it.live(
     "runs the plugin whose id the manifest names when the folder has two approvals",
     () =>
@@ -175,12 +202,7 @@ describe("plugin dev control", () => {
               manifest("1.0.0").replace('"weather"', '"weather-v2"'),
             ),
           );
-          const renamed = yield* readManifest(folder);
-          approvals.push({
-            plugin: renamed.manifest.id,
-            folder: renamed.folder,
-            digest: renamed.digest,
-          });
+          approvals.push(yield* recordOf(folder));
           expect(yield* reload(folder)).toEqual({
             type: "reloaded",
             plugin: "weather-v2",
@@ -297,7 +319,7 @@ describe("plugin dev control", () => {
           const approved = yield* readManifest(folder);
           expect(yield* reload(folder)).toEqual({
             type: "refused",
-            reason: `weather stays stopped: the manifest changed since it was approved. Run aphelion plugin install ${approved.folder} to approve it again.`,
+            reason: `weather stays stopped: the plugin is weather 1.0.1, but weather 1.0.0 was approved. Run aphelion plugin install ${approved.folder} to approve it.`,
           });
           expect(yield* host.status("weather")).toMatchObject({
             state: "stopped",
@@ -316,7 +338,41 @@ describe("plugin dev control", () => {
       ),
   );
 
-  it.live("refuses a line that isn't a reload request", () =>
+  it.live(
+    "reloads a code edit without a new approval, and refuses a new permission",
+    () =>
+      withHost((starts) =>
+        Effect.gen(function* () {
+          const { folder, approve, reload } = yield* setup;
+          yield* approve;
+          yield* reload(folder);
+          yield* Effect.promise(() =>
+            writeFile(join(folder, "index.js"), "// edited"),
+          );
+          expect(yield* reload(folder)).toEqual({
+            type: "reloaded",
+            plugin: "weather",
+            state: "running",
+          });
+          yield* Effect.promise(() =>
+            writeFile(
+              join(folder, "aphelion-plugin.json"),
+              manifest("1.0.0").replace(
+                '"permissions":{}',
+                '"permissions":{"events":["bot.status"]}',
+              ),
+            ),
+          );
+          expect(yield* reload(folder)).toEqual({
+            type: "refused",
+            reason: `weather stays stopped: the plugin asks for permissions that weren't approved: events "bot.status". Run aphelion plugin install ${folder} to approve it.`,
+          });
+          expect(starts).toEqual([1, 2]);
+        }),
+      ),
+  );
+
+  it.live("refuses a line that isn't a restart or reload request", () =>
     withHost(() =>
       Effect.gen(function* () {
         const { folder, handle } = yield* setup;
@@ -331,7 +387,7 @@ describe("plugin dev control", () => {
         ).toEqual({
           reply: {
             type: "refused",
-            reason: "the request isn't a reload request",
+            reason: "the request isn't a restart or reload request",
           },
         });
       }),
@@ -339,10 +395,230 @@ describe("plugin dev control", () => {
   );
 });
 
+const installed = (folder: string) =>
+  Effect.gen(function* () {
+    const { manifest, folder: canonicalFolder } = yield* readManifest(folder);
+    return {
+      plugin: manifest.id,
+      current: {
+        plugin: manifest.id,
+        version: manifest.version,
+        source: "folder",
+        folder: canonicalFolder,
+        filesDigest: yield* filesDigest(canonicalFolder),
+        repository: undefined,
+        grants: [],
+      },
+      previous: undefined,
+    } satisfies InstallRecord;
+  });
+
+describe("plugin restarts", () => {
+  const restartSetup = (watch: Duration.Input = "20 millis") =>
+    Effect.gen(function* () {
+      const { folder } = yield* setup;
+      const records = [yield* installed(folder)];
+      const { handle } = yield* pluginControl({
+        devFolder: undefined,
+        installs: () => records,
+        install: (plugin) => records.find((record) => record.plugin === plugin),
+        restartWatch: watch,
+      });
+      const send = (request: object) =>
+        handle(JSON.stringify(request)).pipe(
+          Effect.map((result) => result.reply),
+        );
+      return { folder, send };
+    });
+
+  it.live(
+    "restart starts the approved version with dev mode off, and reload says dev mode is off",
+    () =>
+      withHost((starts) =>
+        Effect.gen(function* () {
+          const { folder, send } = yield* restartSetup();
+          expect(yield* send({ type: "restart", plugin: "weather" })).toEqual({
+            type: "restarted",
+            plugin: "weather",
+            state: "running",
+          });
+          expect(yield* send({ type: "restart", plugin: "weather" })).toEqual({
+            type: "restarted",
+            plugin: "weather",
+            state: "running",
+          });
+          expect(yield* send({ type: "reload", folder })).toEqual({
+            type: "refused",
+            reason: "dev mode is off",
+          });
+          expect(yield* send({ type: "restart", plugin: "other" })).toEqual({
+            type: "refused",
+            reason: "other isn't installed",
+          });
+          expect(starts).toEqual([1, 2]);
+        }),
+      ),
+  );
+
+  it.live(
+    "restart leaves a plugin stopped while its files differ from the approved ones",
+    () =>
+      withHost((starts) =>
+        Effect.gen(function* () {
+          const { folder, send } = yield* restartSetup();
+          const code = join(folder, "index.js");
+          yield* Effect.promise(() => writeFile(code, "changed"));
+          expect(yield* send({ type: "restart", plugin: "weather" })).toEqual({
+            type: "refused",
+            reason: `weather stays stopped: the plugin's files changed since they were approved. Run aphelion plugin install ${folder} to approve it.`,
+          });
+          expect(starts).toEqual([]);
+          yield* Effect.promise(() => rm(code));
+          expect(yield* send({ type: "restart", plugin: "weather" })).toEqual({
+            type: "restarted",
+            plugin: "weather",
+            state: "running",
+          });
+        }),
+      ),
+  );
+
+  const waitForWeather = Effect.gen(function* () {
+    const host = yield* PluginHost;
+    for (let tries = 0; tries < 600; tries++) {
+      if ((yield* host.status("weather"))?.state === "running") return;
+      yield* Effect.sleep("5 millis");
+    }
+    throw new Error("weather didn't reach running");
+  });
+
+  it.live(
+    "restart answers with the state a run leaves running for within the watch",
+    () =>
+      withHost((starts, exit) =>
+        Effect.gen(function* () {
+          const { send } = yield* restartSetup("5 seconds");
+          const restart = { type: "restart", plugin: "weather" };
+          const reply = yield* Effect.forkChild(send(restart));
+          yield* waitForWeather;
+          yield* exit("weather", 1);
+          expect(yield* Fiber.join(reply)).toEqual({
+            type: "restarted",
+            plugin: "weather",
+            state: "crashed",
+          });
+          expect(starts).toEqual([1]);
+        }),
+      ),
+  );
+
+  it.live("restart refuses if the runner closes during the watch", () =>
+    withHost((_starts, _exit, _folders, close) =>
+      Effect.gen(function* () {
+        const { send } = yield* restartSetup("5 seconds");
+        const reply = yield* Effect.forkChild(
+          send({ type: "restart", plugin: "weather" }),
+        );
+        yield* waitForWeather;
+        yield* close;
+        expect(yield* Fiber.join(reply)).toEqual({
+          type: "refused",
+          reason:
+            "weather can't run: the plugin runner stopped. Restart Aphelion.",
+        });
+      }),
+    ),
+  );
+});
+
+describe("booting the plugins", () => {
+  it.live(
+    "starts each plugin from its record as boot reaches it, and holds restarts until boot ends",
+    () =>
+      withHost((starts, _exit, folders) =>
+        Effect.gen(function* () {
+          const { folder, other } = yield* setup;
+          const snapshot = yield* installed(folder);
+          const fresh = yield* installed(other);
+          let restarted: Promise<ControlReply> | undefined;
+          const control = yield* pluginControl({
+            devFolder: undefined,
+            installs: () => {
+              restarted ??= Effect.runPromise(
+                control
+                  .handle(
+                    JSON.stringify({ type: "restart", plugin: "weather" }),
+                  )
+                  .pipe(Effect.map((result) => result.reply)),
+              );
+              return [snapshot];
+            },
+            install: () => fresh,
+            restartWatch: "20 millis",
+          });
+          yield* control.boot(logger);
+          const reply = yield* Effect.promise(
+            () => restarted ?? Promise.reject(new Error("no restart")),
+          );
+          expect(reply).toEqual({
+            type: "restarted",
+            plugin: "weather",
+            state: "running",
+          });
+          expect(starts).toEqual([1, 2]);
+          expect(folders).toEqual([fresh.current.folder, fresh.current.folder]);
+        }),
+      ),
+  );
+});
+
+describe("the restart client", () => {
+  it.live("reports a server that isn't running apart from a refusal", () =>
+    Effect.gen(function* () {
+      const stateDir = yield* Effect.promise(() => mkdtemp(join(base, "rc-")));
+      expect(yield* restartPlugin(stateDir, "weather")).toEqual({
+        kind: "server not running",
+      });
+      const replies: ControlReply[] = [
+        { type: "restarted", plugin: "weather", state: "running" },
+        { type: "refused", reason: "other isn't installed" },
+      ];
+      const seen: unknown[] = [];
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* serveControlSocket(
+            join(stateDir, "plugin-control.sock"),
+            (line) =>
+              Effect.sync(() => {
+                seen.push(JSON.parse(line));
+                return { reply: replies[seen.length - 1] ?? refuse };
+              }),
+            logger,
+          );
+          expect(yield* restartPlugin(stateDir, "weather")).toEqual({
+            kind: "restarted",
+            state: "running",
+          });
+          expect(yield* restartPlugin(stateDir, "other")).toEqual({
+            kind: "refused",
+            reason: "other isn't installed",
+          });
+        }),
+      );
+      expect(seen).toEqual([
+        { type: "restart", plugin: "weather" },
+        { type: "restart", plugin: "other" },
+      ]);
+    }),
+  );
+});
+
+const refuse: ControlReply = { type: "refused", reason: "unexpected" };
+
 const ask = (path: string, lines: string) =>
   Effect.promise(
     () =>
-      new Promise<DevReply[]>((resolve, reject) => {
+      new Promise<ControlReply[]>((resolve, reject) => {
         const socket = createConnection(path);
         let text = "";
         socket.on("data", (chunk: Buffer) => (text += chunk.toString()));
@@ -352,7 +628,7 @@ const ask = (path: string, lines: string) =>
             text
               .split("\n")
               .filter((line) => line !== "")
-              .map((line) => JSON.parse(line) as DevReply),
+              .map((line) => JSON.parse(line) as ControlReply),
           );
         });
         socket.write(lines, () => {
@@ -364,7 +640,7 @@ const ask = (path: string, lines: string) =>
 const askLater = (path: string, late: string) =>
   Effect.promise(
     () =>
-      new Promise<DevReply[]>((resolve, reject) => {
+      new Promise<ControlReply[]>((resolve, reject) => {
         const socket = createConnection({ path, allowHalfOpen: true });
         let text = "";
         socket.on("data", (chunk: Buffer) => (text += chunk.toString()));
@@ -377,7 +653,7 @@ const askLater = (path: string, late: string) =>
                 text
                   .split("\n")
                   .filter((line) => line !== "")
-                  .map((line) => JSON.parse(line) as DevReply),
+                  .map((line) => JSON.parse(line) as ControlReply),
               );
             }, 50);
           });
@@ -386,16 +662,16 @@ const askLater = (path: string, late: string) =>
       }),
   );
 
-describe("the plugin dev socket", () => {
+describe("the plugin control socket", () => {
   it.live(
     "answers one request at a time, is private to its owner and is removed on shutdown",
     () =>
       Effect.gen(function* () {
         const root = yield* Effect.promise(() => mkdtemp(join(base, "sock-")));
-        const path = join(root, "plugin-dev.sock");
+        const path = join(root, "plugin-control.sock");
         const seen: string[] = [];
         const scope = yield* Scope.make();
-        yield* serveDevSocket(
+        yield* serveControlSocket(
           path,
           (line) =>
             Effect.sync(() => {
@@ -447,7 +723,7 @@ describe("the plugin dev socket", () => {
   it.live("replaces a stale socket and refuses to replace another file", () =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() => mkdtemp(join(base, "stale-")));
-      const path = join(root, "plugin-dev.sock");
+      const path = join(root, "plugin-control.sock");
       const left = spawnSync(process.execPath, [
         "-e",
         `require("node:net").createServer().listen(${JSON.stringify(path)}, () => process.exit(0))`,
@@ -455,12 +731,12 @@ describe("the plugin dev socket", () => {
       expect(left.status).toBe(0);
       expect((yield* Effect.promise(() => stat(path))).isSocket()).toBe(true);
       const answer = () =>
-        Effect.succeed<DevResult>({
+        Effect.succeed<ControlResult>({
           reply: { type: "refused", reason: "fresh" },
         });
       yield* Effect.scoped(
         Effect.gen(function* () {
-          yield* serveDevSocket(path, answer, logger);
+          yield* serveControlSocket(path, answer, logger);
           expect(yield* ask(path, "hello\n")).toEqual([
             { type: "refused", reason: "fresh" },
           ]);
@@ -468,7 +744,7 @@ describe("the plugin dev socket", () => {
       );
       yield* Effect.promise(() => writeFile(path, "not a socket"));
       const refused = yield* Effect.scoped(
-        serveDevSocket(path, answer, logger),
+        serveControlSocket(path, answer, logger),
       ).pipe(Effect.flip);
       expect(String(refused)).toContain("isn't a socket");
     }),
@@ -533,12 +809,12 @@ const connectDev = (path: string) =>
 describe("a crash after the dev handshake", () => {
   const open = (
     folder: string,
-    handle: (line: string) => Effect.Effect<DevResult>,
+    handle: (line: string) => Effect.Effect<ControlResult>,
   ) =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() => mkdtemp(join(base, "watch-")));
-      const path = join(root, "plugin-dev.sock");
-      yield* serveDevSocket(path, handle, logger);
+      const path = join(root, "plugin-control.sock");
+      yield* serveControlSocket(path, handle, logger);
       const io = yield* connectDev(path);
       return { io, request: JSON.stringify({ type: "reload", folder }) };
     });

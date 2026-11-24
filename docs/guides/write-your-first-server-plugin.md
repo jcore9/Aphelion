@@ -64,7 +64,7 @@ A manifest is the file `aphelion-plugin.json`. It names the plugin and lists the
 {
   "id": "hello-plugin",
   "version": "0.1.0",
-  "api": "^0.2.1",
+  "api": "^0.2.2",
   "server": { "entry": "dist/server.mjs" },
   "permissions": { "events": ["approval.requested"] }
 }
@@ -165,7 +165,7 @@ You should see the plugin's name and a line that starts with `events` and names 
 sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/dev-plugin --approve <number>
 ```
 
-You should see `Plugin permissions saved.`
+You should see `Plugin approved.`
 
 ## Watch the folder
 
@@ -199,7 +199,7 @@ Press Ctrl-C in the `plugin dev` terminal to stop watching. The plugin keeps run
 
 ## When the manifest changes
 
-An approval covers one exact manifest. Suppose you add a permission or change the version in `aphelion-plugin.json`, then build. `bun run watch` copies the manifest only when it starts. Run `bun run build` to copy it. Then `plugin dev` prints a refusal that says `hello-plugin stays stopped: the manifest changed since it was approved`, and the plugin stops.
+In dev mode, an approval covers the plugin's `id`, its version and its permissions. A code change needs no new approval. Suppose you add a permission or change the version in `aphelion-plugin.json`, then build. `bun run watch` copies the manifest only when it starts. Run `bun run build` to copy it. Then `plugin dev` prints a refusal that starts with `hello-plugin stays stopped:` and says what doesn't match, and the plugin stops.
 
 1. Run the two `plugin install` commands again, to preview and then approve.
 2. Change a file, for example with `touch ~/hello-plugin/dist/server.mjs`. `plugin dev` reloads only after a change, not when you approve.
@@ -208,16 +208,60 @@ An approval covers one exact manifest. Suppose you add a permission or change th
 
 | `plugin dev` prints | Why | What to do |
 | --- | --- | --- |
-| `Plugin dev mode is off` | The server has no dev socket. | Check the first steps in [Start Aphelion in dev mode](#start-aphelion-in-dev-mode). |
+| `Plugin dev mode is off` | The server runs without the dev override. | Check the first steps in [Start Aphelion in dev mode](#start-aphelion-in-dev-mode). |
+| `Can't reach the server's plugin control socket` | The server isn't running. | Start the service with `sudo systemctl start aphelion`. |
 | `dev mode reloads only /opt/aphelion/dev-plugin` | You gave another folder. | Use the folder from the override. |
 | `isn't approved` | You haven't approved the folder yet. | Run the two `plugin install` commands. |
-| `stays stopped` | The manifest changed since you approved it, or it isn't valid JSON or a valid manifest. | See [When the manifest changes](#when-the-manifest-changes). |
+| `stays stopped` | The manifest's version or permissions changed since you approved it, or it isn't valid JSON or a valid manifest. | See [When the manifest changes](#when-the-manifest-changes). |
 | `Reloaded hello-plugin, but it isn't running: crashed. The server log says why.` | The plugin exited, or the runner refused the folder, for example because user `10004` can write to it. | Read the server log with `sudo journalctl -u aphelion`. |
 | `hello-plugin crashed after the handshake. If its start() failed, the server log says why.` | The handshake finished, and the run crashed after that. This can happen when `start()` throws. | Read the server log with `sudo journalctl -u aphelion`. |
+
+## Publish a release
+
+Once the plugin works, you can publish it on GitHub. Aphelion then updates it from the GitHub releases, after you approve each update.
+
+1. Create an empty repository on GitHub for the plugin, such as `octo-org/hello-plugin`.
+
+2. Add a `repository` field to `aphelion-plugin.json` with the repository's owner and name. Don't use the full URL.
+
+   ```json
+   "repository": "octo-org/hello-plugin",
+   ```
+
+   A new plugin can get the field from the start, with `bun run create:plugin ~/hello-plugin --repository octo-org/hello-plugin`.
+
+3. Commit the whole folder and push it to GitHub. Include `bun.lock` and `vendor/`. GitHub needs both to install the same packages that you installed. `.gitignore` already leaves out `node_modules/`, `dist/` and `release/`.
+
+   ```sh
+   git init -b main
+   git add .
+   git commit -m "First version"
+   git remote add origin https://github.com/octo-org/hello-plugin.git
+   git push -u origin main
+   ```
+
+   The folder has two GitHub Actions workflows in `.github/workflows/`. A workflow is a list of steps that GitHub runs on its own machines. `ci.yml` runs the type check, the tests and the build on every push.
+
+4. Push a tag that is `v` followed by the manifest's `version`. The template's version is `0.1.0`, so the tag is `v0.1.0`.
+
+   ```sh
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+The tag starts `release.yml`. It does these things, in order:
+
+1. It checks that the tag matches `version` in `aphelion-plugin.json`, and stops if it doesn't.
+2. It runs the type check, the tests and the build.
+3. It packs `dist/` into one file, `aphelion-plugin.tar`.
+4. It asks GitHub for an artifact attestation. An attestation is a signed record that says this exact file came from this workflow in this repository. Aphelion checks the attestation before it installs an update, so a file that someone changed later is refused.
+5. It creates a GitHub release named after the tag, with two files: `aphelion-plugin.tar` and the attestation, `aphelion-plugin.tar.sigstore.json`.
+
+On the repository's **Actions** tab you can watch the run. When it finishes, the release is on the **Releases** page. To publish the next version, raise `version` in `aphelion-plugin.json`, commit, and push a new tag. A version with a `-`, such as `0.2.0-rc.1`, becomes a pre-release, which Aphelion doesn't install. The workflow rejects build metadata such as `+build`.
 
 ## Next
 
 - [The plugin API reference](../reference/plugin-api.md) lists every type and function that the SDK exports, such as `PluginContext` and `createTestHost`.
 - [The plugin reference](../reference/plugins.md) lists the messages between Aphelion and a plugin, the errors, and what a crash does.
-- [Dev mode](../reference/plugins.md#dev-mode) and [`aphelion plugin dev`](../reference/cli.md#aphelion-plugin-dev-folder) describe the socket and the command exactly.
-- To run a finished plugin on a server, copy `dist/` to `/opt/aphelion/deploy/plugins/<name>` as root and follow [Install a plugin](install.md#install-a-plugin).
+- [Dev mode](../reference/plugins.md#dev-mode), the [control socket](../reference/plugins.md#control-socket) and [`aphelion plugin dev`](../reference/cli.md#aphelion-plugin-dev-folder) describe the socket and the command exactly.
+- To run a finished plugin on a server, copy `dist/` into the `plugin-files` volume as [Install a plugin](install.md#install-a-plugin) shows.

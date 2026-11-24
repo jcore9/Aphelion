@@ -1,7 +1,7 @@
 {
   "id": "example-plugin",
   "version": "0.1.0",
-  "api": "^0.2.1",
+  "api": "^0.2.2",
   "server": { "entry": "dist/server.mjs" },
   "permissions": {
     "events": ["approval.requested"]

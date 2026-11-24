@@ -19,6 +19,7 @@ export {
   type PluginIO,
   type ServerPlugin,
 } from "./plugin.ts";
+export { releaseArchiveName, releaseBundleName } from "./release.ts";
 export type { SecretBackend, SecretReference } from "./secret-backend.ts";
 export {
   eventParams,

@@ -20,6 +20,7 @@ import { createLogger } from "../log";
 import { Secret } from "../secrets";
 import { openStore } from "../store";
 import { readManifest } from "./manifest-file";
+import { filesDigest } from "./tree-digest";
 import {
   PluginHost,
   type HostOptions,
@@ -28,11 +29,13 @@ import {
   RunnerLink,
 } from "./host";
 import {
-  PluginGrants,
-  recordGrants,
-  sqlitePluginGrants,
-  type Permission,
-} from "./grants";
+  approvalFor,
+  readInstall,
+  recordVersion,
+  type InstallRecord,
+} from "./approvals";
+import { fixtureGrants, startFixture } from "./host-fixture";
+import { PluginGrants, sqlitePluginGrants, type Permission } from "./grants";
 import { rpcErrors } from "./json-rpc";
 import type { LifecycleState, RestartPolicy } from "./lifecycle";
 import { memoryLinkPair, type Framing } from "./link";
@@ -217,8 +220,9 @@ function harness(
   const { grants } = options;
   const grantsLayer = grants
     ? Layer.succeed(PluginGrants, {
-        allows: (plugin, permission) => {
-          const allowed = grants(plugin, permission);
+        hasApproval: () => Effect.succeed(true),
+        allows: ({ id }, permission) => {
+          const allowed = grants(id, permission);
           return typeof allowed === "boolean"
             ? Effect.succeed(allowed)
             : allowed;
@@ -226,7 +230,7 @@ function harness(
       })
     : options.store
       ? sqlitePluginGrants(options.store)
-      : PluginGrants.refuseAll;
+      : fixtureGrants;
   const layer = pluginHostLayer({
     logger,
     policy: options.policy ?? fastPolicy,
@@ -267,6 +271,38 @@ const serverPlugin = (id: string, permissions: Message = {}) =>
       permissions,
     }),
   );
+
+const tempStore = Effect.acquireRelease(
+  Effect.promise(async () => {
+    base ??= await mkdtemp(join(tmpdir(), "aphelion-host-"));
+    return openStore(join(base, `${crypto.randomUUID()}.db`));
+  }),
+  (db) =>
+    Effect.sync(() => {
+      db.close();
+    }),
+);
+
+const approveFolder = (
+  db: ReturnType<typeof openStore>,
+  path: string,
+  grants: readonly Permission[],
+) =>
+  Effect.gen(function* () {
+    const { manifest, folder } = yield* readManifest(path);
+    recordVersion(db, {
+      plugin: manifest.id,
+      version: manifest.version,
+      source: "folder",
+      folder,
+      filesDigest: yield* filesDigest(folder),
+      repository: undefined,
+      grants,
+    });
+    const record: InstallRecord | undefined = readInstall(db, manifest.id);
+    if (record === undefined) return yield* Effect.die("no install record");
+    return approvalFor(record, undefined);
+  });
 
 const handshake = (io: FakeIo) =>
   Effect.gen(function* () {
@@ -326,7 +362,7 @@ describe("the plugin host", () => {
       return Effect.gen(function* () {
         const host = yield* PluginHost;
         const folder = yield* serverPlugin("weather");
-        expect(yield* host.start(folder)).toEqual({
+        expect(yield* startFixture(host, folder)).toEqual({
           kind: "starting",
           id: "weather",
         });
@@ -409,7 +445,7 @@ describe("the plugin host", () => {
           client: { entry: "ui.js" },
         }),
       );
-      expect(yield* host.start(folder)).toEqual({
+      expect(yield* startFixture(host, folder)).toEqual({
         kind: "client only",
         id: "avatar",
       });
@@ -431,7 +467,7 @@ describe("the plugin host", () => {
     });
     return Effect.gen(function* () {
       const host = yield* PluginHost;
-      yield* host.start(yield* serverPlugin("flaky"));
+      yield* startFixture(host, yield* serverPlugin("flaky"));
       yield* waitFor("flaky", { state: "running", run: 2 });
       expect(record.spawned).toHaveLength(2);
       expect(logs).toContainEqual(
@@ -446,7 +482,7 @@ describe("the plugin host", () => {
   });
 
   it.live(
-    "starts an approved plugin only while its manifest matches the approval",
+    "starts an approved plugin only while every file matches the approval, also on an automatic restart",
     () => {
       let folder = "";
       const { layer, record, logs } = harness({
@@ -454,16 +490,7 @@ describe("the plugin host", () => {
           Effect.gen(function* () {
             yield* handshake(io);
             yield* Effect.promise(() =>
-              writeFile(
-                join(folder, "aphelion-plugin.json"),
-                JSON.stringify({
-                  id: "pinned",
-                  version: "1.0.1",
-                  api: "^0.2.0",
-                  server: { entry: "index.js" },
-                  permissions: {},
-                }),
-              ),
+              writeFile(join(folder, "index.js"), "twp"),
             );
             return 1;
           }),
@@ -471,27 +498,124 @@ describe("the plugin host", () => {
       return Effect.gen(function* () {
         const host = yield* PluginHost;
         folder = yield* serverPlugin("pinned");
-        const { digest } = yield* readManifest(folder);
+        const code = join(folder, "index.js");
+        yield* Effect.promise(() => writeFile(code, "two"));
+        const approval = {
+          id: "pinned",
+          version: "1.0.0",
+          folder,
+          filesDigest: yield* filesDigest(folder),
+        };
+        yield* Effect.promise(() => writeFile(code, "twp"));
 
-        const refused = yield* Effect.flip(
-          host.start(folder, { id: "pinned", digest: "0".repeat(64) }),
-        );
-        expect(refused.issues[0]?.message).toContain(
-          "the manifest changed since it was approved",
+        const refused = yield* Effect.flip(host.start(folder, approval));
+        expect(refused.issues[0]?.message).toBe(
+          `the plugin's files changed since they were approved. Run aphelion plugin install ${folder} to approve it.`,
         );
         expect(record.spawned).toEqual([]);
 
-        yield* host.start(folder, { id: "pinned", digest });
+        yield* Effect.promise(() => writeFile(code, "two"));
+        yield* host.start(folder, approval);
         yield* waitFor("pinned", { state: "stopped" });
         expect(record.spawned).toHaveLength(1);
         expect(logs).toContainEqual(
           expect.objectContaining({
-            msg: "a plugin's manifest changed since it was approved, so it won't start",
+            msg: "a plugin changed since it was approved, so it won't start",
             plugin: "pinned",
+            reason: `the plugin's files changed since they were approved. Run aphelion plugin install ${folder} to approve it.`,
           }),
         );
       }).pipe(Effect.provide(layer));
     },
+  );
+
+  for (const dev of [false, true]) {
+    it.live(
+      `requires a stored approval before each launch with no permissions (dev mode: ${String(dev)})`,
+      () =>
+        Effect.gen(function* () {
+          const db = yield* tempStore;
+          const folder = yield* serverPlugin("no-grants");
+          const { layer, record } = harness(
+            {
+              "no-grants": (io) =>
+                Effect.gen(function* () {
+                  yield* handshake(io);
+                  yield* Effect.sync(() => {
+                    db.run("DELETE FROM plugin_installs WHERE plugin = ?", [
+                      "no-grants",
+                    ]);
+                    db.run("DELETE FROM plugin_versions WHERE plugin = ?", [
+                      "no-grants",
+                    ]);
+                  });
+                  return 1;
+                }),
+            },
+            { store: db },
+          );
+          yield* Effect.gen(function* () {
+            const host = yield* PluginHost;
+            const refused = yield* Effect.flip(host.start(folder));
+            expect(refused.issues[0]?.message).toContain("has no approval");
+            const stored = yield* approveFolder(db, folder, []);
+            const beforeEdit = {
+              ...stored,
+              filesDigest: dev ? undefined : stored.filesDigest,
+            };
+            yield* Effect.promise(() =>
+              writeFile(join(folder, "index.js"), "edited"),
+            );
+            const approval = dev
+              ? beforeEdit
+              : yield* approveFolder(db, folder, []);
+            if (!dev) {
+              const stale = yield* Effect.flip(host.start(folder, beforeEdit));
+              expect(stale.issues[0]?.message).toContain("files changed");
+            }
+            yield* host.start(folder, approval);
+            yield* waitFor("no-grants", { state: "stopped" });
+            expect(record.spawned).toHaveLength(1);
+            const removed = yield* Effect.flip(host.start(folder, approval));
+            expect(removed.issues[0]?.message).toContain(
+              "approval is no longer present",
+            );
+          }).pipe(Effect.provide(layer));
+        }).pipe(Effect.scoped),
+    );
+  }
+
+  it.live(
+    "starts an approved plugin only when its manifest asks for no more than was granted",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* tempStore;
+        const folder = yield* serverPlugin("watcher", {
+          events: ["bot.status"],
+        });
+        const { layer, record } = harness(
+          {
+            watcher: (io) =>
+              handshake(io).pipe(Effect.andThen(serveUntilShutdown(io))),
+          },
+          { store: db },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          const ungranted = yield* approveFolder(db, folder, []);
+          const refused = yield* Effect.flip(host.start(folder, ungranted));
+          expect(refused.issues[0]?.message).toBe(
+            `the plugin asks for permissions that weren't approved: events "bot.status". Run aphelion plugin install ${folder} to approve it.`,
+          );
+          expect(record.spawned).toEqual([]);
+
+          const granted = yield* approveFolder(db, folder, [
+            { kind: "events", name: "bot.status" },
+          ]);
+          yield* host.start(folder, granted);
+          yield* waitFor("watcher", { state: "running" });
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
   );
 
   it.live("gives up on a plugin that keeps crashing", () => {
@@ -500,7 +624,7 @@ describe("the plugin host", () => {
     });
     return Effect.gen(function* () {
       const host = yield* PluginHost;
-      yield* host.start(yield* serverPlugin("broken"));
+      yield* startFixture(host, yield* serverPlugin("broken"));
       yield* waitFor("broken", {
         state: "stopped",
         reason: "crashed too often",
@@ -516,7 +640,7 @@ describe("the plugin host", () => {
     );
     return Effect.gen(function* () {
       const host = yield* PluginHost;
-      yield* host.start(yield* serverPlugin("hung"));
+      yield* startFixture(host, yield* serverPlugin("hung"));
       yield* waitFor("hung", { state: "crashed", run: 1 });
       yield* waitUntil(() => record.killed >= 1);
     }).pipe(Effect.provide(layer));
@@ -529,7 +653,7 @@ describe("the plugin host", () => {
     });
     return Effect.gen(function* () {
       const host = yield* PluginHost;
-      yield* host.start(yield* serverPlugin("polite"));
+      yield* startFixture(host, yield* serverPlugin("polite"));
       yield* waitFor("polite", { state: "running" });
       yield* host.stop("polite");
       yield* waitFor("polite", { state: "stopped", reason: "requested" });
@@ -546,7 +670,7 @@ describe("the plugin host", () => {
       });
       return Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.start(yield* serverPlugin("stubborn"));
+        yield* startFixture(host, yield* serverPlugin("stubborn"));
         yield* waitFor("stubborn", { state: "running" });
         yield* host.stop("stubborn");
         yield* waitFor("stubborn", { state: "stopped", reason: "requested" });
@@ -565,7 +689,7 @@ describe("the plugin host", () => {
       return Effect.gen(function* () {
         const host = yield* PluginHost;
         const folder = yield* serverPlugin("stubborn");
-        yield* host.start(folder);
+        yield* startFixture(host, folder);
         yield* waitFor("stubborn", { state: "running", run: 1 });
         yield* host.stop("stubborn");
         expect(yield* host.status("stubborn")).toEqual({
@@ -574,7 +698,7 @@ describe("the plugin host", () => {
           reason: "requested",
         });
         expect(record.killed).toBe(1);
-        yield* host.start(folder);
+        yield* startFixture(host, folder);
         const state = yield* host.waitFor(
           "stubborn",
           (state) => state.state === "running",
@@ -594,11 +718,11 @@ describe("the plugin host", () => {
         Layer.provide(
           Layer.succeed(RunnerLink, { incoming, send: () => Effect.void }),
         ),
-        Layer.provide(PluginGrants.refuseAll),
+        Layer.provide(fixtureGrants),
       );
       yield* Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.start(yield* serverPlugin("orphan"));
+        yield* startFixture(host, yield* serverPlugin("orphan"));
         const stopping = yield* Effect.forkChild(host.stop("orphan"));
         yield* Effect.sleep("50 millis");
         yield* Queue.end(incoming);
@@ -614,7 +738,7 @@ describe("the plugin host", () => {
     return Effect.gen(function* () {
       const host = yield* PluginHost;
       yield* host.stop("unknown");
-      yield* host.start(yield* serverPlugin("quitter"));
+      yield* startFixture(host, yield* serverPlugin("quitter"));
       yield* waitFor("quitter", { state: "stopped" });
       yield* host.stop("quitter");
       expect(yield* host.status("quitter")).toMatchObject({
@@ -643,7 +767,7 @@ describe("the plugin host", () => {
       });
       return Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.start(yield* serverPlugin("sloppy"));
+        yield* startFixture(host, yield* serverPlugin("sloppy"));
         yield* waitUntil(() => replies.length === 3);
         expect(replies).toEqual([
           {
@@ -675,11 +799,14 @@ describe("the plugin host", () => {
     () => {
       const replies: Message[] = [];
       const events: Message[] = [];
+      const go = Deferred.makeUnsafe<undefined>();
+      let revoked = false;
       const { layer } = harness(
         {
           watcher: (io) =>
             Effect.gen(function* () {
               yield* handshake(io);
+              yield* Deferred.await(go);
               for (const event of ["bot.status", "chat.message", "tool.call"]) {
                 replies.push(yield* io.call("events.subscribe", { event }));
               }
@@ -690,16 +817,21 @@ describe("the plugin host", () => {
             }),
         },
         {
-          grants: (_, permission) => permission.name === "bot.status",
+          grants: (_, permission) =>
+            !revoked || permission.name === "bot.status",
         },
       );
       return Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.start(
+        yield* startFixture(
+          host,
           yield* serverPlugin("watcher", {
             events: ["bot.status", "chat.message"],
           }),
         );
+        yield* waitFor("watcher", { state: "running" });
+        revoked = true;
+        yield* Deferred.succeed(go, undefined);
         yield* waitUntil(() => replies.length === 3);
         expect(
           replies.map((reply) => reply["result"] ?? reply["error"]),
@@ -736,9 +868,7 @@ describe("the plugin host", () => {
     });
     return Effect.gen(function* () {
       const host = yield* PluginHost;
-      yield* host.start(
-        yield* serverPlugin("watcher", { events: ["bot.status"] }),
-      );
+      yield* startFixture(host, yield* serverPlugin("watcher"));
       yield* waitUntil(() => reply !== undefined);
       expect(reply?.["error"]).toEqual({
         code: -32001,
@@ -759,29 +889,21 @@ describe("the plugin host", () => {
         const sibling = yield* serverPlugin("sibling", {
           network: ["api.example.com"],
         });
-        const installation = yield* readManifest(folder);
-        yield* Effect.acquireUseRelease(
-          Effect.sync(() => openStore(join(folder, "grants.db"))),
-          (db) =>
-            Effect.sync(() => {
-              recordGrants(db, { ...installation, folder }, [
-                { kind: "network", name: "api.example.com" },
-                { kind: "events", name: "bot.status" },
-                { kind: "secrets", name: "op://vault/item/field" },
-              ]);
-            }),
-          (db) =>
-            Effect.sync(() => {
-              db.close();
-            }),
-        );
-        const db = yield* Effect.acquireRelease(
-          Effect.sync(() => openStore(join(folder, "grants.db"))),
-          (db) =>
-            Effect.sync(() => {
-              db.close();
-            }),
-        );
+        const db = yield* tempStore;
+        const limited: readonly Permission[] = [
+          { kind: "network", name: "api.example.com" },
+          { kind: "events", name: "bot.status" },
+          { kind: "secrets", name: "op://vault/item/field" },
+        ];
+        const approval = yield* approveFolder(db, folder, [
+          ...limited,
+          { kind: "network", name: "other.example.com" },
+          { kind: "events", name: "chat.message" },
+        ]);
+        const siblingApproval = yield* approveFolder(db, sibling, [
+          { kind: "network", name: "api.example.com" },
+        ]);
+        const go = Deferred.makeUnsafe<undefined>();
         const replies: Message[] = [];
         const siblingReplies: Message[] = [];
         const urls: string[] = [];
@@ -794,6 +916,7 @@ describe("the plugin host", () => {
             keyring: (io) =>
               Effect.gen(function* () {
                 yield* handshake(io);
+                yield* Deferred.await(go);
                 for (const event of ["bot.status", "chat.message"]) {
                   replies.push(yield* io.call("events.subscribe", { event }));
                 }
@@ -824,6 +947,7 @@ describe("the plugin host", () => {
             sibling: (io) =>
               Effect.gen(function* () {
                 yield* handshake(io);
+                yield* Deferred.await(go);
                 siblingReplies.push(yield* io.call("network.get", { url }));
                 return yield* serveUntilShutdown(io);
               }),
@@ -852,8 +976,13 @@ describe("the plugin host", () => {
         );
         yield* Effect.gen(function* () {
           const host = yield* PluginHost;
-          yield* host.start(folder);
-          yield* host.start(sibling);
+          yield* host.start(folder, approval);
+          yield* host.start(sibling, siblingApproval);
+          yield* waitFor("keyring", { state: "running" });
+          yield* waitFor("sibling", { state: "running" });
+          yield* approveFolder(db, folder, limited);
+          yield* approveFolder(db, sibling, []);
+          yield* Deferred.succeed(go, undefined);
           yield* waitUntil(
             () => replies.length === 7 && siblingReplies.length === 1,
           );
@@ -878,10 +1007,66 @@ describe("the plugin host", () => {
             name: "bot.status",
             data: {},
           });
-          recordGrants(db, { ...installation, folder }, []);
+          yield* approveFolder(db, folder, []);
           yield* host.publish({ name: "bot.status", data: {} });
           yield* Effect.sleep("20 millis");
           expect(events).toHaveLength(1);
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "takes a run's grants away when another folder is approved at the same version",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* tempStore;
+        const status = { kind: "events", name: "bot.status" } as const;
+        const first = yield* serverPlugin("twin", { events: ["bot.status"] });
+        const copy = yield* serverPlugin("twin", { events: ["bot.status"] });
+        yield* Effect.promise(() =>
+          writeFile(join(copy, "index.js"), "other files"),
+        );
+        const crash = yield* Deferred.make<number>();
+        const events: Message[] = [];
+        const { layer, record, logs } = harness(
+          {
+            twin: (io) =>
+              Effect.gen(function* () {
+                yield* handshake(io);
+                yield* io.call("events.subscribe", { event: "bot.status" });
+                const listen = Effect.forever(
+                  io.read.pipe(
+                    Effect.map((message) => {
+                      if (message["method"] === "event") events.push(message);
+                    }),
+                  ),
+                );
+                return yield* Effect.raceFirst(listen, Deferred.await(crash));
+              }),
+          },
+          { store: db },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          yield* host.start(first, yield* approveFolder(db, first, [status]));
+          yield* waitFor("twin", { state: "running", run: 1 });
+          yield* host.publish({ name: "bot.status", data: {} });
+          yield* waitUntil(() => events.length === 1);
+
+          yield* approveFolder(db, copy, [status]);
+          yield* host.publish({ name: "bot.status", data: {} });
+          yield* Effect.sleep("20 millis");
+          expect(events).toHaveLength(1);
+
+          yield* Deferred.succeed(crash, 1);
+          yield* waitUntil(() =>
+            logs.some(
+              (log) =>
+                log["msg"] ===
+                "a plugin changed since it was approved, so it won't start",
+            ),
+          );
+          expect(record.spawned).toHaveLength(1);
         }).pipe(Effect.provide(layer));
       }).pipe(Effect.scoped),
   );
@@ -948,7 +1133,8 @@ describe("the plugin host", () => {
 
       return Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.start(
+        yield* startFixture(
+          host,
           yield* serverPlugin("watcher", { network: ["api.example.com"] }),
         );
         yield* waitUntil(() => replies.length === 2);
@@ -971,7 +1157,7 @@ describe("the plugin host", () => {
   );
 
   it.live(
-    "does not reuse the previous manifest's grants after an automatic restart",
+    "refuses an automatic restart after a dev manifest version changes",
     () =>
       Effect.gen(function* () {
         const folder = yield* serverPlugin("watcher", {
@@ -979,19 +1165,12 @@ describe("the plugin host", () => {
         });
         const file = join(folder, "aphelion-plugin.json");
         const original = yield* Effect.promise(() => readFile(file, "utf8"));
-        const installation = yield* readManifest(folder);
-        const db = yield* Effect.acquireRelease(
-          Effect.sync(() => openStore(join(folder, "grants.db"))),
-          (store) =>
-            Effect.sync(() => {
-              store.close();
-            }),
-        );
-        recordGrants(db, installation, [
+        const db = yield* tempStore;
+        const approval = yield* approveFolder(db, folder, [
           { kind: "events", name: "bot.status" },
         ]);
         const replies: Message[] = [];
-        const { layer } = harness(
+        const { layer, record } = harness(
           {
             watcher: (io) =>
               Effect.gen(function* () {
@@ -1012,10 +1191,67 @@ describe("the plugin host", () => {
         );
         yield* Effect.gen(function* () {
           const host = yield* PluginHost;
-          yield* host.start(folder);
-          yield* waitUntil(() => replies.length === 2);
+          yield* host.start(folder, { ...approval, filesDigest: undefined });
+          yield* waitFor("watcher", { state: "stopped" });
+          expect(replies.map((reply) => reply["result"])).toEqual([{}]);
+          expect(record.spawned).toHaveLength(1);
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps a run's grants when a newer version is approved, and starts only the approved version",
+    () =>
+      Effect.gen(function* () {
+        const folder = yield* serverPlugin("watcher", {
+          events: ["bot.status"],
+        });
+        const file = join(folder, "aphelion-plugin.json");
+        const original = yield* Effect.promise(() => readFile(file, "utf8"));
+        const db = yield* tempStore;
+        const go = Deferred.makeUnsafe<undefined>();
+        const replies: Message[] = [];
+        const { layer, record } = harness(
+          {
+            watcher: (io) =>
+              Effect.gen(function* () {
+                yield* handshake(io);
+                yield* Deferred.await(go);
+                replies.push(
+                  yield* io.call("events.subscribe", { event: "bot.status" }),
+                );
+                return yield* serveUntilShutdown(io);
+              }),
+          },
+          { store: db },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          const first = yield* approveFolder(db, folder, [
+            { kind: "events", name: "bot.status" },
+          ]);
+          yield* host.start(folder, first);
+          yield* waitFor("watcher", { state: "running" });
+          yield* Effect.promise(() =>
+            writeFile(
+              file,
+              original
+                .replace("1.0.0", "1.1.0")
+                .replace('["bot.status"]', "[]"),
+            ),
+          );
+          const newer = yield* approveFolder(db, folder, []);
+          yield* Effect.promise(() => writeFile(file, original));
+          yield* Deferred.succeed(go, undefined);
+          yield* waitUntil(() => replies.length === 1);
           expect(replies[0]?.["result"]).toEqual({});
-          expect(replies[1]?.["error"]).toEqual(rpcErrors.notGranted);
+
+          yield* host.stop("watcher");
+          const refused = yield* Effect.flip(host.start(folder, newer));
+          expect(refused.issues[0]?.message).toBe(
+            `the plugin is watcher 1.0.0, but watcher 1.1.0 was approved. Run aphelion plugin install ${folder} to approve it.`,
+          );
+          expect(record.spawned).toHaveLength(1);
         }).pipe(Effect.provide(layer));
       }).pipe(Effect.scoped),
   );
@@ -1042,7 +1278,8 @@ describe("the plugin host", () => {
     return Effect.gen(function* () {
       process.env["APHELION_CANARY"] = canary;
       const host = yield* PluginHost;
-      yield* host.start(
+      yield* startFixture(
+        host,
         yield* serverPlugin("keyring", {
           secrets: ["op://vault/item/field"],
           network: ["api.example.com"],
@@ -1110,7 +1347,7 @@ describe("the plugin host", () => {
         const folder = yield* serverPlugin("racer", {
           events: ["bot.status"],
         });
-        yield* host.start(folder);
+        yield* startFixture(host, folder);
         yield* waitUntil(() => subscribed);
         const opened = yield* Deferred.make<boolean>();
         gate = opened;
@@ -1118,9 +1355,10 @@ describe("the plugin host", () => {
           host.publish({ name: "bot.status", data: {} }),
         );
         yield* waitUntil(() => checking);
+        gate = undefined;
         yield* host.stop("racer");
         yield* waitFor("racer", { state: "stopped" });
-        yield* host.start(folder);
+        yield* startFixture(host, folder);
         yield* waitFor("racer", { state: "running", run: 2 });
         yield* Deferred.succeed(opened, true);
         yield* Fiber.join(publishing);
@@ -1143,9 +1381,9 @@ describe("the plugin host", () => {
       );
       return Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.start(yield* serverPlugin("polite"));
+        yield* startFixture(host, yield* serverPlugin("polite"));
         yield* waitFor("polite", { state: "running" });
-        yield* host.start(yield* serverPlugin("deaf"));
+        yield* startFixture(host, yield* serverPlugin("deaf"));
         yield* waitUntil(() =>
           record.spawned.some((spec) => spec.plugin === "deaf"),
         );
@@ -1190,7 +1428,8 @@ describe("the plugin host", () => {
       );
       return Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.start(
+        yield* startFixture(
+          host,
           yield* serverPlugin("flood", { events: ["bot.status"] }),
         );
         yield* waitFor("flood", { state: "crashed", run: 1 });
@@ -1228,7 +1467,8 @@ describe("the plugin host", () => {
       );
       return Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.start(
+        yield* startFixture(
+          host,
           yield* serverPlugin("chatter", { events: ["bot.status"] }),
         );
         yield* waitFor("chatter", { state: "crashed", run: 1 });
@@ -1253,7 +1493,7 @@ describe("the plugin host", () => {
     });
     return Effect.gen(function* () {
       const host = yield* PluginHost;
-      yield* host.start(yield* serverPlugin("chatty"));
+      yield* startFixture(host, yield* serverPlugin("chatty"));
       yield* waitUntil(() => logs.some((log) => log["line"] === tooMuchLog));
       yield* Effect.sleep("20 millis");
       expect(
@@ -1276,7 +1516,7 @@ describe("the plugin host", () => {
     });
     return Effect.gen(function* () {
       const host = yield* PluginHost;
-      yield* host.start(yield* serverPlugin("sprawling"));
+      yield* startFixture(host, yield* serverPlugin("sprawling"));
       yield* waitUntil(() => logs.some((log) => log["line"] === tooMuchLog));
       yield* Effect.sleep("20 millis");
       expect(
@@ -1315,8 +1555,8 @@ describe("the plugin host, when it closes", () => {
       );
       return Effect.gen(function* () {
         const { host, close } = yield* openHost(layer);
-        yield* host.start(yield* serverPlugin("polite"));
-        yield* host.start(yield* serverPlugin("stubborn"));
+        yield* startFixture(host, yield* serverPlugin("polite"));
+        yield* startFixture(host, yield* serverPlugin("stubborn"));
         yield* host.waitFor("polite", isRunning);
         yield* host.waitFor("stubborn", isRunning);
         const elapsed = yield* close;
@@ -1381,12 +1621,12 @@ describe("the plugin host, when it closes", () => {
           stopDeadlineMs: 500,
         }).pipe(
           Layer.provide(Layer.succeed(RunnerLink, { incoming, send })),
-          Layer.provide(PluginGrants.refuseAll),
+          Layer.provide(fixtureGrants),
         );
         const { host, close } = yield* openHost(layer);
         const ids = ["first", "second", "third"];
         for (const id of ids) {
-          yield* host.start(yield* serverPlugin(id));
+          yield* startFixture(host, yield* serverPlugin(id));
           yield* host.waitFor(id, isRunning);
         }
         const elapsed = yield* close;
@@ -1425,9 +1665,9 @@ describe("the plugin host, when it closes", () => {
       return Effect.gen(function* () {
         const { host, close } = yield* openHost(layer);
         const late = yield* serverPlugin("late");
-        yield* host.start(yield* serverPlugin("stubborn"));
+        yield* startFixture(host, yield* serverPlugin("stubborn"));
         yield* host.waitFor("stubborn", isRunning);
-        yield* host.start(yield* serverPlugin("flaky"));
+        yield* startFixture(host, yield* serverPlugin("flaky"));
         yield* host.waitFor("flaky", (state) => state.state === "crashed");
         const starting = yield* Effect.forkChild(
           waitUntil(() =>
@@ -1435,7 +1675,7 @@ describe("the plugin host, when it closes", () => {
               (entry) =>
                 entry["msg"] === "the plugin host is stopping every plugin",
             ),
-          ).pipe(Effect.andThen(host.start(late))),
+          ).pipe(Effect.andThen(startFixture(host, late))),
         );
         const elapsed = yield* close;
         yield* Fiber.join(starting);

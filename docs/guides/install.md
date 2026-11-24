@@ -139,21 +139,68 @@ Always start the server with `systemctl`. A plain `docker compose up` skips the 
 
 ## Install a plugin
 
-1. Unpack the plugin into `/opt/aphelion/deploy/plugins/<name>` as root, readable by everyone and writable only by root. The container sees it, read-only, at `/opt/aphelion/plugins/<name>`.
-2. Preview its permissions.
+Plugins live in the `plugin-files` volume. A volume is a folder that Docker keeps for the container, and it survives an image rebuild. The container sees this one at `/opt/aphelion/plugins`. Plugins can read it, but can't change it. Run these steps in `/opt/aphelion/deploy` while the service runs.
+
+1. Unpack the plugin into a folder named after it, then make every file readable by everyone and writable only by you.
+
+   ```sh
+   chmod -R a+rX,go-w <name>
+   ```
+
+2. Copy the folder into the volume. Docker gives the copy to `root`, so the plugin can't change its own files.
+
+   ```sh
+   sudo docker compose cp <name> aphelion:/opt/aphelion/plugins/<name>
+   ```
+
+3. Preview its permissions.
 
    ```sh
    sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/<name>
    ```
 
-3. If you accept the permissions, repeat the command with the `--approve` value it printed.
-4. Restart the service. The server starts every approved plugin when it starts.
+4. If you accept the permissions, repeat the command with the `--approve` value it printed. The approval covers every file in the folder, so approve again after any file changes.
+5. Restart the service. The server starts every approved plugin when it starts.
 
    ```sh
    sudo systemctl restart aphelion
    ```
 
 [Running plugins on the server](../reference/plugins.md#permissions) explains the approval. To write a plugin, see [Write your first server plugin](write-your-first-server-plugin.md).
+
+## Update a plugin
+
+A plugin whose manifest names a GitHub `repository` updates from that repository's releases. Aphelion checks that GitHub's release workflow built each release, and installs it only after you approve it. The server keeps running while the plugin switches version. Run these steps in `/opt/aphelion/deploy` while the service runs.
+
+1. Check for a newer release and preview it. Use the plugin's `id`, such as `aphelion-test-plugin`.
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion plugin update <id>
+   ```
+
+   When the latest release is the installed version, the command prints `<id> is already on <version>, the latest release. If the server still runs an older version, run aphelion plugin restart <id>.` and you are done. The server can still run an older version when an earlier `--approve` run was stopped after it installed the release and before it restarted the plugin. Then run `sudo docker compose exec -T --user harness aphelion aphelion plugin restart <id>`. Otherwise it prints the two versions, the permissions the new version adds or drops, and an `--approve` value.
+
+2. If you accept the changes, repeat the command with the `--approve` value it printed.
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion plugin update <id> --approve <value>
+   ```
+
+   The command installs the release and restarts the plugin on it. It prints `Updated <id> from <old version> to <new version>.` and then `<id> <new version> runs.`
+
+If the new version doesn't start, Aphelion goes back to the old version on its own, says so, and exits with code 1. The server log says why the new version stopped.
+
+The command refuses a release that GitHub's attestation doesn't vouch for, with one sentence that says why. Nothing changes, and the running version keeps running. [Updates](../reference/plugins.md#updates) lists every check and limit.
+
+## Go back a version
+
+Aphelion keeps the version before the current one. To go back to it, run:
+
+```sh
+sudo docker compose exec -T --user harness aphelion aphelion plugin rollback <id>
+```
+
+The command prints `Went back from <id> <current version> to <earlier version>.` and then `<id> <earlier version> runs.` It deletes the version it left, so you can go back only once. To return to the newer version, [update the plugin](#update-a-plugin) again.
 
 ## Check the network boundary
 
@@ -200,7 +247,9 @@ sudo host/install
 sudo systemctl restart aphelion
 ```
 
-`host/install` installs the new unit file and keeps the existing bootstrap key. If the service then stops and the log shows `The secrets store holds a plain-text key from before the host credential`, see [Start a fresh store after an older install](#start-a-fresh-store-after-an-older-install). The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
+`host/install` installs the new unit file and keeps the existing bootstrap key.
+
+If you upgrade from a version that kept plugins in `/opt/aphelion/deploy/plugins`, install each plugin again. That version mounted the host folder. This one keeps plugins in the `plugin-files` volume, and it checks every file of a plugin, so earlier approvals don't carry over. For each folder in `/opt/aphelion/deploy/plugins`, follow [Install a plugin](#install-a-plugin) from step 2. Until you do, the server doesn't start that plugin. Then you can delete `/opt/aphelion/deploy/plugins`. If the service then stops and the log shows `The secrets store holds a plain-text key from before the host credential`, see [Start a fresh store after an older install](#start-a-fresh-store-after-an-older-install). The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
 
 ## Not covered yet
 

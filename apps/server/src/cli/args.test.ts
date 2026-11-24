@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { defaultConfigDir } from "../config";
-import { defaultStateDir, parseCommandLine } from "./args";
+import { defaultPluginsDir, defaultStateDir, parseCommandLine } from "./args";
 
 const accepted = (argv: string[]) => {
   const result = parseCommandLine(argv);
@@ -66,6 +66,57 @@ describe("accepted command lines", () => {
         stateDir: defaultStateDir,
         pluginRunnerFds: { replies: 3, requests: 4 },
         pluginDev: "/opt/aphelion/dev-plugin",
+      },
+    ],
+    [
+      ["plugin", "update", "weather"],
+      {
+        kind: "plugin update",
+        stateDir: defaultStateDir,
+        pluginsDir: defaultPluginsDir,
+        plugin: "weather",
+        approve: undefined,
+      },
+    ],
+    [
+      [
+        "plugin",
+        "update",
+        "weather",
+        "--approve",
+        "abc",
+        "--plugins-dir",
+        "/p",
+      ],
+      {
+        kind: "plugin update",
+        stateDir: defaultStateDir,
+        pluginsDir: "/p",
+        plugin: "weather",
+        approve: "abc",
+      },
+    ],
+    [
+      ["plugin", "install", "/srv/weather", "--plugins-dir", "/p"],
+      {
+        kind: "plugin install",
+        stateDir: defaultStateDir,
+        pluginsDir: "/p",
+        folder: "/srv/weather",
+        approve: undefined,
+      },
+    ],
+    [
+      ["plugin", "restart", "weather", "--state-dir", "/s"],
+      { kind: "plugin restart", stateDir: "/s", plugin: "weather" },
+    ],
+    [
+      ["plugin", "rollback", "weather", "--state-dir", "/s"],
+      {
+        kind: "plugin rollback",
+        stateDir: "/s",
+        pluginsDir: defaultPluginsDir,
+        plugin: "weather",
       },
     ],
     [
@@ -200,6 +251,11 @@ describe("refused command lines", () => {
       "--plugin-dev must be an absolute path",
     ],
     [["plugin", "dev"], '"plugin dev" needs a folder'],
+    [["plugin", "rollback"], '"plugin rollback" needs a plugin id'],
+    [
+      ["plugin", "rollback", "weather", "--approve", "abc"],
+      '--approve isn\'t an option of "plugin rollback"',
+    ],
     [
       ["plugin", "dev", "/a", "--plugin-dev", "/a"],
       '--plugin-dev isn\'t an option of "plugin dev"',

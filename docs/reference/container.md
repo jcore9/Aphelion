@@ -40,7 +40,7 @@ The image has no `sudo`. The build removes the Ubuntu image's default `ubuntu` u
 | `/var/lib/aphelion-bots` | `aphelion-bot:aphelion-bot` | `0750` | Volume `bots` | One folder per bot |
 | `/var/lib/aphelion-secrets` | `aphelion-secrets:aphelion-secrets` | `0700` | Volume `secrets` | The broker's encrypted store |
 | `/var/lib/aphelion-plugins` | `aphelion-plugins:aphelion-plugins` | `0700` | Volume `plugin-data` | One data folder per plugin |
-| `/opt/aphelion/plugins` | Set on the host | Read-only | Host folder `deploy/plugins` | The installed plugins |
+| `/opt/aphelion/plugins` | `harness:harness` | `0755` | Volume `plugin-files` | The installed plugins: the folders you copied in, and a folder `<id>@<version>` for each release that [`plugin update`](plugins.md#updates) installed |
 | `/run/aphelion-secrets` | `aphelion-secrets:harness` | `2710` | Memory | The broker's socket |
 | `/run/secrets/bootstrap` | `root:root` | `0400` | File from the host's `/run/credentials/aphelion.service/` | The [bootstrap key](secrets.md#the-bootstrap-key). It is a file, not a folder. |
 | `/run` | `root:root` | `0755` | Memory | Runtime files |
@@ -50,7 +50,7 @@ The rest of the file system is read-only.
 
 Docker fills a new, empty volume from the image, and copies the owner and mode of the folder too. The launcher refuses to start if a folder in the table has another owner, or a mode with permissions beyond the one shown. `/run/aphelion-secrets` must have mode `2710` exactly.
 
-Plugins are read-only inside the container, so a plugin can't change its own code or another plugin's code. The [plugin runner](plugins.md#how-your-plugin-is-started) refuses a plugin folder that `aphelion-plugins` owns or can write.
+Only `harness` can write the `plugin-files` volume, so a plugin can't change its own code or another plugin's code. The [plugin runner](plugins.md#how-your-plugin-is-started) refuses a plugin folder that `aphelion-plugins` owns or can write.
 
 ## How the processes start
 
@@ -70,7 +70,7 @@ Plugins are read-only inside the container, so a plugin can't change its own cod
 
 The bot runner comes with M1-04 ([#22](https://github.com/jcore9/Aphelion/issues/22)). The launcher will start it the same way.
 
-If the environment variable `APHELION_PLUGIN_DEV_FOLDER` is set and not empty, the launcher adds `--plugin-dev` with its value to the server's command. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml) sets it. Without the variable, the server opens no dev socket. See [Dev mode](plugins.md#dev-mode).
+If the environment variable `APHELION_PLUGIN_DEV_FOLDER` is set and not empty, the launcher adds `--plugin-dev` with its value to the server's command. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml) sets it. Without the variable, the server refuses reload requests on its [control socket](plugins.md#control-socket). See [Dev mode](plugins.md#dev-mode).
 
 After the launcher closes its copies, only the server and the plugin runner hold the pipes, and no file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved, if its manifest is still the approved one ([`aphelion --headless`](cli.md#aphelion---headless)).
 
