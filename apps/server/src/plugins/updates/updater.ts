@@ -54,11 +54,20 @@ export type Applied =
       readonly outcome: SwitchOutcome;
     };
 
-export interface RolledBack {
-  readonly from: string;
-  readonly to: string;
-  readonly outcome: SwitchOutcome;
-}
+export type RolledBack =
+  | {
+      readonly kind: "switched";
+      readonly from: string;
+      readonly to: string;
+      readonly outcome: SwitchOutcome;
+    }
+  | {
+      readonly kind: "restored";
+      readonly from: string;
+      readonly to: string;
+      readonly failed: string;
+      readonly outcome: SwitchOutcome;
+    };
 
 const refuse = (reason: string) => new UpdateRefused({ reason });
 
@@ -364,6 +373,19 @@ export const rollback = (updates: Updates, plugin: string) =>
       }),
     );
     const outcome = yield* switchOutcome(updates, plugin);
-    yield* prune(updates, plugin);
-    return { from, to, outcome } satisfies RolledBack;
+    if (outcome.kind !== "not running") {
+      yield* prune(updates, plugin);
+      return { kind: "switched", from, to, outcome } satisfies RolledBack;
+    }
+    yield* attemptSync(() => {
+      pointTo(db, plugin, from, to);
+    });
+    const restored = yield* switchOutcome(updates, plugin);
+    return {
+      kind: "restored",
+      from,
+      to,
+      failed: outcome.detail,
+      outcome: restored,
+    } satisfies RolledBack;
   });

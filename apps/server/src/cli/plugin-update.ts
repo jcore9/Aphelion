@@ -131,15 +131,16 @@ export const pluginRollback = (options: Target) =>
   withUpdates(options, undefined, (updates) =>
     Effect.gen(function* () {
       const io = yield* CliIo;
-      const back = yield* rollback(updates, options.plugin);
-      const line = afterSwitch(back.outcome, options.plugin, back.to);
-      yield* io.out(
-        `Went back from ${options.plugin} ${back.from} to ${back.to}.`,
-      );
-      if (back.outcome.kind === "not running") {
-        yield* io.err(line);
+      const { plugin } = options;
+      const back = yield* rollback(updates, plugin);
+      if (back.kind === "restored") {
+        yield* io.err(
+          `${plugin} ${back.to} didn't start (${back.failed}), so Aphelion stayed on ${back.from}.`,
+        );
+        yield* io.err(afterSwitch(back.outcome, plugin, back.from));
         return yield* failed;
       }
-      yield* io.out(line);
+      yield* io.out(`Went back from ${plugin} ${back.from} to ${back.to}.`);
+      yield* io.out(afterSwitch(back.outcome, plugin, back.to));
     }),
   );

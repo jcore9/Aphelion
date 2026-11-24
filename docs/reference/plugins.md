@@ -225,6 +225,8 @@ Went back from aphelion-test-plugin 1.1.0 to 1.0.0.
 aphelion-test-plugin 1.0.0 runs.
 ```
 
+When the earlier version doesn't reach `running`, the rollback undoes itself. The plugin points at the version it left again, with the earlier one as previous, and restarts on it. Nothing is deleted. Standard error says what happened, for example `aphelion-test-plugin 1.0.0 didn't start (it is crashed), so Aphelion stayed on 1.1.0.`, and the command exits with code 1.
+
 The server keeps two versions of each plugin, the current one and the one before it. A rollback makes the one before current, and deletes the version it left. So a second rollback is refused with `aphelion-test-plugin has no earlier version to go back to.` To return to the newer version, run `plugin update` again.
 
 Every refusal is one sentence on standard error, with exit code 1.

@@ -313,6 +313,7 @@ test("rollback goes back one version and deletes the release it left", async () 
   await update(context.updates());
   const back = await Effect.runPromise(rollback(context.updates(), plugin));
   expect(back).toEqual({
+    kind: "switched",
     from: "1.1.0",
     to: "1.0.0",
     outcome: { kind: "running" },
@@ -380,4 +381,42 @@ test("an approval stops working when the installed approval changes, even at the
   expect(await update(context.updates())).toEqual(
     Exit.succeed({ kind: "switched", outcome: { kind: "running" } }),
   );
+});
+
+test("a rollback whose version doesn't start returns to the version it left and deletes nothing", async () => {
+  const context = await setup();
+  const folder = await installFolder(context, "1.0.0");
+  await update(context.updates());
+  const release = join(context.pluginsDir, `${plugin}@1.1.0`);
+  const back = await Effect.runPromise(
+    rollback(
+      context.updates({
+        outcomes: [
+          {
+            kind: "refused",
+            reason: `${plugin} stays stopped: the plugin's files changed since they were approved.`,
+          },
+        ],
+      }),
+      plugin,
+    ),
+  );
+  expect(back).toEqual({
+    kind: "restored",
+    from: "1.1.0",
+    to: "1.0.0",
+    failed: `${plugin} stays stopped: the plugin's files changed since they were approved.`,
+    outcome: { kind: "running" },
+  });
+  expect(readInstall(context.db, plugin)).toMatchObject({
+    current: { version: "1.1.0", folder: release },
+    previous: { version: "1.0.0", folder },
+  });
+  expect(await exists(release)).toBe(true);
+  expect(versions(context.db)).toEqual(["1.0.0 folder", "1.1.0 release"]);
+  expect(context.restarts).toEqual([
+    `${plugin} 1.1.0`,
+    `${plugin} 1.0.0`,
+    `${plugin} 1.1.0`,
+  ]);
 });

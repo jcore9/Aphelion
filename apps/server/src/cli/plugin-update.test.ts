@@ -13,6 +13,12 @@ import { join } from "node:path";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { lockFile } from "../adapters/file-lock";
+import { createLogger } from "../log";
+import {
+  controlSocketFile,
+  serveControlSocket,
+  type ControlReply,
+} from "../plugins/control";
 import { filesLockFile } from "../plugins/updates/files-lock";
 import { readTar, writeEntries } from "../plugins/updates/tar";
 import { cli, CliFailure, CliIo } from "./index";
@@ -254,4 +260,64 @@ test("an update approval stops working when the installed version is approved ag
   expect((await run([...update, "--approve", approval(fresh.out)])).code).toBe(
     0,
   );
+});
+
+const withServer = async (
+  replies: ControlReply[],
+  work: () => Promise<void>,
+) => {
+  const requests: unknown[] = [];
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* serveControlSocket(
+          join(stateDir, controlSocketFile),
+          (line) =>
+            Effect.sync(() => {
+              requests.push(JSON.parse(line));
+              return {
+                reply: replies.shift() ?? { type: "refused", reason: "none" },
+              };
+            }),
+          createLogger({ level: "error", write: () => undefined }),
+        );
+        yield* Effect.promise(work);
+      }),
+    ),
+  );
+  return requests;
+};
+
+test("a rollback whose version doesn't start stays on the version it left", async () => {
+  const folder = await installFolder();
+  const update = ["plugin", "update", plugin, ...dirs()];
+  await run([...update, "--approve", approval((await run(update)).out)]);
+  const reason = `${plugin} stays stopped: the plugin's files changed since they were approved. Run aphelion plugin install ${folder} to approve it.`;
+  const back = ["plugin", "rollback", plugin, ...dirs()];
+  const requests = await withServer(
+    [
+      { type: "refused", reason },
+      { type: "restarted", plugin, state: "running" },
+    ],
+    async () => {
+      expect(await run(back)).toEqual({
+        code: 1,
+        out: [],
+        err: [
+          `${plugin} 1.0.0 didn't start (${reason}), so Aphelion stayed on 1.1.0.`,
+          `${plugin} 1.1.0 runs.`,
+        ],
+      });
+    },
+  );
+  expect(requests).toHaveLength(2);
+  expect((await readdir(pluginsDir)).sort()).toEqual([
+    ".staging",
+    plugin,
+    `${plugin}@1.1.0`,
+  ]);
+  expect((await run(back)).out).toEqual([
+    `Went back from ${plugin} 1.1.0 to 1.0.0.`,
+    `The server isn't running, so ${plugin} starts on 1.0.0 when the server starts.`,
+  ]);
 });
