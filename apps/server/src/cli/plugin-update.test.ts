@@ -4,6 +4,7 @@ import {
   mkdtemp,
   rm,
   readdir,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -98,14 +99,18 @@ async function run(argv: string[]) {
 const approval = (lines: string[]) =>
   /--approve ([0-9a-f]{64})$/.exec(lines.at(-1) ?? "")?.[1] ?? "";
 
-async function installFolder() {
-  const folder = join(pluginsDir, plugin);
+async function unpackFixture(folder: string) {
   const unpacked = readTar(
     await readFile(join(fixtures, "v1.0.0", "aphelion-plugin.tar")),
   );
   if (!unpacked.ok) throw new Error(unpacked.reason);
-  await mkdir(folder);
+  await mkdir(folder, { recursive: true });
   await writeEntries(unpacked.entries, folder);
+}
+
+async function installFolder() {
+  const folder = join(pluginsDir, plugin);
+  await unpackFixture(folder);
   const install = ["plugin", "install", folder, "--state-dir", stateDir];
   const preview = await run(install);
   expect(
@@ -320,4 +325,37 @@ test("a rollback whose version doesn't start stays on the version it left", asyn
     `Went back from ${plugin} 1.1.0 to 1.0.0.`,
     `The server isn't running, so ${plugin} starts on 1.0.0 when the server starts.`,
   ]);
+});
+
+test("plugin install refuses a folder that plugin update manages", async () => {
+  const link = join(root, "plugins-link");
+  await symlink(pluginsDir, link);
+  const install = (folder: string) =>
+    run([
+      "plugin",
+      "install",
+      folder,
+      "--state-dir",
+      stateDir,
+      "--plugins-dir",
+      link,
+    ]);
+  const release = join(pluginsDir, `${plugin}@1.0.0`);
+  const staged = join(pluginsDir, ".staging", "release-x");
+  for (const [folder, what] of [
+    [release, "a release folder that plugin update manages"],
+    [staged, "inside .staging, where plugin update unpacks"],
+  ] as const) {
+    await unpackFixture(folder);
+    expect(await install(folder)).toEqual({
+      code: 1,
+      out: [],
+      err: [
+        `${folder} is ${what}, so it can't be installed as a folder. Copy it to another folder first.`,
+      ],
+    });
+  }
+  const copy = join(pluginsDir, plugin);
+  await unpackFixture(copy);
+  expect((await install(copy)).code).toBe(0);
 });

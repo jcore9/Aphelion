@@ -273,7 +273,7 @@ const pointTo = (
 
 const prune = (updates: Updates, plugin: string) =>
   attempt(async () => {
-    const { db, pluginsDir } = updates;
+    const { db } = updates;
     const folders = db.transaction(() => {
       const rows = db.all(
         `SELECT v.version, v.source, v.folder FROM plugin_versions v
@@ -294,13 +294,13 @@ const prune = (updates: Updates, plugin: string) =>
         );
       }
       return rows
+        .filter((row) => row["source"] === "release")
+        .map((row) => String(row["folder"]))
         .filter(
-          (row) =>
-            row["source"] === "release" &&
-            row["folder"] ===
-              releaseFolder(pluginsDir, plugin, String(row["version"])),
-        )
-        .map((row) => String(row["folder"]));
+          (folder) =>
+            db.all("SELECT 1 FROM plugin_versions WHERE folder = ?", [folder])
+              .length === 0,
+        );
     });
     for (const folder of folders) {
       await rm(folder, { recursive: true, force: true });

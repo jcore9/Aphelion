@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Effect } from "effect";
 import {
   approvalToken,
@@ -22,8 +22,31 @@ const installedVersion = (stateDir: string, plugin: string) =>
       )
     : Effect.succeed(undefined);
 
+const managedBy = (pluginsDir: string, folder: string) => {
+  let root: string;
+  try {
+    root = realpathSync(pluginsDir);
+  } catch {
+    return undefined;
+  }
+  const path = relative(root, folder);
+  if (
+    path === "" ||
+    path === ".." ||
+    path.startsWith(`..${sep}`) ||
+    isAbsolute(path)
+  ) {
+    return undefined;
+  }
+  const [top = ""] = path.split(sep);
+  if (top === ".staging") return "inside .staging, where plugin update unpacks";
+  if (top.includes("@")) return "a release folder that plugin update manages";
+  return undefined;
+};
+
 export const pluginInstall = (options: {
   readonly stateDir: string;
+  readonly pluginsDir: string;
   readonly folder: string;
   readonly approve: string | undefined;
 }) =>
@@ -37,6 +60,13 @@ export const pluginInstall = (options: {
       return yield* failed;
     }
     const { manifest, folder } = result.success;
+    const managed = managedBy(options.pluginsDir, folder);
+    if (managed !== undefined) {
+      yield* io.err(
+        `${folder} is ${managed}, so it can't be installed as a folder. Copy it to another folder first.`,
+      );
+      return yield* failed;
+    }
     const digest = yield* Effect.result(filesDigest(folder));
     if (digest._tag === "Failure") {
       yield* io.err(`Plugin files: ${digest.failure.reason}.`);

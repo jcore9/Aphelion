@@ -30,8 +30,10 @@ Usage:
       Stop a device's token at once.
 
   aphelion plugin install FOLDER [--approve DIGEST] [--state-dir DIR]
+                          [--plugins-dir DIR]
       Preview the permissions for an unpacked plugin. Repeat with the displayed
-      digest to save the grants.
+      digest to save the grants. FOLDER can't be a folder that plugin update
+      manages in --plugins-dir.
 
   aphelion plugin update ID [--approve DIGEST] [--state-dir DIR]
                          [--plugins-dir DIR]

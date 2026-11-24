@@ -23,7 +23,7 @@
 | --- | --- | --- | --- |
 | `--config-dir DIR` | `--headless`, `config check` | `/etc/aphelion` | The folder with the [config files](config.md) |
 | `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
-| `--plugins-dir DIR` | `plugin update`, `plugin rollback` | `/opt/aphelion/plugins` | An absolute path. The folder where updates put each release, as `<id>@<version>` |
+| `--plugins-dir DIR` | `plugin install`, `plugin update`, `plugin rollback` | `/opt/aphelion/plugins` | An absolute path. The folder where updates put each release, as `<id>@<version>`. `plugin install` refuses a folder there that updates manage. |
 | `--approve DIGEST` | `plugin install`, `plugin update` | none | The value the preview printed. It approves exactly what the preview showed. |
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |

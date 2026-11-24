@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit } from "effect";
@@ -419,4 +419,38 @@ test("a rollback whose version doesn't start returns to the version it left and 
     `${plugin} 1.0.0`,
     `${plugin} 1.1.0`,
   ]);
+});
+
+test("a release folder that another approved version names is never deleted", async () => {
+  const context = await setup();
+  await installFolder(context, "1.0.0");
+  await update(context.updates());
+  const release = join(context.pluginsDir, `${plugin}@1.1.0`);
+  const approved = readInstall(context.db, plugin)?.current;
+  if (approved === undefined) throw new Error("not installed");
+  recordVersion(context.db, {
+    ...approved,
+    version: "1.2.0",
+    source: "folder",
+  });
+  await installFolder(context, "1.3.0");
+  await Effect.runPromise(rollback(context.updates(), plugin));
+  expect(versions(context.db)).toEqual(["1.2.0 folder"]);
+  expect(await exists(release)).toBe(true);
+});
+
+test("a rollback deletes the release it left under any spelling of the plugins folder", async () => {
+  const context = await setup();
+  await installFolder(context, "1.0.0");
+  await update(context.updates());
+  const link = join(context.root, "plugins-link");
+  await symlink(context.pluginsDir, link);
+  const back = await Effect.runPromise(
+    rollback({ ...context.updates(), pluginsDir: link }, plugin),
+  );
+  expect(back.kind).toBe("switched");
+  expect(await exists(join(context.pluginsDir, `${plugin}@1.1.0`))).toBe(false);
+  expect(await update(context.updates())).toEqual(
+    Exit.succeed({ kind: "switched", outcome: { kind: "running" } }),
+  );
 });

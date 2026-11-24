@@ -48,6 +48,7 @@ export type Command =
   | {
       readonly kind: "plugin install";
       readonly stateDir: string;
+      readonly pluginsDir: string;
       readonly folder: string;
       readonly approve: string | undefined;
     }
@@ -111,7 +112,7 @@ const grammar: Record<
   "plugin install": {
     words: 2,
     operand: "folder",
-    flags: ["state-dir", "approve"],
+    flags: ["state-dir", "plugins-dir", "approve"],
   },
   "plugin update": {
     words: 2,
@@ -262,6 +263,11 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
   const configDir = values["config-dir"] ?? defaultConfigDir;
   const stateDir = values["state-dir"] ?? defaultStateDir;
   const operand = operands[0] ?? "";
+  const pluginsDir = check(
+    "--plugins-dir",
+    absolutePath,
+    values["plugins-dir"] ?? defaultPluginsDir,
+  );
   switch (kind) {
     case "help":
     case "version":
@@ -312,17 +318,19 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
       };
     }
     case "plugin install":
+      if (!pluginsDir.ok) return pluginsDir;
       return {
         ok: true,
-        command: { kind, stateDir, folder: operand, approve: values.approve },
+        command: {
+          kind,
+          stateDir,
+          pluginsDir: pluginsDir.value,
+          folder: operand,
+          approve: values.approve,
+        },
       };
     case "plugin update":
     case "plugin rollback": {
-      const pluginsDir = check(
-        "--plugins-dir",
-        absolutePath,
-        values["plugins-dir"] ?? defaultPluginsDir,
-      );
       if (!pluginsDir.ok) return pluginsDir;
       const base = { stateDir, pluginsDir: pluginsDir.value, plugin: operand };
       return {

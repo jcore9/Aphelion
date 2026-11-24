@@ -97,6 +97,16 @@ describe("accepted command lines", () => {
       },
     ],
     [
+      ["plugin", "install", "/srv/weather", "--plugins-dir", "/p"],
+      {
+        kind: "plugin install",
+        stateDir: defaultStateDir,
+        pluginsDir: "/p",
+        folder: "/srv/weather",
+        approve: undefined,
+      },
+    ],
+    [
       ["plugin", "rollback", "weather", "--state-dir", "/s"],
       {
         kind: "plugin rollback",
