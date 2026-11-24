@@ -24,7 +24,7 @@ VM A is the machine the server was installed on. The restore drill moved its dat
 
 `ufw` is Ubuntu's firewall front end. Its `MANAGE_BUILTINS` setting decides whether it also rewrites the built-in firewall chains that Docker and Aphelion use.
 
-- With `MANAGE_BUILTINS=yes`, `ufw reload` removed two of Aphelion's firewall jumps. The container could then reach the host, and forwarded traffic, including the internet, was dropped. Two of the "blocked" results in `network-check` were blocked for the wrong reason.
+- With `MANAGE_BUILTINS=yes`, `ufw reload` removed two of Aphelion's firewall rules: the count of its rules fell from 18 to 16. Those two are inferred to be the jumps that send traffic into Aphelion's chains. The container could then reach the host, and forwarded traffic, including the internet, was dropped. So two of the "blocked" results in `network-check` were probably blocked for the wrong reason (inferred).
 - The reload also deleted Docker's own `DOCKER` chain. `systemctl restart aphelion` then failed on every try with `Unable to enable OPEN PORT rule` and `No chain/target/match by that name`. The restart counter reached 20.
 - `systemctl restart docker` fixed it. Docker's chains came back, Aphelion's rules came back, and `/health` answered. Preflight, the check Aphelion runs before it starts, reported the firewall as fine and did not notice that Docker's chains were gone.
 - With `MANAGE_BUILTINS=no`, which is `ufw`'s default, a reload with no restart left everything in place. `network-check` and `/health` passed.
@@ -54,7 +54,7 @@ Each finding is a documentation fix unless noted. [PR #189](https://github.com/j
 
 | # | Finding |
 | --- | --- |
-| F1 | The install guide doesn't name the CPU requirement. Bun needs x86-64 with SSE4.2, so a Proxmox VM needs CPU type `host` or `x86-64-v2-AES`. |
+| F1 | The install guide doesn't name the CPU requirement. Bun needs x86-64 with SSE4.2, so a Proxmox VM needs a CPU type that passes it through. `host` was tested. `x86-64-v2-AES` wasn't. |
 | F2 | The guide doesn't explain the `credential.secret` warning from `host/install`. It is the host-key-only case that [decision 0050](../../decisions/0050-bootstrap-key-is-the-store-key.md) accepts. |
 | F3 | Exit test step 5 names managed hooks and the bot runner. Neither exists in M0. The checks that stood in were the read-only `/etc` and the plugin runner's pipe. |
 | F4 | With `MANAGE_BUILTINS=yes`, `ufw reload` deletes Docker's `DOCKER` chain, and "restart the service" can't recover. The fix is `systemctl restart docker`. A script fix may also be needed, because preflight doesn't notice the missing chains. |
