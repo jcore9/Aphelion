@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { lockFile } from "../adapters/file-lock";
+import { filesLockFile } from "../plugins/updates/files-lock";
 import { readTar, writeEntries } from "../plugins/updates/tar";
 import { cli, CliFailure, CliIo } from "./index";
 
@@ -193,4 +195,26 @@ test("plugin update takes --plugins-dir only as an absolute path", async () => {
   expect(result.err[0]).toBe(
     "aphelion: --plugins-dir must be an absolute path",
   );
+});
+
+test("a second plugin install, update or rollback waits its turn through the lock", async () => {
+  const folder = await installFolder();
+  const held = lockFile(join(stateDir, filesLockFile));
+  expect(held.kind).toBe("locked");
+  const busy = {
+    code: 1,
+    out: [],
+    err: [
+      "Another plugin install, update or rollback is running, so try again when it finishes.",
+    ],
+  };
+  expect(await run(["plugin", "update", plugin, ...dirs()])).toEqual(busy);
+  expect(await run(["plugin", "rollback", plugin, ...dirs()])).toEqual(busy);
+  const install = ["plugin", "install", folder, "--state-dir", stateDir];
+  const preview = await run(install);
+  const approve = [...install, "--approve", approval(preview.out)];
+  expect((await run(approve)).err).toEqual(busy.err);
+  if (held.kind === "locked") held.release();
+  expect((await run(approve)).code).toBe(0);
+  expect((await run(["plugin", "update", plugin, ...dirs()])).code).toBe(0);
 });

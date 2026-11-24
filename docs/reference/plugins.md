@@ -271,7 +271,7 @@ Aphelion sends no GitHub token, so public repositories work and private ones don
 - A release is unpacked first into `.staging` in the plugins folder, then moved to `<id>@<version>`, such as `/opt/aphelion/plugins/aphelion-test-plugin@1.1.0`. Folders get mode `0755` and files `0644`, whatever the archive says.
 - `.staging` is emptied at the start of every update and rollback.
 - After a switch, Aphelion deletes the records of versions that are neither current nor previous, and their release folders. It never deletes a folder that you installed with `plugin install`.
-- `plugin install`, `plugin update` and `plugin rollback` take turns through the lock file `plugin-files.lock` in the state folder. A second command refuses with `Another plugin install, update or rollback is running (process PID), so try again when it finishes.`
+- `plugin install`, `plugin update` and `plugin rollback` take turns through a kernel lock on the file `plugin-files.lock` in the state folder. A second command refuses with `Another plugin install, update or rollback is running, so try again when it finishes.` The kernel drops the lock when the command that holds it ends, even when it is killed, so a lock is never left behind.
 
 `plugin update` and `plugin rollback` take `--plugins-dir DIR`, `/opt/aphelion/plugins` unless given, and `--state-dir`.
 
