@@ -13,7 +13,7 @@ VM A is the machine the server was installed on. The restore drill moved its dat
 | 2. Enabled, reboot | `systemctl is-enabled aphelion`, then reboot | Pass. It reports `enabled`, and the service came back after the reboot. |
 | 3. `/health` | Request from the tailnet and from the LAN | Pass. The tailnet request returned `200` and `{"status":"ok"}`. The request to the host's LAN address timed out. |
 | 4. WebSocket | Open `/ws` without and with a device token | Pass. Without a token: `401 Unauthorized`. With a token from `device add`: `101 Switching Protocols`. |
-| 5. Users in the container | Sudo for all four users, plus the expected access and refusal checks | Pass. No user has `sudo`. Every allowed access worked and every refusal held. The step names managed hooks and the bot runner, which M0 doesn't have (F3). |
+| 5. Users in the container | Whether any of the four users has `sudo`, plus the expected access and refusal checks | Pass. No user has `sudo`. Every allowed access worked and every refusal held. The step names managed hooks and the bot runner, which M0 doesn't have (F3). |
 | 6. `docker inspect` | Hardening settings and mounts | Pass. Output: `true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"]`. No Docker socket is mounted. |
 | N1. network-check | `host/network-check` with five blocked targets and one allowed | Pass. The five blocked targets were blocked, `1.1.1.1:443` was reachable and names resolved. The first run used the Proxmox host as the tailnet peer, so it was rerun with a real tailnet peer. The Proxmox host was blocked too. |
 | N2. ufw reload | Reload `ufw` with `MANAGE_BUILTINS=yes`, then restart. Reload with `MANAGE_BUILTINS=no`, with no restart | Found a problem (F4). See below. |
