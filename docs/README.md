@@ -14,6 +14,7 @@ These Markdown files read the same on GitHub and on the docs site. `bun run docs
 - [Architecture and development plan](plan/aphelion-plan.md): the plan of record, imported unchanged ([decision 0004](decisions/0004-import-plan-with-m0-plan.md)). Later records amend it, and each amendment is marked in the text.
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
+  - [M0 exit test results](plan/milestones/M0-exit-test.md)
 
 ## Guides
 
