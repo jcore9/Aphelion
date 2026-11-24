@@ -17,6 +17,7 @@ import { lockFile } from "../adapters/file-lock";
 import { createLogger } from "../log";
 import {
   controlSocketFile,
+  noServerPart,
   serveControlSocket,
   type ControlReply,
 } from "../plugins/control";
@@ -295,15 +296,55 @@ const withServer = async (
   return requests;
 };
 
+test("plugin update reports both versions when it restores a running plugin", async () => {
+  await installFolder();
+  const update = ["plugin", "update", plugin, ...dirs()];
+  const approve = [...update, "--approve", approval((await run(update)).out)];
+  await withServer(
+    [
+      { type: "restarted", plugin, state: "crashed" },
+      { type: "restarted", plugin, state: "running" },
+    ],
+    async () => {
+      expect(await run(approve)).toEqual({
+        code: 1,
+        out: [],
+        err: [
+          `${plugin} 1.1.0 didn't start (it is crashed), so Aphelion went back to 1.0.0.`,
+          `${plugin} 1.0.0 runs.`,
+        ],
+      });
+    },
+  );
+});
+
+test("plugin update reports a client-only version without a restart", async () => {
+  await installFolder();
+  const update = ["plugin", "update", plugin, ...dirs()];
+  const approve = [...update, "--approve", approval((await run(update)).out)];
+  await withServer(
+    [{ type: "refused", reason: noServerPart(plugin) }],
+    async () => {
+      expect(await run(approve)).toEqual({
+        code: 0,
+        out: [
+          `Updated ${plugin} from 1.0.0 to 1.1.0.`,
+          `${plugin} has no server part to restart.`,
+        ],
+        err: [],
+      });
+    },
+  );
+});
+
 test("a rollback whose version doesn't start stays on the version it left", async () => {
-  const folder = await installFolder();
+  await installFolder();
   const update = ["plugin", "update", plugin, ...dirs()];
   await run([...update, "--approve", approval((await run(update)).out)]);
-  const reason = `${plugin} stays stopped: the plugin's files changed since they were approved. Run aphelion plugin install ${folder} to approve it.`;
   const back = ["plugin", "rollback", plugin, ...dirs()];
   const requests = await withServer(
     [
-      { type: "refused", reason },
+      { type: "restarted", plugin, state: "crashed" },
       { type: "restarted", plugin, state: "running" },
     ],
     async () => {
@@ -311,7 +352,7 @@ test("a rollback whose version doesn't start stays on the version it left", asyn
         code: 1,
         out: [],
         err: [
-          `${plugin} 1.0.0 didn't start (${reason}), so Aphelion stayed on 1.1.0.`,
+          `${plugin} 1.0.0 didn't start (it is crashed), so Aphelion stayed on 1.1.0.`,
           `${plugin} 1.1.0 runs.`,
         ],
       });

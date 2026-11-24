@@ -325,26 +325,41 @@ for ((tries = 0; tries < 50; tries++)); do
   preview=$("${update[@]}" 2>&1) && break
   sleep 0.1
 done
-grep -qF "Plugin $test_plugin can update from 1.0.0 to 1.1.0." <<<"$preview" ||
-  fail "plugin update showed no preview: $preview"
-grep -qF $'adds\tevents\t"bot.status"' <<<"$preview" ||
-  fail "the update preview doesn't show the added permission: $preview"
 token=$(sed -n 's/.*--approve \([0-9a-f]\{64\}\)$/\1/p' <<<"$preview")
+[[ -n $token ]] || fail "plugin update preview printed no approval value"
+expected_preview=$(printf '%s\n' \
+  "Plugin $test_plugin can update from 1.0.0 to 1.1.0." \
+  "GitHub attests that jcore9-bot/$test_plugin's release workflow built 1.1.0 from tag v1.1.0." \
+  $'adds\tevents\t"bot.status"' \
+  "Review the changes above. To install 1.1.0 and grant its permissions, repeat the command with --approve $token")
+[[ $preview == "$expected_preview" ]] || fail "plugin update printed a different preview"
 server_before=$(server_pid)
 [[ -n $server_before ]] || fail "no server process"
 updated=$("${update[@]}" --approve "$token" 2>&1) || fail "plugin update --approve failed: $updated"
-grep -qF "$test_plugin 1.1.0 runs." <<<"$updated" || fail "plugin update didn't report the new version running: $updated"
+[[ $updated == "Updated $test_plugin from 1.0.0 to 1.1.0."$'\n'"$test_plugin 1.1.0 runs." ]] ||
+  fail "plugin update printed something else: $updated"
 wait_for_log "$test_plugin 1.1.0 started"
 [[ $(server_pid) == "$server_before" ]] || fail "the server restarted during a plugin update"
 [[ $(test_plugin_run) == *" /opt/aphelion/plugins/$test_plugin@1.1.0" ]] ||
   fail "the test plugin doesn't run from its 1.1.0 folder: $(test_plugin_run)"
 pass "plugin update installs an attested release on approval and restarts only the plugin"
 
+latest=$("${update[@]}" 2>&1) || fail "plugin update on the latest release failed: $latest"
+[[ $latest == "$test_plugin is already on 1.1.0, the latest release. If the server still runs an older version, run aphelion plugin restart $test_plugin." ]] ||
+  fail "plugin update didn't report that it was on the latest release: $latest"
+restarted=$(docker exec --user harness "$container" aphelion plugin restart "$test_plugin" 2>&1) ||
+  fail "plugin restart failed: $restarted"
+[[ $restarted == "Restarted $test_plugin. It runs." ]] ||
+  fail "plugin restart printed something else: $restarted"
+[[ $(test_plugin_run) == *" /opt/aphelion/plugins/$test_plugin@1.1.0" ]] ||
+  fail "plugin restart didn't start the approved version"
+pass "plugin update reports the latest version and plugin restart starts it"
+
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 sleep 1
 back=$(docker exec --user harness "$container" aphelion plugin rollback "$test_plugin" 2>&1) ||
   fail "plugin rollback failed: $back"
-grep -qF "Went back from $test_plugin 1.1.0 to 1.0.0." <<<"$back" && grep -qF "$test_plugin 1.0.0 runs." <<<"$back" ||
+[[ $back == "Went back from $test_plugin 1.1.0 to 1.0.0."$'\n'"$test_plugin 1.0.0 runs." ]] ||
   fail "plugin rollback printed something else: $back"
 wait_for_log "$test_plugin 1.0.0 started"
 [[ $(server_pid) == "$server_before" ]] || fail "the server restarted during a rollback"
