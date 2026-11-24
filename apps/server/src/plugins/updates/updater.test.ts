@@ -1,5 +1,13 @@
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, stat, symlink } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit } from "effect";
@@ -453,4 +461,41 @@ test("a rollback deletes the release it left under any spelling of the plugins f
   expect(await update(context.updates())).toEqual(
     Exit.succeed({ kind: "switched", outcome: { kind: "running" } }),
   );
+});
+
+test("an update and a rollback clear a release folder that no approval names, and keep one that an approval names", async () => {
+  const context = await setup();
+  await installFolder(context, "1.0.0");
+  const release = join(context.pluginsDir, `${plugin}@1.1.0`);
+  const leftover = join(context.pluginsDir, `${plugin}@0.5.0`);
+  await mkdir(release);
+  await writeFile(join(release, "half-moved"), "");
+  recordVersion(context.db, {
+    plugin: "other-plugin",
+    version: "1.0.0",
+    source: "folder",
+    folder: release,
+    filesDigest: "digest",
+    repository: undefined,
+    grants: [],
+  });
+  expect(refusalOf(await update(context.updates()))).toBe(
+    `${release} already exists. Move it away, then update again.`,
+  );
+  expect(await exists(release)).toBe(true);
+
+  context.db.run("DELETE FROM plugin_installs WHERE plugin = ?", [
+    "other-plugin",
+  ]);
+  context.db.run("DELETE FROM plugin_versions WHERE plugin = ?", [
+    "other-plugin",
+  ]);
+  expect(await update(context.updates())).toEqual(
+    Exit.succeed({ kind: "switched", outcome: { kind: "running" } }),
+  );
+  expect(await exists(join(release, "half-moved"))).toBe(false);
+
+  await mkdir(leftover);
+  await Effect.runPromise(rollback(context.updates(), plugin));
+  expect(await exists(leftover)).toBe(false);
 });

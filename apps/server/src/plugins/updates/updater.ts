@@ -1,4 +1,13 @@
-import { chmod, lstat, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rename,
+  rm,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { gt } from "semver";
@@ -94,11 +103,34 @@ const installed = (db: Database, plugin: string) => {
 
 const stagingRoot = (pluginsDir: string) => join(pluginsDir, ".staging");
 
-const sweepStaging = (pluginsDir: string) =>
-  attempt(async () => {
-    await rm(stagingRoot(pluginsDir), { recursive: true, force: true });
-    await mkdir(stagingRoot(pluginsDir), { mode: 0o700 });
-    await chmod(stagingRoot(pluginsDir), 0o700);
+const sweep = ({ db, pluginsDir: given }: Updates) =>
+  Effect.gen(function* () {
+    const pluginsDir = yield* attempt(() => realpath(given)).pipe(
+      Effect.mapError(() =>
+        refuse(`The plugins folder ${given} can't be read.`),
+      ),
+    );
+    yield* attempt(async () => {
+      await rm(stagingRoot(pluginsDir), { recursive: true, force: true });
+      await mkdir(stagingRoot(pluginsDir), { mode: 0o700 });
+      await chmod(stagingRoot(pluginsDir), 0o700);
+      const named = new Set(
+        db
+          .all("SELECT folder FROM plugin_versions")
+          .map((row) => String(row["folder"])),
+      );
+      for (const entry of await readdir(pluginsDir, { withFileTypes: true })) {
+        const folder = join(pluginsDir, entry.name);
+        if (
+          entry.isDirectory() &&
+          entry.name.includes("@") &&
+          !named.has(folder)
+        ) {
+          await rm(folder, { recursive: true, force: true });
+        }
+      }
+    });
+    return pluginsDir;
   });
 
 const stagingFolder = (pluginsDir: string) =>
@@ -150,8 +182,8 @@ const checkManifest = (
 
 export const prepareUpdate = (updates: Updates, plugin: string) =>
   Effect.gen(function* () {
-    const { db, github, pluginsDir } = updates;
-    yield* sweepStaging(pluginsDir);
+    const { db, github } = updates;
+    const pluginsDir = yield* sweep(updates);
     const record = yield* attemptSync(() => installed(db, plugin));
     const { current } = record;
     const repository = current.repository;
@@ -358,7 +390,7 @@ export const applyUpdate = (
 export const rollback = (updates: Updates, plugin: string) =>
   Effect.gen(function* () {
     const { db } = updates;
-    yield* sweepStaging(updates.pluginsDir);
+    yield* sweep(updates);
     const { from, to } = yield* attemptSync(() =>
       db.transaction(() => {
         const record = installed(db, plugin);
