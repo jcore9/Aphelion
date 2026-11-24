@@ -42,4 +42,4 @@ To publish a version:
    git push origin v0.2.0
    ```
 
-`release.yml` then checks that the tag matches `version`, runs the type check, the tests and the build, and packs `dist/` into `aphelion-plugin.tar`. GitHub signs a record of that build, an artifact attestation, which Aphelion checks before it installs the update. The release gets two files: `aphelion-plugin.tar` and the attestation, `aphelion-plugin.tar.sigstore.json`. A version with a `-`, such as `0.2.0-rc.1`, is published as a pre-release, and Aphelion doesn't install it.
+`release.yml` then checks that the tag matches `version`, runs the type check, the tests and the build, and packs `dist/` into `aphelion-plugin.tar`. GitHub signs a record of that build, an artifact attestation, which Aphelion checks before it installs the update. The release gets two files: `aphelion-plugin.tar` and the attestation, `aphelion-plugin.tar.sigstore.json`. A version with a `-`, such as `0.2.0-rc.1`, is published as a pre-release, and Aphelion doesn't install it. The workflow rejects build metadata such as `+build`.

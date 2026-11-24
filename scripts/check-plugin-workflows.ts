@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   pluginManifestFile,
@@ -189,21 +190,40 @@ const tagCheck = stepNamed(publish, "Check the tag matches the manifest").run;
 const { version } = JSON.parse(read(join(project, pluginManifestFile))) as {
   version: string;
 };
-const runTagCheck = (tag: string) =>
-  spawnSync("bash", ["-e", "-c", tagCheck ?? "exit 2"], {
-    cwd: project,
-    env: { ...process.env, GITHUB_REF_NAME: tag },
-    encoding: "utf8",
-  });
-deepStrictEqual(
-  runTagCheck(`v${version}`).status,
-  0,
-  "the matching tag passes",
-);
-const wrongTag = runTagCheck(`v${version}9`);
-ok(
-  wrongTag.status !== 0 && wrongTag.stdout.includes("doesn't match version"),
-  "a tag that doesn't match the manifest stops the release",
-);
+ok(tagCheck, "the tag check has a shell script");
+const tagFixture = mkdtempSync(join(tmpdir(), "aphelion-release-tag-"));
+try {
+  const runTagCheck = (manifestVersion: string, tag: string) => {
+    writeFileSync(
+      join(tagFixture, pluginManifestFile),
+      JSON.stringify({ version: manifestVersion }),
+    );
+    return spawnSync("bash", ["-e", "-c", tagCheck], {
+      cwd: tagFixture,
+      env: { ...process.env, GITHUB_REF_NAME: tag },
+      encoding: "utf8",
+    });
+  };
+
+  for (const allowed of [version, `${version}-rc.1`]) {
+    deepStrictEqual(
+      runTagCheck(allowed, `v${allowed}`).status,
+      0,
+      `the matching tag v${allowed} passes`,
+    );
+  }
+  const wrongTag = runTagCheck(version, `v${version}9`);
+  ok(
+    wrongTag.status === 1 && wrongTag.stdout.includes("doesn't match version"),
+    "a tag that doesn't match the manifest stops the release",
+  );
+  const buildTag = runTagCheck(`${version}+build`, `v${version}+build`);
+  ok(
+    buildTag.status === 1 && buildTag.stdout.includes("build metadata"),
+    "build metadata stops the release even when the tag matches the manifest",
+  );
+} finally {
+  rmSync(tagFixture, { recursive: true, force: true });
+}
 
 console.log("ci.yml and release.yml match the release contract");

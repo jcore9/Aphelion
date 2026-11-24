@@ -257,7 +257,7 @@ The tag starts `release.yml`. It does these things, in order:
 4. It asks GitHub for an artifact attestation. An attestation is a signed record that says this exact file came from this workflow in this repository. Aphelion checks the attestation before it installs an update, so a file that someone changed later is refused.
 5. It creates a GitHub release named after the tag, with two files: `aphelion-plugin.tar` and the attestation, `aphelion-plugin.tar.sigstore.json`.
 
-On the repository's **Actions** tab you can watch the run. When it finishes, the release is on the **Releases** page. To publish the next version, raise `version` in `aphelion-plugin.json`, commit, and push a new tag. A version with a `-`, such as `0.2.0-rc.1`, becomes a pre-release, which Aphelion doesn't install.
+On the repository's **Actions** tab you can watch the run. When it finishes, the release is on the **Releases** page. To publish the next version, raise `version` in `aphelion-plugin.json`, commit, and push a new tag. A version with a `-`, such as `0.2.0-rc.1`, becomes a pre-release, which Aphelion doesn't install. The workflow rejects build metadata such as `+build`.
 
 ## Next
 

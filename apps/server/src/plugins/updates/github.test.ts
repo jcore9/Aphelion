@@ -77,6 +77,7 @@ describe("latestRelease", () => {
     ["a pre-release", { prerelease: true }],
     ["a draft", { draft: true }],
     ["a pre-release tag", { tag_name: "v1.1.0-beta.1" }],
+    ["a tag with build metadata", { tag_name: "v1.1.0+build" }],
     ["a tag without v", { tag_name: "1.1.0" }],
     ["a tag with leading zeros", { tag_name: "v01.1.0" }],
   ])("refuses %s", async (_, patch) => {
