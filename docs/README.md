@@ -117,3 +117,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0057](decisions/0057-plugin-updates-from-github-releases.md) | The server updates a plugin from its GitHub releases, proven genuine by an artifact attestation, on the owner's approval and with no restart | Proposed |
 | [0058](decisions/0058-specialized-bots.md) | Each bot starts with no connectors or plugins, and the owner switches on the ones it may use | Proposed |
 | [0059](decisions/0059-backup-and-restore-drill.md) | A backup is one archive of the six volumes plus the key's recovery copy, and the M0 exit test restores it on a second VM | Proposed |
+| [0060](decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) | The server stays on Linux in Docker and also builds for arm64, API keys join sign-ins, and two plugin isolation gaps close in M5 | Proposed |
