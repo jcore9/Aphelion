@@ -26,6 +26,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-03] | Spike: headless without Electron | spike, desktop | M0-00 |
 | [M0-17] | Spike: Codex headless on a ChatGPT login | spike, server | M0-00 |
 | [M0-18] | Spike: per-bot isolation with user namespaces | spike, security, **risk/security** | M0-00 |
+| [M0-19] | Write down the specialized-bot model ([decision 0058](../../decisions/0058-specialized-bots.md)) | docs, plugins | M0-00 |
 | [M0-04] | Monorepo scaffold | chore | M0-03 |
 | [M0-05] | Repo hygiene and MIT license | chore, security, **risk/security** | M0-04 |
 | [M0-16] | Docs site and decision records | docs | M0-04 |
@@ -40,7 +41,7 @@ That test needs a real VM, a reboot and a tailnet, so CI can't run it. CI covers
 | [M0-14] | Secrets broker v0 | feature, security, **risk/security** | M0-08 |
 | [M0-15] | ~~1Password backend plugin~~ Moved to M3 ([decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md)) | feature, plugins, security, **risk/security** | M0-13, M0-14 |
 
-~~Seven of the eighteen~~ Six of the seventeen work issues ([decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md)) carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
+~~Seven of the eighteen~~ ~~Six of the seventeen~~ Six of the eighteen work issues ([decision 0053](../../decisions/0053-1password-token-and-move-to-m3.md), [decision 0058](../../decisions/0058-specialized-bots.md)) carry `risk/security`, so their PRs get a full line-by-line review. The splits proposed below keep each of those PRs small enough to review that way.
 
 ### Out of scope
 
@@ -59,6 +60,7 @@ flowchart LR
   m00 --> s3["M0-03 spike: headless"]
   m00 --> s4["M0-17 spike: Codex"]
   m00 --> s5["M0-18 spike: namespaces"]
+  m00 --> d1["M0-19 docs: specialized bots"]
   s5 --> m12
   s3 --> m04["M0-04 scaffold"]
   m04 --> m05["M0-05 hygiene"]
@@ -79,7 +81,7 @@ flowchart LR
 
 | Wave | Starts when | Issues, all in parallel |
 | --- | --- | --- |
-| 1 | This plan is approved | M0-01, M0-02, M0-03, M0-17, M0-18 |
+| 1 | This plan is approved | M0-01, M0-02, M0-03, M0-17, M0-18, M0-19 |
 | 2 | M0-03's finding is approved | M0-04 |
 | 3 | M0-04 merges | M0-05, M0-16, M0-06, M0-07 |
 | 4 | Its dependencies merge | M0-08, M0-09, M0-13 |
@@ -96,6 +98,8 @@ M0-01 and M0-02 block nothing inside M0. They block [M1-02] and [M4-01], and the
 M0-17 blocks nothing inside M0 either. It blocks [M4-10], the Codex adapter ([decision 0024](../../decisions/0024-codex-third-bot-cli.md)).
 
 M0-18 was added on 2026-11-22 by [decision 0035](../../decisions/0035-codex-login-sandbox-approvals.md). It depends only on M0-00, so it belongs to wave 1 and can start now. It blocks [M0-12], the container image, because the image's seccomp profile (the list of system calls the container may make) and its host setup depend on what the spike finds. It also blocks [M1-04], the session manager, because the answer decides how each bot is started. An unfinished M0-18 can therefore delay the exit test.
+
+M0-19 was added on 2026-11-23, when the owner asked for specialized bots, each with its own connectors and plugins. It is docs only, depends only on M0-00, and blocks nothing inside M0. It writes the model down before M1 builds bots. [Decision 0058](../../decisions/0058-specialized-bots.md) records the owner's answers, and M3-06, M4-02 and M5-13 carry the work.
 
 M0-18 is settled. The owner answered its questions on 2026-11-22, and [decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md) records the answers: bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox. No seccomp profile ships, so M0-12 and [M4-10] have none to carry. How [M1-04] cancels a bot is still open, because a process group misses processes that leave it. Decision 0045 lists the options.
 
@@ -410,6 +414,7 @@ Written when M0 closes.
 [M0-15]: https://github.com/jcore9/Aphelion/issues/17
 [M0-17]: https://github.com/jcore9/Aphelion/issues/113
 [M0-18]: https://github.com/jcore9/Aphelion/issues/124
+[M0-19]: https://github.com/jcore9/Aphelion/issues/161
 [M1-02]: https://github.com/jcore9/Aphelion/issues/20
 [M1-03]: https://github.com/jcore9/Aphelion/issues/21
 [M4-01]: https://github.com/jcore9/Aphelion/issues/44

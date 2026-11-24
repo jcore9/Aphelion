@@ -6,6 +6,7 @@
 - Proposed by: the M0-13a follow-up PR ([#135](https://github.com/jcore9/Aphelion/issues/135))
 - Answers: [#135](https://github.com/jcore9/Aphelion/issues/135), the plan's open decision "UI plugin isolation", and the design gap the security review of [#136](https://github.com/jcore9/Aphelion/pull/136) found
 - Amended by: [its own amendment](#amendment-plugin-screens) from [#138](https://github.com/jcore9/Aphelion/issues/138) (plugins can add screens, with no grant)
+- Amended by: [decision 0058](0058-specialized-bots.md) (the one-time grant stays, and each bot has a switch for which plugins it may use)
 - Amends: [0038](0038-plugin-manifest-and-api-range.md) (the single `entry` field, and the plugin API version), [0020](0020-1password-grok-bot-style.md) (how a plugin uses a secret), the plan's [Plugin types](../plan/aphelion-plan.md#plugins-and-themes) table and its "UI plugin isolation" default
 
 ## Context

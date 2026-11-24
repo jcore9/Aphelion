@@ -190,6 +190,19 @@ The install command also records the manifest's `repository`, so a plugin instal
 
 The host identifies `network.get` requests by the plugin's own channel. The request takes an HTTPS URL using the default port and an exact granted hostname. The host connects to a public IPv4 address, skips redirects, and limits the response to 64 KiB and the request to five seconds. The container's controls for direct network access are a separate boundary.
 
+### Which bots may use a plugin
+
+You approve a plugin's permissions once, for the whole server, as described above. Which bots may use the plugin is a separate switch ([decision 0058](../decisions/0058-specialized-bots.md)).
+
+- Each bot has an on/off switch for each plugin and each connector. A new bot starts with every switch off. You turn on what the bot needs.
+- The switch decides who may use the plugin. It never adds a permission. A bot that has a plugin on gets the plugin's whole grant, and a bot that has it off gets none of it.
+- The grant has no per-bot version. To limit one bot more, for example to read-only on GitHub, write a policy rule for that bot, that connector and those tools.
+- 1Password grants are the exception. They stay per item, per consumer and per bot ([decision 0020](../decisions/0020-1password-grok-bot-style.md)).
+
+The host decides from the manifest which plugins get a switch. A plugin gets one when it contributes something a bot calls: a tool, a connector or a custom MCP server. A plugin that only serves the server or the app is always on and has no switch. That covers secret backends (`contributes.secretSchemes`), themes, notifiers, and UI plugins, including one that shows bot status. A bot adapter has no switch, because a bot picks it with its `provider` setting. Reviewers and routine triggers have none either, because the policy engine and each routine choose them.
+
+No manifest field names a tool or a connector yet. The connector contract (M3-02) adds it. Until then, no plugin has a switch. The switches themselves come with M3-06, M4-02 and M5-13.
+
 ### Updates
 
 The host checks a folder install's files just before the runner starts them, so leave the files unchanged while the folder is installed.
