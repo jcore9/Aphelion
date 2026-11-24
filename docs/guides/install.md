@@ -461,7 +461,7 @@ sudo systemctl restart docker
 
 Once Aphelion runs again, run the network check above again.
 
-Reloading a file that contains `flush ruleset`, such as `/etc/nftables.conf`, can clear Docker's and Aphelion's rules too, because Ubuntu's `iptables` keeps its rules in nftables. This wasn't tested. After such a reload, restart Docker the same way and run the check again.
+Reloading a file that contains `flush ruleset`, such as `/etc/nftables.conf`, can clear Docker's and Aphelion's rules too, when `iptables` uses the nftables backend. This wasn't tested. After such a reload, restart Docker the same way and run the check again.
 
 ## Logs
 
