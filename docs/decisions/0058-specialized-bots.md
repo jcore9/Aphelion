@@ -70,7 +70,7 @@ A new bot starts with no connectors and no plugins. The create screen shows what
 - A plugin's permissions are approved once, for the whole server, as [decision 0042](0042-plugin-server-and-client-parts.md) and [the plugin reference](../reference/plugins.md) say. No per-bot narrowing of a plugin's grant exists.
 - Each bot has an on/off switch for each plugin and each connector. The switch answers one question: which bots may use it. A bot that has it off can't see the plugin's tools, and its calls to them are refused.
 - The switch covers every way a bot reaches a connector. The harness MCP endpoint checks it when it lists a bot's tools and again on every call. The git credential helper gives no GitHub token to a bot that doesn't have the GitHub connector switched on.
-- A bot can't switch its own plugins or connectors, or another bot's, without the owner. [Decision 0010](0010-bot-folders.md) already makes a change to a bot's connectors always ask the owner. This record adds its plugins to that row.
+- A bot can ask to change another bot's connectors or plugins through the bot management tools, and the owner always approves or denies the change. [Decision 0010](0010-bot-folders.md) already does this for connectors. This record adds plugins to that row. A bot can never change its own lists, because 0010's hard floor bars a bot from editing its own definition. Only the owner changes them.
 - Finer control comes from the policy engine. For example, one bot can be read-only on GitHub through a rule scoped to that bot, that connector and those tools.
 - 1Password item grants stay per item, per consumer and per bot, as [decision 0020](0020-1password-grok-bot-style.md) says.
 
@@ -112,7 +112,7 @@ A connector with a client part that draws a screen is on the list, because it co
 - [The plugin reference](../reference/plugins.md) gains a short section on how a grant and a bot's switch combine, and which plugins are server-wide.
 - M4-02 builds the registry's per-bot lists and the create screen's checklist. M3-03 checks the switch on the harness MCP endpoint, and M3-05 checks it in the git credential helper. M3-06 builds the per-bot switch for custom MCP servers. M5-13 builds the switch for installed plugins. M4-09's bot management tools ask the owner before changing a bot's plugins.
 - The M0 plan gains M0-19 for this docs work, in wave 1. It depends only on M0-00, and it blocks nothing in M0.
-- Cost: a plugin that is on for a bot has its whole grant for that bot. Narrowing by bot depends on the policy engine's rules, which arrive in M2 and are edited in M5-09.
+- Cost: switching a plugin on lets that bot call all of the plugin's tools, and the plugin keeps its one server-wide grant. Limiting what one bot does with it depends on the policy engine's rules, which arrive in M2 and are edited in M5-09.
 - **Open case: events.** This record doesn't say whether a UI plugin's `permissions.events` grant covers every bot's events or only some bots'. Decide this when M5-11 defines which events a client part receives.
 - **Open case: a plugin with mixed roles.** How the switch applies to a plugin that adds tools and is also, for example, a bot adapter or a secret backend is open. Decide this when the first such plugin appears.
 - Not decided here: the exact YAML shape of a bot preset, the screen layouts, and how the app shows a plugin that was switched on and later uninstalled. M4-02 and M5-13 settle these.
