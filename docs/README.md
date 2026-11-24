@@ -115,3 +115,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0056](decisions/0056-test-host-event-limit-and-dev-crash-notice.md) | The test host rejects an event the real host would refuse, and `plugin dev` reports a crash after the handshake | Proposed |
 | [0057](decisions/0057-plugin-updates-from-github-releases.md) | The server updates a plugin from its GitHub releases, proven genuine by an artifact attestation, on the owner's approval and with no restart | Proposed |
 | [0058](decisions/0058-specialized-bots.md) | Each bot starts with no connectors or plugins, and the owner switches on the ones it may use | Proposed |
+| [0059](decisions/0059-backup-and-restore-drill.md) | A backup is one archive of the six volumes plus the key's recovery copy, and the M0 exit test restores it on a second VM | Proposed |

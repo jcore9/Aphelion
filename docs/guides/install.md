@@ -101,16 +101,236 @@ Put the bootstrap key on the new host before you run `host/install`, so that the
    sudo sh -c 'umask 077 && systemd-creds encrypt --name=bootstrap - /etc/credstore.encrypted/aphelion-bootstrap'
    ```
 
-3. Paste the key from your password manager, press Enter, and then press Ctrl-D. The key never enters your shell history, because you paste it into `systemd-creds` and not into a command.
+3. Paste the key from your password manager, press Enter, and then press Ctrl-D. The key never enters your shell history, because you paste it into `systemd-creds` and not into a command. It does show on screen while you paste, so make sure that nobody can see your screen, and clear the terminal with `clear` afterwards.
 4. Check that the whole key arrived. The command counts the lines that look like a whole key, without showing the key. You should see `1`. If you see `0`, repeat steps 2 and 3.
 
    ```sh
    sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap - | grep -cEx 'AGE-SECRET-KEY-1[0-9A-Z]{58}'
    ```
 
-5. Follow [Install](#install) from step 1.
+5. Follow [Install](#install) steps 1 to 4. Stop there and don't start the service. If you start it now, the secrets broker creates an empty store. Don't reboot either: `host/install` enables the service, so it starts at boot. Then follow [Back up and restore](#back-up-and-restore) to put your data back.
 
-The key alone restores nothing. The secrets themselves are in the `secrets` volume, and this guide has no tested way yet to back up a volume and restore it on another host. The broker refuses to start if the key doesn't match a store it finds, and the log then shows `The bootstrap key does not match this secrets store`.
+The key alone restores nothing. The secrets themselves are in the `secrets` volume. [Back up and restore](#back-up-and-restore) moves that volume and the other five to a new host. The commands were run with Docker on a development machine and test data. The M0 exit test runs them on two fresh VMs. The guide has not yet been tested on a host that holds real secrets. The broker refuses to start if the key doesn't match a store it finds, and the log then shows `The bootstrap key does not match this secrets store`.
+
+## Back up and restore
+
+A backup is one archive file that holds the contents of Aphelion's six Docker volumes. It doesn't hold the bootstrap key, or the host setup that [Install](#install) makes again, such as `deploy/.env` and the service. You restore it on a new host before the first start. To try the whole drill with test data first, see [Rehearse with test data](#rehearse-with-test-data).
+
+A **volume** is a folder that Docker keeps for the container. Aphelion has six. A real install names them `aphelion_config`, `aphelion_state` and so on, because Compose, the tool that reads `deploy/compose.yaml`, names the project `aphelion` and puts the project name in front of each volume.
+
+| Volume | Holds |
+| --- | --- |
+| `config` | The config files |
+| `state` | The database: devices, plugin approvals and the audit log |
+| `bots` | The bot folders |
+| `secrets` | The encrypted secrets store |
+| `plugin-data` | Data that plugins store |
+| `plugin-files` | The plugins' files |
+
+You keep two things, in two places:
+
+- The recovery copy of the bootstrap key, in your password manager. [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) makes it.
+- The archive of the six volumes.
+
+The archive holds the database and the bot folders as plain files. Only the `secrets` volume inside it is encrypted, by the bootstrap key. Store the archive on encrypted storage, and keep it apart from the key's copy. Someone who has both reads every secret.
+
+The commands use `tar`, a program that packs a folder into one file. `--numeric-owner` and `--preserve-permissions` keep the user numbers and access modes that Aphelion's checks need. Each command runs in a short-lived container made from the `aphelion:local` image, so nothing is downloaded. Run every command from `/opt/aphelion/deploy`.
+
+### Back up
+
+1. Stop the service. A running server writes to the database, and a copy taken meanwhile can be broken.
+
+   ```sh
+   sudo systemctl stop aphelion
+   ```
+
+2. Make a private folder for the archive.
+
+   ```sh
+   sudo install -d -m 0700 /var/backups/aphelion
+   ```
+
+3. Write the archive. You should see no output.
+
+   ```sh
+   sudo docker run --rm --pull never --network none --entrypoint "" \
+     -v aphelion_config:/data/config:ro \
+     -v aphelion_state:/data/state:ro \
+     -v aphelion_bots:/data/bots:ro \
+     -v aphelion_secrets:/data/secrets:ro \
+     -v aphelion_plugin-data:/data/plugin-data:ro \
+     -v aphelion_plugin-files:/data/plugin-files:ro \
+     -v /var/backups/aphelion:/backup \
+     aphelion:local \
+     tar --create --gzip --numeric-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data .
+   ```
+
+4. Write a checksum, a short fingerprint that shows later whether the file changed or broke in a copy.
+
+   ```sh
+   sudo sh -c 'cd /var/backups/aphelion && sha256sum aphelion-data.tar.gz > aphelion-data.tar.gz.sha256'
+   ```
+
+5. Start the service again.
+
+   ```sh
+   sudo systemctl start aphelion
+   ```
+
+6. Copy the archive and its checksum file off the host, for example to a machine you can reach with `ssh`. The command makes a new folder named after the date and time, which only you can read, and prints its name. A failed copy never replaces an older backup, because each copy gets its own folder.
+
+   ```sh
+   d=aphelion-backup-$(date +%Y%m%d-%H%M%S) && sudo tar --create --directory /var/backups/aphelion --file - aphelion-data.tar.gz aphelion-data.tar.gz.sha256 | ssh you@backup-machine "umask 077 && mkdir $d && tar --extract --directory $d --file -" && echo "$d"
+   ```
+
+7. Check the copy on the backup machine. Put the folder name that step 6 printed in place of `aphelion-backup-20261123-120000`. You should see `aphelion-data.tar.gz: OK`. Only `OK` means the backup is ready. If you see anything else, the copy or the `ssh` connection failed. Run step 6 again.
+
+   ```sh
+   ssh you@backup-machine 'cd aphelion-backup-20261123-120000 && sha256sum --check aphelion-data.tar.gz.sha256'
+   ```
+
+### Restore on the new host
+
+Start from a host that has the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap` ([Restore on new hardware](#restore-on-new-hardware)) and has finished [Install](#install) steps 1 to 4. The service must not have started. The first start creates empty volumes, and the secrets broker writes a new store in them.
+
+1. Check that no Aphelion volume exists. The command should print nothing.
+
+   ```sh
+   sudo docker volume ls --quiet --filter name=aphelion_
+   ```
+
+   If it prints names, an earlier start made them. Restoring over them would mix old and new files. Continue only if they hold nothing you need. Stop the service and remove the stopped container, which still holds the volumes. `down` without `-v` keeps the volumes, so you remove them one by one after.
+
+   ```sh
+   sudo systemctl stop aphelion
+   ```
+
+   ```sh
+   sudo docker compose down
+   ```
+
+   Then remove each volume with `sudo docker volume rm <name>`.
+
+2. Put the archive and its checksum file in a private folder on the new host.
+
+   ```sh
+   sudo install -d -m 0700 /var/backups/aphelion
+   ```
+
+   For example, run this on the new host to fetch them from the backup machine. Put the name of the backup folder in place of `aphelion-backup-20261123-120000`.
+
+   ```sh
+   ssh you@backup-machine 'tar --create --directory aphelion-backup-20261123-120000 --file - aphelion-data.tar.gz aphelion-data.tar.gz.sha256' | sudo tar --extract --no-same-owner --directory /var/backups/aphelion --file -
+   ```
+
+3. Check the archive. You should see `aphelion-data.tar.gz: OK`.
+
+   ```sh
+   sudo sh -c 'cd /var/backups/aphelion && sha256sum --check aphelion-data.tar.gz.sha256'
+   ```
+
+4. Create the six volumes with the labels that Compose puts on its own. Without the labels, Compose warns that it didn't create them, and `docker compose down -v` skips them. You should see the six volume names.
+
+   ```sh
+   for v in config state bots secrets plugin-data plugin-files; do
+     sudo docker volume create --label com.docker.compose.project=aphelion --label com.docker.compose.volume=$v aphelion_$v
+   done
+   ```
+
+5. Unpack the archive into the volumes. You should see no output.
+
+   ```sh
+   sudo docker run --rm --pull never --network none --entrypoint "" \
+     -v aphelion_config:/data/config \
+     -v aphelion_state:/data/state \
+     -v aphelion_bots:/data/bots \
+     -v aphelion_secrets:/data/secrets \
+     -v aphelion_plugin-data:/data/plugin-data \
+     -v aphelion_plugin-files:/data/plugin-files \
+     -v /var/backups/aphelion:/backup:ro \
+     aphelion:local \
+     tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data
+   ```
+
+6. Start the service.
+
+   ```sh
+   sudo systemctl start aphelion
+   ```
+
+If the key doesn't match the restored `secrets` volume, the container exits and systemd tries again every 10 seconds. `sudo journalctl -u aphelion` shows `The bootstrap key does not match this secrets store`. The key and the archive came from different installs. Stop the service with `sudo systemctl stop aphelion`, put the right key in place with [Restore on new hardware](#restore-on-new-hardware) steps 2 to 4, and start it again. The volumes stay as they are.
+
+A plugin can come back in two ways. Restoring `plugin-files` brings its files back as they were. You can also install it again and skip `plugin-files`. The approval is in the database and records the plugin's folder, and a digest of its files. The digest is a fingerprint made from each file's path inside the plugin folder and its contents, and [the plugin reference](../reference/plugins.md#permissions) describes it. A plugin that you install again must go in the same folder, with the same files, byte for byte. A file that differs in one byte stops the plugin from starting, and you approve it again with [Install a plugin](#install-a-plugin). The `plugin-data` volume holds data that a plugin stores, and a new install doesn't recreate it, so restore that volume either way.
+
+### Check the restore
+
+Run three checks from `/opt/aphelion/deploy` once the service has started. They use the test data from [Rehearse with test data](#rehearse-with-test-data). After a real restore, check a plugin and a device that you know, and check a real secret by using the feature that needs it. Never type a real secret's value into a command.
+
+1. A secret reads back. No `aphelion` command reads a secret, so this asks the secrets broker through Bun, the program inside the image that runs the server. It prints the broker's status code, and then `true` if the value matches. You should see `200 true`.
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion bun -e 'const r = await fetch("http://broker/v1/local", {unix: "/run/aphelion-secrets/broker.sock", method: "POST", body: JSON.stringify({op: "read", ref: "local://drill/test"})}); console.log(r.status, r.ok && (await r.json()) === "drill-value-not-a-real-secret")'
+   ```
+
+2. A plugin keeps its approval. The server starts a plugin only when its approval and its files match. You should see `plugin host started` with `"installed":1`, the plugin go from `starting` to `running`, and the line `aphelion-test-plugin 1.0.0 started`. You should not see `won't start`.
+
+   ```sh
+   sudo docker compose logs --no-color | grep -E 'plugin host started|aphelion-test-plugin|won.t start'
+   ```
+
+3. The database history is there. You should see the device `drill-laptop` with the same ID that `device add` printed on the old host.
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion device list
+   ```
+
+If a check doesn't show what it should, write down the command and its output.
+
+### Rehearse with test data
+
+Use this on the old host, before [Back up](#back-up). It makes one secret, one approved plugin and one device. The values are made up.
+
+1. Write the test secret. You should see `204`.
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion bun -e 'const r = await fetch("http://broker/v1/local", {unix: "/run/aphelion-secrets/broker.sock", method: "POST", body: JSON.stringify({op: "write", ref: "local://drill/test", value: "drill-value-not-a-real-secret"})}); console.log(r.status)'
+   ```
+
+2. Add the test device. The command discards its token. You should see its ID and expiry on the screen.
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion device add drill-laptop > /dev/null
+   ```
+
+3. Unpack the test plugin from the repository into a folder, and make its files readable by everyone and writable only by you.
+
+   ```sh
+   mkdir ~/aphelion-test-plugin && tar -xf /opt/aphelion/apps/server/src/plugins/updates/fixtures/aphelion-test-plugin/v1.0.0/aphelion-plugin.tar -C ~/aphelion-test-plugin && chmod -R a+rX,go-w ~/aphelion-test-plugin
+   ```
+
+4. Copy the folder into the `plugin-files` volume, and preview its permissions.
+
+   ```sh
+   sudo docker compose cp ~/aphelion-test-plugin aphelion:/opt/aphelion/plugins/aphelion-test-plugin
+   ```
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/aphelion-test-plugin
+   ```
+
+5. Repeat the second command with the `--approve` value it printed. You should see `Plugin approved.`
+
+6. Restart the service, so the server starts the plugin.
+
+   ```sh
+   sudo systemctl restart aphelion
+   ```
+
+7. Check that the device is listed, then follow [Back up](#back-up).
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion device list
+   ```
 
 ## Start a fresh store after an older install
 
