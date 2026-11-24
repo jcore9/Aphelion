@@ -1,5 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   chmod,
@@ -131,25 +130,24 @@ async function setUp() {
       permissions: {},
     });
     await writeFile(join(folder, "aphelion-plugin.json"), manifest);
-    const digest = createHash("sha256").update(manifest).digest("hex");
-    const approval = createHash("sha256")
-      .update(JSON.stringify([folder, digest]))
-      .digest("hex");
-    const install = spawn(
+    const command = [
+      main,
+      "plugin",
+      "install",
+      folder,
+      "--state-dir",
+      stateDir,
+    ];
+    const preview = spawnSync(process.execPath, command, { encoding: "utf8" });
+    expect(preview.status, preview.stderr).toBe(0);
+    const approval = /--approve ([0-9a-f]{64})$/m.exec(preview.stdout)?.[1];
+    expect(approval).toBeDefined();
+    const install = spawnSync(
       process.execPath,
-      [
-        main,
-        "plugin",
-        "install",
-        folder,
-        "--approve",
-        approval,
-        "--state-dir",
-        stateDir,
-      ],
-      { stdio: "ignore" },
+      [...command, "--approve", approval ?? ""],
+      { encoding: "utf8" },
     );
-    expect(await exitOf(install)).toBe(0);
+    expect(install.status, install.stderr).toBe(0);
     for (const file of ["index.js", "aphelion-plugin.json"]) {
       await chmod(join(folder, file), 0o444);
     }
