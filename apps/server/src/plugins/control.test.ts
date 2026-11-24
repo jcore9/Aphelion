@@ -4,7 +4,16 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
-import { Cause, Effect, Exit, Fiber, Layer, Queue, Scope } from "effect";
+import {
+  Cause,
+  type Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Queue,
+  Scope,
+} from "effect";
 import { afterAll, beforeAll, describe } from "vitest";
 import { createLogger } from "../log";
 import {
@@ -26,6 +35,7 @@ const logger = createLogger({ level: "error", write: () => undefined });
 
 function fakeRunner(exitAfterReady: boolean) {
   const starts: number[] = [];
+  const folders: string[] = [];
   let reply: (message: RunnerReply) => Effect.Effect<void> = () =>
     Effect.die("the fake runner hasn't started");
   const exit = (plugin: string, run: number) =>
@@ -46,6 +56,7 @@ function fakeRunner(exitAfterReady: boolean) {
             switch (request.type) {
               case "start":
                 starts.push(run);
+                folders.push(request.folder);
                 return yield* reply({ type: "started", plugin, run });
               case "stop":
                 return yield* reply({ type: "stopped", plugin, run });
@@ -87,7 +98,7 @@ function fakeRunner(exitAfterReady: boolean) {
       };
     }),
   );
-  return { layer, starts, exit };
+  return { layer, starts, folders, exit };
 }
 
 let base: string;
@@ -138,9 +149,10 @@ const setup = Effect.gen(function* () {
   const approve = Effect.gen(function* () {
     approvals.splice(0, approvals.length, yield* recordOf(folder));
   });
-  const handle = yield* pluginControl({
+  const { handle } = yield* pluginControl({
     devFolder: folder,
     installs: () => approvals,
+    install: (plugin) => approvals.find((record) => record.plugin === plugin),
   });
   const reload = (path: string) =>
     handle(JSON.stringify({ type: "reload", folder: path })).pipe(
@@ -153,6 +165,7 @@ const withHost = <A, E>(
   test: (
     starts: number[],
     exit: (plugin: string, run: number) => Effect.Effect<void>,
+    folders: string[],
   ) => Effect.Effect<A, E, PluginHost>,
   options?: {
     readonly exitAfterReady?: boolean;
@@ -163,7 +176,7 @@ const withHost = <A, E>(
   const hostLayer = options?.policy
     ? pluginHostLayer({ logger, policy: options.policy })
     : pluginHostLayer({ logger });
-  return test(runner.starts, runner.exit).pipe(
+  return test(runner.starts, runner.exit, runner.folders).pipe(
     Effect.provide(
       hostLayer.pipe(
         Layer.provide(runner.layer),
@@ -401,13 +414,14 @@ const installed = (folder: string) =>
   });
 
 describe("plugin restarts", () => {
-  const restartSetup = (watch: string = "20 millis") =>
+  const restartSetup = (watch: Duration.Input = "20 millis") =>
     Effect.gen(function* () {
       const { folder } = yield* setup;
       const records = [yield* installed(folder)];
-      const handle = yield* pluginControl({
+      const { handle } = yield* pluginControl({
         devFolder: undefined,
         installs: () => records,
+        install: (plugin) => records.find((record) => record.plugin === plugin),
         restartWatch: watch,
       });
       const send = (request: object) =>
@@ -489,6 +503,47 @@ describe("plugin restarts", () => {
             state: "crashed",
           });
           expect(starts).toEqual([1]);
+        }),
+      ),
+  );
+});
+
+describe("booting the plugins", () => {
+  it.live(
+    "starts each plugin from its record as boot reaches it, and holds restarts until boot ends",
+    () =>
+      withHost((starts, _exit, folders) =>
+        Effect.gen(function* () {
+          const { folder, other } = yield* setup;
+          const snapshot = yield* installed(folder);
+          const fresh = yield* installed(other);
+          let restarted: Promise<ControlReply> | undefined;
+          const control = yield* pluginControl({
+            devFolder: undefined,
+            installs: () => {
+              restarted ??= Effect.runPromise(
+                control
+                  .handle(
+                    JSON.stringify({ type: "restart", plugin: "weather" }),
+                  )
+                  .pipe(Effect.map((result) => result.reply)),
+              );
+              return [snapshot];
+            },
+            install: () => fresh,
+            restartWatch: "20 millis",
+          });
+          yield* control.boot(logger);
+          const reply = yield* Effect.promise(
+            () => restarted ?? Promise.reject(new Error("no restart")),
+          );
+          expect(reply).toEqual({
+            type: "restarted",
+            plugin: "weather",
+            state: "running",
+          });
+          expect(starts).toEqual([1, 2]);
+          expect(folders).toEqual([fresh.current.folder, fresh.current.folder]);
         }),
       ),
   );

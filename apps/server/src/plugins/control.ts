@@ -53,6 +53,7 @@ export interface ControlResult {
 export interface ControlOptions {
   readonly devFolder: string | undefined;
   readonly installs: () => readonly InstallRecord[];
+  readonly install: (plugin: string) => InstallRecord | undefined;
   readonly restartWatch?: Duration.Input;
 }
 
@@ -160,9 +161,7 @@ export const pluginControl = (options: ControlOptions) =>
 
     const restart = (plugin: string) =>
       Effect.gen(function* () {
-        const record = options
-          .installs()
-          .find((installed) => installed.plugin === plugin);
+        const record = options.install(plugin);
         if (!record) return refused(`${plugin} isn't installed`);
         yield* host.stop(plugin);
         return yield* startSettled(record, yield* devFolder, "restarted");
@@ -204,7 +203,29 @@ export const pluginControl = (options: ControlOptions) =>
         return yield* startSettled(record, dev, "reloaded");
       });
 
-    return (line: string): Effect.Effect<ControlResult> => {
+    const boot = (logger: Logger) =>
+      Effect.gen(function* () {
+        const dev = yield* devFolder;
+        const plugins = options.installs().map((record) => record.plugin);
+        for (const plugin of plugins) {
+          const record = options.install(plugin);
+          if (!record) continue;
+          const { folder } = record.current;
+          const started = yield* Effect.result(
+            host.start(folder, approvalFor(record, dev)),
+          );
+          if (started._tag === "Failure") {
+            logger.error("an installed plugin was refused at startup", {
+              plugin,
+              folder,
+              issues: started.failure.issues.map((issue) => issue.message),
+            });
+          }
+        }
+        logger.info("plugin host started", { installed: plugins.length });
+      }).pipe(lock.withPermits(1));
+
+    const handle = (line: string): Effect.Effect<ControlResult> => {
       let data: unknown;
       try {
         data = JSON.parse(line);
@@ -226,6 +247,8 @@ export const pluginControl = (options: ControlOptions) =>
         ? Effect.succeed(refused(devModeOff))
         : reload(parsed.folder, folder).pipe(lock.withPermits(1));
     };
+
+    return { handle, boot };
   });
 
 const attempt = <A>(work: () => Promise<A>) =>

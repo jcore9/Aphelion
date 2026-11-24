@@ -1,11 +1,10 @@
 import { join } from "node:path";
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { formatIssue } from "../config";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
-import { approvalFor, installedPlugins } from "../plugins/approvals";
+import { installedPlugins, readInstall } from "../plugins/approvals";
 import {
-  canonical,
   controlSocketFile,
   pluginControl,
   serveControlSocket,
@@ -38,35 +37,19 @@ const startPlugins = (
         ),
       ),
     );
-    const host = Context.get(services, PluginHost);
-    const installed = installedPlugins(db);
-    const canonicalDev =
-      devFolder === undefined
-        ? undefined
-        : Option.getOrUndefined(yield* canonical(devFolder));
-    for (const record of installed) {
-      const { folder } = record.current;
-      const started = yield* Effect.result(
-        host.start(folder, approvalFor(record, canonicalDev)),
-      );
-      if (started._tag === "Failure") {
-        logger.error("an installed plugin was refused at startup", {
-          plugin: record.plugin,
-          folder,
-          issues: started.failure.issues.map((issue) => issue.message),
-        });
-      }
-    }
-    logger.info("plugin host started", { installed: installed.length });
-    const handle = yield* pluginControl({
+    const control = yield* pluginControl({
       devFolder,
       installs: () => installedPlugins(db),
-    }).pipe(Effect.provideService(PluginHost, host));
+      install: (plugin) => readInstall(db, plugin),
+    }).pipe(
+      Effect.provideService(PluginHost, Context.get(services, PluginHost)),
+    );
     yield* serveControlSocket(
       join(stateDir, controlSocketFile),
-      handle,
+      control.handle,
       logger,
     );
+    yield* control.boot(logger);
     if (devFolder !== undefined) {
       logger.info("plugin dev mode is on", { folder: devFolder });
     }
