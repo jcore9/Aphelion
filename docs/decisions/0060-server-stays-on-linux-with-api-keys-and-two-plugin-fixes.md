@@ -118,21 +118,21 @@ All answers are as the owner decided on 2026-11-24.
 **Rules**
 
 1. The server runs on Linux in Docker. There is no host mode. Mac, Windows and phones are clients.
-2. An installer that creates a small Linux VM on a Mac (Apple's Virtualization framework) or Windows PC (WSL2) and runs the same container gets a design spike in M9 Later, next to the VM per bot spike ([#160](https://github.com/jcore9/Aphelion/issues/160)): `#NEW-VM`.
-3. The image builds for x86-64 and arm64 from M1: `#NEW-ARM`. [#155](https://github.com/jcore9/Aphelion/issues/155) pins each AI tool's checksum per architecture.
+2. An installer that creates a small Linux VM on a Mac (Apple's Virtualization framework) or Windows PC (WSL2) and runs the same container gets a design spike in M9 Later, next to the VM per bot spike ([#160](https://github.com/jcore9/Aphelion/issues/160)): [#185](https://github.com/jcore9/Aphelion/issues/185).
+3. The image builds for x86-64 and arm64 from M1: [#180](https://github.com/jcore9/Aphelion/issues/180). [#155](https://github.com/jcore9/Aphelion/issues/155) pins each AI tool's checksum per architecture.
 4. Aphelion never reuses or mounts a sign-in from the host. The owner runs `sudo aphelion sign-in <tool>` ([#178](https://github.com/jcore9/Aphelion/issues/178)), and the vendor's own flow does the rest. [0019](0019-cli-subscription-use.md) is unchanged.
-5. An API key is an alternative to a sign-in: `#NEW-KEYS`.
+5. An API key is an alternative to a sign-in: [#181](https://github.com/jcore9/Aphelion/issues/181).
    - The secrets broker stores it encrypted.
    - The owner can add, test, replace and remove it. A test is a lightweight check the provider supports, such as listing models.
    - After entry the key is never shown again. It stays out of logs, prompts and plugin processes.
    - Aphelion hands the key to the tool as an environment setting when the bot starts.
-   - `#NEW-KEYS` covers the broker storage, the `aphelion key` commands and the Claude adapter ([#20](https://github.com/jcore9/Aphelion/issues/20)). Key use for Grok ([#44](https://github.com/jcore9/Aphelion/issues/44)) and Codex ([#114](https://github.com/jcore9/Aphelion/issues/114)), and which one wins when a key and a sign-in both exist, belong to those adapter issues.
+   - [#181](https://github.com/jcore9/Aphelion/issues/181) covers the broker storage, the `aphelion key` commands and the Claude adapter ([#20](https://github.com/jcore9/Aphelion/issues/20)). Key use for Grok ([#44](https://github.com/jcore9/Aphelion/issues/44)) and Codex ([#114](https://github.com/jcore9/Aphelion/issues/114)), and which one wins when a key and a sign-in both exist, belong to those adapter issues.
    - `aphelion key add`, `test`, `replace` and `remove` land in M1 through [#178](https://github.com/jcore9/Aphelion/issues/178). The app screen comes in M5.
    - A proxy that adds the key on the way out can come later with [0022](0022-bot-network-boundary.md) option 2.
-6. A provider with an API and no CLI runs on Aphelion's own bot engine. A design spike in M9 Later covers it: `#NEW-ENGINE`.
+6. A provider with an API and no CLI runs on Aphelion's own bot engine. A design spike in M9 Later covers it: [#184](https://github.com/jcore9/Aphelion/issues/184).
 7. Both plugin gaps are fixed in M5, and both block plugin install by other people ([#65](https://github.com/jcore9/Aphelion/issues/65)):
-   - `#NEW-PLUGIN-DATA` gives each plugin its own data area that no other plugin can read.
-   - `#NEW-PLUGIN-NET` stops a plugin from opening its own internet connections. A direct connection must fail even to a host the plugin was granted, while the same request through the host's `network.get` works. If plugins go through a proxy instead, the proxy must enforce each plugin's own grants. It ties to [0022](0022-bot-network-boundary.md) option 2.
+   - [#182](https://github.com/jcore9/Aphelion/issues/182) gives each plugin its own data area that no other plugin can read.
+   - [#183](https://github.com/jcore9/Aphelion/issues/183) stops a plugin from opening its own internet connections. A direct connection must fail even to a host the plugin was granted, while the same request through the host's `network.get` works. If plugins go through a proxy instead, the proxy must enforce each plugin's own grants. It ties to [0022](0022-bot-network-boundary.md) option 2.
    - The owner's own plugins are fine until then.
 8. `aphelion plugin install`, `update`, `rollback` and `list` join [#178](https://github.com/jcore9/Aphelion/issues/178), and work the same on every computer.
 9. The desktop app ([#67](https://github.com/jcore9/Aphelion/issues/67)) gets build targets for macOS and Windows as well as Linux. Signed releases belong to [#68](https://github.com/jcore9/Aphelion/issues/68) (M5-16). Apple's [developer program](https://developer.apple.com/programs/) costs US$99 a year (docs). A Windows signing certificate also costs money (inferred, price not checked). Windows SmartScreen may warn on downloaded builds until they build reputation, signed builds included ([Microsoft](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation), docs).
@@ -147,7 +147,7 @@ All answers are as the owner decided on 2026-11-24.
 
 ## Consequences
 
-- Six new issues, and comments on [#178](https://github.com/jcore9/Aphelion/issues/178), [#155](https://github.com/jcore9/Aphelion/issues/155), [#67](https://github.com/jcore9/Aphelion/issues/67), [#68](https://github.com/jcore9/Aphelion/issues/68), [#44](https://github.com/jcore9/Aphelion/issues/44) and [#114](https://github.com/jcore9/Aphelion/issues/114).
+- Six new issues ([#180](https://github.com/jcore9/Aphelion/issues/180) to [#185](https://github.com/jcore9/Aphelion/issues/185)), and comments on [#178](https://github.com/jcore9/Aphelion/issues/178), [#155](https://github.com/jcore9/Aphelion/issues/155), [#67](https://github.com/jcore9/Aphelion/issues/67), [#68](https://github.com/jcore9/Aphelion/issues/68), [#44](https://github.com/jcore9/Aphelion/issues/44) and [#114](https://github.com/jcore9/Aphelion/issues/114).
 - The plan's "Not in v1" item, its "One app, two modes" paragraph and its M5-15 row change in this PR. [0011](0011-ubuntu-lts.md), [0017](0017-desktop-remote-only.md), [0018](0018-shared-plugin-user.md) and [0049](0049-ai-tools-installed-from-a-list.md) gain an "Amended by" line.
 - No code and no test changed. The feasibility check ran on an image built from `dev` at `ab1089f` and on Codex CLI 0.172.0. Its scripts were throwaway and are not in the repo.
 - Revisit this record when:
