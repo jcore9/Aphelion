@@ -203,7 +203,7 @@ adds	events	"bot.status"
 Review the changes above. To install 1.1.0 and grant its permissions, repeat the command with --approve 7acafce2e348d79f9ac8f77e3a7c2503ae356492758a34915e4500a9528963c4
 ```
 
-A line that starts with `adds` names a permission the new version asks for. A line that starts with `drops` names one it no longer asks for. When the list doesn't change, the preview says `No permission changes.` The `--approve` value is built from the same parts as the [install command's](#permissions), with the release's final folder. The command downloads and checks the release again on the approving run, so the value works only for the same files, permissions and installed version.
+A line that starts with `adds` names a permission the new version asks for. A line that starts with `drops` names one it no longer asks for. When the list doesn't change, the preview says `No permission changes.` The `--approve` value is a SHA-256 hash of two approvals: the installed version's (its version, folder, files digest and grants) and the release's (its version, final folder, files digest and permissions). It has its own label, so a value from `plugin install` never works here. The command downloads and checks the release again on the approving run, so the value works only while both stay the same. If you approve the installed version again in between, even at the same version, preview the update again.
 
 With `--approve`, the command moves the release into place, records it as the current version with its grants, and keeps the version it replaces as the previous one. Then it asks the server, through the [control socket](#control-socket), to restart the plugin:
 

@@ -1,4 +1,11 @@
-import { readFile, mkdir, mkdtemp, rm, readdir } from "node:fs/promises";
+import {
+  readFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  readdir,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -217,4 +224,34 @@ test("a second plugin install, update or rollback waits its turn through the loc
   if (held.kind === "locked") held.release();
   expect((await run(approve)).code).toBe(0);
   expect((await run(["plugin", "update", plugin, ...dirs()])).code).toBe(0);
+});
+
+test("an update approval stops working when the installed version is approved again", async () => {
+  const folder = await installFolder();
+  const update = ["plugin", "update", plugin, ...dirs()];
+  const stale = approval((await run(update)).out);
+  const manifestFile = join(folder, "aphelion-plugin.json");
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8")) as {
+    permissions: { events: string[] };
+  };
+  manifest.permissions.events.push("bot.status");
+  await writeFile(manifestFile, JSON.stringify(manifest));
+  const install = ["plugin", "install", folder, "--state-dir", stateDir];
+  const again = await run(install);
+  expect((await run([...install, "--approve", approval(again.out)])).code).toBe(
+    0,
+  );
+
+  expect(await run([...update, "--approve", stale])).toEqual({
+    code: 1,
+    out: [],
+    err: [
+      "The approval doesn't match this release's files, permissions or the installed version. Preview the update again.",
+    ],
+  });
+  const fresh = await run(update);
+  expect(fresh.out).toContain("No permission changes.");
+  expect((await run([...update, "--approve", approval(fresh.out)])).code).toBe(
+    0,
+  );
 });

@@ -354,3 +354,30 @@ test("rolling back from a folder install keeps its files", async () => {
   expect(versions(context.db)).toEqual(["0.9.0 folder"]);
   expect(await exists(newer)).toBe(true);
 });
+
+test("an approval stops working when the installed approval changes, even at the same version", async () => {
+  const context = await setup();
+  const folder = await installFolder(context, "1.0.0");
+  const updates = context.updates();
+  const changed = await Effect.runPromiseExit(
+    Effect.gen(function* () {
+      const prepared = yield* prepareUpdate(updates, plugin);
+      if (prepared.kind !== "update") return yield* Effect.die("no update");
+      const current = readInstall(context.db, plugin)?.current;
+      if (current === undefined) return yield* Effect.die("not installed");
+      recordVersion(context.db, { ...current, grants: [] });
+      return yield* applyUpdate(updates, prepared.plan, prepared.plan.token);
+    }).pipe(Effect.scoped),
+  );
+  expect(refusalOf(changed)).toBe(
+    `The installed ${plugin} changed since the preview. Preview the update again.`,
+  );
+  expect(versions(context.db)).toEqual(["1.0.0 folder"]);
+  expect(readInstall(context.db, plugin)?.current).toMatchObject({
+    folder,
+    grants: [],
+  });
+  expect(await update(context.updates())).toEqual(
+    Exit.succeed({ kind: "switched", outcome: { kind: "running" } }),
+  );
+});

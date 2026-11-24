@@ -69,6 +69,25 @@ export const approvalToken = (input: {
     )
     .digest("hex");
 
+const approvedParts = (approved: ApprovedVersion) => [
+  approved.version,
+  approved.folder,
+  approved.filesDigest,
+  sortedPermissions(approved.grants),
+];
+
+export const updateToken = (from: ApprovedVersion, next: ApprovedVersion) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify([
+        "aphelion-update-v1",
+        next.plugin,
+        approvedParts(from),
+        approvedParts(next),
+      ]),
+    )
+    .digest("hex");
+
 export function recordVersion(db: Database, approved: ApprovedVersion): void {
   const { plugin, version } = approved;
   db.transaction(() => {

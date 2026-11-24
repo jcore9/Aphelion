@@ -4,9 +4,9 @@ import { Effect } from "effect";
 import { gt } from "semver";
 import type { Database } from "../../store/database";
 import {
-  approvalToken,
   readInstall,
   recordVersion,
+  updateToken,
   type ApprovedVersion,
   type InstallRecord,
 } from "../approvals";
@@ -221,14 +221,7 @@ export const prepareUpdate = (updates: Updates, plugin: string) =>
       added: grants.filter(missingFrom(current.grants)),
       removed: current.grants.filter(missingFrom(grants)),
       staging,
-      token: approvalToken({
-        id: plugin,
-        fromVersion: current.version,
-        version: next.version,
-        folder,
-        permissions: grants,
-        filesDigest: digest,
-      }),
+      token: updateToken(current, next),
     };
     return { kind: "update", plan } as const;
   });
@@ -323,12 +316,9 @@ export const applyUpdate = (
     const previous = yield* attemptSync(() =>
       db.transaction(() => {
         const record = installed(db, plugin);
-        if (
-          record.current.version !== from.version ||
-          record.current.filesDigest !== from.filesDigest
-        ) {
+        if (updateToken(record.current, next) !== token) {
           throw refuse(
-            `${plugin} changed to ${record.current.version} since the preview. Preview the update again.`,
+            `The installed ${plugin} changed since the preview. Preview the update again.`,
           );
         }
         recordVersion(db, next);
