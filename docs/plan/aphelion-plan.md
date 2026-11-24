@@ -19,6 +19,7 @@ Aphelion is a self-hosted bot application, not a coding app. Its bots are persis
 - Be plugin-first: every feature is a plugin on a public, versioned API, and the UI is fully themeable, down to animations in the chat panel.
 - Drive multiple AI CLIs through one adapter interface, starting with Claude Code and Grok Build, using their existing subscription logins.
 - Keep persistent bots: each has a name, instructions, a workspace, and resumable session history.
+- Let bots specialize, as Grok Bot does. Each bot has its own list of connectors and plugins, and sees only those. A new bot starts with none, and the owner switches on what it needs. For example, one bot works on GitHub and another on email and calendars. A plugin's permissions are approved once for the whole server, and each bot has an on/off switch for each plugin and connector. Finer limits, such as one bot read-only on GitHub, come from the policy engine's rules. A bot's setup can be saved to a preset file and imported later. The file never carries an approval, grant or secret, so importing it asks the owner to approve anything missing ([decision 0058](../decisions/0058-specialized-bots.md)).
 - Let bots message each other and hand off tasks, under the same approval rules as everything else.
 - Queue messages per bot, with pause, resume and cancel.
 - Run routines on schedules (cron-style) and on demand, with run history.
@@ -63,7 +64,7 @@ Documentation and planning are the most critical parts of the project: nothing i
 | --- | --- | --- |
 | README | Everyone | What Aphelion is (and isn't), a quick start, links to everything else |
 | Install guides | Users | Headless server setup, desktop app, Tailscale, gateway host, upgrades and backups |
-| User guide | Users | Bots, approvals and presets, connectors, custom MCP servers, routines, usage, the bot map and Work view |
+| User guide | Users | Bots and their connectors and plugins, approvals and presets (policy modes and bot presets), connectors, custom MCP servers, routines, usage, the bot map and Work view |
 | Security and threat model | Users, contributors | What the isolation protects, what it doesn't, and how to report a vulnerability |
 | Architecture overview | Contributors | This plan's architecture, kept current as the code changes |
 | Decision records | Contributors | One numbered record per significant decision: context, options, choice, consequences |
@@ -190,7 +191,7 @@ The harness is one server process with a handful of modules, plus a connector ga
 | Component | Responsibility | Key design choices |
 | --- | --- | --- |
 | API server | Serves clients: commands in, events out | WebSocket for streaming, REST for everything else. Binds to the tailnet only. Device identity from Tailscale, plus a per-device token so a lost phone can be revoked. |
-| Bot registry | Defines each bot | Name, provider, model, instructions, workspace path, policy profile. Stored as YAML in git, loaded into SQLite. |
+| Bot registry | Defines each bot | Name, provider, model, instructions, workspace path, policy profile, and the connectors and plugins the bot may use, none by default ([0058](../decisions/0058-specialized-bots.md)). Stored as YAML in git, loaded into SQLite. |
 | Bot adapters | Talk to the AI CLIs | ~~[ACP](https://agentclientprotocol.com/) client first: Grok via `grok agent stdio`, Claude via an ACP adapter. Fallback: `-p --output-format stream-json` with `--resume`.~~ Each CLI over its vendor's own protocol ([0034](../decisions/0034-vendor-protocol-per-cli.md)): Claude Code through the Claude Agent SDK, Codex through `codex app-server`, Grok via `grok agent stdio` ([ACP](https://agentclientprotocol.com/)). One normalized event type out. |
 | Session manager | Owns bot processes | One live process per bot, ~~run as that bot's Unix user~~ run as the shared `aphelion-bot` user and started by the bot runner ([0006](../decisions/0006-shared-bot-user.md), [0016](../decisions/0016-one-docker-container.md)). Restart on crash, resume by session id, kill the whole process tree on cancel. |
 | Queue | Orders work per bot | FIFO per bot, one turn at a time. Pause, resume, cancel, reorder. Survives restarts. |
@@ -354,7 +355,7 @@ Every connector implements the same interface, so GitHub, Forgejo, Notion and Gm
 - **Event source (optional):** webhook or polling, so routines can trigger on "new issue" or "PR review requested".
 - **Per-tool policy:** allow, reviewer or ask you, editable per connector and per bot in the Connections page.
 
-Bots reach connectors through one MCP endpoint the harness hosts. Each bot session gets its own short-lived bearer token for that endpoint, so the harness knows which bot made each call.
+Bots reach connectors through one MCP endpoint the harness hosts. Each bot session gets its own short-lived bearer token for that endpoint, so the harness knows which bot made each call. The endpoint offers a bot only the connectors that bot may use, and refuses calls to any other ([decision 0058](../decisions/0058-specialized-bots.md)).
 
 **GitHub connector design**
 
@@ -362,7 +363,7 @@ Use your own private GitHub App, installed only on the repos you choose. The gat
 
 - **Acting as the app (default):** bot actions show up as the app's bot account, which keeps a clean audit trail separate from your own activity.
 - **Acting as you (optional):** a user access token via device flow, for things only your account can do. These expire after 8 hours with a 6-month refresh token, so keep it off unless needed.
-- **Git access:** bots still clone and push with plain git. A git credential helper on the VM asks the harness for a token per operation: fetch gets a read-only token, push goes through the policy engine first. No long-lived git credential ever lands on the VM.
+- **Git access:** bots still clone and push with plain git. A git credential helper on the VM asks the harness for a token per operation: fetch gets a read-only token, push goes through the policy engine first. No long-lived git credential ever lands on the VM. The helper gives no token to a bot that doesn't have the GitHub connector switched on ([decision 0058](../decisions/0058-specialized-bots.md)).
 - **Events:** start with polling (notifications and repo events every few minutes). Webhooks need a public URL, which means Tailscale Funnel or a relay; add that later if polling is too slow.
 - **Backstops:** branch protection on default branches, and never grant the app Administration, Secrets or Workflows permissions.
 
@@ -393,7 +394,7 @@ Any MCP server can be added as a custom connector, such as T3 Code's MCP server 
 - **Risk classes:** new tools default to "ask". The server's tool annotations (read-only or destructive hints) can suggest a class, but they come from the server, so they're treated as hints, not trusted.
 - **Pinning:** the gateway stores a hash of each tool's name, description and input schema. If a server changes an approved tool, that tool is disabled until the user reviews the change.
 - **Network:** the gateway, not the bot VM, reaches the MCP server. A LAN service like a T3 Code instance only needs a firewall rule from the gateway host, so the bot VM stays isolated.
-- **Scoping:** each custom server can be enabled for specific bots only.
+- **Scoping:** each custom server can be enabled for specific bots only. No bot has one until the owner switches it on ([decision 0058](../decisions/0058-specialized-bots.md)).
 
 ## Plugins and themes
 
@@ -744,10 +745,10 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M3-01 | Gateway service | Runs on a separate host or as a separate local user; authenticated channel to the harness; hosts the secrets broker | M0-14 |
 | M3-02 | Connector plugin contract | Manifest with tools, risk classes and provider permissions; auth flow; handlers; optional event source | M0-13 |
 | M0-15 | 1Password backend plugin (moved from M0 by [0053](../decisions/0053-1password-token-and-move-to-m3.md)) | Resolves op:// references with a read-only service account through the official SDK; grants per consumer, bot and item ([0020](../decisions/0020-1password-grok-bot-style.md)) through the approval protocol. Connectors whose secrets are `op://` references need it | M0-13, M0-14, M2-06 |
-| M3-03 | Harness MCP endpoint | One endpoint per bot session with a short-lived bearer token; aggregates connector tools; every call goes through the policy engine | M3-02, M2-04 |
+| M3-03 | Harness MCP endpoint | One endpoint per bot session with a short-lived bearer token; aggregates connector tools; every call goes through the policy engine; lists and accepts calls only for the connectors the bot has switched on ([0058](../decisions/0058-specialized-bots.md)) | M3-02, M2-04 |
 | M3-04 | GitHub App connector | App ID and key reference in config; per-call installation tokens scoped to one repo and one permission; tools and default policy from the main plan | M3-01, M3-03 |
-| M3-05 | Git credential helper | Fetch gets a read-only token and push goes through approval; a test proves no long-lived credential exists on the bot VM | M3-04 |
-| M3-06 | Custom MCP servers | stdio and Streamable HTTP; secret injection; tool discovery; new tools default to ask; hash pinning disables a changed tool; per-bot enablement | M3-03 |
+| M3-05 | Git credential helper | Fetch gets a read-only token and push goes through approval; a test proves no long-lived credential exists on the bot VM; no token for a bot without the GitHub connector switched on ([0058](../decisions/0058-specialized-bots.md)) | M3-04 |
+| M3-06 | Custom MCP servers | stdio and Streamable HTTP; secret injection; tool discovery; new tools default to ask; hash pinning disables a changed tool; per-bot enablement, an on/off switch per bot that is off for every bot until the owner turns it on ([0058](../decisions/0058-specialized-bots.md)) | M3-03 |
 | M3-07 | Secure secret entry | Form posts straight to the broker; the value never appears in chat, logs or the harness database | M3-01 |
 | M3-08 | Work data API | Read-only GitHub queries for pull requests (checks, reviews, author) and issues (labels, assignees), cached and polled, exposed to clients as `work.updated` events | M3-04 |
 
@@ -757,7 +758,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | --- | --- | --- | --- |
 | M4-00 | Milestone plan (row added by [decision 0001](../decisions/0001-planning-issue-per-milestone.md)) | Written plan for M4 (scope, design notes, risks, open questions), reviewed before other work starts | none |
 | M4-01 | Grok adapter plugin | `grok agent stdio` behind the adapter contract, using the auth path from M0-02 | M1-01, M0-02 |
-| M4-02 | Bot registry | Bots defined in config and synced to the database; create, edit and archive | M0-06 |
+| M4-02 | Bot registry | Bots defined in config and synced to the database; create, edit and archive; each bot lists its connectors and plugins, a new bot starts with none, and a bot can be exported to and imported from a preset file ([0058](../decisions/0058-specialized-bots.md)) | M0-06 |
 | M4-03 | Per-bot queues | Pause, resume, cancel and reorder; queues survive a restart | M1-04 |
 | M4-04 | Parallel bots with limits | Bots run concurrently with per-bot CPU and memory limits (systemd scopes) | M4-03 |
 | M4-05 | Bot status events | `bot.status` emitted on every state change (idle, thinking, running a tool, waiting for approval, error) with the current task | M4-03, M2-03 |
@@ -782,7 +783,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M5-10 | Command palette | Ctrl+K reaches every action | M5-01 |
 | M5-11 | UI slots and plugin sandbox | Named slots including the map; sandboxed iframes with a message API; status-only and chat-content permissions enforced | M5-02, M0-13 |
 | M5-12 | Declarative theme animations | CSS keyframes and Lottie bound to bot states; reduced motion respected; animations pause when hidden | M5-11 |
-| M5-13 | Plugin and theme install flow | Install from npm, git or a local folder; lockfile with checksums; permission prompt and diff on update | M0-13, M5-01 |
+| M5-13 | Plugin and theme install flow | Install from npm, git or a local folder; lockfile with checksums; permission prompt and diff on update; an on/off switch per bot for each installed plugin that gives bots tools, with server-wide plugins left out of the list ([0058](../decisions/0058-specialized-bots.md)) | M0-13, M5-01 |
 | M5-14 | Example plugins | Animated avatar plugin, and a second theme that restyles every screen with no code changes | M5-12, M5-13 |
 | M5-15 | Electron desktop shell | Local server mode and remote connect mode; local mode shows the weaker-isolation notice; AppImage and .deb builds | M5-01, M0-11 |
 | M5-16 | Signed releases | Signed headless and desktop builds, changelog and update path | M5-15 |
