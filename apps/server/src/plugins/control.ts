@@ -107,7 +107,6 @@ export const pluginControl = (options: ControlOptions) =>
               ? left.value
               : running,
           ),
-          Effect.catchTag("RunnerClosed", () => Effect.succeed(running)),
         );
 
     const startSettled = (
@@ -129,18 +128,12 @@ export const pluginControl = (options: ControlOptions) =>
         if (started.success.kind === "client only") {
           return refused(noServerPart(id));
         }
-        const waited = yield* host
+        const settled = yield* host
           .waitFor(
             id,
             (state) => state.run > before && state.state !== "starting",
           )
-          .pipe(Effect.timeoutOption("15 seconds"), Effect.result);
-        if (waited._tag === "Failure") {
-          return refused(
-            `${id} can't run: the plugin runner stopped. Restart Aphelion.`,
-          );
-        }
-        const settled = waited.success;
+          .pipe(Effect.timeoutOption("15 seconds"));
         const reached = Option.isSome(settled)
           ? settled.value
           : yield* host.status(id);
@@ -157,7 +150,15 @@ export const pluginControl = (options: ControlOptions) =>
           return { reply, notice: crashNotice(id, seen.run) };
         }
         return { reply };
-      });
+      }).pipe(
+        Effect.catchTag("RunnerClosed", () =>
+          Effect.succeed(
+            refused(
+              `${record.plugin} can't run: the plugin runner stopped. Restart Aphelion.`,
+            ),
+          ),
+        ),
+      );
 
     const restart = (plugin: string) =>
       Effect.gen(function* () {

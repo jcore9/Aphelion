@@ -42,10 +42,12 @@ function fakeRunner(exitAfterReady: boolean) {
     Effect.suspend(() =>
       reply({ type: "exited", plugin, run, code: 1, signal: null }),
     );
+  let close: Effect.Effect<void> = Effect.die("the fake runner hasn't started");
   const layer = Layer.effect(
     RunnerLink,
     Effect.gen(function* () {
       const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+      close = Queue.end(incoming).pipe(Effect.asVoid);
       reply = (message: RunnerReply) =>
         Queue.offer(incoming, message).pipe(Effect.asVoid);
       return {
@@ -98,7 +100,7 @@ function fakeRunner(exitAfterReady: boolean) {
       };
     }),
   );
-  return { layer, starts, folders, exit };
+  return { layer, starts, folders, exit, close: Effect.suspend(() => close) };
 }
 
 let base: string;
@@ -166,6 +168,7 @@ const withHost = <A, E>(
     starts: number[],
     exit: (plugin: string, run: number) => Effect.Effect<void>,
     folders: string[],
+    close: Effect.Effect<void>,
   ) => Effect.Effect<A, E, PluginHost>,
   options?: {
     readonly exitAfterReady?: boolean;
@@ -176,7 +179,7 @@ const withHost = <A, E>(
   const hostLayer = options?.policy
     ? pluginHostLayer({ logger, policy: options.policy })
     : pluginHostLayer({ logger });
-  return test(runner.starts, runner.exit, runner.folders).pipe(
+  return test(runner.starts, runner.exit, runner.folders, runner.close).pipe(
     Effect.provide(
       hostLayer.pipe(
         Layer.provide(runner.layer),
@@ -483,6 +486,15 @@ describe("plugin restarts", () => {
       ),
   );
 
+  const waitForWeather = Effect.gen(function* () {
+    const host = yield* PluginHost;
+    for (let tries = 0; tries < 600; tries++) {
+      if ((yield* host.status("weather"))?.state === "running") return;
+      yield* Effect.sleep("5 millis");
+    }
+    throw new Error("weather didn't reach running");
+  });
+
   it.live(
     "restart answers with the state a run leaves running for within the watch",
     () =>
@@ -491,11 +503,7 @@ describe("plugin restarts", () => {
           const { send } = yield* restartSetup("5 seconds");
           const restart = { type: "restart", plugin: "weather" };
           const reply = yield* Effect.forkChild(send(restart));
-          const host = yield* PluginHost;
-          for (let tries = 0; tries < 600; tries++) {
-            if ((yield* host.status("weather"))?.state === "running") break;
-            yield* Effect.sleep("5 millis");
-          }
+          yield* waitForWeather;
           yield* exit("weather", 1);
           expect(yield* Fiber.join(reply)).toEqual({
             type: "restarted",
@@ -505,6 +513,24 @@ describe("plugin restarts", () => {
           expect(starts).toEqual([1]);
         }),
       ),
+  );
+
+  it.live("restart refuses if the runner closes during the watch", () =>
+    withHost((_starts, _exit, _folders, close) =>
+      Effect.gen(function* () {
+        const { send } = yield* restartSetup("5 seconds");
+        const reply = yield* Effect.forkChild(
+          send({ type: "restart", plugin: "weather" }),
+        );
+        yield* waitForWeather;
+        yield* close;
+        expect(yield* Fiber.join(reply)).toEqual({
+          type: "refused",
+          reason:
+            "weather can't run: the plugin runner stopped. Restart Aphelion.",
+        });
+      }),
+    ),
   );
 });
 
