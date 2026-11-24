@@ -84,7 +84,7 @@ export const pluginUpdate = (
       const prepared = yield* prepareUpdate(updates, plugin);
       if (prepared.kind === "up to date") {
         yield* io.out(
-          `${plugin} is already on ${prepared.version}, the latest release.`,
+          `${plugin} is already on ${prepared.version}, the latest release. If the server still runs an older version, run aphelion plugin restart ${plugin}.`,
         );
         return;
       }
@@ -144,3 +144,32 @@ export const pluginRollback = (options: Target) =>
       yield* io.out(afterSwitch(back.outcome, plugin, back.to));
     }),
   );
+
+export const pluginRestart = (options: {
+  readonly stateDir: string;
+  readonly plugin: string;
+}) =>
+  Effect.gen(function* () {
+    const io = yield* CliIo;
+    const { plugin } = options;
+    const outcome = yield* restartPlugin(options.stateDir, plugin);
+    switch (outcome.kind) {
+      case "server not running":
+        return yield* io.out(
+          `The server isn't running, so ${plugin} starts on its approved version when the server starts.`,
+        );
+      case "refused":
+        yield* io.err(
+          `The server didn't restart ${plugin}: ${outcome.reason.replace(/\.$/, "")}.`,
+        );
+        return yield* failed;
+      case "restarted":
+        if (outcome.state === "running") {
+          return yield* io.out(`Restarted ${plugin}. It runs.`);
+        }
+        yield* io.err(
+          `Restarted ${plugin}, but it isn't running: ${outcome.state}. The server log says why.`,
+        );
+        return yield* failed;
+    }
+  });

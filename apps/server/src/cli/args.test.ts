@@ -107,6 +107,10 @@ describe("accepted command lines", () => {
       },
     ],
     [
+      ["plugin", "restart", "weather", "--state-dir", "/s"],
+      { kind: "plugin restart", stateDir: "/s", plugin: "weather" },
+    ],
+    [
       ["plugin", "rollback", "weather", "--state-dir", "/s"],
       {
         kind: "plugin rollback",

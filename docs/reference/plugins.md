@@ -216,7 +216,7 @@ When the server isn't running, the second line is `The server isn't running, so 
 
 When a plugin with a server part doesn't reach `running` on the new version, the command goes back at once. It points the plugin at the old version again, restarts it, deletes the new version's files and records, and exits with code 1. Standard error then says which state the new version reached and where the old one is now, for example `aphelion-test-plugin 1.1.0 didn't start (it is crashed), so Aphelion went back to 1.0.0.`
 
-When the latest release is the installed version, the command prints `aphelion-test-plugin is already on 1.1.0, the latest release.` and exits with code 0. `plugin update` never goes to an older version. It refuses a latest release that is older than the installed version.
+When the latest release is the installed version, the command prints `aphelion-test-plugin is already on 1.1.0, the latest release. If the server still runs an older version, run aphelion plugin restart aphelion-test-plugin.` and exits with code 0. The server still runs an older version only when an `--approve` run was stopped after it recorded the new version and before it asked for the restart. `aphelion plugin restart ID` asks the server to restart the plugin on its approved version. `plugin update` never goes to an older version. It refuses a latest release that is older than the installed version.
 
 `aphelion plugin rollback ID` goes back one version and restarts the plugin on it:
 

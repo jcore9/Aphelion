@@ -45,6 +45,9 @@ Usage:
       Go back to the version plugin ID ran before its last update or install,
       and restart the plugin on it.
 
+  aphelion plugin restart ID [--state-dir DIR]
+      Ask the running server to restart plugin ID on its approved version.
+
   aphelion plugin dev FOLDER [--state-dir DIR]
       Reload the approved plugin in FOLDER through the running server, then
       reload it again each time its files change. Works only when the server

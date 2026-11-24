@@ -164,7 +164,9 @@ test("plugin update previews, installs on approval, and plugin rollback goes bac
 
   expect(await run(update)).toEqual({
     code: 0,
-    out: [`${plugin} is already on 1.1.0, the latest release.`],
+    out: [
+      `${plugin} is already on 1.1.0, the latest release. If the server still runs an older version, run aphelion plugin restart ${plugin}.`,
+    ],
     err: [],
   });
 
@@ -358,4 +360,46 @@ test("plugin install refuses a folder that plugin update manages", async () => {
   const copy = join(pluginsDir, plugin);
   await unpackFixture(copy);
   expect((await install(copy)).code).toBe(0);
+});
+
+test("plugin restart prints the server's answer", async () => {
+  const restart = ["plugin", "restart", plugin, "--state-dir", stateDir];
+  expect(await run(restart)).toEqual({
+    code: 0,
+    out: [
+      `The server isn't running, so ${plugin} starts on its approved version when the server starts.`,
+    ],
+    err: [],
+  });
+  const results: Awaited<ReturnType<typeof run>>[] = [];
+  const requests = await withServer(
+    [
+      { type: "restarted", plugin, state: "running" },
+      { type: "restarted", plugin, state: "crashed" },
+      { type: "refused", reason: `${plugin} stays stopped: it changed.` },
+    ],
+    async () => {
+      for (let i = 0; i < 3; i++) results.push(await run(restart));
+    },
+  );
+  expect(requests).toEqual(
+    Array.from({ length: 3 }, () => ({ type: "restart", plugin })),
+  );
+  expect(results).toEqual([
+    { code: 0, out: [`Restarted ${plugin}. It runs.`], err: [] },
+    {
+      code: 1,
+      out: [],
+      err: [
+        `Restarted ${plugin}, but it isn't running: crashed. The server log says why.`,
+      ],
+    },
+    {
+      code: 1,
+      out: [],
+      err: [
+        `The server didn't restart ${plugin}: ${plugin} stays stopped: it changed.`,
+      ],
+    },
+  ]);
 });

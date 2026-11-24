@@ -10,6 +10,7 @@
 | `aphelion config check` | Checks the config files, the modes of the config and state folders and, with `--compose`, the ports a Compose file publishes |
 | `aphelion plugin update ID` | Previews the latest GitHub release of plugin `ID`, and with `--approve` installs it and restarts the plugin on it |
 | `aphelion plugin rollback ID` | Goes back to the version of plugin `ID` before the current one, and restarts the plugin on it |
+| `aphelion plugin restart ID` | Asks the running server to restart plugin `ID` on its approved version |
 | `aphelion plugin dev FOLDER` | Reloads the approved plugin in `FOLDER` through the running server, and again after each change to the folder. Works only in [dev mode](plugins.md#dev-mode). |
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
@@ -153,7 +154,7 @@ Updates plugin `ID` from the GitHub repository its manifest names. Without `--ap
 | Output | Meaning |
 | --- | --- |
 | `Plugin ID can update from OLD to NEW.` | The first preview line. Next come the line about the attestation, one `adds` or `drops` line for each changed permission or `No permission changes.`, and the line with the `--approve` value. Standard output, exit code 0. |
-| `ID is already on VERSION, the latest release.` | Nothing to do. Standard output, exit code 0. |
+| `ID is already on VERSION, the latest release. If the server still runs an older version, run aphelion plugin restart ID.` | Nothing to install. If an earlier `--approve` run was stopped before it restarted the plugin, run [`plugin restart`](#aphelion-plugin-restart-id). Standard output, exit code 0. |
 | `Updated ID from OLD to NEW.` | The release is installed. The next line says `ID NEW runs.`, `ID has no server part to restart.`, or `The server isn't running, so ID starts on NEW when the server starts.` Standard output, exit code 0. |
 | `ID NEW didn't start (REASON), so Aphelion went back to OLD.` | The new version didn't reach `running`. Aphelion restarted the old version and deleted the new one. The next line says how the old version runs. Standard error, exit code 1. |
 | `The approval doesn't match this release's files, permissions or the installed version. Preview the update again.` | The `--approve` value is wrong or out of date. Standard error, exit code 1. |
@@ -168,6 +169,21 @@ aphelion plugin rollback ID [--state-dir DIR] [--plugins-dir DIR]
 ```
 
 Makes the version before the current one current again, restarts the plugin on it, and deletes the version it left. It prints `Went back from ID CURRENT to EARLIER.` and then a line that says how `EARLIER` runs, as `plugin update` does. When the earlier version doesn't reach `running`, that line goes to standard error and the exit code is 1. When there is no earlier version, it prints `ID has no earlier version to go back to.` on standard error and exits with code 1.
+
+## `aphelion plugin restart ID`
+
+```sh
+aphelion plugin restart ID [--state-dir DIR]
+```
+
+Asks the running server, through the [control socket](plugins.md#control-socket), to restart plugin `ID` on the version that is approved now. Use it when `plugin update` says the plugin is already on the latest release but the server still runs an older one. The server watches the new run for 10 seconds before it answers, as for an update.
+
+| Output | Meaning |
+| --- | --- |
+| `Restarted ID. It runs.` | The plugin runs on its approved version. Standard output, exit code 0. |
+| `Restarted ID, but it isn't running: STATE. The server log says why.` | The run reached another state, such as `crashed`. Standard error, exit code 1. |
+| `The server didn't restart ID: REASON.` | The server refused, for example because the plugin isn't installed or its files changed since they were approved. Standard error, exit code 1. |
+| `The server isn't running, so ID starts on its approved version when the server starts.` | Nothing to do now. Standard output, exit code 0. |
 
 ## `aphelion device add NAME`
 

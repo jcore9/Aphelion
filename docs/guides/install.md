@@ -178,7 +178,7 @@ A plugin whose manifest names a GitHub `repository` updates from that repository
    sudo docker compose exec -T --user harness aphelion aphelion plugin update <id>
    ```
 
-   When the latest release is the installed version, the command prints `<id> is already on <version>, the latest release.` and you are done. Otherwise it prints the two versions, the permissions the new version adds or drops, and an `--approve` value.
+   When the latest release is the installed version, the command prints `<id> is already on <version>, the latest release. If the server still runs an older version, run aphelion plugin restart <id>.` and you are done. The server can still run an older version when an earlier `--approve` run was stopped after it installed the release and before it restarted the plugin. Then run `sudo docker compose exec -T --user harness aphelion aphelion plugin restart <id>`. Otherwise it prints the two versions, the permissions the new version adds or drops, and an `--approve` value.
 
 2. If you accept the changes, repeat the command with the `--approve` value it printed.
 
