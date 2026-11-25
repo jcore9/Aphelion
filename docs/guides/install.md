@@ -453,7 +453,7 @@ sudo systemctl restart docker
 
 Docker rebuilds its chains, and `aphelion.service` restarts with it and installs Aphelion's rules. Once Aphelion runs again, run the network check above.
 
-Avoid switching to `yes` and reloading ufw while Aphelion runs, because the reload removes Aphelion's rules until the next restart.
+Preflight runs only when Aphelion starts. If you set `yes` later, while Aphelion runs, the next `sudo ufw reload` or `sudo ufw enable` removes Aphelion's rules, and nothing stops it until the next restart. Keep `MANAGE_BUILTINS=no` before you run either command. If `/etc/default/ufw` sets `MANAGE_BUILTINS` more than once, the last line counts.
 
 The M0 exit test tried two `ufw` settings on Ubuntu 26.04 with Docker 29.10, with ufw turned on:
 

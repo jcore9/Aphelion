@@ -192,4 +192,17 @@ error=$(host/preflight 2>&1 >/dev/null) || status=$?
 [[ $status == 1 && $error == *MANAGE_BUILTINS* ]] ||
   fail 'preflight accepted quoted "yes" or failed without naming MANAGE_BUILTINS'
 pass 'preflight refuses enabled ufw with quoted "yes" values'
+
+printf "MANAGE_BUILTINS='yes' # set by hand\n" >/etc/default/ufw
+status=0
+error=$(host/preflight 2>&1 >/dev/null) || status=$?
+[[ $status == 1 && $error == *MANAGE_BUILTINS* ]] ||
+  fail "preflight accepted a single-quoted yes with a trailing comment"
+printf 'MANAGE_BUILTINS=yes\nMANAGE_BUILTINS=no\n' >/etc/default/ufw
+host/preflight >/dev/null || fail "preflight refused a file whose last MANAGE_BUILTINS line is no"
+printf 'MANAGE_BUILTINS=no\nMANAGE_BUILTINS=yes\n' >/etc/default/ufw
+status=0
+host/preflight >/dev/null 2>&1 || status=$?
+[[ $status == 1 ]] || fail "preflight accepted a file whose last MANAGE_BUILTINS line is yes"
+pass "preflight reads single quotes and comments, and the last MANAGE_BUILTINS line wins, as in ufw"
 rm -f /etc/ufw/ufw.conf /etc/default/ufw
