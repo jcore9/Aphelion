@@ -111,7 +111,7 @@ What each bot is allowed to do. Instructions live in the bot's folder, not here 
 
 ### `policy.yaml`, version 1
 
-Approval rules. No fields yet: M2-01 adds the policy model.
+Approval rules. It has no fields yet. Issue M2-01 adds the policy model.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -119,7 +119,7 @@ Approval rules. No fields yet: M2-01 adds the policy model.
 
 ### `routines.yaml`, version 1
 
-Scheduled and on-demand routines. No fields yet: M6-02 adds routine definitions.
+Scheduled and on-demand routines. It has no fields yet. Issue M6-02 adds routine definitions.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -127,7 +127,7 @@ Scheduled and on-demand routines. No fields yet: M6-02 adds routine definitions.
 
 ### `connectors.yaml`, version 1
 
-Connector settings. No fields yet: M3 adds connector entries.
+Connector settings. It has no fields yet. Milestone M3 adds connector entries.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
