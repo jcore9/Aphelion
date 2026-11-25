@@ -22,8 +22,10 @@ Run any other command without root, and it prints `Run it with sudo: sudo apheli
 | Code | Meaning |
 | --- | --- |
 | 0 | The command worked. For `status`, the service runs and `/health` answers. For `check`, every check passed. |
-| 1 | `status` found the service or `/health` down. `check` found a failed check. A `device` command failed. |
+| 1 | `status` found the service or `/health` down. `check` found a failed check. |
 | 2 | The command was misused, or it wasn't run as root. |
+
+A `device` command exits with the code of the server's own `aphelion device` command, which [the aphelion command](cli.md#exit-codes) lists.
 
 ## `status`
 
