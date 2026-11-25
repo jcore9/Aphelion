@@ -44,7 +44,7 @@ Option 2 would reverse 0006 and 0018: the plugin user would need access to bot f
 
 ## Consequences
 
-- `claude` and the other bot CLIs run as `aphelion-bot`, with the bot's folder and the proxy settings, as [0018](0018-shared-plugin-user.md) and [0022](0022-bot-network-boundary.md) require.
+- `claude` and the other bot CLIs run as `aphelion-bot`, with the bot's folder and the proxy settings, as [0006](0006-shared-bot-user.md) and [0022](0022-bot-network-boundary.md) require.
 - The adapter talks to the server through the bot runner's message channel, not the plugin JSON-RPC wire, so #19 doesn't extend the plugin wire with an outbound event method.
 - #19 defines the adapter interface and the event schemas, and #20 builds and tests the Claude adapter against a stand-in for the bot runner, because #22 lands after it.
 - The adapter is installed and versioned like a plugin, through a manifest declaration that #19 names, and the plugin runner skips it.
