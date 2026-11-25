@@ -13,7 +13,7 @@ Two kinds of file hold the rules:
 2. CI runs `lint`, `typecheck` and `test` from [`.github/workflows/ci.yml`](https://github.com/jcore9/Aphelion/blob/main/.github/workflows/ci.yml). All three must pass.
 3. A model from another family than the author reviews the pull request, and the review is on record. The bot fixes or answers each finding.
 4. The bot squash-merges the pull request. A squash merge turns the pull request's commits into one commit. It takes the pull request's Conventional Commit title, which feeds the release notes.
-5. If the pull request changes a path that `CODEOWNERS` names, GitHub holds it until the owner approves. The bot also never merges anything under `.github/` without the owner.
+5. If the pull request changes a path that `CODEOWNERS` names, the bot waits for the owner's approval before it merges. GitHub should also hold the pull request until then. A test after the rulesets are applied checks that, as described below.
 
 The owner reviews all other merged work at the end of each milestone, before the release.
 
@@ -21,7 +21,7 @@ The owner reviews all other merged work at the end of each milestone, before the
 
 From M1 on, release-please keeps one release pull request open into `main` ([decision 0061](decisions/0061-release-please.md), steps in [the release guide](guides/releasing.md)). It sets the version and writes the release notes. The owner approves and merges it at the end of the milestone. The bot never merges it. Merging it makes a tag, such as `v0.1.0-alpha.2`, and the GitHub release. A tag is a name fixed to one commit. The install guide clones a release tag.
 
-The release pull request is opened with `GITHUB_TOKEN`, so GitHub doesn't start CI for it. Before merging, the owner closes and reopens it, which starts CI as the owner.
+The release pull request is opened with `GITHUB_TOKEN`, so GitHub doesn't start CI for it. Before merging, the owner clicks **Approve and run workflows** on it. If GitHub doesn't show that button, the owner closes and reopens the pull request, which starts CI as the owner.
 
 An urgent fix is a normal pull request into `main`. The owner then merges the release pull request early.
 
@@ -49,19 +49,19 @@ One pull request becomes one commit on `main`, with a title that follows the Con
 
 ### Why 0 approving reviews
 
-GitHub never lets the author of a pull request approve it. The bot authors every pull request, so any number above 0 would block every merge by the bot. The other model family's review is on record in the pull request, and the bot merges only once its findings are fixed or answered. The code owner rule below still blocks the owner's paths.
+GitHub never lets the author of a pull request approve it. The bot authors every pull request, so any number above 0 would block every merge by the bot. The other model family's review is on record in the pull request, and the bot merges only once its findings are fixed or answered. For the owner's paths, the bot waits for the owner's approval, and the code owner rule below should make GitHub wait too.
 
 ### Why a code owner must approve
 
-With "require review from code owners" on, a pull request that changes a path in `CODEOWNERS` can't merge without its code owner. This is how the owner keeps control of the paths below. A bot's approval never counts for them.
+With "require review from code owners" on, GitHub is meant to stop a pull request that changes a path in `CODEOWNERS` until its code owner approves. This is how the owner keeps control of the paths below. A bot's approval never counts for them.
 
-GitHub's documents don't say for certain whether this rule still blocks a merge when 0 approvals are required. [Decision 0062](decisions/0062-one-main-branch.md) names this as an open risk. After the rulesets are applied, the bot opens a pull request that touches an owner path and checks that GitHub reports it blocked, without merging it. If GitHub would let it merge, the fallback is a second GitHub account that posts the review as a real approval, with 1 approving review required.
+GitHub's documents don't say for certain whether this rule still blocks a merge when 0 approvals are required. [Decision 0062](decisions/0062-one-main-branch.md) names this as an open risk. After the rulesets are applied, the bot opens a test pull request that touches an owner path and waits for its checks to pass. It then checks that GitHub still refuses to merge it and asks `@jcore9` to review. The bot never merges the test, and it merges nothing else until the test gives that result. If GitHub would let it merge, the fallback is a second GitHub account that posts the review as a real approval, with 1 approving review required.
 
 ### Why the checks must come from GitHub Actions
 
 Anyone with the Write role can set a commit status with any name through the API. Each required check names GitHub Actions (app ID `15368`) as its source, so a status named `lint` from any other source doesn't count.
 
-The `docs` check from M0-16 isn't required yet. Requiring a check that never runs would block every pull request. M0-16 adds it to the ruleset.
+CI also runs a `docs` check, which builds the docs site and checks its links. The ruleset doesn't require it, but the bot waits for every CI check to pass before it merges.
 
 ### Why branches don't have to be up to date
 
@@ -75,7 +75,7 @@ The owner is the code owner of the paths the owner always decides:
 
 - `.github/`, which holds the rulesets, the workflows, the templates and `CODEOWNERS` itself
 - the release-please config and manifest
-- every `package.json`, `bun.lock` and `bunfig.toml`, because they set the scripts that CI runs, the dependencies, and the package registry
+- every `package.json` in the repository, and the root `bun.lock` and `bunfig.toml`, because they set the scripts that CI runs, the dependencies, and the package registry
 - `eslint.config.ts`, `lint-boundaries.test.ts`, `vitest.config.ts` and every `tsconfig*.json`, which enforce the boundaries in [decision 0023](decisions/0023-scaffold-toolchain.md)
 - the decision records, the plan, `SECURITY.md` and `LICENSE`
 

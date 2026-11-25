@@ -1,8 +1,8 @@
 # Apply the rulesets
 
-A ruleset is a set of GitHub rules for a branch or a tag. `main.json` protects the `main` branch. `tags.json` protects the release tags, which are the names that start with `v`, such as `v0.1.0-alpha.2`. [Branch protection](../../docs/branch-protection.md) explains each rule and [decision 0062](../../docs/decisions/0062-one-main-branch.md) gives the reasons.
+A tag is a name fixed to one commit, such as the release tag `v0.1.0-alpha.2`. A ruleset is a set of GitHub rules for a branch or for tags. `main.json` protects the `main` branch, and `tags.json` protects the release tags, whose names start with `v`. [Branch protection](../../docs/branch-protection.md) explains each rule and [decision 0062](../../docs/decisions/0062-one-main-branch.md) gives the reasons.
 
-Applying them needs the Admin role, so the owner runs these steps. Run the commands from a checkout of this repository, signed in to `gh` as `jcore9`. Do the steps in order. Until you finish them, nobody merges.
+Applying them needs the Admin role, so the owner runs these steps. Run the commands from a checkout of this repository, signed in to `gh`, the GitHub command-line tool, as `jcore9`. Do the steps in order. Until you finish them, nobody merges.
 
 ## Move to one `main` branch
 
@@ -30,6 +30,8 @@ Applying them needs the Admin role, so the owner runs these steps. Run the comma
    gh api --method DELETE "repos/jcore9/Aphelion/rulesets/$id"
    ```
 
+   In the web UI, open `dev` on the **Rulesets** page and delete it.
+
 4. Delete the `dev` branch. This works only after step 3, because the `dev` ruleset blocks deleting it:
 
    ```sh
@@ -52,7 +54,7 @@ Applying them needs the Admin role, so the owner runs these steps. Run the comma
 
    In the web UI, go to **Settings** > **General** > **Pull Requests**.
 
-6. Keep the Actions token read-only, and let workflows approve pull requests:
+6. Give workflows read-only access by default, and let them create and approve pull requests:
 
    ```sh
    gh api --method PUT repos/jcore9/Aphelion/actions/permissions/workflow \
@@ -74,7 +76,7 @@ Applying them needs the Admin role, so the owner runs these steps. Run the comma
 
    The four rules are `deletion`, `non_fast_forward`, `pull_request` and `required_status_checks`.
 
-8. Tell the bot you're done. It opens two small test pull requests. One touches no owner path, and the bot merges it. The other touches an owner path, and the bot only checks that GitHub blocks it until you approve, then closes it.
+8. Tell the bot you're done. It opens two small test pull requests and waits for their checks to pass. One touches no owner path, and the bot merges it. The other touches an owner path. The bot checks that GitHub still refuses to merge it and asks you to review, then closes it. The bot merges nothing else until both tests give that result.
 
 ## Update a ruleset
 

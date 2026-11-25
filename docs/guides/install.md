@@ -484,14 +484,16 @@ Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/re
 
 ```sh
 tag=v0.1.0-alpha.2
-cd /opt/aphelion
-sudo git fetch --tags
-sudo git checkout "$tag"
-cd deploy
-sudo docker compose build
-sudo host/install
-sudo systemctl restart aphelion
+cd /opt/aphelion &&
+	sudo git fetch --tags &&
+	sudo git checkout --detach "refs/tags/$tag" &&
+	cd deploy &&
+	sudo docker compose build &&
+	sudo host/install &&
+	sudo systemctl restart aphelion
 ```
+
+Each command runs only if the one before it worked, so a mistyped tag stops the upgrade before anything is rebuilt.
 
 `host/install` installs the new unit file and keeps the existing bootstrap key.
 

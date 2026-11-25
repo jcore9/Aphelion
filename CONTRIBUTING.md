@@ -17,7 +17,7 @@ Nothing is built without a written plan.
 3. Open one small PR into `main`. Aim for under about 400 changed lines, not counting tests and generated files. A PR never mixes a refactor with a feature, or two features.
 4. Fill in the PR template. Write `Closes #<issue>` and add the labels that apply. GitHub closes the issue by itself when the PR merges.
 5. Give the PR a Conventional Commit title, such as `feat(server): ...` or `docs: ...`. The title becomes the squash commit on `main`.
-6. Wait for green checks and a review from another model family. Then `jcore9-bot` squash-merges the PR ([decision 0062](docs/decisions/0062-one-main-branch.md)). If the PR touches a path that [`.github/CODEOWNERS`](.github/CODEOWNERS) names, GitHub holds it until the owner approves. The owner reviews everything else at the end of the milestone.
+6. Wait for green checks and a review from another model family. Then `jcore9-bot` squash-merges the PR ([decision 0062](docs/decisions/0062-one-main-branch.md)). If the PR touches a path that [`.github/CODEOWNERS`](.github/CODEOWNERS) names, the bot waits for the owner's approval. The owner reviews everything else at the end of the milestone.
 
 Spikes end in a written finding under `docs/spikes/`. Their prototype code stays on the `spike/` branch and never merges.
 
@@ -27,7 +27,7 @@ Coding agents open PRs from the `jcore9-bot` account, never from the owner's acc
 
 - Agents commit with the bot's noreply address, `356729618+jcore9-bot@users.noreply.github.com`.
 - PRs from the bot carry the `agent-authored` label.
-- Agents open PRs but never approve them. Only `jcore9-bot` merges, and only under the rules in [decision 0062](docs/decisions/0062-one-main-branch.md). It never merges the release PR.
+- Agents open PRs but never approve them. `jcore9-bot` merges its own PRs under the rules in [decision 0062](docs/decisions/0062-one-main-branch.md). The owner merges the release PR, and the bot never does.
 
 ## Docs ship with the change
 
