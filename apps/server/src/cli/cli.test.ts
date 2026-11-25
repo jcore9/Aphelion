@@ -61,19 +61,30 @@ test("version.ts matches package.json", async () => {
   expect(version).toBe(pkg.version);
 });
 
-test("--help and no arguments print the commands", async () => {
+const commands = {
+  config: ["check"],
+  device: ["add", "list", "revoke"],
+  plugin: ["install", "update", "rollback", "restart", "dev"],
+  tool: ["list", "install", "remove"],
+};
+
+test("--help and no arguments list the command groups", async () => {
   for (const argv of [["--help"], []]) {
     const { code, out } = await run(argv);
     expect(code).toBe(0);
-    for (const command of [
-      "aphelion --headless",
-      "aphelion config check",
-      "aphelion device add NAME",
-      "aphelion device list",
-      "aphelion device revoke ID",
-      "aphelion --version",
-    ]) {
-      expect(out.join("\n")).toContain(command);
+    const text = out.join("\n");
+    for (const word of ["--headless", "--version", ...Object.keys(commands)]) {
+      expect(text).toContain(word);
+    }
+  }
+});
+
+test("each group's help lists its commands", async () => {
+  for (const [group, names] of Object.entries(commands)) {
+    const { code, out } = await run([group, "--help"]);
+    expect(code).toBe(0);
+    for (const name of names) {
+      expect(out.join("\n")).toMatch(new RegExp(`^  ${name}\\s`, "m"));
     }
   }
 });

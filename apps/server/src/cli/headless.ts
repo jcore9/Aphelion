@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
+import { CliError, Command, Flag } from "effect/cli";
+import { z } from "zod";
 import { formatIssue } from "../config";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
@@ -17,6 +19,15 @@ import { version } from "../version";
 import { checkDirs, migratedNote } from "./checks";
 import { withStore } from "./device";
 import { failed } from "./failure";
+import {
+  absolutePath,
+  checkedFlag,
+  configDirFlag,
+  optionalFlag,
+  options,
+  stateDirFlag,
+  type Handler,
+} from "./flags";
 
 interface PluginOptions {
   readonly fds: RunnerPipeFds;
@@ -107,3 +118,57 @@ export const headless = (
       ),
     );
   });
+
+const pluginRunnerFds = z
+  .string()
+  .regex(/^\d{1,4},\d{1,4}$/, {
+    error: "must be two file descriptor numbers, such as 3,4",
+  })
+  .transform((text) => {
+    const [replies = 0, requests = 0] = text.split(",").map(Number);
+    return { replies, requests };
+  })
+  .refine(({ replies, requests }) => replies >= 3 && requests >= 3, {
+    error:
+      "must name descriptors from 3 up, after standard input, output and error",
+  })
+  .refine(({ replies, requests }) => replies !== requests, {
+    error: "must name two different descriptors",
+  });
+
+export const rootCommand = (handler: Handler<Parameters<typeof headless>[0]>) =>
+  Command.make(
+    "aphelion",
+    {
+      headless: Flag.Boolean(options.headless).pipe(
+        Flag.withDefault(false),
+        Flag.withDescription("Start the server. The container runs this"),
+      ),
+      configDir: configDirFlag,
+      stateDir: stateDirFlag,
+      pluginRunnerFds: optionalFlag(
+        checkedFlag(options.pluginRunnerFds, pluginRunnerFds).pipe(
+          Flag.withDescription(
+            "Descriptors REPLIES,REQUESTS of the plugin runner's pipes. The server starts every installed plugin",
+          ),
+        ),
+      ),
+      pluginDev: optionalFlag(
+        checkedFlag(options.pluginDev, absolutePath).pipe(
+          Flag.withDescription(
+            "Let plugin dev reload the approved plugin in this folder",
+          ),
+        ),
+      ),
+    },
+    ({ headless: serve, ...config }) =>
+      serve
+        ? handler(config)
+        : Effect.fail(
+            new CliError.ShowHelp({ commandPath: ["aphelion"], errors: [] }),
+          ),
+  ).pipe(
+    Command.withDescription(
+      "Aphelion server and command line. Run it with --headless to start the server, or with a command below.",
+    ),
+  );

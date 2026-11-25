@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { Command } from "effect/cli";
 import { restartPlugin } from "../plugins/control-client";
 import type { Permission } from "../plugins/grants";
 import { withFilesLock } from "../plugins/updates/files-lock";
@@ -13,6 +14,14 @@ import {
 } from "../plugins/updates/updater";
 import { withStore } from "./device";
 import { failed } from "./failure";
+import {
+  approveFlag,
+  operandArgument,
+  operands,
+  pluginsDirFlag,
+  stateDirFlag,
+  type Handler,
+} from "./flags";
 import { CliIo } from "./io";
 
 interface Target {
@@ -173,3 +182,54 @@ export const pluginRestart = (options: {
         return yield* failed;
     }
   });
+
+export const pluginUpdateCommand = (
+  handler: Handler<Parameters<typeof pluginUpdate>[0]>,
+) =>
+  Command.make(
+    "update",
+    {
+      stateDir: stateDirFlag,
+      pluginsDir: pluginsDirFlag,
+      plugin: operandArgument(operands["plugin update"]),
+      approve: approveFlag,
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Check the GitHub repository that the plugin id names for a newer release and preview what it changes. Repeat with the displayed digest to install it.",
+    ),
+  );
+
+export const pluginRollbackCommand = (
+  handler: Handler<Parameters<typeof pluginRollback>[0]>,
+) =>
+  Command.make(
+    "rollback",
+    {
+      stateDir: stateDirFlag,
+      pluginsDir: pluginsDirFlag,
+      plugin: operandArgument(operands["plugin rollback"]),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Go back to the version the plugin ran before its last update or install, and restart it on that version.",
+    ),
+  );
+
+export const pluginRestartCommand = (
+  handler: Handler<Parameters<typeof pluginRestart>[0]>,
+) =>
+  Command.make(
+    "restart",
+    {
+      stateDir: stateDirFlag,
+      plugin: operandArgument(operands["plugin restart"]),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Ask the running server to restart the plugin on its approved version.",
+    ),
+  );

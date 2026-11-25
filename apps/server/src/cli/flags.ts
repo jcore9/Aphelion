@@ -1,7 +1,9 @@
 import { isAbsolute } from "node:path";
+import { Option, type Effect } from "effect";
 import { Argument, Flag } from "effect/cli";
 import { z } from "zod";
 import { defaultConfigDir } from "../config";
+import type { CliIo } from "./io";
 
 export const defaultStateDir = "/var/lib/aphelion";
 export const defaultPluginsDir = "/opt/aphelion/plugins";
@@ -37,6 +39,13 @@ export const operands = {
 
 export const ownText = "usage:";
 
+export type Handler<Config> = (
+  config: Config,
+) => Effect.Effect<unknown, unknown, CliIo>;
+
+export const optionalFlag = <A>(flag: Flag.Flag<A>) =>
+  flag.pipe(Flag.optional, Flag.map(Option.getOrUndefined));
+
 const nonEmpty = z.string().min(1, { error: "can't be empty" });
 
 export const absolutePath = z
@@ -61,39 +70,51 @@ export const checkedFlag = <T>(name: string, schema: z.ZodType<T, string>) =>
 
 export const textFlag = (name: string) => checkedFlag(name, z.string());
 
+export const operandArgument = (name: string) =>
+  Argument.String(name).pipe(Argument.withDescription(`The ${name}`));
+
 export const checkedArgument = <T>(
   name: string,
   label: string,
   schema: z.ZodType<T, string>,
 ) =>
-  Argument.String(name).pipe(
+  operandArgument(name).pipe(
     Argument.mapTryCatch((text) => check(schema, text), complaint(`${label} `)),
   );
 
-export const stateDir = textFlag(options.stateDir).pipe(
+export const stateDirFlag = textFlag(options.stateDir).pipe(
   Flag.withDefault(defaultStateDir),
   Flag.withDescription(
     `Folder for the database and sockets (default ${defaultStateDir})`,
   ),
 );
 
-export const configDir = textFlag(options.configDir).pipe(
+export const configDirFlag = textFlag(options.configDir).pipe(
   Flag.withDefault(defaultConfigDir),
   Flag.withDescription(
     `Folder of the config files (default ${defaultConfigDir})`,
   ),
 );
 
-export const pluginsDir = checkedFlag(options.pluginsDir, absolutePath).pipe(
+export const pluginsDirFlag = checkedFlag(
+  options.pluginsDir,
+  absolutePath,
+).pipe(
   Flag.withDefault(defaultPluginsDir),
   Flag.withDescription(
     `Folder of installed plugins (default ${defaultPluginsDir})`,
   ),
 );
 
-export const toolsDir = checkedFlag(options.toolsDir, absolutePath).pipe(
+export const toolsDirFlag = checkedFlag(options.toolsDir, absolutePath).pipe(
   Flag.withDefault(defaultToolsDir),
   Flag.withDescription(
     `Folder of installed AI tools (default ${defaultToolsDir})`,
+  ),
+);
+
+export const approveFlag = optionalFlag(
+  textFlag(options.approve).pipe(
+    Flag.withDescription("The digest the preview showed, to save the grants"),
   ),
 );

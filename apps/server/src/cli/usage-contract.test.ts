@@ -89,13 +89,16 @@ describe("an empty value", () => {
 });
 
 describe("--version and --help", () => {
-  test("--version prints one line on standard output and exits 0", async () => {
-    expect(await run(["--version"])).toEqual({
-      code: 0,
-      out: [`aphelion ${version}`],
-      err: [],
-    });
-  });
+  test.each([["--version"], ["-v"]])(
+    "%s prints one line on standard output and exits 0",
+    async (flag) => {
+      expect(await run([flag])).toEqual({
+        code: 0,
+        out: [`aphelion ${version}`],
+        err: [],
+      });
+    },
+  );
 
   test.each([
     [[]],

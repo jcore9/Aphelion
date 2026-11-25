@@ -1,22 +1,52 @@
+import { Effect } from "effect";
 import { describe, expect, test } from "vitest";
 import { defaultConfigDir } from "../config";
-import {
-  defaultPluginsDir,
-  defaultStateDir,
-  defaultToolsDir,
-  parseCommandLine,
-} from "./args";
+import { makeCli, type Handlers } from "./index";
+import { defaultPluginsDir, defaultStateDir, defaultToolsDir } from "./flags";
+import { capture } from "./testing";
 
-const accepted = (argv: string[]) => {
-  const result = parseCommandLine(argv);
-  if (!result.ok) throw new Error(result.message);
-  return result.command;
+interface Call {
+  readonly handler: keyof Handlers;
+  readonly config: unknown;
+}
+
+const parsed = async (argv: string[]) => {
+  const calls: Call[] = [];
+  const record = (handler: keyof Handlers) => (config: unknown) =>
+    Effect.sync(() => void calls.push({ handler, config }));
+  const handlers: Handlers = {
+    headless: record("headless"),
+    configCheck: record("configCheck"),
+    deviceAdd: record("deviceAdd"),
+    deviceList: record("deviceList"),
+    deviceRevoke: record("deviceRevoke"),
+    pluginInstall: record("pluginInstall"),
+    pluginUpdate: record("pluginUpdate"),
+    pluginRollback: record("pluginRollback"),
+    pluginRestart: record("pluginRestart"),
+    pluginDev: record("pluginDev"),
+    toolList: record("toolList"),
+    toolInstall: record("toolInstall"),
+    toolRemove: record("toolRemove"),
+  };
+  const result = await capture(makeCli(handlers)(argv));
+  return { ...result, calls };
 };
 
-const refused = (argv: string[]) => {
-  const result = parseCommandLine(argv);
-  if (result.ok) throw new Error(`accepted ${JSON.stringify(result.command)}`);
-  return result.message;
+const accepted = async (argv: string[]) => {
+  const { code, err, calls } = await parsed(argv);
+  expect(err).toEqual([]);
+  expect(code).toBe(0);
+  return calls;
+};
+
+const refused = async (argv: string[]) => {
+  const { code, out, err, calls } = await parsed(argv);
+  expect(code).toBe(2);
+  expect(out).toEqual([]);
+  expect(calls).toEqual([]);
+  expect(err.at(-1)).toBe("Run aphelion --help to see the commands.");
+  return err[0] ?? "";
 };
 
 describe("accepted command lines", () => {
@@ -27,6 +57,8 @@ describe("accepted command lines", () => {
     [["device", "add", "--help"], { kind: "help" }],
     [["--help", "--unknown"], { kind: "help" }],
     [["--version"], { kind: "version" }],
+    [["-v"], { kind: "version" }],
+    [["--version", "--headless"], { kind: "version" }],
     [
       ["--headless"],
       {
@@ -196,8 +228,13 @@ describe("accepted command lines", () => {
         id: "0123456789abcdef",
       },
     ],
-  ])("%j", (argv, command) => {
-    expect(accepted(argv)).toEqual(command);
+  ])("%j", async (argv, { kind, ...config }) => {
+    const handler = kind.replace(/ (.)/, (_, letter: string) =>
+      letter.toUpperCase(),
+    );
+    expect(await accepted(argv)).toEqual(
+      kind === "help" || kind === "version" ? [] : [{ handler, config }],
+    );
   });
 });
 
@@ -208,9 +245,16 @@ describe("refused command lines", () => {
     [["device", "remove", "x"], 'unknown command "device remove"'],
     [
       ["--headless", "config", "check"],
-      '"headless" takes no arguments, but got 2',
+      '--headless isn\'t an option of "config"',
     ],
-    [["--version", "--headless"], '--headless isn\'t an option of "version"'],
+    [
+      ["--state-dir", "/s", "device", "list"],
+      '--state-dir isn\'t an option of "device"',
+    ],
+    [
+      ["device", "list", "--headless"],
+      '--headless isn\'t an option of "device list"',
+    ],
     [["--headless", "--days", "3"], '--days isn\'t an option of "headless"'],
     [
       ["config", "check", "--days", "3"],
@@ -301,8 +345,9 @@ describe("refused command lines", () => {
       ["config", "check", "--plugin-runner-fds", "3,4"],
       '--plugin-runner-fds isn\'t an option of "config check"',
     ],
-  ])("%j", (argv, message) => {
-    expect(refused(argv)).toContain(message);
-    expect(refused(argv)).not.toContain("aph_dev_");
+  ])("%j", async (argv, message) => {
+    const text = await refused(argv);
+    expect(text).toContain(message);
+    expect(text).not.toContain("aph_dev_");
   });
 });

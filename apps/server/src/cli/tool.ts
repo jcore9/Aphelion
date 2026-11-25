@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { Effect } from "effect";
+import { Command } from "effect/cli";
+import { z } from "zod";
 import { withFilesLock } from "../plugins/updates/files-lock";
 import { UpdateRefused } from "../plugins/updates/refused";
 import {
@@ -12,10 +14,18 @@ import {
   buildFor,
   parseToolList,
   processorFor,
+  toolName,
   type ToolList,
   type ToolName,
 } from "../tools/list";
 import { failed } from "./failure";
+import {
+  checkedArgument,
+  operands,
+  stateDirFlag,
+  toolsDirFlag,
+  type Handler,
+} from "./flags";
 import { CliIo } from "./io";
 
 export const defaultToolListFile = "/usr/local/lib/aphelion/ai-tools.json";
@@ -142,4 +152,53 @@ export const toolRemove = (options: {
           : `${options.name} isn't installed.`,
       );
     }),
+  );
+
+const toolNameText = z.string().pipe(toolName);
+
+export const toolListCommand = (
+  handler: Handler<Parameters<typeof toolList>[0]>,
+) =>
+  Command.make("list", { toolsDir: toolsDirFlag }, handler).pipe(
+    Command.withDescription(
+      "List the AI tools on Aphelion's list as a tab-separated table: name, pinned version, whether it is installed, and the command that checks its sign-in.",
+    ),
+  );
+
+export const toolInstallCommand = (
+  handler: Handler<Parameters<typeof toolInstall>[0]>,
+) =>
+  Command.make(
+    "install",
+    {
+      stateDir: stateDirFlag,
+      toolsDir: toolsDirFlag,
+      name: checkedArgument(
+        operands["tool install"],
+        "tool name",
+        toolNameText,
+      ),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Download the pinned build of an AI tool from the list, check it against the list's SHA-256 and size, and install it.",
+    ),
+  );
+
+export const toolRemoveCommand = (
+  handler: Handler<Parameters<typeof toolRemove>[0]>,
+) =>
+  Command.make(
+    "remove",
+    {
+      stateDir: stateDirFlag,
+      toolsDir: toolsDirFlag,
+      name: checkedArgument(operands["tool remove"], "tool name", toolNameText),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Remove an installed AI tool. Its sign-in stays in the bots volume.",
+    ),
   );

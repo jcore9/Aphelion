@@ -8,6 +8,7 @@ import {
   Stdio,
   Terminal,
 } from "effect";
+import type { Command } from "effect/cli";
 import { ChildProcessSpawner } from "effect/process";
 import { cli, CliFailure, CliIo } from "./index";
 
@@ -32,7 +33,10 @@ export const cliEnvironment = Layer.mergeAll(
   ),
 );
 
-export async function run(argv: readonly string[], stdin = "") {
+export async function capture(
+  program: Effect.Effect<void, unknown, CliIo | Command.Environment>,
+  stdin = "",
+) {
   const out: string[] = [];
   const err: string[] = [];
   const io = Layer.succeed(CliIo, {
@@ -41,7 +45,7 @@ export async function run(argv: readonly string[], stdin = "") {
     stdin: Effect.succeed(stdin),
   });
   const exit = await Effect.runPromiseExit(
-    cli(argv).pipe(Effect.provide(Layer.merge(io, cliEnvironment))),
+    program.pipe(Effect.provide(Layer.merge(io, cliEnvironment))),
   );
   let code = 0;
   if (Exit.isFailure(exit)) {
@@ -50,3 +54,6 @@ export async function run(argv: readonly string[], stdin = "") {
   }
   return { code, out, err };
 }
+
+export const run = (argv: readonly string[], stdin = "") =>
+  capture(cli(argv), stdin);
