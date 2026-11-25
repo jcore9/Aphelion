@@ -27,7 +27,7 @@ version: 1
 
 ## Versions and migrations
 
-Each file has its own version. When a file's format changes, its version goes up by one, and the server gains a migration that moves the old version forward. On load, the server runs the migrations from the file's version up to the current one, in memory, and then checks the result against the current schema. It doesn't rewrite the file. `loadConfig` returns the list of migrated files, so the caller can report them.
+Each file has its own version. When a file's format changes, its version goes up by one, and the server gains a migration that moves the old version forward. On load, the server runs the migrations in memory, from the file's version up to the current one. Then it checks the result against the current schema. It doesn't rewrite the file. `loadConfig` returns the list of migrated files, so the caller can report them.
 
 A file with a version newer than the server reads is an error. Upgrade Aphelion to read it.
 
@@ -35,7 +35,7 @@ Every file is at version 1, and no migrations exist yet.
 
 ## Owners and modes
 
-`checkConfigPermissions` refuses a config directory that bots could read or write. [`aphelion config check`](cli.md#aphelion-config-check) calls it, and `aphelion --headless` doesn't start when it fails. Both also check the state folder, `/var/lib/aphelion`, with `checkStatePermissions`: it must be a folder owned by the server's user and group, with a mode no looser than `0700`.
+`checkConfigPermissions` refuses a config directory that bots could read or write. [`aphelion config check`](cli.md#aphelion-config-check) calls it, and `aphelion --headless` doesn't start when it fails. Both also check the state folder, `/var/lib/aphelion`, with `checkStatePermissions`. `/var/lib/aphelion` must be a folder owned by the server's user and group, with a mode no looser than `0700`.
 
 | Path | Must be | Owner and group | Mode no looser than |
 | --- | --- | --- | --- |
@@ -75,14 +75,14 @@ Each error names the file, then the line and column where the parser found it, t
 
 ## JSON Schema for editors
 
-Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config): [`bots.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/bots.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/server.schema.json). The schemas describe the current version. To get completion and checks in an editor that runs the YAML language server, add a first line that points at the schema:
+Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config). The files are [`bots.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/bots.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/server.schema.json). The schemas describe the current version. An editor that runs the YAML language server can then complete and check the file. To turn on completion and checks, add a first line that points at the schema:
 
 ```yaml
 # yaml-language-server: $schema=../path/to/bots.schema.json
 version: 1
 ```
 
-JSON Schema can't express one rule: bot names must be unique within `bots.yaml`. Only the server checks it.
+JSON Schema can't express one rule, that bot names must be unique within `bots.yaml`. Only the server checks it.
 
 ## Fields
 
@@ -111,7 +111,7 @@ What each bot is allowed to do. Instructions live in the bot's folder, not here 
 
 ### `policy.yaml`, version 1
 
-Approval rules. No fields yet: M2-01 adds the policy model.
+Approval rules. The file has no fields yet. Issue M2-01 adds the policy model.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -119,7 +119,7 @@ Approval rules. No fields yet: M2-01 adds the policy model.
 
 ### `routines.yaml`, version 1
 
-Scheduled and on-demand routines. No fields yet: M6-02 adds routine definitions.
+Scheduled and on-demand routines. The file has no fields yet. Issue M6-02 adds routine definitions.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -127,7 +127,7 @@ Scheduled and on-demand routines. No fields yet: M6-02 adds routine definitions.
 
 ### `connectors.yaml`, version 1
 
-Connector settings. No fields yet: M3 adds connector entries.
+Connector settings. The file has no fields yet. Milestone M3 adds connector entries.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

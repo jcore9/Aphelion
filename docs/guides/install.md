@@ -2,7 +2,7 @@
 
 This guide installs Aphelion's server on an Ubuntu host. The server runs in one Docker container ([the container](../reference/container.md)). A systemd service, `aphelion.service`, starts it at boot. Devices reach it only over your tailnet.
 
-The install was tested in parts on Debian 13 with Docker 29.10 and Compose 5.8 on x86-64. The M0 exit test, on 2026-11-24, ran the install on Ubuntu 26.04.1 on a Proxmox VM, and restored its backup on an existing Ubuntu 24.04.5 machine ([results](../plan/milestones/M0-exit-test.md)).
+The install was tested in parts on Debian 13 with Docker 29.10 and Compose 5.8 on x86-64. The M0 exit test ran on 2026-11-24. It ran the install on Ubuntu 26.04.1 on a Proxmox VM. It then restored the backup on an existing Ubuntu 24.04.5 machine ([results](../plan/milestones/M0-exit-test.md)).
 
 ## What you need
 
@@ -16,7 +16,7 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
 ## Install
 
-1. Clone the latest release to `/opt/aphelion` as root. A release is a tag, a name fixed to one commit, so you install a version that was tested and not whatever is on `main` today. The service runs the files there, so only root may change them. The latest tag is on [the releases page](https://github.com/jcore9/Aphelion/releases). Put it in `tag`:
+1. Clone the latest release to `/opt/aphelion` as root. A release is a tag, which is a name fixed to one commit. You install a version that was tested, not whatever is on `main` today. The service runs the files in that folder, so only root may change them. Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`:
 
    ```sh
    tag=v0.1.0-alpha.1
@@ -31,7 +31,7 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
    echo "APHELION_TAILNET_ADDRESS=$(tailscale ip -4)" | sudo tee /opt/aphelion/deploy/.env
    ```
 
-   The same file takes four optional settings: `APHELION_MEMORY` (default `4g`), `APHELION_CPUS` (default `2`), `APHELION_SUBNET` (default `172.30.73.0/24`) and `APHELION_TAILNET_INTERFACE` (default `tailscale0`).
+   The same file takes four optional settings. `APHELION_MEMORY` defaults to `4g`. `APHELION_CPUS` defaults to `2`. `APHELION_SUBNET` defaults to `172.30.73.0/24`. `APHELION_TAILNET_INTERFACE` defaults to `tailscale0`.
 
 3. Build the image.
 
@@ -48,11 +48,11 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
    The script also links `/usr/local/bin/aphelion` to the `aphelion` command for the host, so `sudo aphelion` works from any folder. [The host command](../reference/host-command.md) describes it. Running the script again keeps the link as it is.
 
-   The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens it. The bootstrap key unlocks it ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
+   The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens the store. The bootstrap key unlocks the store ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
 
    The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a whole key, the script stops and leaves the file and the service as they are.
 
-   When it creates the key, the script may print `Credential secret file '/var/lib/systemd/credential.secret' is not located on encrypted media, using anyway.` `systemd-creds` prints this when its host key, the key it encrypts the bootstrap key with, sits on a disk that isn't encrypted. On a host without a TPM, a security chip on the motherboard, that host key is the only protection, so anyone who copies the whole disk can decrypt the bootstrap key. [Decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md#what-it-protects) accepts this. Encrypting the host's disk closes the gap.
+   When it creates the key, the script may print `Credential secret file '/var/lib/systemd/credential.secret' is not located on encrypted media, using anyway.` `systemd-creds` prints this when its host key sits on a disk that isn't encrypted. The host key is the key that `systemd-creds` encrypts the bootstrap key with. A TPM is a security chip on the motherboard. On a host without a TPM, the host key is the only protection. Anyone who copies the whole disk can then decrypt the bootstrap key. [Decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md#what-it-protects) accepts this. Encrypting the host's disk closes the gap.
 
 5. Make a recovery copy of the bootstrap key, as [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) describes. Do it before you store any secret. If the host's disk fails, this copy is the only way to read the store on a new host.
 
@@ -97,7 +97,7 @@ sudo docker compose exec -T --user harness aphelion aphelion device add laptop
 
 ## Keep a recovery copy of the bootstrap key
 
-The bootstrap key is the only key to the secrets store. If the host's disk is lost, the key is lost with it, and so is every secret in the store. On a host with a TPM, a security chip on the motherboard, the key may also be tied to that chip, so a new machine can't decrypt the old file.
+The bootstrap key is the only key to the secrets store. If the host's disk is lost, the key is lost with it, and so is every secret in the store. A TPM is a security chip on the motherboard. On a host with a TPM, the key may also be tied to that chip. A new machine can't decrypt the old file then.
 
 1. Print the key. The command shows the key on screen, so make sure that nobody can see your screen.
 
@@ -133,15 +133,17 @@ Put the bootstrap key on the new host before you run `host/install`, so that the
    sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap - | grep -cEx 'AGE-SECRET-KEY-1[0-9A-Z]{58}'
    ```
 
-5. Follow [Install](#install) steps 1 to 4. Stop there and don't start the service. If you start it now, the secrets broker creates an empty store. Don't reboot either: `host/install` enables the service, so it starts at boot. Then follow [Back up and restore](#back-up-and-restore) to put your data back.
+5. Follow [Install](#install) steps 1 to 4. Stop there and don't start the service. If you start it now, the secrets broker creates an empty store. Don't reboot either, because `host/install` enables the service, so it starts at boot. Then follow [Back up and restore](#back-up-and-restore) to put your data back.
 
-The key alone restores nothing. The secrets themselves are in the `secrets` volume. [Back up and restore](#back-up-and-restore) moves that volume and the other five to a new host. The commands were run with Docker on a development machine and test data. The M0 exit test restored test data from an Ubuntu 26.04 VM on an existing Ubuntu 24.04 machine. That machine also held the backup, so the archive was copied locally instead of fetched over `ssh`. All three checks passed. The guide has not yet been tested on a host that holds real secrets. The broker refuses to start if the key doesn't match a store it finds, and the log then shows `The bootstrap key does not match this secrets store`.
+The key alone restores nothing. The secrets themselves are in the `secrets` volume. [Back up and restore](#back-up-and-restore) moves that volume and the other five to a new host. The commands were run with Docker on a development machine and test data. The M0 exit test restored test data from an Ubuntu 26.04 VM on an existing Ubuntu 24.04 machine. That machine also held the backup, so the archive was copied locally instead of fetched over `ssh`. All three checks passed. The guide has not yet been tested on a host that holds real secrets.
+
+The broker refuses to start if the key doesn't match a store it finds. The log then shows `The bootstrap key does not match this secrets store`.
 
 ## Back up and restore
 
 A backup is one archive file that holds the contents of Aphelion's six Docker volumes. It doesn't hold the bootstrap key, or the host setup that [Install](#install) makes again, such as `deploy/.env` and the service. You restore it on a new host before the first start. To try the whole drill with test data first, see [Rehearse with test data](#rehearse-with-test-data).
 
-A **volume** is a folder that Docker keeps for the container. Aphelion has six. A real install names them `aphelion_config`, `aphelion_state` and so on, because Compose, the tool that reads `deploy/compose.yaml`, names the project `aphelion` and puts the project name in front of each volume.
+A **volume** is a folder that Docker keeps for the container. Aphelion has six. A real install names them `aphelion_config`, `aphelion_state` and so on. Compose is the tool that reads `deploy/compose.yaml`. It names the project `aphelion` and puts the project name in front of each volume.
 
 | Volume | Holds |
 | --- | --- |
@@ -372,13 +374,13 @@ sudo systemctl start aphelion
 
 ## What the service does
 
-[`aphelion.service`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/aphelion.service) starts at boot after Docker and Tailscale. It also starts whenever Docker starts, and stops when Docker stops. It decrypts the bootstrap key into `/run/credentials/aphelion.service/bootstrap`, a folder in memory that only root can read, and Compose gives that file to the container. Before each start, [`host/preflight`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/preflight) does three things:
+[`aphelion.service`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/aphelion.service) starts at boot after Docker and Tailscale. It also starts whenever Docker starts, and stops when Docker stops. It decrypts the bootstrap key into `/run/credentials/aphelion.service/bootstrap`, a folder in memory that only root can read, and Compose gives that file to the container. Before each start, [`host/preflight`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/preflight) does three things, in this order:
 
 1. It waits up to 120 seconds for `APHELION_TAILNET_ADDRESS` to appear on the tailnet interface, `tailscale0`. Docker can't publish a port on an address that doesn't exist yet.
 2. It installs the [host firewall](../reference/container.md#network) again. Firewall rules don't survive a reboot, so every start installs them.
-3. It runs `aphelion config check` on the rendered Compose file, as `harness`. The check refuses a port published anywhere but the tailnet. It also refuses a `server.yaml` that the published port can't reach: the server must listen on address `0.0.0.0` and port 7400 ([decision 0055](../decisions/0055-compose-check-server-listener.md)).
+3. It runs `aphelion config check` on the rendered Compose file, as `harness`. The check refuses a port published anywhere but the tailnet. It also refuses a `server.yaml` that the published port can't reach. The server must listen on address `0.0.0.0` and port 7400 ([decision 0055](../decisions/0055-compose-check-server-listener.md)).
 
-If any step fails, the service doesn't start. Then the service runs `docker compose up` in the foreground. If the container stops with an error, systemd starts it again after 10 seconds.
+If any step fails, the service doesn't start. If all three succeed, the service runs `docker compose up` in the foreground. If the container stops with an error, systemd starts it again after 10 seconds.
 
 Always start the server with `systemctl`. A plain `docker compose up` skips the firewall step and has no bootstrap key, so the container stops.
 
@@ -423,7 +425,7 @@ A plugin whose manifest names a GitHub `repository` updates from that repository
    sudo docker compose exec -T --user harness aphelion aphelion plugin update <id>
    ```
 
-   When the latest release is the installed version, the command prints `<id> is already on <version>, the latest release. If the server still runs an older version, run aphelion plugin restart <id>.` and you are done. The server can still run an older version when an earlier `--approve` run was stopped after it installed the release and before it restarted the plugin. Then run `sudo docker compose exec -T --user harness aphelion aphelion plugin restart <id>`. Otherwise it prints the two versions, the permissions the new version adds or drops, and an `--approve` value.
+   When the latest release is the installed version, the command prints `<id> is already on <version>, the latest release. If the server still runs an older version, run aphelion plugin restart <id>.` and you are done. The server can still run an older version if an earlier `--approve` run stopped after it installed the release and before it restarted the plugin. In that case, run `sudo docker compose exec -T --user harness aphelion aphelion plugin restart <id>`. If the latest release is not the installed version, the command prints the two versions, the permissions the new version adds or drops, and an `--approve` value.
 
 2. If you accept the changes, repeat the command with the `--approve` value it printed.
 
@@ -449,14 +451,14 @@ The command prints `Went back from <id> <current version> to <earlier version>.`
 
 ## Check the network boundary
 
-The container must not reach your LAN, the host or other tailnet devices ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check) connects to six targets as `aphelion-bot` inside the running container. Give it, in order:
+The container must not reach your LAN, the host or other tailnet devices ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check) connects to six targets as `aphelion-bot` inside the running container. Give it these targets, in this order:
 
-1. your LAN gateway, such as your router;
-2. the host's LAN address;
-3. the host's tailnet address;
-4. another device on your tailnet;
-5. the bridge gateway, `172.30.73.1` by default;
-6. a host on the internet.
+1. Your LAN gateway, such as your router.
+2. The host's LAN address.
+3. The host's tailnet address.
+4. Another device on your tailnet.
+5. The bridge gateway, which is `172.30.73.1` by default.
+6. A host on the internet.
 
 Each target is an address and an open port. For example:
 
@@ -464,7 +466,7 @@ Each target is an address and an open port. For example:
 sudo host/network-check 10.0.0.1:80 10.0.0.133:22 100.71.226.67:22 100.93.139.95:22 172.30.73.1:22 1.1.1.1:443
 ```
 
-The script first connects to each target from the host itself, and stops if one doesn't answer. Pick targets with an open port. The first five must then print `blocked`, which means the connection from the container timed out because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The script exits with code 1 if any check fails, and with code 2 if a target is malformed or the container isn't running.
+The script first connects to each target from the host itself. It stops if a target doesn't answer, so pick targets with an open port. The first five must then print `blocked`. That means the connection from the container timed out, because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The script exits with code 1 if any check fails, and with code 2 if a target is malformed or the container isn't running.
 
 Aphelion refuses to start when ufw is enabled and `MANAGE_BUILTINS=yes` is set in `/etc/default/ufw`. To fix this, set `MANAGE_BUILTINS=no` in that file, then run these commands.
 
@@ -475,7 +477,7 @@ sudo systemctl restart docker
 
 Docker rebuilds its chains, and `aphelion.service` restarts with it and installs Aphelion's rules. Once Aphelion runs again, run the network check above.
 
-Preflight runs only when Aphelion starts. If you set `yes` later, while Aphelion runs, the next `sudo ufw reload` or `sudo ufw enable` removes Aphelion's rules and Docker's chains. They stay gone until you fix the setting and restart Docker as above. Restarting Aphelion alone doesn't bring them back. Keep `MANAGE_BUILTINS=no` before you run either command. Preflight reads `/etc/default/ufw` the way ufw does, so if it sets `MANAGE_BUILTINS` more than once, the last line counts.
+Preflight runs only when Aphelion starts. If you set `yes` later, while Aphelion runs, the next `sudo ufw reload` or `sudo ufw enable` removes Aphelion's rules and Docker's chains. They stay gone until you fix the setting and restart Docker as above. Restarting Aphelion alone doesn't bring them back. Make sure `MANAGE_BUILTINS=no` is set before you run either command. Preflight reads `/etc/default/ufw` the way ufw does, so if it sets `MANAGE_BUILTINS` more than once, the last line counts.
 
 The M0 exit test tried two `ufw` settings on Ubuntu 26.04 with Docker 29.10, with ufw turned on:
 

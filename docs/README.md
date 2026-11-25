@@ -1,17 +1,17 @@
 # Aphelion docs
 
-These Markdown files read the same on GitHub and on the docs site. `bun run docs` builds the site with [Starlight](https://starlight.astro.build/) and checks every internal link ([decision 0033](decisions/0033-docs-site-in-place.md)).
+This folder holds the Aphelion documentation: the plan, guides, reference pages, spike findings and decision records. The files are Markdown, and they read the same on GitHub and on the docs site. `bun run docs` builds the site with [Starlight](https://starlight.astro.build/) and checks every internal link ([decision 0033](decisions/0033-docs-site-in-place.md)).
 
 ## Writing a page
 
-- Start the file with a `# Title` line. The site uses it as the page title, so pages need no frontmatter.
-- Link to another page by its relative path, such as `[decision 0007](decisions/0007-bun-runtime.md)`. The site turns the link into the page's URL, and the build fails on a link to a missing page or heading.
+- Start the file with a `# Title` line. The site uses it as the page title, so pages need no frontmatter. Frontmatter is the settings block that some site generators expect at the top of a file.
+- Link to another page by its relative path, such as `[decision 0007](decisions/0007-bun-runtime.md)`. The site turns the link into the page's URL. The build fails on a link to a missing page or heading.
 - Link to code or anything else outside `docs/` with a full GitHub URL. A relative link to such a file fails the build.
-- A new folder at the top of `docs/` needs a symbolic link in `src/content/docs/`, or its pages don't appear on the site. For example, run `ln -s ../../../guides src/content/docs/guides` from `docs/`.
+- A new folder at the top of `docs/` needs a symbolic link (a file that points to another folder) in `src/content/docs/`. Without it, the folder's pages don't appear on the site. For example, run `ln -s ../../../guides src/content/docs/guides` from `docs/`.
 
 ## Plan
 
-- [Architecture and development plan](plan/aphelion-plan.md): the plan of record, imported unchanged ([decision 0004](decisions/0004-import-plan-with-m0-plan.md)). Later records amend it, and each amendment is marked in the text.
+- [Architecture and development plan](plan/aphelion-plan.md) is the plan of record. It was imported unchanged ([decision 0004](decisions/0004-import-plan-with-m0-plan.md)). Later records amend it, and each amendment is marked in the text.
 - Milestone plans:
   - [M0: Foundations](plan/milestones/M0-foundations.md)
   - [M0 exit test results](plan/milestones/M0-exit-test.md)
@@ -19,17 +19,17 @@ These Markdown files read the same on GitHub and on the docs site. `bun run docs
 
 ## Guides
 
-- [Install the headless server](guides/install.md): the host, the image, `aphelion.service`, plugins, the network check and upgrades.
-- [Write your first server plugin](guides/write-your-first-server-plugin.md): create a plugin from the template, test it, build it and reload it in dev mode.
-- [How a release happens](guides/releasing.md): the release pull requests, the version overrides, and the first tag.
+- [Install the headless server](guides/install.md) covers the host, the image, `aphelion.service`, plugins, the network check and upgrades. A headless server runs without a desktop window.
+- [Write your first server plugin](guides/write-your-first-server-plugin.md) shows how to create a plugin from the template, test it, build it and reload it in dev mode.
+- [How a release happens](guides/releasing.md) covers the release pull requests, the version overrides and the first tag.
 
 ## Working on the repository
 
-- [Branch protection](branch-protection.md): how changes reach `main`, and the rules that protect `main` and the release tags.
+- [Branch protection](branch-protection.md) says how changes reach `main`. It also lists the rules that protect `main` and the release tags.
 
 ## Spike findings
 
-Each spike answers its questions in writing before anything builds on it. Prototype code stays on its `spike/` branch and is never merged.
+A spike is a research task. Each spike answers its questions in writing before anything builds on it. Its prototype code stays on its `spike/` branch and is never merged.
 
 - [M0-01: Claude over ACP on a subscription login](spikes/M0-01-claude-over-acp.md)
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)
@@ -41,24 +41,24 @@ Each spike answers its questions in writing before anything builds on it. Protot
 
 ## Reference
 
-- [The aphelion command](reference/cli.md): `--headless`, `--version`, `config check` and the `device` commands, their options, output and exit codes.
-- [The host command](reference/host-command.md): `sudo aphelion status`, `device` and `check` on the server, what each prints and its exit codes.
-- [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
-- [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
-- [Logging and the audit log](reference/logging.md): the log format, the redaction rules and how to add one, and the append-only audit table.
-- [The HTTP and WebSocket server](reference/server.md): where the server listens, what `/health` returns, what each request gets with and without a device token, the WebSocket limits, and the Compose port rule.
-- [Device tokens](reference/devices.md): how a device token is made, stored, checked, expired and revoked, and what is audited.
-- [The client protocol](reference/protocol.md): how frames, sequence numbers, replay, resync and command ids work.
-- [Protocol spec](reference/protocol-spec.md): every frame, command, event and error code, generated from the protocol schemas.
-- [Plugin manifest](reference/plugin-manifest.md): the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
-- [Plugin API reference](reference/plugin-api.md): every type, function and constant in `@aphelion/plugin-sdk`, generated from the SDK's types and doc comments.
-- [Running plugins on the server](reference/plugins.md): how the plugin host and the plugin runner start, talk to, restart and stop a plugin's server part, its environment and data folder, and the JSON-RPC messages.
-- [The container](reference/container.md): the image, the four users, the folders, how the launcher starts and stops the processes, the hardening, the network boundary and the contract tests.
-- [Secrets](reference/secrets.md): the `Secret` type, what it guarantees and what it doesn't, how to read a value, and the secret reference syntax.
+- [The aphelion command](reference/cli.md) covers `--headless`, `--version`, `config check` and the `device` commands, their options, output and exit codes.
+- [The host command](reference/host-command.md) covers `sudo aphelion status`, `device` and `check` on the server, what each prints and its exit codes.
+- [Config reference](reference/config.md) covers the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
+- [The SQLite store](reference/store.md) covers the `Database` interface and how to add a migration.
+- [Logging and the audit log](reference/logging.md) covers the log format, the redaction rules and how to add one, and the append-only audit table.
+- [The HTTP and WebSocket server](reference/server.md) covers where the server listens and what `/health` returns. It also covers what each request gets with and without a device token, the WebSocket limits and the Compose port rule.
+- [Device tokens](reference/devices.md) covers how a device token is made, stored, checked, expired and revoked, and what is audited.
+- [The client protocol](reference/protocol.md) covers how frames, sequence numbers, replay, resync and command ids work.
+- [Protocol spec](reference/protocol-spec.md) lists every frame, command, event and error code, generated from the protocol schemas.
+- [Plugin manifest](reference/plugin-manifest.md) covers the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
+- [Plugin API reference](reference/plugin-api.md) lists every type, function and constant in `@aphelion/plugin-sdk`, generated from the SDK's types and doc comments.
+- [Running plugins on the server](reference/plugins.md) covers how the plugin host and the plugin runner start, talk to, restart and stop a plugin's server part. It also covers the plugin's environment and data folder and the JSON-RPC messages.
+- [The container](reference/container.md) covers the image, the four users and the folders. It also covers how the launcher starts and stops the processes, the hardening, the network boundary and the contract tests.
+- [Secrets](reference/secrets.md) covers the `Secret` type, what it guarantees and what it doesn't, how to read a value, and the secret reference syntax.
 
 ## Decision records
 
-One numbered record per significant decision: context, options, choice, consequences. Start a new record from [the template](decisions/template.md).
+Each significant decision has one numbered record. A record lists the context, the options, the choice and the consequences. Start a new record from [the template](decisions/template.md).
 
 | # | Decision | Status |
 | --- | --- | --- |

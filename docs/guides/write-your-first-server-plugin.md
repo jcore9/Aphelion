@@ -76,7 +76,7 @@ The other file you don't need to touch is `src/index.ts`. It connects your plugi
 
 ## Run the tests
 
-Open `src/plugin.test.ts`. It runs your plugin against `createTestHost`, a fake Aphelion in the SDK. The fake checks grants and the shape of each request the way the real server does, so a test can show that a plugin without a grant is refused. Its `network.get` replies are fixtures that the test registers, not real requests. The fake does no DNS lookup, public-address check or TLS. It also runs the secret operations that a test registers, which the server can't do yet. The template has two tests. One grants the event and checks the log. The other grants nothing and checks that `start` fails with error `-32001`, `Not granted`.
+Open `src/plugin.test.ts`. It runs your plugin against `createTestHost`, a fake Aphelion in the SDK. The fake checks grants and the shape of each request the way the real server does. A test can therefore show that a plugin without a grant is refused. Its `network.get` replies are fixtures that the test registers, not real requests. The fake does no DNS lookup, public-address check or TLS. It also runs the secret operations that a test registers, which the server can't do yet. The template has two tests. One grants the event and checks the log. The other grants nothing and checks that `start` fails with error `-32001`, `Not granted`.
 
 1. Run the tests.
 
@@ -161,7 +161,7 @@ Aphelion starts a plugin only after you approve its permissions. Approve the fol
 sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/dev-plugin
 ```
 
-You should see the plugin's name and a line that starts with `events` and names `"approval.requested"`, then a line that ends with `--approve` and a long hexadecimal number. Run the command again, with the whole number in place of `<number>` and no angle brackets.
+You should see the plugin's name and a line that starts with `events` and names `"approval.requested"`. Then you should see a line that ends with `--approve` and a long hexadecimal number. Run the command again, with the whole number in place of `<number>` and no angle brackets.
 
 ```sh
 sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/dev-plugin --approve <number>
@@ -257,7 +257,7 @@ The tag starts `release.yml`. It does these things, in order:
 2. It runs the type check, the tests and the build.
 3. It packs `dist/` into one file, `aphelion-plugin.tar`.
 4. It asks GitHub for an artifact attestation. An attestation is a signed record that says this exact file came from this workflow in this repository. Aphelion checks the attestation before it installs an update, so a file that someone changed later is refused.
-5. It creates a GitHub release named after the tag, with two files: `aphelion-plugin.tar` and the attestation, `aphelion-plugin.tar.sigstore.json`.
+5. It creates a GitHub release named after the tag, with two files. They are `aphelion-plugin.tar` and the attestation, `aphelion-plugin.tar.sigstore.json`.
 
 On the repository's **Actions** tab you can watch the run. When it finishes, the release is on the **Releases** page. To publish the next version, raise `version` in `aphelion-plugin.json`, commit, and push a new tag. A version with a `-`, such as `0.2.0-rc.1`, becomes a pre-release, which Aphelion doesn't install. The workflow rejects build metadata such as `+build`.
 

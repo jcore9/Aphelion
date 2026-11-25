@@ -7,7 +7,7 @@
 | Command | What it does |
 | --- | --- |
 | `aphelion --headless` | Checks the config, then starts the server. The container runs this. |
-| `aphelion config check` | Checks the config files, the modes of the config and state folders and, with `--compose`, the ports a Compose file publishes |
+| `aphelion config check` | Checks the config files, the modes of the config and state folders and, with `--compose`, the ports a Docker Compose file publishes |
 | `aphelion plugin update ID` | Previews the latest GitHub release of plugin `ID`, and with `--approve` installs it and restarts the plugin on it |
 | `aphelion plugin rollback ID` | Goes back to the version of plugin `ID` before the current one, and restarts the plugin on it |
 | `aphelion plugin restart ID` | Asks the running server to restart plugin `ID` on its approved version |
@@ -50,7 +50,7 @@ The server starts in this order:
 2. It logs a `warn` line for each config file at an older version, which it read through a migration ([versions and migrations](config.md#versions-and-migrations)).
 3. It opens `aphelion.db` in the state folder and applies any new [migrations](store.md#migrations).
 4. It starts the [HTTP and WebSocket server](server.md) on the address and port from `server.yaml`, and logs `server started` with the version, address and port.
-5. With `--plugin-runner-fds`, it starts the [plugin host](plugins.md) on those pipes and asks the runner to start every plugin that `aphelion plugin install` approved. It logs an `error` line for a plugin whose manifest it can't read, or whose files, version or permissions no longer match the approved version, and goes on with the others. Then it logs `plugin host started` with the number of approved plugins, and opens the [control socket](plugins.md#control-socket). Without the option, it logs `plugins are off: no plugin runner pipe was given`.
+5. With `--plugin-runner-fds`, it starts the [plugin host](plugins.md) on those pipes and asks the runner to start every plugin that `aphelion plugin install` approved. It logs an `error` line for a plugin that fails a check, and goes on with the others. A plugin fails when the server can't read its manifest, or when its files, version or permissions no longer match the approved version. Then the server logs `plugin host started` with the number of approved plugins, and opens the [control socket](plugins.md#control-socket). Without the option, it logs `plugins are off: no plugin runner pipe was given`.
 
 On `SIGTERM` or `SIGINT` it logs `server stopping`, closes the listener and the database, and exits with code 130.
 
@@ -66,8 +66,8 @@ Headless mode never loads Electron or any GUI library. In the container, the [la
 
 The check prints one line for each problem it finds. It looks at:
 
-- the owner and mode of the config folder and each file ([owners and modes](config.md#owners-and-modes));
-- the owner and mode of the state folder. It must be a folder owned by the server's user and group, with a mode no looser than `0700`;
+- the owner and mode of the config folder and each file ([owners and modes](config.md#owners-and-modes)).
+- the owner and mode of the state folder. It must be a folder owned by the server's user and group, with a mode no looser than `0700`.
 - the five config files, as `loadConfig` reads them ([config errors](config.md#errors)).
 
 It reads the config files only when every owner and mode is right. A path that isn't a regular file, such as a named pipe, could make the read wait forever, so the check stops before reading it.
@@ -90,13 +90,13 @@ A run with problems prints each one, then the count on standard error, and exits
 
 ### Checking the Compose file
 
-With `--compose`, the check also runs [the Compose port rule](server.md#the-compose-port-rule) on the Compose file. Every port that any service publishes must be on a tailnet address, in `100.64.0.0/10`.
+With `--compose`, the check also runs [the Compose port rule](server.md#the-compose-port-rule) on the Compose file. Every port that any service publishes must be on a tailnet address in `100.64.0.0/10`. A tailnet is the owner's private Tailscale network.
 
 It also checks that a published port can reach the server ([decision 0055](../decisions/0055-compose-check-server-listener.md)):
 
 - `address` in `server.yaml` must be `0.0.0.0`. Compose forwards connections to the container's own network interface, and a server on `127.0.0.1` never sees them.
 - `port` in `server.yaml` must be `7400`, the only port that the [host firewall](container.md#network) lets into the container.
-- Every port that the `aphelion` service publishes must forward to the server's TCP port. The first number, the host port, may differ: `"100.71.226.67:8443:7400"` passes. A service that publishes no port passes this rule.
+- Every port that the `aphelion` service publishes must forward to the server's TCP port. The first number, the host port, may differ. `"100.71.226.67:8443:7400"` passes. A service that publishes no port passes this rule.
 
 Without `--compose`, any valid address and port pass, so the server can run from source on `127.0.0.1`. A check of a `server.yaml` with `address: 127.0.0.1` and `port: 7401` against the shipped Compose file prints:
 
@@ -149,7 +149,7 @@ The command exits with code 1 and a message if it can't reach the control socket
 aphelion plugin update ID [--approve DIGEST] [--state-dir DIR] [--plugins-dir DIR]
 ```
 
-Updates plugin `ID` from the GitHub repository its manifest names. Without `--approve`, the command downloads and checks the latest release, then prints a preview. The preview can clear abandoned staging files and release folders, and leaves installed versions and approvals in place. With the value the preview printed, it does the same checks again, installs the release, and asks the server to restart the plugin through the [control socket](plugins.md#control-socket). [Updates](plugins.md#updates) lists what the command checks and its limits.
+Updates plugin `ID` from the GitHub repository its manifest names. Without `--approve`, the command downloads and checks the latest release, then prints a preview. The preview can clear abandoned staging files and release folders, and leaves installed versions and approvals in place. With the value the preview printed, the command does the same checks again and installs the release. Then it asks the server to restart the plugin through the [control socket](plugins.md#control-socket). [Updates](plugins.md#updates) lists what the command checks and its limits.
 
 | Output | Meaning |
 | --- | --- |
@@ -209,7 +209,7 @@ To save the token to a file, create a new file that only you can read. `umask 07
 (umask 077 && set -o noclobber && docker compose exec -T --user harness aphelion aphelion device add laptop > token.txt)
 ```
 
-If the token can't be printed, for example because the disk is full, the command revokes the new device at once and exits with code 1, so no working token is left that nobody saw.
+If the token can't be printed, for example because the disk is full, the command revokes the new device at once. It then exits with code 1. So no working token exists that nobody saw.
 
 The name is 1 to 64 characters, with no control characters and no spaces at either end. Two devices may share a name.
 
