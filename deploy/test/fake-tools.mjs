@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import process from "node:process";
 
 const [root, port] = process.argv.slice(2);
 
