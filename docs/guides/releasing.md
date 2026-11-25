@@ -50,17 +50,18 @@ The owner does these once.
 
 Do them in this order. The alpha.1 merge into `main` starts the release workflow before the tag exists. While the setting in step 2 is still off, that first run can't open a pull request, so it fails without harm.
 
-1. Right after the alpha.1 release merges into `main`, tag that merge commit as `v0.1.0-alpha.1`, so release-please knows where M1 starts:
+1. Right after the alpha.1 release pull request (from `dev` into `main`) merges, tag its merge commit as `v0.1.0-alpha.1`, so release-please knows where M1 starts. Its description holds the M0 release notes. Set `pr` to its number:
 
    ```sh
-   sha=$(gh api repos/jcore9/Aphelion/commits/main --jq .sha)
-   gh api repos/jcore9/Aphelion/commits/$sha --jq .commit.message
-   gh pr list --repo jcore9/Aphelion --base main --state merged --limit 1 --json body --jq '.[0].body' > /tmp/notes.md
+   pr=<number of the alpha.1 release pull request>
+   gh pr view "$pr" --repo jcore9/Aphelion --json state,baseRefName,headRefName
+   sha=$(gh pr view "$pr" --repo jcore9/Aphelion --json mergeCommit --jq .mergeCommit.oid)
+   gh pr view "$pr" --repo jcore9/Aphelion --json body --jq .body > /tmp/notes.md
    gh release create v0.1.0-alpha.1 --repo jcore9/Aphelion --target "$sha" \
      --prerelease --title v0.1.0-alpha.1 --notes-file /tmp/notes.md
    ```
 
-   The second command prints the commit's message. It should be the merge of the alpha.1 release pull request. If it isn't, find the right commit before you run the last command. The third command copies that pull request's description, which holds the M0 release notes, into `/tmp/notes.md`. Read it before you run the last command.
+   The second command should show `MERGED`, from `dev` into `main`. The third and fourth take that pull request's merge commit and its description, so the tag and the notes match even if more commits land on `main` first. Read `/tmp/notes.md` before you run the last command.
 
 2. Turn on Settings → Actions → General → Workflow permissions → **Allow GitHub Actions to create and approve pull requests**. release-please opens its pull request with the workflow's own key, `GITHUB_TOKEN`, and GitHub allows that only with this setting.
 3. Run the release workflow again: `gh workflow run release.yml --repo jcore9/Aphelion --ref main`. It now starts from the tag. If a release pull request that lists every old commit is open anyway, close it and run the workflow again.
