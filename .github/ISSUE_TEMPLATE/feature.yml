@@ -16,7 +16,7 @@ body:
     attributes:
       label: Plan or decision record
       description: A link to the milestone plan section or the decision record that covers this work.
-      placeholder: https://github.com/jcore9/Aphelion/blob/dev/docs/plan/milestones/M0-foundations.md
+      placeholder: https://github.com/jcore9/Aphelion/blob/main/docs/plan/milestones/M0-foundations.md
     validations:
       required: true
   - type: input

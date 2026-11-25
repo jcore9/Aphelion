@@ -1,66 +1,90 @@
 # Apply the rulesets
 
-`dev.json` and `main.json` protect the `dev` and `main` branches. [Branch protection](../../docs/branch-protection.md) explains each rule. Applying them needs the Admin role, so the owner runs these steps. Run the commands from a checkout of this repository, signed in to `gh` as `jcore9`.
+A tag is a name fixed to one commit, such as the release tag `v0.1.0-alpha.2`. A ruleset is a set of GitHub rules for a branch or for tags. `main.json` protects the `main` branch, and `tags.json` protects the release tags, whose names start with `v`. [Branch protection](../../docs/branch-protection.md) explains each rule and [decision 0062](../../docs/decisions/0062-one-main-branch.md) gives the reasons.
 
-## Change the repository settings
+Applying them needs the Admin role, so the owner runs these steps. Run the commands from a checkout of this repository, signed in to `gh`, the GitHub command-line tool, as `jcore9`. Do the steps in order. Until you finish them, nobody merges.
 
-1. Allow squash merges for `dev` and merge commits for `main`, and turn off rebase merges. Delete head branches after a merge. Give squash and merge commits the pull request's title:
+## Move to one `main` branch
+
+1. Replace the `main` ruleset with the new `main.json`. The command finds the ruleset by name and replaces it, so it isn't created a second time:
+
+   ```sh
+   id=$(gh api repos/jcore9/Aphelion/rulesets --jq '.[] | select(.name == "main") | .id')
+   gh api --method PUT "repos/jcore9/Aphelion/rulesets/$id" --input .github/rulesets/main.json
+   ```
+
+   In the web UI, go to **Settings** > **Rules** > **Rulesets**, open `main`, and change it to match the file.
+
+2. Create the tag ruleset:
+
+   ```sh
+   gh api --method POST repos/jcore9/Aphelion/rulesets --input .github/rulesets/tags.json
+   ```
+
+   In the web UI, click **New ruleset** > **Import a ruleset** on the same page, and choose `tags.json`.
+
+3. Delete the `dev` ruleset:
+
+   ```sh
+   id=$(gh api repos/jcore9/Aphelion/rulesets --jq '.[] | select(.name == "dev") | .id')
+   gh api --method DELETE "repos/jcore9/Aphelion/rulesets/$id"
+   ```
+
+   In the web UI, open `dev` on the **Rulesets** page and delete it.
+
+4. Delete the `dev` branch. This works only after step 3, because the `dev` ruleset blocks deleting it:
+
+   ```sh
+   gh api --method DELETE repos/jcore9/Aphelion/git/refs/heads/dev
+   ```
+
+   In the web UI, go to **Code** > **Branches** and delete `dev`.
+
+5. Allow only squash merges, which turn a pull request into one commit. Delete a branch after its pull request merges, and give the squash commit the pull request's title:
 
    ```sh
    gh api --method PATCH repos/jcore9/Aphelion \
    	-F allow_squash_merge=true \
-   	-F allow_merge_commit=true \
+   	-F allow_merge_commit=false \
    	-F allow_rebase_merge=false \
    	-F delete_branch_on_merge=true \
    	-f squash_merge_commit_title=PR_TITLE \
-   	-f squash_merge_commit_message=COMMIT_MESSAGES \
-   	-f merge_commit_title=PR_TITLE \
-   	-f merge_commit_message=PR_BODY
+   	-f squash_merge_commit_message=COMMIT_MESSAGES
    ```
 
-   The deletion rule in each ruleset stops the automatic delete from removing `dev` after a release pull request merges.
+   In the web UI, go to **Settings** > **General** > **Pull Requests**.
 
-2. Keep the Actions token read-only, and stop workflows from approving pull requests:
+6. Give workflows read-only access by default, and let them create and approve pull requests:
 
    ```sh
    gh api --method PUT repos/jcore9/Aphelion/actions/permissions/workflow \
    	-f default_workflow_permissions=read \
-   	-F can_approve_pull_request_reviews=false
+   	-F can_approve_pull_request_reviews=true
    ```
 
-In the web UI, the first step is **Settings** > **General** > **Pull Requests**. The second step is **Settings** > **Actions** > **General** > **Workflow permissions**.
+   In the web UI, go to **Settings** > **Actions** > **General** > **Workflow permissions**.
 
-## Create the rulesets
+   [Decision 0061](../../docs/decisions/0061-release-please.md) needs this setting, because release-please opens its release pull request from a workflow. You already turned it on. It is safe because the merge rule asks for a code owner, and a workflow's approval isn't a code owner's.
 
-1. Create both rulesets:
-
-   ```sh
-   gh api --method POST repos/jcore9/Aphelion/rulesets --input .github/rulesets/dev.json
-   gh api --method POST repos/jcore9/Aphelion/rulesets --input .github/rulesets/main.json
-   ```
-
-   In the web UI, go to **Settings** > **Rules** > **Rulesets**. Click **New ruleset** > **Import a ruleset**, and choose the file.
-
-2. Check that each branch has four rules: `deletion`, `non_fast_forward`, `pull_request` and `required_status_checks`:
+7. Check the result. The first command lists four rules for `main`. The second shows the tag ruleset. The third prints `[]` when GitHub reads every line of `CODEOWNERS`:
 
    ```sh
-   gh api repos/jcore9/Aphelion/rules/branches/dev --jq '.[].type'
    gh api repos/jcore9/Aphelion/rules/branches/main --jq '.[].type'
+   gh api repos/jcore9/Aphelion/rulesets --jq '.[] | {name, target}'
+   gh api 'repos/jcore9/Aphelion/codeowners/errors?ref=main' --jq '.errors'
    ```
 
-3. After `CODEOWNERS` reaches `dev`, check that GitHub reads every line. The command prints `[]` when it does:
+   The four rules are `deletion`, `non_fast_forward`, `pull_request` and `required_status_checks`.
 
-   ```sh
-   gh api 'repos/jcore9/Aphelion/codeowners/errors?ref=dev' --jq '.errors'
-   ```
+8. Tell the bot you're done. It opens two small test pull requests and waits for their checks to pass. One touches no owner path, and the bot merges it. The other touches an owner path. The bot checks that GitHub still refuses to merge it and asks you to review, then closes it. The bot merges nothing else until both tests give that result.
 
 ## Update a ruleset
 
 To apply a changed file, replace the existing ruleset by its ID. Don't create it a second time.
 
 ```sh
-id=$(gh api repos/jcore9/Aphelion/rulesets --jq '.[] | select(.name == "dev") | .id')
-gh api --method PUT "repos/jcore9/Aphelion/rulesets/$id" --input .github/rulesets/dev.json
+id=$(gh api repos/jcore9/Aphelion/rulesets --jq '.[] | select(.name == "main") | .id')
+gh api --method PUT "repos/jcore9/Aphelion/rulesets/$id" --input .github/rulesets/main.json
 ```
 
-For `main`, use `main` in both places.
+For the tag ruleset, use `release tags` and `tags.json`.

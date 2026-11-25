@@ -1,6 +1,6 @@
 # The container
 
-The headless server runs as one Docker container with four users inside ([decision 0016](../decisions/0016-one-docker-container.md)). [`deploy/Dockerfile`](https://github.com/jcore9/Aphelion/blob/dev/deploy/Dockerfile) builds the image, and [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.yaml) runs it. [Install the headless server](../guides/install.md) covers the host side.
+The headless server runs as one Docker container with four users inside ([decision 0016](../decisions/0016-one-docker-container.md)). [`deploy/Dockerfile`](https://github.com/jcore9/Aphelion/blob/main/deploy/Dockerfile) builds the image, and [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/main/deploy/compose.yaml) runs it. [Install the headless server](../guides/install.md) covers the host side.
 
 ## What the image holds
 
@@ -14,7 +14,7 @@ The image is built on Ubuntu 26.04 LTS. The Ubuntu and Bun base images are pinne
 | `/usr/local/bin/bun` | Bun 1.4.5, which runs the plugin runner and every plugin |
 | `/usr/local/lib/aphelion/launch` | The launcher script that starts the processes |
 | `/usr/bin/tini` | The init process, process 1 in the container |
-| `/etc/aphelion/*.yaml` | The default config files, copied from [`docs/reference/config/example`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config/example) |
+| `/etc/aphelion/*.yaml` | The default config files, copied from [`docs/reference/config/example`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config/example) |
 
 The image also has `git` and `ca-certificates`. It has no AI tool such as Claude Code, Codex, Grok Build or OpenCode ([decision 0049](../decisions/0049-ai-tools-installed-from-a-list.md)). Issue [#155](https://github.com/jcore9/Aphelion/issues/155) adds a list to install them from.
 
@@ -70,7 +70,7 @@ Only `harness` can write the `plugin-files` volume, so a plugin can't change its
 
 The bot runner comes with M1-04 ([#22](https://github.com/jcore9/Aphelion/issues/22)). The launcher will start it the same way.
 
-If the environment variable `APHELION_PLUGIN_DEV_FOLDER` is set and not empty, the launcher adds `--plugin-dev` with its value to the server's command. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml) sets it. Without the variable, the server refuses reload requests on its [control socket](plugins.md#control-socket). See [Dev mode](plugins.md#dev-mode).
+If the environment variable `APHELION_PLUGIN_DEV_FOLDER` is set and not empty, the launcher adds `--plugin-dev` with its value to the server's command. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/main/deploy/compose.plugin-dev.yaml) sets it. Without the variable, the server refuses reload requests on its [control socket](plugins.md#control-socket). See [Dev mode](plugins.md#dev-mode).
 
 After the launcher closes its copies, only the server and the plugin runner hold the pipes, and no file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved, if its manifest is still the approved one ([`aphelion --headless`](cli.md#aphelion---headless)).
 
@@ -115,7 +115,7 @@ The container joins a bridge network named `aphelion`. Its host interface is `ap
 
 The server listens on port 7400 on every address inside the container, `0.0.0.0`. The Compose file publishes the port only on the host's tailnet address, which `APHELION_TAILNET_ADDRESS` sets. [`aphelion config check --compose -`](cli.md#checking-the-compose-file) refuses any other host address. It also refuses a `server.yaml` with another address or port, because the firewall below lets connections in only on port 7400.
 
-The host firewall keeps the container away from the LAN, and the LAN away from the container ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`deploy/host/firewall`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/firewall) installs two chains in iptables' `mangle` table:
+The host firewall keeps the container away from the LAN, and the LAN away from the container ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`deploy/host/firewall`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/firewall) installs two chains in iptables' `mangle` table:
 
 - `APHELION-FORWARD` is the first rule of the `FORWARD` chain. It drops traffic from `aphelion0` to `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10` (the tailnet), `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`, multicast and `240.0.0.0/4`. It also drops every new connection into the container, except one to port 7400 that arrives on the tailnet interface, `tailscale0`.
 - `APHELION-INPUT` is the first rule of the `INPUT` chain. It drops traffic from `aphelion0` to any of the host's own addresses.
@@ -134,7 +134,7 @@ Names still resolve. Docker's resolver in the container sends its queries from t
 
 ## Tests
 
-[`deploy/test/image-contract.sh`](https://github.com/jcore9/Aphelion/blob/dev/deploy/test/image-contract.sh) builds the image and runs it with the real Compose file. CI runs it in the `container` job. It checks these things:
+[`deploy/test/image-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/image-contract.sh) builds the image and runs it with the real Compose file. CI runs it in the `container` job. It checks these things:
 
 - The users, the groups, the missing `sudo` and AI tools, and the cleared set-user-ID bits.
 - `config check` accepts the Compose file and refuses a port published on every address.
@@ -148,7 +148,7 @@ Names still resolve. Docker's resolver in the container sends its queries from t
 
 With `APHELION_TEST_TAILNET_ADDRESS` and `APHELION_TEST_LAN_ADDRESS` set, it also checks that `/health` answers on the tailnet address and not on the LAN address or `127.0.0.1`.
 
-[`deploy/test/host-contract.sh`](https://github.com/jcore9/Aphelion/blob/dev/deploy/test/host-contract.sh) runs in a throwaway privileged container, never on the host's own firewall. It builds a small network of namespaces with a bridge named `aphelion0`, an interface named `tailscale0`, and a published port forwarded the way Docker does it. It checks that the firewall drops the container's traffic to the LAN, the host, the tailnet and the bridge, and still allows the internet. It checks that a tailnet client reaches the published port and that a LAN client doesn't, through the tailnet address or directly. It runs these checks with a rule that accepts everything placed first in the `filter` table's `FORWARD` and `INPUT` chains, as Tailscale and ufw do. It also checks that:
+[`deploy/test/host-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/host-contract.sh) runs in a throwaway privileged container, never on the host's own firewall. It builds a small network of namespaces with a bridge named `aphelion0`, an interface named `tailscale0`, and a published port forwarded the way Docker does it. It checks that the firewall drops the container's traffic to the LAN, the host, the tailnet and the bridge, and still allows the internet. It checks that a tailnet client reaches the published port and that a LAN client doesn't, through the tailnet address or directly. It runs these checks with a rule that accepts everything placed first in the `filter` table's `FORWARD` and `INPUT` chains, as Tailscale and ufw do. It also checks that:
 
 - a second run changes nothing, and a run after an interrupted one ends with the same rules;
 - `systemd-analyze` accepts `aphelion.service`;
@@ -162,9 +162,9 @@ A real host checks the rest during the M0 exit test: the install, a reboot, Tail
 
 | File | Holds |
 | --- | --- |
-| [`deploy/Dockerfile`](https://github.com/jcore9/Aphelion/blob/dev/deploy/Dockerfile) | The image |
-| [`deploy/image/launch`](https://github.com/jcore9/Aphelion/blob/dev/deploy/image/launch) | The launcher |
-| [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.yaml) | The Compose file |
-| [`deploy/host/`](https://github.com/jcore9/Aphelion/tree/dev/deploy/host) | `aphelion.service` and the host scripts |
-| [`apps/server/src/plugins/runner-pipe.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/plugins/runner-pipe.ts) | The server's end of the runner pipes |
-| [`deploy/test/`](https://github.com/jcore9/Aphelion/tree/dev/deploy/test) | The two contract tests and the probe plugin |
+| [`deploy/Dockerfile`](https://github.com/jcore9/Aphelion/blob/main/deploy/Dockerfile) | The image |
+| [`deploy/image/launch`](https://github.com/jcore9/Aphelion/blob/main/deploy/image/launch) | The launcher |
+| [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/main/deploy/compose.yaml) | The Compose file |
+| [`deploy/host/`](https://github.com/jcore9/Aphelion/tree/main/deploy/host) | `aphelion.service` and the host scripts |
+| [`apps/server/src/plugins/runner-pipe.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/plugins/runner-pipe.ts) | The server's end of the runner pipes |
+| [`deploy/test/`](https://github.com/jcore9/Aphelion/tree/main/deploy/test) | The two contract tests and the probe plugin |

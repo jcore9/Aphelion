@@ -72,7 +72,7 @@ Bun opens a `file:` name as an ordinary file today, so the last rule is a precau
 ## Rules
 
 - Migrations only go forward. To undo a change, write a new migration.
-- Never edit, rename or reorder a migration that has merged into `dev`. A server refuses a database whose recorded name doesn't match its own migration with the same version.
+- Never edit, rename or reorder a migration that has merged into `main`. A server refuses a database whose recorded name doesn't match its own migration with the same version.
 - Versions start at 1 and go up by one, in list order. The runner refuses a list with a gap.
 - Put no `BEGIN`, `COMMIT`, `ROLLBACK` or `PRAGMA foreign_keys` in a migration. The runner runs every pending migration in one transaction.
 - A server refuses a database that has more migrations than it knows. Run a newer server, or restore a backup.

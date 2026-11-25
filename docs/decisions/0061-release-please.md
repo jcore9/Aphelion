@@ -6,6 +6,7 @@
 - Proposed by: [#191](https://github.com/jcore9/Aphelion/pull/191)
 - Answers: [#192](https://github.com/jcore9/Aphelion/issues/192), which tool works out versions and the changelog from M1 on, and where it runs
 - Amends: [0003](0003-release-versioning.md), because the tool makes each tag and GitHub release when the owner merges its release PR, instead of someone tagging by hand. [Branch protection](../branch-protection.md), with a note on the release PR's checks.
+- Amended by: [0062](0062-one-main-branch.md), which moves the project to one `main` branch, so release-please's pull request is the only release pull request
 
 ## Context
 

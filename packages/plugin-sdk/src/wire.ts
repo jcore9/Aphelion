@@ -10,7 +10,7 @@ export interface RpcError {
 
 /**
  * The errors that the host replies with, by name.
- * [The plugin reference](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/plugins.md#errors) says when the host sends each one.
+ * [The plugin reference](https://github.com/jcore9/Aphelion/blob/main/docs/reference/plugins.md#errors) says when the host sends each one.
  */
 export const rpcErrors = {
   parse: { code: -32700, message: "Parse error" },

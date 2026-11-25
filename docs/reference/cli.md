@@ -121,7 +121,7 @@ docker compose --profile '*' config \
 
 `docker compose run` mounts the bootstrap key that `aphelion.service` decrypts, so the line works only while the service runs. When the service is stopped, the run fails because the key file doesn't exist. The service runs the line itself before every start.
 
-The service is named `aphelion` in [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.yaml), and `aphelion.service` runs this line before every start ([what the service does](../guides/install.md#what-the-service-does)). `--compose FILE` reads a file that holds the same output instead. The check refuses input with no services, such as an empty file or `{}`, because that can't be the output for Aphelion's Compose file.
+The service is named `aphelion` in [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/main/deploy/compose.yaml), and `aphelion.service` runs this line before every start ([what the service does](../guides/install.md#what-the-service-does)). `--compose FILE` reads a file that holds the same output instead. The check refuses input with no services, such as an empty file or `{}`, because that can't be the output for Aphelion's Compose file.
 
 ## `aphelion plugin dev FOLDER`
 
@@ -241,11 +241,11 @@ This runs `bun build --compile` and writes one file, `apps/server/dist/aphelion`
 
 | File | Holds |
 | --- | --- |
-| [`apps/server/src/cli/main.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/cli/main.ts) | The entry point of the binary |
-| [`apps/server/src/cli/args.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/cli/args.ts) | Reads the command line into one command, and refuses a wrong one |
-| [`apps/server/src/cli/index.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/cli/index.ts) | Runs the command, and turns failures into exit codes |
-| [`apps/server/src/cli/headless.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/cli/headless.ts) | `--headless` |
-| [`apps/server/src/cli/checks.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/cli/checks.ts) | The checks that `--headless` and `config check` share |
-| [`apps/server/src/cli/config-check.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/cli/config-check.ts) | `config check` |
-| [`apps/server/src/cli/device.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/cli/device.ts) | `device add`, `device list` and `device revoke` |
-| [`apps/server/src/adapters/run-main.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/run-main.ts) | Runs the program on Bun, and stops it on `SIGTERM` or `SIGINT` |
+| [`apps/server/src/cli/main.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/main.ts) | The entry point of the binary |
+| [`apps/server/src/cli/args.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/args.ts) | Reads the command line into one command, and refuses a wrong one |
+| [`apps/server/src/cli/index.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/index.ts) | Runs the command, and turns failures into exit codes |
+| [`apps/server/src/cli/headless.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/headless.ts) | `--headless` |
+| [`apps/server/src/cli/checks.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/checks.ts) | The checks that `--headless` and `config check` share |
+| [`apps/server/src/cli/config-check.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/config-check.ts) | `config check` |
+| [`apps/server/src/cli/device.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/device.ts) | `device add`, `device list` and `device revoke` |
+| [`apps/server/src/adapters/run-main.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/adapters/run-main.ts) | Runs the program on Bun, and stops it on `SIGTERM` or `SIGINT` |

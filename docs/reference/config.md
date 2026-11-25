@@ -13,7 +13,7 @@ The server reads its config from `/etc/aphelion/` ([decision 0014](../decisions/
   server.yaml           the address and port the server listens on
 ```
 
-All five files must exist. The directory can be a git repo. [`example/`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config/example) holds a complete, valid directory, and a test loads it.
+All five files must exist. The directory can be a git repo. [`example/`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config/example) holds a complete, valid directory, and a test loads it.
 
 ## File format
 
@@ -75,7 +75,7 @@ Each error names the file, then the line and column where the parser found it, t
 
 ## JSON Schema for editors
 
-Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/dev/docs/reference/config): [`bots.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/bots.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/config/server.schema.json). The schemas describe the current version. To get completion and checks in an editor that runs the YAML language server, add a first line that points at the schema:
+Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config): [`bots.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/bots.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/server.schema.json). The schemas describe the current version. To get completion and checks in an editor that runs the YAML language server, add a first line that points at the schema:
 
 ```yaml
 # yaml-language-server: $schema=../path/to/bots.schema.json

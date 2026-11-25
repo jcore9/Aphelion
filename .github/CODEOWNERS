@@ -1,16 +1,15 @@
-# docs/branch-protection.md explains these rules and which paths are guesses.
+# docs/branch-protection.md explains these rules (decision 0062).
+# Paths not listed here merge after a review by another model family,
+# and the owner reviews them at the end of the milestone.
 
-# Every path, until manager bots start approving PRs into dev.
-* @jcore9
+# GitHub settings, CI, workflows and templates.
+/.github/ @jcore9
 
-# Who reviews and what CI runs.
-/.github/CODEOWNERS @jcore9
-/.github/rulesets/ @jcore9
-/.github/workflows/ @jcore9
-/.github/actions/ @jcore9
-/.github/dependabot.yml @jcore9
+# Releases.
 /release-please-config.json @jcore9
 /.release-please-manifest.json @jcore9
+
+# Dependencies and build settings.
 package.json @jcore9
 /bun.lock @jcore9
 /bunfig.toml @jcore9
@@ -21,35 +20,7 @@ package.json @jcore9
 /vitest.config.ts @jcore9
 tsconfig*.json @jcore9
 
-# Bun-only adapters (decision 0007).
-/apps/server/src/adapters/ @jcore9
-
-# Guessed future homes. Most match a folder name in any package.
-secrets/ @jcore9
-broker/ @jcore9
-plugin-host/ @jcore9
-grants/ @jcore9
-auth/ @jcore9
-devices/ @jcore9
-policy/ @jcore9
-/apps/server/**/hooks/ @jcore9
-gateway/ @jcore9
-/packages/plugin-sdk/src/manifest* @jcore9
-
-# Future image, Compose file, host unit and install script (M0-12).
-Dockerfile* @jcore9
-/.dockerignore @jcore9
-compose*.yaml @jcore9
-compose*.yml @jcore9
-docker-compose*.yaml @jcore9
-docker-compose*.yml @jcore9
-*.service @jcore9
-install*.sh @jcore9
-managed-settings.json @jcore9
-requirements.toml @jcore9
-/deploy/ @jcore9
-
-# What the owner always approves.
+# What the owner always decides.
 /docs/decisions/ @jcore9
 /docs/plan/ @jcore9
 /SECURITY.md @jcore9
