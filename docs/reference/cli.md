@@ -1,6 +1,6 @@
 # The aphelion command
 
-`aphelion` is one program. It starts the server, checks the config, and manages device tokens. In the container it is the compiled binary that the image runs with `--headless` ([decision 0016](../decisions/0016-one-docker-container.md)). The desktop app doesn't bundle it ([decision 0017](../decisions/0017-desktop-remote-only.md)). [Decision 0048](../decisions/0048-cli-on-node-parseargs.md) explains how the command line is read. On the host, [`sudo aphelion`](host-command.md) runs the `device` commands inside the container for you.
+`aphelion` is one program. It starts the server, checks the config, and manages device tokens. In the container it is the compiled binary that the image runs with `--headless` ([decision 0016](../decisions/0016-one-docker-container.md)). The desktop app doesn't bundle it ([decision 0017](../decisions/0017-desktop-remote-only.md)). [Decision 0067](../decisions/0067-cli-on-effect-cli.md) explains how the command line is read. On the host, [`sudo aphelion`](host-command.md) runs the `device` commands inside the container for you.
 
 ## Commands
 
@@ -18,8 +18,8 @@
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
 | `aphelion device revoke ID` | Stops a device's token at once |
-| `aphelion --version` | Prints `aphelion` and the version, such as `aphelion 0.1.0-alpha.1` |
-| `aphelion --help`, or `aphelion` alone | Prints the commands |
+| `aphelion --version`, or `-v` | Prints `aphelion` and the version, such as `aphelion 0.1.0-alpha.1` |
+| `aphelion --help`, or `aphelion` alone | Prints the command groups. `aphelion GROUP --help` lists the commands in a group, and `aphelion GROUP COMMAND --help` shows that command's options and defaults. |
 
 ### Options
 
@@ -35,7 +35,7 @@
 | `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
 | `--plugin-dev FOLDER` | `--headless` | none | An absolute path. Turns on [dev mode](plugins.md#dev-mode): `plugin dev` can reload the approved plugin in `FOLDER` through the server's [control socket](plugins.md#control-socket). Needs `--plugin-runner-fds` to have any effect. |
 
-The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
+The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. Write each option after the command, as in `aphelion device list --state-dir /s`. An option before the command is an error. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
 
 ### Exit codes
 
@@ -275,8 +275,9 @@ This runs `bun build --compile` and writes one file, `apps/server/dist/aphelion`
 | File | Holds |
 | --- | --- |
 | [`apps/server/src/cli/main.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/main.ts) | The entry point of the binary |
-| [`apps/server/src/cli/args.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/args.ts) | Reads the command line into one command, and refuses a wrong one |
-| [`apps/server/src/cli/index.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/index.ts) | Runs the command, and turns failures into exit codes |
+| [`apps/server/src/cli/index.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/index.ts) | Builds the command tree, runs the command, and turns failures into exit codes |
+| [`apps/server/src/cli/flags.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/flags.ts) | The options and operands that several commands share, and the Zod checks on values |
+| [`apps/server/src/cli/output.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/output.ts) | Prints help, the version and usage errors, with fixed text that never repeats your input |
 | [`apps/server/src/cli/headless.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/headless.ts) | `--headless` |
 | [`apps/server/src/cli/checks.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/checks.ts) | The checks that `--headless` and `config check` share |
 | [`apps/server/src/cli/config-check.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/config-check.ts) | `config check` |

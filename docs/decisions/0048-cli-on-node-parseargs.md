@@ -1,6 +1,6 @@
 # 0048. The aphelion command reads its command line with Node's parseArgs, and Docker's Compose output reaches config check through standard input
 
-- Status: Accepted (approved by merging #151 on 2026-11-22)
+- Status: Accepted (approved by merging #151 on 2026-11-22). Parser part superseded by [0067](0067-cli-on-effect-cli.md)
 - Date: 2026-11-22
 - Proposed by: the CLI and headless mode PR ([#13](https://github.com/jcore9/Aphelion/issues/13))
 - Answers: how M0-11 reads the command line, and how `aphelion config check` gets the output of `docker compose config`

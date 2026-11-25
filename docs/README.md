@@ -128,3 +128,4 @@ Each significant decision has one numbered record. A record lists the context, t
 | [0064](decisions/0064-linked-equal-servers.md) | Two or more Aphelion servers can link up as equals, with groundwork in M1 and the build after v1.0 | Accepted |
 | [0065](decisions/0065-bot-adapter-runs-inside-the-bot.md) | The bot adapter runs inside the bot, not under the plugin runner | Proposed |
 | [0066](decisions/0066-grok-checksum-recorded-by-aphelion.md) | Aphelion records its own checksum for Grok Build, because xAI publishes none | Proposed |
+| [0067](decisions/0067-cli-on-effect-cli.md) | The aphelion command reads its command line with effect/cli, and a test pins the usage rules | Proposed |
