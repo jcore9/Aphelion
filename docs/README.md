@@ -29,7 +29,7 @@ This folder holds the Aphelion documentation: the plan, guides, reference pages,
 
 ## Spike findings
 
-A spike is a short research task. Each spike answers its questions in writing before anything builds on it. Its prototype code stays on its `spike/` branch and is never merged.
+A spike is a research task. Each spike answers its questions in writing before anything builds on it. Its prototype code stays on its `spike/` branch and is never merged.
 
 - [M0-01: Claude over ACP on a subscription login](spikes/M0-01-claude-over-acp.md)
 - [M0-02: Grok headless billing](spikes/M0-02-grok-headless-billing.md)

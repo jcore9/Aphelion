@@ -63,7 +63,7 @@ Anyone with the Write role can set a commit status with any name through the API
 
 ### Why branches don't have to be up to date
 
-Bringing a branch up to date is a new push, so it dismisses any approval. Suppose several pull requests are open at once. Each merge into `main` would cost every other pull request a new push, a new CI run and a new review. CI also runs on each push to `main`, so a break between two merged pull requests shows on `main` straight away.
+Bringing a branch up to date is a new push, so it dismisses any approval. With several pull requests open at once, each merge into `main` would cost every other pull request a new push, a new CI run and a new review. CI also runs on each push to `main`, so a break between two merged pull requests shows on `main` straight away.
 
 When a pull request does need the latest `main`, the bot updates the branch.
 
