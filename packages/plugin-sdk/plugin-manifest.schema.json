@@ -98,7 +98,7 @@
         },
         "uiSlots": {
           "default": [],
-          "description": "UI slots the plugin shows content in. The owner grants each one, because content there can show what is in a chat.",
+          "description": "UI slots the plugin plans to show content in. Declared only: the server doesn't act on it yet. Once it does, the owner grants each one, because content there can show what is in a chat.",
           "type": "array",
           "items": {
             "type": "string",
@@ -116,7 +116,7 @@
       "properties": {
         "secretSchemes": {
           "default": [],
-          "description": "Secret reference schemes the plugin resolves as a secret backend. The values it returns go only to the secrets broker.",
+          "description": "Secret reference schemes the plugin would resolve as a secret backend. Declared only: no server code runs secret backends yet. The values it returns would go only to the secrets broker.",
           "type": "array",
           "items": {
             "type": "string",
@@ -126,7 +126,7 @@
         },
         "screens": {
           "default": [],
-          "description": "Full pages the plugin's client part draws, each with an entry in the app's menu. They appear when the plugin is installed, with no grant.",
+          "description": "Full pages the plugin's client part would draw, each with an entry in the app's menu. Declared only: the server doesn't add menu entries yet. Once it does, they will appear when the plugin is installed, with no grant.",
           "type": "array",
           "items": {
             "type": "object",

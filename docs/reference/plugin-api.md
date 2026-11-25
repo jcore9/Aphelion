@@ -125,7 +125,7 @@ interface PluginContext {
 
 - `id`: The plugin's `id`, as the host sent it when it started the plugin.
 - `api`: The plugin API version that the host runs, such as `0.2.2`.
-- `events`: `subscribe(name, handle)` asks the host for an event, and the SDK then calls `handle` with each event's data.
+- `events`: `subscribe(name, handle)` asks the host for an event, and the SDK then calls `handle` with each event's data each time the host delivers it. The deployed server doesn't publish events yet, so only a test host delivers one.
   Once shutdown starts, the SDK calls no handler for a new event, and every call to the host fails with `the plugin is shutting down`.
   It rejects with a `HostError` when the manifest's `permissions.events` doesn't list the event or the owner hasn't granted it.
 - `network`: `get(url)` asks the host to fetch an HTTPS URL that `requestUrl` accepts, from a host in `permissions.network` that the owner granted.
@@ -295,7 +295,7 @@ type PluginManifest =
 
 ### `PluginScreen`
 
-A full page that a plugin's client part adds to the app's menu, from `contributes.screens`.
+A full page that a plugin's client part declares in `contributes.screens`. The app's menu doesn't list it yet.
 
 ```ts
 type PluginScreen = PluginManifest["contributes"]["screens"][number];
@@ -725,7 +725,7 @@ interface HostCall {
 
 ### `TestHost`
 
-A fake host for a plugin's tests. It checks grants, network calls and secret operations the way the real host does.
+A fake host for a plugin's tests. It checks grants, request shapes and secret operations the way the real host does. Network replies are fixtures from `respondToGet`, not real requests: it does no DNS lookup, public-address check or TLS.
 Unlike the real host, it can run secret operations that a test registers with `registerSecretOperation`.
 
 ```ts
@@ -742,7 +742,7 @@ interface TestHost {
 ```
 
 - `setGrants`: Sets what the owner granted, replacing earlier grants. A grant counts only when the manifest also lists the permission.
-- `respondToGet`: Sets the reply to `network.get` for one URL. A URL with no reply, a reply that takes more than 5 seconds, and a body larger than 64 KiB fail with `Operation failed`.
+- `respondToGet`: Sets the fixture reply to `network.get` for one URL; nothing is fetched. A URL with no reply, a reply that takes more than 5 seconds, and a body larger than 64 KiB fail with `Operation failed`.
 - `registerSecretOperation`: Adds a named operation for `secrets.use`. While none is registered, `secrets.use` with a granted reference fails with error `-32002`.
 - `start`: Starts the plugin and resolves when its `start` has finished, or rejects when `start` fails. A test host starts one plugin only.
 - `publish`: Sends an event to the plugin and resolves when its handler has finished.

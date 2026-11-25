@@ -57,7 +57,7 @@ export default {
 The plugin is one object with one function, `start`. Aphelion calls `start` after it starts your plugin. The argument `ctx` is the plugin's connection to Aphelion:
 
 - `ctx.log(text)` writes one line to Aphelion's log.
-- `ctx.events.subscribe(name, handler)` asks Aphelion to send you an event. Aphelion calls the handler each time the event happens. It refuses the request when your manifest doesn't list the event or the owner didn't grant it.
+- `ctx.events.subscribe(name, handler)` asks Aphelion to send you an event. The SDK calls the handler each time the host delivers that event. The deployed server never delivers one yet, because nothing on the server publishes events, so the handler runs only when a test delivers an event. The host refuses the request when your manifest doesn't list the event or the owner didn't grant it.
 - `ctx.network.get(url)` and `ctx.secrets.use(operation, reference)` are the other two things a plugin can ask for. This plugin uses neither. Both need a permission in the manifest, and a plugin never sees the value of a secret ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
 
 A manifest is the file `aphelion-plugin.json`. It names the plugin and lists the permissions it asks for. Yours asks to receive `approval.requested`:
@@ -76,7 +76,7 @@ The other file you don't need to touch is `src/index.ts`. It connects your plugi
 
 ## Run the tests
 
-Open `src/plugin.test.ts`. It runs your plugin against `createTestHost`, a fake Aphelion in the SDK. The fake checks grants and network calls the way the real server does, so a test can show that a plugin without a grant is refused. It also runs the secret operations that a test registers, which the server can't do yet. The template has two tests. One grants the event and checks the log. The other grants nothing and checks that `start` fails with error `-32001`, `Not granted`.
+Open `src/plugin.test.ts`. It runs your plugin against `createTestHost`, a fake Aphelion in the SDK. The fake checks grants and the shape of each request the way the real server does, so a test can show that a plugin without a grant is refused. Its `network.get` replies are fixtures that the test registers, not real requests: the fake does no DNS lookup, public-address check or TLS. It also runs the secret operations that a test registers, which the server can't do yet. The template has two tests. One grants the event and checks the log. The other grants nothing and checks that `start` fails with error `-32001`, `Not granted`.
 
 1. Run the tests.
 

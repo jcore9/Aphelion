@@ -19,7 +19,7 @@ export interface PluginContext {
   /** The plugin API version that the host runs, such as `0.2.2`. */
   readonly api: string;
   /**
-   * `subscribe(name, handle)` asks the host for an event, and the SDK then calls `handle` with each event's data.
+   * `subscribe(name, handle)` asks the host for an event, and the SDK then calls `handle` with each event's data each time the host delivers it. The deployed server doesn't publish events yet, so only a test host delivers one.
    * Once shutdown starts, the SDK calls no handler for a new event, and every call to the host fails with `the plugin is shutting down`.
    * It rejects with a `HostError` when the manifest's `permissions.events` doesn't list the event or the owner hasn't granted it.
    */

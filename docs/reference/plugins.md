@@ -13,7 +13,7 @@ The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/b
 
 ## For plugin authors
 
-You don't have to write JSON-RPC by hand. The SDK, `@aphelion/plugin-sdk`, does it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them, and [the plugin API reference](plugin-api.md) lists every type and function in the SDK. The SDK has no typed settings or storage API yet, on either host. A plugin's only storage is its data folder, which the deployed host sets up for it ([How your plugin is started](#how-your-plugin-is-started)). `createTestHost` has no data folder. The rest of this section says what the host does and expects, which is what the SDK builds on.
+You don't have to write JSON-RPC by hand. The SDK, `@aphelion/plugin-sdk`, does it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them, and [the plugin API reference](plugin-api.md) lists every type and function in the SDK. The SDK has no typed settings or storage API yet, on either host. The deployed host gives each plugin a persistent data folder ([How your plugin is started](#how-your-plugin-is-started)). The container's `/tmp` is writable too, but it is a memory-backed tmpfs that is not kept, so don't store anything there that you need later. `createTestHost` has no data folder. The rest of this section says what the host does and expects, which is what the SDK builds on.
 
 ### How your plugin is started
 
@@ -89,7 +89,7 @@ A handler that still runs after 3 seconds isn't stopped. The SDK logs `the handl
 | --- | --- | --- |
 | `events.subscribe` | `{ "event": "<name>" }` | `{}`. The error `-32001 Not granted` if the event isn't in your manifest's `permissions.events` or the owner hasn't granted it. |
 | `network.get` | `{ "url": "https://api.example.com/path" }` | `{ "status": 200, "body": "..." }`. The destination must be in `permissions.network` and granted. |
-| `secrets.use` | `{ "operation": "<name>", "reference": "<secret reference>" }` | `{}` after the host completes the operation. The host checks the grant for the secret reference and the destination it configured for the operation. |
+| `secrets.use` | `{ "operation": "<name>", "reference": "<secret reference>" }` | `{}` after the host completes the operation. On the deployed host it never succeeds yet: `-32001 Not granted` without a grant for the secret reference, and `-32002` with one, because no operation is registered. The test host can succeed when a test registers an operation. |
 
 Subscriptions last until the process exits. After a restart, subscribe again. Network and secret operations require a running server part. Each plugin can have one such operation in progress at a time.
 
@@ -108,7 +108,7 @@ Subscriptions last until the process exits. After a restart, subscribe again. Ne
 
 ### Secrets
 
-Your plugin asks for a named operation with `secrets.use`. The host chooses the destination and keeps both the secret value and the upstream response. The current server registers no operations, so the deployed host doesn't run any `secrets.use` call yet and returns `-32002`. `createTestHost` can run an operation that a test registers, so a test can see the call succeed where the server refuses it. The secrets broker belongs to [#104](https://github.com/jcore9/Aphelion/issues/104).
+Your plugin asks for a named operation with `secrets.use`. The host chooses the destination and keeps both the secret value and the upstream response. The current server registers no operations, so `secrets.use` never succeeds on the deployed host. Without a grant for the secret reference it returns `-32001`; with one, it returns `-32002`. `createTestHost` can run an operation that a test registers, so a test can see the call succeed where the server refuses it. The secrets broker belongs to [#104](https://github.com/jcore9/Aphelion/issues/104).
 
 The host also refuses to send any message that holds a [`Secret`](secrets.md), because a `Secret` throws when it is turned into JSON. The event is then sent to no plugin.
 
@@ -192,14 +192,14 @@ The host identifies `network.get` requests by the plugin's own channel. The requ
 
 ### Which bots may use a plugin
 
-You approve a plugin's permissions once, for the whole server, as described above. Which bots may use the plugin is a separate switch ([decision 0058](../decisions/0058-specialized-bots.md)).
+You approve a plugin's permissions once, for the whole server, as described above. Which bots may use the plugin is planned as a separate switch ([decision 0058](../decisions/0058-specialized-bots.md)). The deployed server has no per-bot switches yet, so the rules below describe the planned design.
 
-- Each bot has an on/off switch for each plugin and each connector. A new bot starts with every switch off. You turn on what the bot needs.
-- The switch decides which bots can call the plugin's tools. It never adds a permission, and it can't narrow the plugin's grant for one bot.
+- Each bot will have an on/off switch for each plugin and each connector. A new bot will start with every switch off. You will turn on what the bot needs.
+- The switch will decide which bots can call the plugin's tools. It will never add a permission, and it won't narrow the plugin's grant for one bot.
 - The grant has no per-bot version. To limit one bot more, for example to read-only on GitHub, write a policy rule for that bot, that connector and those tools.
 - 1Password grants are the exception. They stay per item, per consumer and per bot ([decision 0020](../decisions/0020-1password-grok-bot-style.md)).
 
-The host decides from the manifest which plugins get a switch. A plugin gets one when it contributes something a bot calls: a tool, a connector or a custom MCP server. A plugin that only serves the server or the app has no switch, and is still limited to the permissions you granted it. That covers secret backends (`contributes.secretSchemes`), themes, notifiers, and UI plugins, including one that shows bot status. Nothing on the server runs secret backends, screens or UI slots yet, and `createTestHost` doesn't run them either. A bot adapter has no switch, because a bot's `provider` setting selects it. Reviewers and routine triggers have none either: the policy engine calls the reviewer, and each routine selects its trigger.
+The plan is for the host to decide from the manifest which plugins get a switch. A plugin would get one when it contributes something a bot calls: a tool, a connector or a custom MCP server. A plugin that only serves the server or the app would have no switch, and would still be limited to the permissions you granted it. That would cover secret backends (`contributes.secretSchemes`), themes, notifiers, and UI plugins, including one that shows bot status. Nothing on the server runs secret backends, screens or UI slots yet, and `createTestHost` doesn't run them either. A bot adapter would have no switch, because a bot's `provider` setting selects it. Reviewers and routine triggers would have none either: the policy engine calls the reviewer, and each routine selects its trigger.
 
 No manifest field names a tool or a connector yet. The connector contract (M3-02) adds it. Until then, no plugin has a switch. The switches themselves come with M3-06, M4-02 and M5-13.
 
