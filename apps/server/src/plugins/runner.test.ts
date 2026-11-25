@@ -131,3 +131,71 @@ describe("the plugin input queue budget", () => {
     30_000,
   );
 });
+
+const stalledSpawn = (stalled: string, gate: Deferred.Deferred<undefined>) =>
+  Layer.succeed(PluginProcesses, {
+    sweep: Effect.succeed({ survivors: 0 }),
+    spawn: (spec) =>
+      Effect.gen(function* () {
+        if (spec.plugin === stalled) yield* Deferred.await(gate);
+        const exit = yield* Deferred.make<ProcessExit>();
+        return {
+          write: () => Effect.void,
+          stdout: Stream.empty,
+          stderr: Stream.empty,
+          exited: Deferred.await(exit),
+          kill: Deferred.succeed(exit, { code: null, signal: "SIGKILL" }).pipe(
+            Effect.as({ survivors: 0 }),
+          ),
+        };
+      }),
+  });
+
+describe("the plugin runner's command order", () => {
+  it.live(
+    "starts and stops a plugin while another plugin's launch is stalled",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<undefined>();
+        const { a, b } = yield* memoryLinkPair<RunnerReply, RunnerRequest>(
+          framing(runnerReplySchema),
+          framing(runnerRequestSchema),
+        );
+        yield* runRunner(b, {
+          dataRoot: "/data",
+          sweepEvery: "1 hour",
+          inputDeadline: "1 hour",
+          logger: createLogger({ write: () => undefined }),
+        }).pipe(Effect.provide(stalledSpawn("slow", gate)), Effect.forkScoped);
+        yield* Effect.addFinalizer(() => Deferred.succeed(gate, undefined));
+        const request = (type: "start" | "stop", plugin: string) =>
+          a.send(
+            type === "start"
+              ? {
+                  type,
+                  plugin,
+                  run: 1,
+                  folder: `/plugins/${plugin}`,
+                  entry: "index.js",
+                }
+              : { type, plugin, run: 1 },
+          );
+        yield* request("start", "slow");
+        yield* request("start", "quick");
+        yield* request("stop", "quick");
+        const replies: RunnerReply[] = [];
+        const reachedStop = yield* Effect.gen(function* () {
+          for (;;) {
+            const reply = yield* Queue.take(a.incoming);
+            replies.push(reply);
+            if (reply.type === "stopped") return;
+          }
+        }).pipe(Effect.timeoutOption("1 second"));
+        expect(reachedStop._tag).toBe("Some");
+        expect(replies.map(({ type, plugin }) => `${type} ${plugin}`)).toEqual(
+          expect.arrayContaining(["started quick", "stopped quick"]),
+        );
+      }).pipe(Effect.scoped),
+    10_000,
+  );
+});

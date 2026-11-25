@@ -74,8 +74,11 @@ type FakePlugin = (io: FakeIo) => Effect.Effect<number>;
 function fakeProcesses(
   plugins: Record<string, FakePlugin>,
   deaf: readonly string[],
+  stalls: Readonly<Record<string, Deferred.Deferred<undefined>>>,
 ) {
+  const stalled = new Set<string>();
   const record = {
+    alive: new Set<number>(),
     spawned: [] as SpawnSpec[],
     received: [] as string[],
     killed: 0,
@@ -86,9 +89,16 @@ function fakeProcesses(
     spawn: (spec) =>
       Effect.gen(function* () {
         record.spawned.push(spec);
+        const ordinal = record.spawned.length;
         const script = plugins[spec.plugin];
         if (!script)
           return yield* new SpawnFailed({ reason: "no such plugin" });
+        const stall = stalls[spec.plugin];
+        if (stall && !stalled.has(spec.plugin)) {
+          stalled.add(spec.plugin);
+          yield* Effect.uninterruptible(Deferred.await(stall));
+        }
+        record.alive.add(ordinal);
         const stdin = yield* Queue.unbounded<string>();
         const stdout = yield* Queue.unbounded<Uint8Array, Cause.Done>();
         const stderr = yield* Queue.unbounded<Uint8Array, Cause.Done>();
@@ -128,6 +138,11 @@ function fakeProcesses(
           ),
           Effect.ensuring(Queue.end(stdout)),
           Effect.ensuring(Queue.end(stderr)),
+          Effect.ensuring(
+            Effect.sync(() => {
+              record.alive.delete(ordinal);
+            }),
+          ),
           Effect.forkDetach,
         );
         return {
@@ -188,6 +203,7 @@ interface HarnessOptions {
   ) => boolean | Effect.Effect<boolean>;
   readonly policy?: RestartPolicy;
   readonly deaf?: readonly string[];
+  readonly stalls?: Readonly<Record<string, Deferred.Deferred<undefined>>>;
   readonly stopDeadlineMs?: number;
 }
 
@@ -195,7 +211,7 @@ function harness(
   plugins: Record<string, FakePlugin>,
   options: HarnessOptions = {},
 ) {
-  const fake = fakeProcesses(plugins, options.deaf ?? []);
+  const fake = fakeProcesses(plugins, options.deaf ?? [], options.stalls ?? {});
   const logs: Message[] = [];
   const logger = createLogger({
     level: "debug",
@@ -645,6 +661,45 @@ describe("the plugin host", () => {
       yield* waitUntil(() => record.killed >= 1);
     }).pipe(Effect.provide(layer));
   });
+
+  it.live(
+    "counts one failure when a launch passes its deadline, and removes a child that appears late without touching the newer run",
+    () => {
+      const gate = Effect.runSync(Deferred.make<undefined>());
+      const withDeadline = {
+        ...fastPolicy,
+        firstRetryMs: 200,
+        launchMs: 50,
+      };
+      const { layer, record } = harness(
+        {
+          slow: (io) =>
+            handshake(io).pipe(Effect.andThen(serveUntilShutdown(io))),
+        },
+        { policy: withDeadline, stalls: { slow: gate } },
+      );
+      return Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* startFixture(host, yield* serverPlugin("slow"));
+        yield* waitFor("slow", { state: "crashed", run: 1, crashes: 1 });
+        yield* waitFor("slow", { state: "running", run: 2, crashes: 1 });
+        yield* Deferred.succeed(gate, undefined);
+        yield* waitUntil(() => !record.alive.has(1));
+        expect(record.alive.has(2)).toBe(true);
+        expect(yield* host.status("slow")).toMatchObject({
+          state: "running",
+          run: 2,
+          crashes: 1,
+        });
+        yield* host.stop("slow");
+        yield* waitFor("slow", { state: "stopped", reason: "requested" });
+        expect(record.killed).toBe(1);
+      }).pipe(
+        Effect.ensuring(Deferred.succeed(gate, undefined)),
+        Effect.provide(layer),
+      );
+    },
+  );
 
   it.live("stops a plugin that exits when asked", () => {
     const { layer, record } = harness({
