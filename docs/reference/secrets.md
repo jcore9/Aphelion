@@ -6,7 +6,7 @@ Plugins never see a secret's value ([decision 0042](../decisions/0042-plugin-ser
 
 ## Local secrets broker
 
-The broker runs as a separate Linux process under `aphelion-secrets` (UID 10003). Build its executable with `bun run --filter @aphelion/server build:broker`. The executable is `apps/server/dist/aphelion-secrets`. In the container, the [launcher](container.md#how-the-processes-start) starts it.
+The broker runs as a separate Linux process under `aphelion-secrets` (user ID 10003). Build its executable with `bun run --filter @aphelion/server build:broker`. The executable is `apps/server/dist/aphelion-secrets`. In the container, the [launcher](container.md#how-the-processes-start) starts it.
 
 ### The bootstrap key
 
@@ -30,7 +30,7 @@ The broker wraps the key in a `Secret`, so the logger masks it. The key never re
 | `/var/lib/aphelion-secrets/<64 hex digits>.age` | `aphelion-secrets`, `0600` | One encrypted entry per local reference. |
 | `/var/lib/aphelion-secrets/recipient.pub` | `aphelion-secrets`, `0600` | The store's public key, which starts with `age1`. It isn't secret. The broker writes it on the first start. |
 
-The parent folders of these paths must be writable only by root. In the container, `/run/aphelion-secrets/` is a fresh in-memory folder that Docker creates with this owner and mode at every start, so no socket is left over from an earlier run. The launcher checks its owner and mode before it starts the broker. The broker checks the socket directory group against the local `harness` group in `/etc/group`. It refuses to replace an existing socket at startup.
+The parent folders of these paths must be writable only by root. In the container, `/run/aphelion-secrets/` is a fresh in-memory folder. Docker creates it with this owner and mode at every start, so no socket is left over from an earlier run. The launcher checks its owner and mode before it starts the broker. The broker checks the socket directory group against the local `harness` group in `/etc/group`. It refuses to replace an existing socket at startup.
 
 The store keeps an age-encrypted file per local reference. The filename is the SHA-256 hash of the reference path. The broker writes encrypted data to a private temporary file and then renames it into place. The encrypted record includes a format version and the reference path. A read fails if the stored path differs from the requested path.
 
@@ -103,7 +103,7 @@ token.wipe();
 - An error message built from it, and an error whose `cause` is the `Secret`, when it is printed.
 - `new Blob([secret])` and `Bun.write(path, secret)`. Both convert the `Secret` to text first. The `Bun.write` case was checked by hand with Bun 1.4.5, because the tests can't call Bun's own APIs outside `adapters/`.
 
-**The logger and the audit log write the placeholder.** A `Secret` anywhere in the fields of a log call or in an audit row's `detail` is written as `<redacted>` or `<redacted:label>`. That holds inside nested objects, lists and an error's `cause`. The redactor uses the `Symbol.for("aphelion.redactSelf")` method that [the logging reference](logging.md#values-that-redact-themselves) describes.
+**The logger and the audit log write the placeholder.** The placeholder is `<redacted>`, or `<redacted:label>` for a secret with a label. It replaces a `Secret` anywhere in the fields of a log call or in an audit row's `detail`. That holds inside nested objects, lists and an error's `cause`. The redactor uses the `Symbol.for("aphelion.redactSelf")` method that [the logging reference](logging.md#values-that-redact-themselves) describes.
 
 **Serializing it throws.** Serializing here means converting a value, with everything inside it, into JSON or into a copy for another thread or process. These throw, even when the `Secret` is deep inside another object:
 
@@ -115,13 +115,13 @@ token.wipe();
 
 **The value is in a private field, and the object can't be changed.** The class keeps the value in `#value`. JavaScript allows no access to a `#` field from outside the class. `Object.keys(secret)` lists only `label` and `cloneGuard`. Each `Secret`, the class and its methods are frozen, so code can't delete `cloneGuard` or replace `reveal`, `toString` or `toJSON`.
 
-**The exact value is masked in every log line.** `Secret.make` registers the value with `maskSecretValue`, as [known secret values](logging.md#known-secret-values) describes. If code reads the value and then puts it into a log line, for example in an error message, the logger still replaces it with `[REDACTED]`. Its base64, URI-encoded and JSON-escaped forms are masked too.
+**The exact value is masked in every log line.** `Secret.make` registers the value with `maskSecretValue`, as [known secret values](logging.md#known-secret-values) describes. If code reads the value and then puts it into a log line, the logger still replaces it with `[REDACTED]`. An example is a value in an error message. The base64, URI-encoded and JSON-escaped forms of the value are masked too.
 
 **It fails closed.** If the mask list is full, `maskSecretValue` throws `MaskListFullError`. `Secret.make` lets that error through, and no `Secret` is made. A value that can't be masked can't be used.
 
 **Wiping unmasks the value once nothing else holds it.** `wipe()` calls `unmaskSecretValue`. The mask list counts how many times a value was registered. So when two `Secret`s hold the same value, the value stays masked until both are wiped.
 
-**A canary test checks all of this.** `canary.test.ts` makes a `Secret` from a random value. It logs it in every shape: as a field, nested in objects, lists and a `Map`, as an error's `cause`, and inside an `AggregateError`. It also logs copies of the read value in a message, in a `token` field, in JSON text, in base64, URI-encoded, and in an error message. It writes two audit rows with all of these in `detail` and in the text columns. Then it reads the raw log lines and the raw bytes of every file in the database folder, including the `-wal` file, both while the store is open and after it is closed. The value must not appear anywhere, in plain, base64 or URI-encoded form.
+**A canary test checks all of this.** `canary.test.ts` makes a `Secret` from a random value, called the canary. It logs the `Secret` in every shape. The shapes are a field, nested in objects, lists and a `Map`, an error's `cause`, and inside an `AggregateError`. It also logs copies of the read value. The copies appear in a message, in a `token` field, in JSON text, in base64, URI-encoded, and in an error message. It writes two audit rows with all of these in `detail` and in the text columns. Then it reads the raw log lines and the raw bytes of every file in the database folder, including the `-wal` file. It does this both while the store is open and after it is closed. The value must not appear anywhere, in plain, base64 or URI-encoded form.
 
 The test also proves that each of those places really holds what was written. Each log record and each audit row carries its own random marker, which isn't secret. Each log line must hold its marker. The `-wal` file must hold each row's marker before SQLite copies it into the main file. After the store is closed, the test opens it again and reads back both rows with their markers.
 
@@ -168,14 +168,14 @@ The scheme must be lowercase. Any other scheme is refused.
 
 **`op`** follows 1Password's [secret reference syntax](https://www.1password.dev/cli/secret-reference-syntax), read on 2026-11-22, with stricter rules that are Aphelion's policy:
 
-- The path has three or four names: the vault, the item, an optional section, and the field. This is 1Password's rule.
+- The path has three or four names. These are the vault, the item, an optional section, and the field. This is 1Password's rule.
 - Each name is made of the letters `A` to `Z` and `a` to `z`, the digits, spaces, `-`, `_` and `.`. These are the characters 1Password supports. 1Password says to refer to a name with any other character, such as `ü`, by its ID. An ID is 26 letters and digits.
-- Aphelion's policy: the only space allowed is the ordinary space, and a name can't start or end with one. 1Password allows other whitespace, such as tabs, and spaces at the ends of a name. Aphelion refuses them, so that two references that look the same are the same.
-- Aphelion's policy: the reference may end with one of three queries. `?attribute=otp` and `?attribute=totp` ask for the current one-time password code. `?ssh-format=openssh` asks for an SSH private key in the OpenSSH format. 1Password also documents attributes such as `type`, `id` and the file attributes. Aphelion refuses them, because they don't return a secret's value.
+- Aphelion's policy allows only the ordinary space, and a name can't start or end with one. 1Password allows other whitespace, such as tabs, and spaces at the ends of a name. Aphelion refuses them, so that two references that look the same are the same.
+- Aphelion's policy lets the reference end with one of three queries. `?attribute=otp` and `?attribute=totp` ask for the current one-time password code. `?ssh-format=openssh` asks for an SSH private key in the OpenSSH format. 1Password also documents attributes such as `type`, `id` and the file attributes. Aphelion refuses them, because they don't return a secret's value.
 - `attr` may stand for `attribute`, as 1Password allows. The parser stores it as `attribute`, because 1Password's SDK docs show only `attribute`.
 - The path is otherwise kept exactly as written. 1Password itself ignores case in references.
 
-**`bws`** takes a Bitwarden Secrets Manager secret ID, which is a UUID: 32 hexadecimal digits in groups of 8, 4, 4, 4 and 12, separated by `-`. Uppercase digits are accepted and stored in lowercase.
+**`bws`** takes a Bitwarden Secrets Manager secret ID, which is a UUID. A UUID is 32 hexadecimal digits in groups of 8, 4, 4, 4 and 12, separated by `-`. Uppercase digits are accepted and stored in lowercase.
 
 **`local`** takes one or more names separated by `/`. Each name starts with a lowercase letter or a digit, and then holds lowercase letters, digits, `.`, `-` and `_`. So `.` and `..` can't be names, and no name is empty.
 
