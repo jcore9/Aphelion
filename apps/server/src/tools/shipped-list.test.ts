@@ -40,4 +40,33 @@ describe("deploy/ai-tools.json", () => {
       }
     }
   });
+
+  it("has an entry at the path the image links each tool name to, on each processor", () => {
+    if (!parsed.ok) throw new Error(parsed.message);
+    const dockerfile = readFileSync(
+      join(import.meta.dirname, "../../../../deploy/Dockerfile"),
+      "utf8",
+    );
+    const targetOf = (name: string, processor: string) => {
+      const loop =
+        /for tool in ([a-z ]+); do ln -s "\/opt\/aphelion\/tools\/\$tool\/current\/([^"]+)"/.exec(
+          dockerfile,
+        );
+      if (loop?.[1]?.split(" ").includes(name)) {
+        return loop[2]?.replaceAll("$tool", name);
+      }
+      return new RegExp(`ln -s "/opt/aphelion/tools/${name}/current/([^"]+)"`)
+        .exec(dockerfile)?.[1]
+        ?.replaceAll("$(uname -m)", processor);
+    };
+    for (const tool of parsed.list.tools) {
+      for (const processor of processors) {
+        const found = buildFor(tool, processor);
+        if (found.kind === "unavailable") continue;
+        expect(found.build.entry, `${tool.name} ${processor}`).toBe(
+          targetOf(tool.name, processor),
+        );
+      }
+    }
+  });
 });

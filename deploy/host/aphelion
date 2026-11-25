@@ -7,9 +7,6 @@ readonly service=aphelion
 readonly health_port=7400
 readonly hardening='true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"]'
 
-readonly AI_TOOL_NAMES=(claude codex grok)
-readonly -A AI_TOOL_SIGN_IN_CHECKS=([claude]="auth status --text" [codex]="login status" [grok]="")
-
 usage() {
   cat <<'USAGE'
 usage:
@@ -17,11 +14,14 @@ usage:
   aphelion device add NAME [--days N]  add a device and print its token
   aphelion device list                 list the devices
   aphelion device revoke ID            stop a device from signing in
+  aphelion tool list                   list the AI tools Aphelion can install, and which are installed
+  aphelion tool install NAME           download an AI tool from the list, check it and install it
+  aphelion tool remove NAME            remove an installed AI tool
   aphelion check                       run every check the host can run alone
   aphelion --help                      show this text
 
 Run it as root: sudo aphelion status
-The device commands run the server's own aphelion command inside the container.
+The device and tool commands run the server's own aphelion command inside the container.
 USAGE
 }
 
@@ -135,26 +135,25 @@ check_cpu() {
     { echo "Bun needs sse4_2. On a Proxmox VM, set the CPU type to host."; return 1; }
 }
 
-report_ai_tool() {
-  local name=$1 sign_in_check
-  local -a words
-  sign_in_check=${AI_TOOL_SIGN_IN_CHECKS[$name]}
-  in_container aphelion-bot sh -c 'command -v "$1"' _ "$name" >/dev/null 2>&1 </dev/null || return 1
-  if [[ -z $sign_in_check ]]; then
-    echo "$name: installed, sign-in state unknown"
-    return 0
-  fi
-  read -ra words <<<"$sign_in_check"
-  if in_container aphelion-bot "$name" "${words[@]}" >/dev/null 2>&1 </dev/null; then
-    echo "$name: signed in"
-  else
-    echo "$name: not signed in, or the check failed"
-  fi
-}
-
 report_ai_tools() {
-  local name lines
-  lines=$(for name in "${AI_TOOL_NAMES[@]}"; do report_ai_tool "$name" || true; done)
+  local rows name state status line lines=""
+  local -a words
+  rows=$(in_container harness aphelion tool list 2>/dev/null </dev/null) ||
+    { echo "AI tools: unknown, aphelion tool list failed"; return 0; }
+  while IFS=$'\t' read -r name _ state status; do
+    [[ $state == installed ]] || continue
+    if [[ $status == - ]]; then
+      line="$name: installed, sign-in state unknown"
+    else
+      read -ra words <<<"$status"
+      if in_container aphelion-bot "${words[@]}" >/dev/null 2>&1 </dev/null; then
+        line="$name: signed in"
+      else
+        line="$name: not signed in, or the check failed"
+      fi
+    fi
+    lines+=${lines:+$'\n'}$line
+  done < <(tail -n +2 <<<"$rows")
   echo "${lines:-AI tools: none installed}"
 }
 
@@ -217,6 +216,10 @@ cmd_device() {
   compose exec -T --user harness "$service" aphelion device "$@"
 }
 
+cmd_tool() {
+  compose exec -T --user harness "$service" aphelion tool "$@"
+}
+
 case ${1:-} in
   -h | --help | help)
     usage
@@ -235,6 +238,12 @@ case ${1:-} in
   device)
     case ${2:-}:$# in
       add:[3-9] | list:2 | revoke:3) cmd_device "${@:2}" ;;
+      *) usage_error ;;
+    esac
+    ;;
+  tool)
+    case ${2:-}:$# in
+      list:2 | install:3 | remove:3) cmd_tool "${@:2}" ;;
       *) usage_error ;;
     esac
     ;;

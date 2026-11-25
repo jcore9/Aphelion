@@ -11,4 +11,5 @@
 !docs/package.json
 !docs/reference/config/example
 !deploy/image
+!deploy/ai-tools.json
 **/*.test.ts

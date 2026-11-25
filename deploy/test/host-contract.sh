@@ -257,14 +257,22 @@ case " $* " in
     echo "the-token"
     echo "Added device" >&2
     exit "${FAKE_DEVICE_EXIT:-0}" ;;
+  *" --user harness aphelion aphelion tool list"*)
+    printf 'NAME\tVERSION\tSTATE\tSTATUS-COMMAND\n'
+    for entry in "claude 2.1.330 claude auth status --text" "codex 0.172.0 codex login status" "grok 1.0.92 -" "opencode 2.4.1 -"; do
+      read -r name version status <<<"$entry"
+      state="not installed"
+      [[ " ${FAKE_TOOLS:-} " == *" $name "* ]] && state=installed
+      printf '%s\t%s\t%s\t%s\n' "$name" "$version" "$state" "$status"
+    done
+    exit "${FAKE_TOOL_EXIT:-0}" ;;
+  *" --user harness aphelion aphelion tool "*)
+    all="$*"
+    echo "ran tool ${all##* aphelion tool }"
+    exit "${FAKE_TOOL_EXIT:-0}" ;;
   *" --user aphelion-bot aphelion "*)
     all="$*"
     rest=${all#*--user aphelion-bot aphelion }
-    if [[ $rest == "sh -c "* ]]; then
-      tool=${rest##* }
-      [[ " ${FAKE_TOOLS:-} " == *" $tool "* ]]
-      exit
-    fi
     echo "SECRET-FROM-THE-TOOL"
     [[ " ${FAKE_SIGNED_IN:-} " == *" ${rest%% *} "* ]]
     exit ;;
@@ -299,11 +307,11 @@ error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" status 2>&1 >
 [[ $status == 2 && $error == "Run it with sudo: sudo aphelion status" ]] ||
   fail "the command didn't refuse a user other than root with status 2: $status $error"
 help=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" --help) || fail "--help needs root"
-[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* ]] ||
+[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* && $help == *"aphelion tool install NAME"* ]] ||
   fail "--help doesn't list the commands: $help"
 pass "the command refuses a user other than root with status 2, and --help works for everyone"
 
-for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b"; do
+for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b" tool "tool frobnicate" "tool list extra" "tool install" "tool install a b" "tool remove" "tool remove a b"; do
   status=0
   read -ra words <<<"$bad" || true
   error=$(as_root_aphelion "${words[@]}" 2>&1 >/dev/null) || status=$?
@@ -358,3 +366,12 @@ stdout=$(FAKE_DEVICE_EXIT=3 as_root_aphelion device add laptop --days 30 2>/dev/
 stderr=$(as_root_aphelion device list 2>&1 >/dev/null)
 [[ $stderr == "Added device" ]] || fail "device list changed the standard error: $stderr"
 pass "device runs the server's command as harness and passes its output and exit code through"
+
+out=$(as_root_aphelion tool install claude) || fail "tool install failed"
+[[ $out == "ran tool install claude" ]] || fail "tool install didn't run the server's command: $out"
+status=0
+out=$(FAKE_TOOL_EXIT=4 as_root_aphelion tool remove claude 2>&1) || status=$?
+[[ $status == 4 && $out == "ran tool remove claude" ]] || fail "tool remove changed the exit code or output ($status, $out)"
+rows=$(FAKE_TOOLS=grok as_root_aphelion tool list) || fail "tool list failed"
+grep -qP "^grok\t1\.0\.92\tinstalled\t-$" <<<"$rows" || fail "tool list didn't pass the server's table through: $rows"
+pass "tool list, install and remove run the server's command as harness and pass its output and exit code through"

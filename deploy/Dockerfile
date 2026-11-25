@@ -26,13 +26,19 @@ RUN apt-get update \
  && install -d -o aphelion-secrets -g aphelion-secrets -m 0700 /var/lib/aphelion-secrets \
  && install -d -o aphelion-plugins -g aphelion-plugins -m 0700 /var/lib/aphelion-plugins \
  && install -d -o harness -g harness -m 0755 /opt/aphelion/plugins \
- && install -d -m 0755 /usr/local/lib/aphelion \
+ && install -d -o harness -g harness -m 0755 /opt/aphelion/tools \
+ && install -d -m 0755 /usr/local/lib/aphelion /etc/codex \
+ && printf 'check_for_update_on_startup = false\n' >/etc/codex/requirements.toml \
+ && for tool in claude grok opencode; do ln -s "/opt/aphelion/tools/$tool/current/$tool" "/usr/local/bin/$tool"; done \
+ && ln -s "/opt/aphelion/tools/codex/current/codex-$(uname -m)-unknown-linux-musl" /usr/local/bin/codex \
  && find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
 COPY --from=build --chmod=0755 /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=build --chmod=0755 /src/apps/server/dist/aphelion /src/apps/server/dist/aphelion-secrets /usr/local/bin/
 COPY --from=build --chmod=0644 /src/apps/server/dist/plugin-runner.js /usr/local/lib/aphelion/
+COPY --chmod=0644 deploy/ai-tools.json /usr/local/lib/aphelion/ai-tools.json
 COPY --chown=harness:harness --chmod=0640 docs/reference/config/example/*.yaml /etc/aphelion/
 COPY --chmod=0755 deploy/image/launch /usr/local/lib/aphelion/launch
+ENV DISABLE_AUTOUPDATER=1
 EXPOSE 7400
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/lib/aphelion/launch"]

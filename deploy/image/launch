@@ -50,6 +50,7 @@ check_dir /var/lib/aphelion-bots aphelion-bot:aphelion-bot 750
 check_dir /var/lib/aphelion-secrets aphelion-secrets:aphelion-secrets 700
 check_dir /var/lib/aphelion-plugins aphelion-plugins:aphelion-plugins 700
 check_dir /opt/aphelion/plugins harness:harness 755
+check_dir /opt/aphelion/tools harness:harness 755
 check_dir /run/aphelion-secrets aphelion-secrets:harness 2710
 [[ $(stat -c '%a' /run/aphelion-secrets) == 2710 ]] ||
   refuse "/run/aphelion-secrets must have mode 2710"

@@ -26,6 +26,7 @@ services:
       - secrets:/var/lib/aphelion-secrets
       - plugin-data:/var/lib/aphelion-plugins
       - plugin-files:/opt/aphelion/plugins
+      - ai-tools:/opt/aphelion/tools
     secrets: [bootstrap]
     networks: [aphelion]
     stop_grace_period: 45s
@@ -53,3 +54,4 @@ volumes:
   secrets:
   plugin-data:
   plugin-files:
+  ai-tools:
