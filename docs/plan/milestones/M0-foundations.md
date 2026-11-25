@@ -396,9 +396,61 @@ The [exit test results](M0-exit-test.md) record the run of 2026-11-24.
 
 ## Retro
 
-Written when M0 closes.
+### What shipped
 
-The exit test passed on 2026-11-24. See the [exit test results](M0-exit-test.md).
+M0 built the base: the server, the plugin runner, the install and backup guides, and the docs site. The first alpha, [v0.1.0-alpha.1](https://github.com/jcore9/Aphelion/releases/tag/v0.1.0-alpha.1), is tagged. The M0 exit test passed on 2026-11-24. See the [exit test results](M0-exit-test.md).
+
+### Exit test deviations
+
+- VM A ran both the install checks and the first half of the restore drill.
+- VM B was an existing Ubuntu 24.04.5 machine, not a fresh 26.04 one.
+- The backup lived on VM B, so it was copied locally instead of fetched over `ssh`.
+- The host has no TPM (a chip that can seal keys), so the TPM checks did not apply.
+
+### What went well
+
+- A second review by an AI from another vendor ("cross-family review") caught real defects, such as the missing firewall check and the wrong version number.
+- The exit test on real machines found a firewall problem that unit tests could not.
+- Decision records kept choices written down. Retiring the `dev` branch for one `main` ([0062](../../decisions/0062-one-main-branch.md)) removed a merge step.
+- Delegates working in separate worktrees (private copies of the repository) kept parallel work apart.
+
+### What went badly
+
+- The 8 GB dev box could not run more than two delegates at once or a full lint (the style and rule checker). Lint left on that box slowed everything.
+- PR bodies were too long. The owner found them wordy.
+- The version constant still said `0.0.0` at the exit test, and the firewall problem was found only then. Both became release blockers.
+- One check (the plugin-template archive test) failed once without a known cause.
+- The plan promised plugin features that the deployed host does not offer.
+
+### Changes for M1
+
+- Run the exit-style checks on the release image earlier, not only at the end.
+- Keep PR bodies to one screen.
+- Run the heavy checks in CI (GitHub's automatic checks), not on the dev box.
+- Make every merge gate a required check (#201).
+- Name each promise in a plan against a test that proves it.
+
+### Review follow-ups
+
+The [whole-repo review](https://github.com/jcore9/Aphelion/issues/144) left these items. Each has a home.
+
+| Finding | Issue | Milestone |
+| --- | --- | --- |
+| B1 firewall isolation | Fixed in [#191](https://github.com/jcore9/Aphelion/pull/191) | M0 |
+| B2 version number | Fixed in [#191](https://github.com/jcore9/Aphelion/pull/191) | M0 |
+| F1 restore and old device access | [#199](https://github.com/jcore9/Aphelion/issues/199) | M1 |
+| F2 backup overwrites last copy | [#178](https://github.com/jcore9/Aphelion/issues/178) | M1 |
+| F3 recovery key check | [#178](https://github.com/jcore9/Aphelion/issues/178) | M1 |
+| F4 queue counts string length | [#200](https://github.com/jcore9/Aphelion/issues/200) | M1 |
+| F5 required checks | [#201](https://github.com/jcore9/Aphelion/issues/201) | M1 |
+| F6 plugin features vs host | [#202](https://github.com/jcore9/Aphelion/issues/202) | M1 |
+| D1 cancellation, separation, Codex | [#22](https://github.com/jcore9/Aphelion/issues/22), [#45](https://github.com/jcore9/Aphelion/issues/45), [#114](https://github.com/jcore9/Aphelion/issues/114) | M1, M4 |
+| D2 API key exposure | [#181](https://github.com/jcore9/Aphelion/issues/181), [#20](https://github.com/jcore9/Aphelion/issues/20) | M1 |
+| D3 plugin trust and updates | [#182](https://github.com/jcore9/Aphelion/issues/182), [#183](https://github.com/jcore9/Aphelion/issues/183), [#65](https://github.com/jcore9/Aphelion/issues/65) | M5 |
+| D4 recovery and key custody | [#199](https://github.com/jcore9/Aphelion/issues/199), [#34](https://github.com/jcore9/Aphelion/issues/34) | M1, M3 |
+| Flaky archive check | [#203](https://github.com/jcore9/Aphelion/issues/203) | M1 |
+| Repeated commands after restart | [#18](https://github.com/jcore9/Aphelion/issues/18) | M1 |
+| Codex and Grok live sign-in | [#114](https://github.com/jcore9/Aphelion/issues/114), [#44](https://github.com/jcore9/Aphelion/issues/44) | M4 |
 
 [M0-00]: https://github.com/jcore9/Aphelion/issues/1
 [M0-01]: https://github.com/jcore9/Aphelion/issues/2
