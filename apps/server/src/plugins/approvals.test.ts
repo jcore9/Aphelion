@@ -135,3 +135,33 @@ test("a run keeps its grants only while its exact approval stands", async () => 
     allowed({ ...first, folder: elsewhere.folder, filesDigest: undefined }),
   ).toBe(true);
 });
+
+test("a switched-off plugin has no approval and no grant, and switching it on restores both", async () => {
+  const db = await store();
+  const grants = Effect.runSync(
+    Layer.build(sqlitePluginGrants(db)).pipe(
+      Effect.map((services) => Context.get(services, PluginGrants)),
+      Effect.scoped,
+    ),
+  );
+  recordVersion(db, version("1.0.0"));
+  const approval = approvalFor(
+    { plugin: "weather", current: version("1.0.0"), previous: undefined },
+    undefined,
+  );
+  const status = { kind: "events", name: "bot.status" } as const;
+  const answers = () => [
+    Effect.runSync(grants.hasApproval(approval)),
+    Effect.runSync(grants.allows(approval, status)),
+  ];
+  expect(answers()).toEqual([true, true]);
+
+  db.run("UPDATE plugin_installs SET enabled = 0 WHERE plugin = 'weather'");
+  expect(answers()).toEqual([false, false]);
+
+  recordVersion(db, version("1.0.0"));
+  expect(answers()).toEqual([false, false]);
+
+  db.run("UPDATE plugin_installs SET enabled = 1 WHERE plugin = 'weather'");
+  expect(answers()).toEqual([true, true]);
+});
