@@ -11,12 +11,11 @@ import {
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Cause, Effect, Exit, Layer } from "effect";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { readInstall } from "../plugins/approvals";
 import { openStore } from "../store";
 import { version } from "../version";
-import { cli, CliFailure, CliIo } from "./index";
+import { run } from "./testing";
 import { stdinLabel } from "./config-check";
 
 const example = join(
@@ -44,23 +43,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
-
-async function run(argv: string[], stdin = "") {
-  const out: string[] = [];
-  const err: string[] = [];
-  const io = Layer.succeed(CliIo, {
-    out: (line) => Effect.sync(() => void out.push(line)),
-    err: (line) => Effect.sync(() => void err.push(line)),
-    stdin: Effect.succeed(stdin),
-  });
-  const exit = await Effect.runPromiseExit(cli(argv).pipe(Effect.provide(io)));
-  let code = 0;
-  if (Exit.isFailure(exit)) {
-    const error = Cause.squash(exit.cause);
-    code = error instanceof CliFailure ? error.exitCode : -1;
-  }
-  return { code, out, err };
-}
 
 const dirs = () => ["--config-dir", configDir, "--state-dir", stateDir];
 

@@ -11,7 +11,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Cause, Effect, Exit, Layer } from "effect";
+import { Effect } from "effect";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { lockFile } from "../adapters/file-lock";
 import { createLogger } from "../log";
@@ -23,7 +23,7 @@ import {
 } from "../plugins/control";
 import { filesLockFile } from "../plugins/updates/files-lock";
 import { readTar, writeEntries } from "../plugins/updates/tar";
-import { cli, CliFailure, CliIo } from "./index";
+import { run } from "./testing";
 
 const plugin = "aphelion-test-plugin";
 const fixtures = join(
@@ -79,23 +79,6 @@ afterEach(async () => {
   await new Promise((resolve) => server.close(resolve));
   await rm(root, { recursive: true, force: true });
 });
-
-async function run(argv: string[]) {
-  const out: string[] = [];
-  const err: string[] = [];
-  const io = Layer.succeed(CliIo, {
-    out: (line) => Effect.sync(() => void out.push(line)),
-    err: (line) => Effect.sync(() => void err.push(line)),
-    stdin: Effect.succeed(""),
-  });
-  const exit = await Effect.runPromiseExit(cli(argv).pipe(Effect.provide(io)));
-  let code = 0;
-  if (Exit.isFailure(exit)) {
-    const error = Cause.squash(exit.cause);
-    code = error instanceof CliFailure ? error.exitCode : -1;
-  }
-  return { code, out, err };
-}
 
 const approval = (lines: string[]) =>
   /--approve ([0-9a-f]{64})$/.exec(lines.at(-1) ?? "")?.[1] ?? "";
