@@ -1,6 +1,6 @@
 # Device tokens
 
-A device token is a long random password that one of the owner's devices, such as a laptop or a phone, sends with every request to the server. The server answers nothing but `GET /health` without one ([decision 0022](../decisions/0022-bot-network-boundary.md)). [The server reference](server.md) shows what each request gets.
+A device token is a long random password. One of the owner's devices, such as a laptop or a phone, sends it with every request to the server. The server answers nothing but `GET /health` without one ([decision 0022](../decisions/0022-bot-network-boundary.md)). [The server reference](server.md) shows what each request gets.
 
 ## The life of a token
 
@@ -46,7 +46,7 @@ For each request except `GET /health`:
 3. Compare the SHA-256 fingerprint of the token with the stored one, with `timingSafeEqual`. That function takes the same time whether the first byte differs or the last, so an attacker can't learn the fingerprint by timing replies. The comparison runs even when the token is malformed or the device unknown.
 4. Refuse a revoked or expired token.
 
-A missing, malformed, wrong, unknown, expired or revoked token all get the same reply: `401` with an empty body and the same headers. A caller can't tell which check failed. A token in the query string, such as `?token=…`, isn't read.
+A missing, malformed, wrong, unknown, expired or revoked token all get the same reply, `401` with an empty body and the same headers. A caller can't tell which check failed. A token in the query string, such as `?token=…`, isn't read.
 
 ## What is audited
 
@@ -64,11 +64,11 @@ Failed attempts write at most 10 rows a minute, so a flood of bad tokens can't f
 
 ## Keeping the token out of logs
 
-- `addDevice` registers each new token with `maskSecretValue`, so the redactor replaces that exact text, and its base64 and URL-encoded forms, in every log line and audit row written by the same process ([logging](logging.md#known-secret-values)).
+- `addDevice` registers each new token with `maskSecretValue`. The redactor then replaces that exact text in every log line and audit row that the same process writes. It also replaces the base64 and URL-encoded forms of the token ([logging](logging.md#known-secret-values)).
 - The `aph_dev_` pattern catches a token the process didn't create, such as one a client sent.
 - The field name `token` is redacted wherever it appears.
 
-A test adds a device, logs the token and the result in several shapes, tries it as a bad token, and then reads the log lines and the database files byte by byte. None of them holds the token.
+A test adds a device and logs the token and the result in several shapes. It tries the token as a bad token. Then it reads the log lines and the database files byte by byte. None of them holds the token.
 
 ## Code
 

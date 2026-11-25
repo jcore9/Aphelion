@@ -72,7 +72,7 @@ The bot runner comes with M1-04 ([#22](https://github.com/jcore9/Aphelion/issues
 
 If the environment variable `APHELION_PLUGIN_DEV_FOLDER` is set and not empty, the launcher adds `--plugin-dev` with its value to the server's command. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/main/deploy/compose.plugin-dev.yaml) sets it. Without the variable, the server refuses reload requests on its [control socket](plugins.md#control-socket). See [Dev mode](plugins.md#dev-mode).
 
-After the launcher closes its copies, only the server and the plugin runner hold the pipes, and no file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved, if its manifest is still the approved one ([`aphelion --headless`](cli.md#aphelion---headless)).
+After the launcher closes its copies, only the server and the plugin runner hold the pipes. No file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved, if its manifest is still the approved one ([`aphelion --headless`](cli.md#aphelion---headless)).
 
 ### Stopping
 
@@ -84,7 +84,7 @@ On `SIGTERM`, which `docker compose stop` sends, the launcher stops the processe
 
 A process that doesn't stop in time gets `SIGKILL`. The launcher then exits with code 0. The Compose file gives the container 45 seconds before Docker kills it.
 
-If the server, the runner or the broker exits while the container runs, the launcher logs which one, stops the other two the same way, and exits with code 1. The container stops, and [`aphelion.service`](../guides/install.md#what-the-service-does) starts it again 10 seconds later.
+If the server, the runner or the broker exits while the container runs, the launcher logs which one. It stops the other two the same way and exits with code 1. The container stops, and [`aphelion.service`](../guides/install.md#what-the-service-does) starts it again 10 seconds later.
 
 ## Hardening
 
@@ -113,7 +113,7 @@ sudo docker compose exec -T --user harness aphelion aphelion device list
 
 The container joins a bridge network named `aphelion`. Its host interface is `aphelion0`, its subnet is `172.30.73.0/24`, and it has no IPv6. Set `APHELION_SUBNET` in `deploy/.env` if that subnet is in use on your network.
 
-The server listens on port 7400 on every address inside the container, `0.0.0.0`. The Compose file publishes the port only on the host's tailnet address, which `APHELION_TAILNET_ADDRESS` sets. [`aphelion config check --compose -`](cli.md#checking-the-compose-file) refuses any other host address. It also refuses a `server.yaml` with another address or port, because the firewall below lets connections in only on port 7400.
+The server listens on port 7400 on every address inside the container, `0.0.0.0`. The Compose file publishes the port only on the host's tailnet address, which `APHELION_TAILNET_ADDRESS` sets. A tailnet is the private network that Tailscale builds between the owner's devices. [`aphelion config check --compose -`](cli.md#checking-the-compose-file) refuses any other host address. It also refuses a `server.yaml` with another address or port, because the firewall below lets connections in only on port 7400.
 
 The host firewall keeps the container away from the LAN, and the LAN away from the container ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`deploy/host/firewall`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/firewall) installs two chains in iptables' `mangle` table:
 
@@ -148,15 +148,15 @@ Names still resolve. Docker's resolver in the container sends its queries from t
 
 With `APHELION_TEST_TAILNET_ADDRESS` and `APHELION_TEST_LAN_ADDRESS` set, it also checks that `/health` answers on the tailnet address and not on the LAN address or `127.0.0.1`.
 
-[`deploy/test/host-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/host-contract.sh) runs in a throwaway privileged container, never on the host's own firewall. It builds a small network of namespaces with a bridge named `aphelion0`, an interface named `tailscale0`, and a published port forwarded the way Docker does it. It checks that the firewall drops the container's traffic to the LAN, the host, the tailnet and the bridge, and still allows the internet. It checks that a tailnet client reaches the published port and that a LAN client doesn't, through the tailnet address or directly. It runs these checks with a rule that accepts everything placed first in the `filter` table's `FORWARD` and `INPUT` chains, as Tailscale and ufw do. It also checks that:
+[`deploy/test/host-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/host-contract.sh) runs in a throwaway privileged container, never on the host's own firewall. It builds a small test network from Linux network namespaces. A network namespace is an isolated set of network interfaces and routes. The test network has a bridge named `aphelion0`, an interface named `tailscale0`, and a published port forwarded the way Docker does it. It checks that the firewall drops the container's traffic to the LAN, the host, the tailnet and the bridge, and still allows the internet. It checks that a tailnet client reaches the published port and that a LAN client doesn't, through the tailnet address or directly. It runs these checks with a rule that accepts everything placed first in the `filter` table's `FORWARD` and `INPUT` chains, as Tailscale and ufw do. It also checks that:
 
-- a second run changes nothing, and a run after an interrupted one ends with the same rules;
-- `systemd-analyze` accepts `aphelion.service`;
-- the unit, `host/install` and `compose.yaml` name the same bootstrap credential;
-- a key sealed with `systemd-creds encrypt` under umask `077` has mode `0600` and decrypts under the name the unit loads;
-- the preflight script refuses a tailnet address that is malformed, missing or on another interface.
+- A second run changes nothing, and a run after an interrupted one ends with the same rules.
+- `systemd-analyze` accepts `aphelion.service`.
+- The unit, `host/install` and `compose.yaml` name the same bootstrap credential.
+- A key sealed with `systemd-creds encrypt` under umask `077` has mode `0600` and decrypts under the name the unit loads.
+- The preflight script refuses a tailnet address that is malformed, missing or on another interface.
 
-A real host checks the rest during the M0 exit test: the install, a reboot, Tailscale, and the firewall with Docker's own chains. [Check the network boundary](../guides/install.md#check-the-network-boundary) runs the six connects from the [M0-03 review](../spikes/M0-03-headless-on-bun.md#review-findings).
+A real host checks the rest during the M0 exit test. That covers the install, a reboot, Tailscale, and the firewall with Docker's own chains. [Check the network boundary](../guides/install.md#check-the-network-boundary) runs the six connects from the [M0-03 review](../spikes/M0-03-headless-on-bun.md#review-findings).
 
 ## Code
 

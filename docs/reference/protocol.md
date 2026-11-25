@@ -47,15 +47,15 @@ The server keeps the last `capacity` events. When a client reconnects, it sends 
 - The events after the cursor, in order, when the server still has all of them. A client that is up to date gets no events.
 - One `resync` frame with the server's current cursor. The server sends it when the cursor is `null`, names another stream, or is ahead of the server. It also sends it when the cursor is more than one behind the oldest event the server kept. The server never replays part of the history.
 
-For example, when the server keeps events 2 and 3, a cursor at 1 gets events 2 and 3, and a cursor at 0 gets `resync`.
+For example, when the server keeps events 2 and 3, a cursor at 1 gets events 2 and 3. A cursor at 0 gets `resync`.
 
-`append` checks the event against its schema before it gives the event a number. An event that doesn't match is rejected with an error, and the log doesn't change, so sequence numbers never have a gap. Kept events can't be changed. `EventLog` stores a frozen copy of the checked event, so neither the caller of `append` nor the receiver of a replayed frame can alter the history.
+`append` checks the event against its schema before it gives the event a number. An event that doesn't match is rejected with an error, and the log doesn't change, so sequence numbers never have a gap. Kept events can't be changed. `EventLog` stores a frozen copy of the checked event. Neither the caller of `append` nor the receiver of a replayed frame can alter the history.
 
 A server that restarts with an in-memory log starts a new stream with a new id, so a cursor from before the restart gets `resync`.
 
 ## Command ids
 
-A client gives every command an `id` of 1 to 64 letters, digits, hyphens or underscores. A UUID from `crypto.randomUUID()` fits. When a client gets no answer, it sends the same command again with the same `id`.
+A client gives every command an `id` of 1 to 64 letters, digits, hyphens or underscores. A UUID, which is a universally unique identifier, from `crypto.randomUUID()` fits. When a client gets no answer, it sends the same command again with the same `id`.
 
 `CommandLedger` applies each id once. A retry gets the first run's outcome, whether that was a result or a failure. A command that throws before it returns counts as a failure too. A retry that arrives while the first run is still going waits for that run.
 
