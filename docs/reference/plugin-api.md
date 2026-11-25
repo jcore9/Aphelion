@@ -1300,6 +1300,34 @@ type CallOutcome =
     };
 ```
 
+### `FakeAdapter`
+
+A `BotAdapter` that runs a script, and keeps what the runtime gave it.
+
+```ts
+interface FakeAdapter extends BotAdapter {
+  readonly contexts: readonly AdapterContext[];
+  readonly inputs: readonly TurnInput[];
+  readonly signals: readonly AbortSignal[];
+  readonly answers: readonly PermissionDecision[];
+  readonly closed: boolean;
+}
+```
+
+- `contexts`: The contexts that `open` received.
+- `inputs`: The turns the runtime started, in order.
+- `signals`: The signal of each turn, in order.
+- `answers`: The answers to the `ask` steps, in order.
+- `closed`: Whether the runtime has called `close`.
+
+### `FakeScript`
+
+A script's turns. The first turn that the runtime starts runs the first list of steps, the second turn the second list, and so on. A turn past the end of the script yields nothing.
+
+```ts
+type FakeScript = readonly (readonly FakeStep[])[];
+```
+
 ### `FakeSecretOperation`
 
 A secret operation that the test host runs for `secrets.use`.
@@ -1315,6 +1343,35 @@ interface FakeSecretOperation {
 - `reference`: The secret reference that the plugin must name, and that the plugin needs a grant for.
 - `host`: The hostname that the operation sends to. The plugin needs a network grant for it.
 - `run`: Runs the operation with the plugin's id. The plugin never sees what it returns or throws, and the call fails after 5 seconds.
+
+### `FakeStep`
+
+One step of a fake turn. The fake adapter runs a turn's steps in order.
+
+```ts
+type FakeStep =
+  | {
+      readonly emit: AdapterEvent;
+    }
+  | {
+      readonly emitRaw: unknown;
+    }
+  | {
+      readonly ask: PermissionRequest;
+    }
+  | {
+      readonly wait: PromiseLike<unknown>;
+    }
+  | {
+      readonly waitForAbort: true;
+    }
+  | {
+      readonly hang: true;
+    }
+  | {
+      readonly throws: true;
+    };
+```
 
 ### `Grant`
 
@@ -1346,6 +1403,20 @@ interface HostCall {
 - `params`: The params that the plugin sent.
 - `outcome`: The test host's answer.
 
+### `StreamViolation`
+
+One rule that a stream broke.
+
+```ts
+interface StreamViolation {
+  readonly rule: number;
+  readonly message: string;
+}
+```
+
+- `rule`: The rule's number, from 1 to 7, as [the bot adapter reference](bot-adapters.md#rules-a-stream-follows) numbers them.
+- `message`: What broke the rule. It names ids and numbers only, never text from the stream.
+
 ### `TestHost`
 
 A fake host for a plugin's tests. It checks grants, request shapes and secret operations the way the real host does. Network replies are fixtures from `respondToGet`, not real requests. It does no DNS lookup, public-address check or TLS.
@@ -1376,12 +1447,29 @@ interface TestHost {
 - `logs`: The messages that the plugin and the SDK logged, in order.
 - `calls`: The requests that the plugin sent, with the answers, in the order the test host answered them.
 
+### `checkStream`
+
+Checks the events of one bot process against the seven rules of [the bot adapter reference](bot-adapters.md#rules-a-stream-follows).
+It returns the broken rules, and an empty list when the stream is good. Pass a stream that has finished: a turn without a `turn.end` breaks rule 3.
+
+```ts
+function checkStream(events: readonly AdapterEnvelope[]): StreamViolation[];
+```
+
 ### `createTestHost`
 
 Makes a test host for a plugin's manifest, with nothing granted. It throws when the manifest is invalid or has no server part.
 
 ```ts
 function createTestHost(manifestData: unknown): TestHost;
+```
+
+### `fakeAdapter`
+
+Makes an adapter that runs `script`. Its provider is `fake` unless `provider` says otherwise.
+
+```ts
+function fakeAdapter(script: FakeScript, provider?: string): FakeAdapter;
 ```
 
 ## Files

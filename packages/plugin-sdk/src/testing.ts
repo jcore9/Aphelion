@@ -347,3 +347,11 @@ export function createTestHost(manifestData: unknown): TestHost {
     calls,
   };
 }
+
+export {
+  fakeAdapter,
+  type FakeAdapter,
+  type FakeScript,
+  type FakeStep,
+} from "./adapter-testing.ts";
+export { checkStream, type StreamViolation } from "./adapter-check.ts";
