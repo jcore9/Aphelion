@@ -15,7 +15,7 @@
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
 | `aphelion device revoke ID` | Stops a device's token at once |
-| `aphelion --version` | Prints `aphelion` and the version, such as `aphelion 0.0.0` |
+| `aphelion --version` | Prints `aphelion` and the version, such as `aphelion 0.1.0-alpha.1` |
 | `aphelion --help`, or `aphelion` alone | Prints the commands |
 
 ### Options
