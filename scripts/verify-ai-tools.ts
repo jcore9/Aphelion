@@ -282,6 +282,11 @@ const line = (state: "ok" | "FAIL" | "skip", text: string) => {
   console.log(`${state.padEnd(4)}  ${text}`);
 };
 
+const agreement = (tool: Tool) =>
+  tool.checksumSource === "recorded"
+    ? "both xAI hosts serve the same file"
+    : "matches the vendor";
+
 async function checkEntry(tool: Tool, processor: Processor, download: boolean) {
   const label = `${tool.name} ${tool.version} ${processor}`;
   const available = buildFor(tool, processor);
@@ -309,7 +314,7 @@ async function checkEntry(tool: Tool, processor: Processor, download: boolean) {
     return;
   }
   if (!download) {
-    line("ok", `${label}: matches the vendor (${available.build.sha256})`);
+    line("ok", `${label}: ${agreement(tool)} (${available.build.sha256})`);
     return;
   }
   const file = await settled(async () => ({
@@ -329,7 +334,7 @@ async function checkEntry(tool: Tool, processor: Processor, download: boolean) {
   } else {
     line(
       "ok",
-      `${label}: matches the vendor, and the download from ${available.build.url} hashes to ${available.build.sha256} (${String(available.build.size)} bytes)`,
+      `${label}: ${agreement(tool)}, and the download from ${available.build.url} hashes to ${available.build.sha256} (${String(available.build.size)} bytes)`,
     );
   }
 }
