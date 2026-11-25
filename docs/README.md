@@ -123,5 +123,5 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0060](decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) | The server stays on Linux in Docker and also builds for arm64, API keys join sign-ins, and two plugin isolation gaps close in M5 | Proposed |
 | [0061](decisions/0061-release-please.md) | release-please sets the version, the release notes and the tag from commit titles, through a release PR into `main` | Proposed |
 | [0062](decisions/0062-one-main-branch.md) | From M1, Aphelion works on one `main` branch, and jcore9-bot squash-merges its own pull requests after another model family has reviewed them | Proposed |
-| [0063](decisions/0063-m1-planning-answers.md) | Before M2 approvals, the first bot works in its own folder, and M1 takes four other choices | Accepted |
-| [0064](decisions/0064-linked-equal-servers.md) | Two or more Aphelion servers can link up as equals, with groundwork in M1 and the build after v1.0 | Accepted |
+| [0063](decisions/0063-m1-planning-answers.md) | Before M2 approvals, the first bot works in its own folder, and M1 takes four other choices | Proposed |
+| [0064](decisions/0064-linked-equal-servers.md) | Two or more Aphelion servers can link up as equals, with groundwork in M1 and the build after v1.0 | Proposed |

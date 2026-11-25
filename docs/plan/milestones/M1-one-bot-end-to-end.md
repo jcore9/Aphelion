@@ -38,16 +38,18 @@ The [Exit test](#exit-test) runs all of this on the release image.
 | M1-09 | [`aphelion` command and installer](https://github.com/jcore9/Aphelion/issues/178), as parts a1 to a3, b and c | 1 to 3 | #155 for part a2 | part c |
 | M1-02 | [Claude adapter](https://github.com/jcore9/Aphelion/issues/20) | 2 | M1-01, #155, M0-01 | yes |
 | M1-10 | [arm64 image](https://github.com/jcore9/Aphelion/issues/180) | 2 | M0-12, #155 | yes |
-| M1-12 | [A restore makes every device enroll again](https://github.com/jcore9/Aphelion/issues/199) | 2 | none | no |
+| M1-12 | [A restore makes every device enroll again](https://github.com/jcore9/Aphelion/issues/199) | 2 | M0-12, #168, #177 | no |
 | M1-04 | [Session manager](https://github.com/jcore9/Aphelion/issues/22) | 3 | M1-02, M0-12, M0-18 | no |
 | M1-07 | [Adapter contract tests](https://github.com/jcore9/Aphelion/issues/25) | 3 | M1-02 | no |
 | M1-05 | [Message history](https://github.com/jcore9/Aphelion/issues/23) | 4 | M1-04, M0-09 | no |
 | M1-11 | [API keys](https://github.com/jcore9/Aphelion/issues/181) | 4 | #155, M1-02, part a1 | no |
 | M1-06 | [Minimal test client](https://github.com/jcore9/Aphelion/issues/24) | 5 | M0-10, M1-05 | maybe |
 
-M1-03 ([#21](https://github.com/jcore9/Aphelion/issues/21)) is closed as not planned ([decision 0034](../../decisions/0034-vendor-protocol-per-cli.md)).
+M1-03 ([#21](https://github.com/jcore9/Aphelion/issues/21)) is closed as not planned ([decision 0034](../../decisions/0034-vendor-protocol-per-cli.md)). An **owner path** is a path that `.github/CODEOWNERS` names. The bot never merges a pull request that changes one. It waits for you. The paths are `.github/` (including `CODEOWNERS`), `release-please-config.json`, `.release-please-manifest.json`, every `package.json`, `bun.lock`, `bunfig.toml`, `eslint.config.ts`, `lint-boundaries.test.ts`, `vitest.config.ts`, every `tsconfig*.json`, `docs/decisions/`, `docs/plan/`, `SECURITY.md` and `LICENSE`.
 
-An **owner path** is a path that `CODEOWNERS` names: `.github/`, every `package.json`, `bun.lock`, `docs/decisions/` and `docs/plan/`. A pull request that changes one waits for you. Every other pull request is squash-merged by the bot after a review from another model family ([decision 0062](../../decisions/0062-one-main-branch.md)). "Maybe" means the pull request adds a `package.json`. Each issue below says which of its pull requests wait.
+Every other pull request is squash-merged by the bot after a review from another model family ([decision 0062](../../decisions/0062-one-main-branch.md)). Both trials that decision required passed on 2026-11-25: [#197](https://github.com/jcore9/Aphelion/pull/197) touched an owner path and was blocked (closed unmerged), and [#198](https://github.com/jcore9/Aphelion/pull/198) touched none and the bot merged it. So wave 1 can merge now.
+
+"Maybe" means the pull request adds a `package.json`. #155 adds the tool list to `CODEOWNERS`, so after it merges, every edit to that list is an owner change, including #180's per-processor entries. Any decision record #22 needs is an owner change too. Each issue below says which of its pull requests wait.
 
 ### Out of scope
 
@@ -64,7 +66,7 @@ flowchart LR
   p["M1-00 plan"] --> w0["#201 five checks"]
   p --> a19["#19 adapter contract"]
   p --> a155["#155 tool list"]
-  p --> a1["#178 a1: status, device"]
+  p --> a1["#178 a1: status, device, check"]
   a19 --> a20["#20 Claude adapter"]
   a155 --> a20
   a155 --> a2["#178 a2: sign-in, backup, restore"]
@@ -74,13 +76,13 @@ flowchart LR
   c --> a3["#178 a3: logs, upgrade, network-check"]
   c --> b["#178 b: installer"]
   a20 --> a22["#22 session manager"]
-  a20 --> a25["#25 contract tests"]
+  a20 --> a25["#25 contract tests, after #20a"]
   a22 --> a23["#23 message history"]
   a23 --> a24["#24 test client"]
   a155 --> a181["#181 API keys"]
   a20 --> a181
   a1 --> a181
-  a2 --- a199["#199 restore re-enrolls"]
+  a199["#199 restore re-enrolls"] --> a2
   a24 --> exit(["Exit test"])
   a25 --> exit
   a181 --> exit
@@ -94,23 +96,22 @@ flowchart LR
 | --- | --- | --- |
 | 0 | You approve this plan | #201 (you approve it, because it touches `.github/`). A scripted sweep of the M1 to M9 issue bodies, described below. |
 | 1 | Wave 0 is done, except #201, which waits only for you | #19, #155, #167, #200, #202, #203, #178 part a1 |
-| 2 | #19 and #155 merge | #20, #178 part a2, #180, then #178 part c, #199 |
-| 3 | #20 merges, and #178 part c merges | #22, #25, #178 part a3, #178 part b |
+| 2 | #19 and #155 merge | #20, #180, #199, then #178 part c (after #180) and part a2 (after #199) |
+| 3 | #20 merges, and #178 part c merges | #22, #178 part a3, #178 part b, and #25 (its recorded fixture waits for #20a) |
 | 4 | #22 merges, and #20 and #178 part a1 are in | #23, #181 |
 | 5 | #23 merges | #24 |
 | Exit | Everything has merged | The [exit test](#exit-test) |
 
-The dev box has 8 GB of memory, so at most two delegates run at once. A wave lists what may run. It doesn't say all of it runs together.
-
-**The sweep.** Many issue bodies in M1 to M9 still say "branch from `dev`" and "coding tools never approve or merge". [Decision 0062](../../decisions/0062-one-main-branch.md) changed both. A script edits each affected body to match. It runs once, before wave 1, and the bot lists the changed issues in the plan's retro.
+The dev box has 8 GB of memory, so at most two delegates run at once. **The sweep.** Many issue bodies in M1 to M9 still say "branch from `dev`" and "coding tools never approve or merge". [Decision 0062](../../decisions/0062-one-main-branch.md) changed both. A script edits each affected body to match. It runs once, before wave 1, and the bot lists the changed issues in the plan's retro.
 
 ### What changed against the issues' own "Depends on" lists
 
 - #20 now also depends on #155. Its first acceptance line needs the pinned `claude` binary, and the tool list installs it.
 - #181 also depends on #178 part a1, because the `aphelion key` commands live in the `aphelion` command. The issue already says so.
-- #25 depended on #21, which is closed. It depends on #20 only.
-- #178's installer and its `upgrade` and `network-check` commands move to wave 3. They use the image that part c publishes.
-- #178's `sign-in` command moves to wave 2. It needs the tool list from #155.
+- #25 depended on #21, which is closed. It depends on #20 only. If #20 is split, #25 records its fixture after #20a (the adapter part), and #20 counts as done only when permission handling and replay both pass.
+- #199 needs M0's backup, restore, device-token and plugin-approval code. It depends on #14, on #168 and #177 (the restore drill), and on the device and plugin-grant tables. It lands before #178 part a2 exposes `aphelion restore`. The issue now lists these.
+- #23's issue gains the saved command IDs and the event format version, and #24's gains reconnecting. The M1 table in `docs/plan/aphelion-plan.md` now says #20 depends on #155 and #22 on M0-18.
+- #178's installer, `upgrade` and `network-check` move to wave 3, because they use the image that part c publishes. Its `sign-in` moves to wave 2, because it needs #155.
 
 ## The first bot before approvals
 
@@ -120,59 +121,61 @@ The first bot may read and write files in its own working folder and run shell c
 - It denies the file tools outside the folder.
 - It denies Claude's web tools.
 
-The answer lives in the `canUseTool` function of #20. It never changes with the request.
+The answer lives in the `canUseTool` function of #20. It gives the same answer for every request. It doesn't learn or widen. The SDK is the Claude Agent SDK, Anthropic's library for driving Claude Code.
 
 **The limit, stated plainly.** Aphelion can't read what a shell command does. Only the file permissions of the `aphelion-bot` account and the container hold a shell command. A command can read other bots' folders and reach the internet. The container still keeps it from Aphelion's secrets and config. Only one bot exists in M1, so there is no other bot to read. M1 uses test data only. M2 puts each command behind your yes or no.
 
+A bot can also read its own provider credential, which is the sign-in token or the API key. A tricked bot could leak it. A proxy can remove this later ([decision 0022](../../decisions/0022-bot-network-boundary.md), option 2).
+
 ## Design notes
+
+Four notes end in a **Default**. The orchestrator chose it, and you can overrule it when you approve.
 
 ### Repeated commands after a restart
 
 A client may send a command again, because the first reply got lost. The server must not run it twice. Today the server keeps command IDs in memory ([command-ledger.ts](https://github.com/jcore9/Aphelion/blob/main/packages/protocol/src/command-ledger.ts)). It forgets them when it evicts old ones or restarts.
 
-The default: the server saves each command ID and its result in its SQLite database for 24 hours. A repeat inside that time gets the saved result and has no second effect. #23 owns this, because it adds the tables for turns and events. It also adds a test: send a command, restart the server, send the same ID again, and check for one effect.
+**Default.** The server saves each state-changing command's ID and its result in its SQLite database for 24 hours. A repeat inside that time gets the saved result and has no second effect. #23 owns this, because it adds the tables for turns and events. Its test sends a command, restarts the server, sends the same ID again, and checks for one effect.
 
-Cancel and start-session in #22 are safe to repeat on their own. A second cancel finds nothing to stop. A second start returns the running session. #22 documents this, and #23 adds the saved IDs.
+Cancel and start-session in #22 are safe to repeat on their own. A second cancel finds nothing to stop. A second start returns the running session.
 
 ### Sign-in or key
 
 The sign-in wins. The key is used only when there is no working sign-in ([decision 0063](../../decisions/0063-m1-planning-answers.md)). #20 and #181 both implement this, and one test in #181 covers it.
 
-A provider may offer no lightweight key check. The default: Aphelion saves the key as "not tested". The first real use reports pass or fail. #181 checks each provider's options when it starts.
+**Default.** A provider may offer no lightweight key check. Aphelion then saves the key as "not tested". The first real use reports pass or fail. #181 checks each provider's options when it starts.
 
 ### Cancel must leave nothing running
 
 A **process group** is a set of processes that one signal can reach. A bot's command can leave its group with `setsid` or become a daemon, so a group kill misses it. The M0 spike measured 2 of 5 processes left alive ([decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md)).
 
-The bar in #22 stays: no process survives, including one that leaves its group. #22 tries a **cgroup** per bot first. A cgroup is a Linux feature that groups processes so one action stops all of them. It needs delegation to work under the shipped container settings. If it doesn't, #22 walks the child processes, which can race. If nothing meets the bar on the shipped image, #22 stops and you decide in a decision record whether to accept the risk.
+**Default.** The bar in #22 stays: no process survives, including one that leaves its group. #22 tries a **cgroup** per bot first. A cgroup is a Linux feature that groups processes so one action stops all of them. It needs delegation to work under the shipped container settings. If it doesn't, #22 walks the child processes, which can race. If nothing meets the bar on the shipped image, #22 stops and you decide in a decision record whether to accept the risk.
 
 ### One image, two processors
 
-The image builds for x86-64 and arm64 from one `deploy/Dockerfile`. The default: the arm64 checks run on GitHub's free hosted arm64 runners, because the repository is public. Emulation is slower and isn't used. The tool list holds one URL and one checksum per processor ([decision 0060](../../decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md)). A tool with no arm64 download shows as unavailable on arm64.
+The image builds for x86-64 and arm64 from one `deploy/Dockerfile`. The tool list holds one URL and one checksum per processor ([decision 0060](../../decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md)). A tool with no arm64 download shows as unavailable on arm64.
+
+**Default.** The arm64 checks run on GitHub's free hosted arm64 runners, because the repository is public. Emulation is slower and isn't used.
 
 ### How the installer gets the image
 
-A workflow builds the image for each release and publishes it with its **digest**, a fingerprint of the image. The installer downloads the image and checks the digest. If the download fails, it builds the image on the server ([decision 0063](../../decisions/0063-m1-planning-answers.md)).
+The release workflow builds the image and publishes it with its **digest**, a fingerprint of the image. It runs from the `release-please` job's release output in `release.yml`, so it fires when a release is made. The installer downloads the image and checks the digest. It refuses an image whose digest doesn't match. If the download fails, it builds the image on the server ([decision 0063](../../decisions/0063-m1-planning-answers.md)).
 
 ### Network check
 
-`aphelion network-check` also looks for a lost firewall. Running `ufw reload` or `ufw enable` while Aphelion runs can remove the rules that Aphelion and Docker added. The command checks that those rules exist and says which are missing. Startup already refuses `MANAGE_BUILTINS=yes` ([#191](https://github.com/jcore9/Aphelion/issues/191)).
+Running `ufw reload` or `ufw enable` while Aphelion runs can remove the firewall rules that Aphelion and Docker added. Startup already refuses `MANAGE_BUILTINS=yes` ([#191](https://github.com/jcore9/Aphelion/issues/191)).
+
+**Default.** `aphelion network-check` also looks for those lost rules and says which are missing.
 
 ### Order of `aphelion` commands
 
-1. `status`, `device` and `sign-in`.
-2. `backup` and `restore`, with the backup fix F2, the key check F3 and #199.
-3. `logs`, `upgrade` and `network-check`.
+**Default.** Each group matches a part of #178:
 
-The `key` group lands with #181 and the `plugin` group with part a2.
+1. `status`, `device` and `check` (part a1, wave 1).
+2. `sign-in`, `backup`, `restore` and `plugin` (part a2, wave 2). `sign-in` needs the tool list from #155. `restore` waits for #199.
+3. `logs`, `upgrade` and `network-check` (part a3, wave 3).
 
-## Keeping it extensible
-
-- The adapter contract (#19) is the only thing a new bot CLI must implement. M4 adds Grok and Codex behind it.
-- The tool list (#155) is data, not code. A new tool is a new entry with a checksum.
-- Saved events carry a version number, so M5 clients can read M1 history.
-- Two or more servers may link up as equals later ([decision 0064](../../decisions/0064-linked-equal-servers.md)). So each server gets a stable server ID on first start, stored in its database. Every new M1 table uses IDs that can't clash between servers, such as UUIDv7, a random ID that sorts by time. Each saved record names the server that wrote it. The audit log keeps its integer IDs for now, and moving it is a known migration for later.
-- The bot runner already sits behind one message channel ([#22](https://github.com/jcore9/Aphelion/issues/22)). A bot on another server would use the same channel later, so M1 adds nothing for it.
+The `key` group lands with #181.
 
 ## Issues
 
@@ -187,17 +190,17 @@ Each section says what the issue builds, what it needs, which files it is expect
 
 ### #19 Bot adapter contract (wave 1)
 
-- **Builds.** The plugin interface that emits normalized events: text delta, tool start and end, permission request, turn end, error and usage.
+- **Builds.** The plugin interface that emits normalized events: text delta, tool start and end, permission request, turn end, error and usage. It is the only thing a new bot tool must implement. M4 adds Grok and Codex behind it.
 - **Needs.** M0-13, the plugin host.
 - **Files.** `packages/plugin-sdk/src/`, `packages/protocol/src/`, `docs/reference/`.
 - **Check.** Unit tests of the event shapes. A fake adapter passes the contract tests.
 
 ### #155 Install AI tools from a list (wave 1, owner path)
 
-- **Builds.** A list of tools with pinned versions and per-processor checksums. Commands list the tools and install one. An install refuses a wrong checksum. Tools live in their own Docker volume and update only through a new list entry. The list becomes an owner path in `CODEOWNERS`, and the bot opens a pull request for each version bump with the checksum checked against the vendor's download ([decision 0063](../../decisions/0063-m1-planning-answers.md)).
+- **Builds.** A list of tools with pinned versions and per-processor checksums. The list is data, so a new tool is a new entry. Commands list the tools and install one. An install refuses a wrong checksum. Tools live in their own Docker volume, which bots can run but can't change. It survives an image upgrade. Tools update only through a new list entry. The list becomes an owner path in `CODEOWNERS`, and the bot opens a pull request for each version bump with the checksum checked against the vendor's download ([decision 0063](../../decisions/0063-m1-planning-answers.md)).
 - **Needs.** M0-12, the image.
 - **Files.** A new list file under `deploy/`, `apps/server/src/cli/`, `deploy/Dockerfile`, `.github/CODEOWNERS`, `docs/guides/install.md`.
-- **Check.** A contract test installs a tool and runs it as `aphelion-bot`. Live: you install Claude Code from the list on a VM.
+- **Check.** A contract test installs a tool and runs it as `aphelion-bot`. Live: you install Claude Code from the list on a VM (a virtual machine, a computer simulated inside another).
 - **Waits for you.** The `CODEOWNERS` change is in `.github/`.
 
 ### #167 A slow plugin start doesn't hold up others (wave 1)
@@ -209,35 +212,32 @@ Each section says what the issue builds, what it needs, which files it is expect
 
 ### #200 Queue budget counts bytes (wave 1)
 
-- **Builds.** The plugin queue limit counts UTF-8 bytes.
-- **Files.** `apps/server/src/plugins/runner.ts`.
+- **Builds.** The plugin queue limit counts UTF-8 bytes, in `apps/server/src/plugins/runner.ts`.
 - **Check.** One test with ASCII text and one with multibyte text against the same budget.
 
 ### #202 Plugin docs match the deployed host (wave 1)
 
 - **Builds.** The plugin guide and API reference say what works today. One example plugin runs against `createTestHost` and the real host.
 - **Files.** `docs/guides/`, `docs/reference/`, `packages/plugin-sdk/src/testing.ts`.
-- **Check.** The example's tests run against both hosts in CI.
+- **Check.** The example's tests run against both hosts in CI, the automatic checks GitHub runs on every pull request.
 
 ### #203 Is the plugin-template check flaky? (wave 1)
 
-- **Builds.** A measured failure rate on a small box and in CI. A fix, a new issue with the cause, or a close.
-- **Check.** The measured numbers go into the issue.
+- **Builds.** A measured failure rate on a small box and in CI. A fix, a new issue with the cause, or a close. The numbers go into the issue.
 
-### #178 `aphelion` command and installer (waves 1 to 3, split in five)
-
-The [Splits](#splits) section describes the parts.
+### #178 `aphelion` command and installer (waves 1 to 3, split in [five](#splits))
 
 - **Part a1.** `status`, `device` and a `check` command that runs the exit test's checks. Files: new `deploy/host/aphelion`, `deploy/host/install`, `docs/guides/install.md`. Check: a shell test for each subcommand against the container.
-- **Part a2.** `sign-in`, `backup`, `restore` and the `plugin` group. `backup` keeps the previous verified copy until the new one verifies (F2). The restore runs the checks from #199. Needs #155 for `sign-in`. Check: shell tests, plus a live backup and restore on two VMs.
+- **Part a2.** `sign-in`, `backup`, `restore` and the `plugin` group. `sign-in` runs only the fixed sign-in command for a tool on the #155 list, as `aphelion-bot`, in your own terminal. `backup` keeps the previous verified copy until the new one verifies. `restore` runs the checks from #199 and waits for #199 to merge. Needs #155 for `sign-in`. Check: shell tests, plus a live backup and restore on two VMs.
 - **Part a3.** `logs`, `upgrade` and `network-check`, with the lost-firewall check. Files: `deploy/host/network-check`, `deploy/host/aphelion`. Check: shell tests, plus a live `ufw reload` on a VM.
-- **Part b.** The one-line installer. It runs `preflight`, checks the processor for `sse4_2`, installs Docker if missing, downloads Aphelion, writes `deploy/.env`, gets the image, enables the service, and walks you through saving the recovery key. It checks that key with the broker's own parser (F3). Running it twice changes nothing. Check: the installer runs twice on a fresh VM.
-- **Part c.** The image workflow. It builds both processors on each release, publishes the image and its digest. Files: `.github/workflows/`. Check: a test release builds both images.
+- **Part b.** The one-line installer. It runs `preflight`, checks the processor for `sse4_2`, installs Docker if missing, downloads Aphelion, writes `deploy/.env`, gets the image, enables the service, and walks you through saving the recovery key. It checks that key with the secrets broker's own parser. On x86-64 only, it first checks that the processor has `sse4_2`. It refuses an image whose digest doesn't match, and builds on the server when the download fails. Running it twice changes nothing. Check: the installer runs twice on a fresh VM, once with a wrong digest, and once with the download blocked.
+- **Part c.** The image workflow. It builds both processors from the release job's release output, and publishes the image and its digest. Files: `.github/workflows/`. Check: a test release builds both images.
 - **Waits for you.** Part c touches `.github/`. Parts a1 to a3 and b don't, unless they change a `package.json`.
 
 ### #20 Claude adapter (wave 2, owner path)
 
-- **Builds.** The adapter plugin, using `@anthropic-ai/claude-agent-sdk` and the `claude` binary from #155. It always passes `permissionMode: "default"`. It answers every permission request with the fixed rule above. It answers the open points in [decision 0034](../../decisions/0034-vendor-protocol-per-cli.md). With fake keys, no key shows in output or logs, including at shutdown.
+- **Builds.** The adapter plugin, using `@anthropic-ai/claude-agent-sdk` and the `claude` binary from #155. It answers every permission request with the fixed rule above. It answers the open points in [decision 0034](../../decisions/0034-vendor-protocol-per-cli.md). With fake keys, no key shows in output or logs, including at shutdown.
+- **Constraints.** It sets the explicit path to the pinned `claude` binary on every call. The SDK is pinned to the matching CLI version, and the image leaves out the SDK's bundled copy. Managed settings ban the bypass modes (`auto` and `bypassPermissions`), and the adapter always passes `permissionMode: "default"`.
 - **Needs.** #19, #155.
 - **Files.** A new plugin folder under `apps/server/plugins/` or `packages/`, `bun.lock`, `docs/reference/`.
 - **Check.** Unit tests of the permission answer: inside the folder, outside it, a web tool. A recorded SDK stream replays. Live: a real turn with a tool call on the shipped image.
@@ -249,32 +249,34 @@ The [Splits](#splits) section describes the parts.
 - **Needs.** M0-12, #155.
 - **Files.** `.github/workflows/ci.yml`, `deploy/Dockerfile`, the tool list, `docs/guides/install.md`.
 - **Check.** `deploy/test/image-contract.sh` passes on arm64 in CI. Live: the arm64 smoke test in the exit test.
-- **Waits for you.** It changes `.github/`.
+- **Waits for you.** It changes `.github/` and the tool list, both owner paths.
 
 ### #199 A restore makes every device enroll again (wave 2)
 
 - **Builds.** A restore cancels every device token, and access stays closed until you enroll a device. Restored plugins start switched off, and the restore ends with a list of them.
+- **Needs.** #14, #168 and #177 (the restore drill), and the device and plugin-grant tables. It lands before #178 part a2 exposes `aphelion restore`.
 - **Files.** `apps/server/src/devices/`, `apps/server/src/plugins/`, `apps/server/src/cli/`, `docs/guides/install.md`.
 - **Check.** A test shows an old token is refused. A test shows a restored plugin gets no start, secret or network until you switch it on. Live: the restore step of the exit test.
 
 ### #22 Session manager (wave 3)
 
-- **Builds.** The bot runner, as `aphelion-bot`, starts one process per bot on the server's request. It restarts a crashed bot and resumes by session ID and working folder. Cancel leaves no process alive. A bot can't start, stop or cancel another bot.
+- **Builds.** The bot runner, as `aphelion-bot`, starts one process per bot on the server's request. It restarts a crashed bot and resumes by session ID and working folder. Cancel leaves no process alive. A bot can't start, stop or cancel another bot. The bot runner already sits behind one message channel, so a bot on another server would use the same channel later ([decision 0064](../../decisions/0064-linked-equal-servers.md)). M1 adds nothing for that.
+- **Constraints.** The runner keeps the init-created pipe. Only the runner signals bot processes. Bot egress goes only through the proxy variables. Default seccomp, and no bot namespaces ([decision 0045](../../decisions/0045-no-bot-namespaces-default-seccomp.md)).
 - **Needs.** #20, M0-12, M0-18.
 - **Files.** `apps/server/src/plugins/runner*.ts` or a new `apps/server/src/bots/`, `deploy/Dockerfile`, `docs/reference/`.
 - **Check.** A test starts a process that leaves its group with `setsid`, cancels, and checks that none survive. The same test runs on the shipped image. Live: kill the bot process and see it resume.
-- **Waits for you.** Only if no method meets the bar. Then a decision record decides.
+- **Waits for you.** Only if no method meets the bar. Then a decision record decides, and the record is an owner change.
 
 ### #25 Adapter contract tests (wave 3)
 
-- **Builds.** Recorded event streams replayed in CI.
+- **Builds.** Recorded event streams replayed in CI. The recorded fixture is made after #20a, the adapter part.
 - **Needs.** #20.
 - **Files.** `packages/plugin-sdk/src/`, a `fixtures/` folder.
 - **Check.** The replay runs in CI and fails when an event changes shape.
 
 ### #23 Message history (wave 4)
 
-- **Builds.** Turns and events saved in SQLite. A reconnecting client gets the missed events. The saved command IDs from the design note above. The groundwork from [decision 0064](../../decisions/0064-linked-equal-servers.md): a stable server ID created on first start and stored in the database, IDs such as UUIDv7 for every new table instead of counting 1, 2, 3, and a column on each saved record that names the server that wrote it.
+- **Builds.** Turns and events saved in SQLite. A reconnecting client gets the missed events. The saved command IDs for 24 hours, from the design note above. The groundwork from [decision 0064](../../decisions/0064-linked-equal-servers.md) ([#205](https://github.com/jcore9/Aphelion/issues/205), the M4 design study, and [#206](https://github.com/jcore9/Aphelion/issues/206), the build after v1.0): a stable server ID created on first start and stored in the database, IDs such as UUIDv7 for every new table instead of counting 1, 2, 3, and a column on each saved record that names the server that wrote it. Saved events carry a format version number, so M5 clients can read M1 history. The audit log keeps its integer IDs, and moving it is a known migration for later.
 - **Needs.** #22, M0-09.
 - **Files.** `apps/server/src/store/migrations/`, `apps/server/src/http/`, `packages/protocol/src/event-log.ts`, `packages/protocol/src/command-ledger.ts`.
 - **Check.** A test disconnects a client mid-turn and checks the replay. A test restarts the server and repeats a command ID. A test checks that the server ID survives a restart, and that two fresh databases make different IDs.
@@ -282,13 +284,14 @@ The [Splits](#splits) section describes the parts.
 ### #181 API keys (wave 4)
 
 - **Builds.** `aphelion key add`, `test`, `replace` and `remove`, with the key stored by the broker. The Claude adapter hands the key to the CLI as an environment setting when no sign-in works. The key stays in the `Secret` wrapper until then.
+- **Constraints.** The key is typed into a hidden prompt, never the command line. The masking from [decision 0044](../../decisions/0044-secret-type.md) holds through shutdown. A bot can read its own key.
 - **Needs.** #155, #20, #178 part a1.
 - **Files.** `apps/server/src/secrets/`, `apps/server/src/cli/`, the Claude adapter, `docs/guides/install.md`.
 - **Check.** Automated tests use fake keys, and one checks that none shows in output, errors, logs or at shutdown. Live: you add a throwaway test key with a small spending limit and run the check yourself.
 
 ### #24 Minimal test client (wave 5, maybe an owner path)
 
-- **Builds.** A terminal chat client that shows streaming text and tool events and reconnects.
+- **Builds.** A terminal chat client that shows streaming text and tool events, and reconnects after a drop and shows what it missed.
 - **Needs.** #23, M0-10.
 - **Files.** A new client folder, perhaps `packages/test-client/`.
 - **Check.** An automated chat against a fake adapter. Live: the exit test.
@@ -303,16 +306,14 @@ Propose these. The orchestrator files them after you approve.
 | Sub-issue | Covers | Wave |
 | --- | --- | --- |
 | #178a1 | `aphelion` command with `status`, `device` and `check` | 1 |
-| #178a2 | `sign-in`, `backup`, `restore`, `plugin` | 2 |
+| #178a2 | `sign-in`, `backup`, `restore`, `plugin` (after #199) | 2 |
 | #178a3 | `logs`, `upgrade`, `network-check` | 3 |
 | #178b | The one-line installer | 3 |
 | #178c | The image workflow | 2 |
 
-**#20 into two.** #20a is the adapter streaming a turn. #20b is the permission rule and its tests. Both fit one pull request each, and #20b is the part you most want to read.
+**#20 into two.** #20a is the adapter streaming a turn. #20b is the permission rule and its tests. #20 counts as done only when both parts and the replay pass. Both fit one pull request each, and #20b is the part you most want to read.
 
 **#22 into two.** #22a is the runner start, restart and resume. #22b is cancel with no leftover process. #22b carries the risk and its own live test.
-
-No other issue needs a split.
 
 ## Risks
 
@@ -329,51 +330,49 @@ No other issue needs a split.
 
 ## Open questions
 
-None remain from the M1 outlook. You answered five on 2026-11-25. [Decision 0063](../../decisions/0063-m1-planning-answers.md) records them.
-
-### Defaults you can overrule when you approve
-
-1. arm64 checks run on GitHub's hosted arm64 runners, not on emulation.
-2. A provider with no lightweight key check saves the key as "not tested". The first real use reports pass or fail.
-3. The server saves command IDs for 24 hours in SQLite, and #23 owns it.
-4. `aphelion network-check` also detects missing firewall rules after a `ufw reload`.
-5. The `aphelion` commands arrive in the order under [Design notes](#order-of-aphelion-commands).
-6. The cancel bar in #22 stays at "no process survives".
+None remain from the M1 outlook. You answered five on 2026-11-25. [Decision 0063](../../decisions/0063-m1-planning-answers.md) records them. The Design notes mark six defaults you can overrule: the arm64 runners, the "not tested" key, the 24-hour command IDs, the lost-firewall check, the command order and the cancel bar.
 
 ## What I need from you
 
-1. Approval of this plan, including the splits and the defaults above. Say which defaults you change.
+1. Approval of this plan, including the splits and the defaults in the Design notes. Say which defaults you change.
 2. Apply the updated `main` ruleset from #201 once it merges.
 3. For the exit test: a fresh Ubuntu LTS VM on your tailnet, a second one for the restore, and an arm64 machine or VM.
 4. For the live key check: a throwaway Anthropic API key with a small spending limit.
 
 ## Exit test
 
-Run on the release image, on a fresh Ubuntu Server LTS VM with Tailscale. Test data only.
+Run on the release image, on a fresh Ubuntu Server LTS VM with Tailscale. Use test data only. Each step gives what to type and what you must see. Part A is the smoke test. Run it on x86-64, then again on arm64. Part B runs once. The output of each step goes into the retro note.
 
-1. Run the one-line installer twice. The second run changes nothing.
-2. Chat from the test client. Text and tool events stream as the bot works.
-3. Disconnect the client mid-turn and reconnect. The missed events arrive.
-4. Kill the bot process. The bot resumes the session.
-5. Cancel a turn that started a detached process. No process of the bot is left.
-6. Repeat steps 1 to 5 as a smoke test on arm64.
-7. Restore a backup on a second VM. Every device must enroll again, and every plugin starts switched off.
-8. Add a fake API key. Search the output, the logs and the saved events for it. It must not appear.
-9. Run `aphelion network-check` after `ufw reload`. It reports any lost rule.
-10. Repeat the live host checks the M0 reviewers did not repeat: Docker isolation from inside the container, and access over Tailscale only.
-11. The output of each step goes into the retro note.
+### Part A: smoke test
+
+1. Run the one-line installer. On x86-64 it first checks the processor for `sse4_2` (arm64 skips this). It downloads the image and checks the digest. Expect: the service runs, and you save the recovery key.
+2. Run the installer a second time. Expect: nothing changes.
+3. `aphelion status`. Expect: the service is up and no AI tool is installed.
+4. Install Claude Code from the list, with the command in the install guide. Expect: the checksum is verified and the tool is installed.
+5. `aphelion sign-in claude`. Expect: you sign in in your terminal, and `aphelion status` shows Claude signed in.
+6. `aphelion device add`, then get and start the test client as the guide says. Expect: the client connects.
+7. Chat with the bot and ask it to make a file in its folder. Expect: streamed text and tool events.
+8. Disconnect the client mid-turn, then reconnect. Expect: the missed events arrive, with none repeated.
+9. Kill the bot process. Expect: the bot resumes the session.
+10. Cancel a turn that started a detached process. Expect: no bot process is left (`ps` shows none).
+
+### Part B: once, on x86-64
+
+11. Installer safety. Point the installer at an image with a wrong digest. Expect: it refuses. Block the image download. Expect: it builds the image on the server.
+12. Your live key test, with a throwaway API key that has a small spending limit. Add the key while a sign-in exists: the bot uses the sign-in. Remove the sign-in: the bot uses the key. Run `aphelion key remove`: the bot reports no credential. Expect each result.
+13. Fake-key leak check. Add a fake key. Search the output, errors and logs, through a shutdown. Expect: the key appears nowhere.
+14. Bot permission probes. Ask the bot to write a file outside its folder, to use a Claude web tool, and to write a file inside its folder. Expect: the first two are denied and the third works.
+15. Restore. Seed a backup with one device and one approved plugin. Restore it with the recovery key on the second VM. Expect: the old device token fails, and the plugin is switched off. It gets no secret and no network access until you switch it on.
+16. Network. Run `ufw reload`, then `aphelion network-check`. Expect: it names each lost rule. Repeat the six connects from [decision 0022](../../decisions/0022-bot-network-boundary.md) as `aphelion-bot`. Expect: the first five fail. Reach the server from a device off the tailnet. Expect: no answer.
+17. Docker isolation, from inside the container. Expect: the host's files and sockets are out of reach.
+
+**What only CI can prove.** Link the passing CI run on the release commit. It must show: saved command IDs surviving a restart, server IDs on records, adapter replay, the fixes from #167 and #200, and all five required checks.
 
 ## Docs M1 produces
 
-| Doc | Issues |
-| --- | --- |
-| Install guide, with `aphelion` commands in place of Docker steps | #155, #178, #180 |
-| The first bot's powers and their limit, in the install guide and the threat model | #20 |
-| Claude adapter reference and the adapter contract | #19, #20 |
-| Session and history reference | #22, #23 |
-| Test client guide | #24 |
-| Decision records 0063 and 0064, and any record #22 needs | This PR, #22 |
-| Changelog | The M1 release PR |
+- The install guide, with `aphelion` commands in place of Docker steps, and the bot's powers and their limit.
+- The adapter contract, Claude adapter, session and history references, and the test client guide.
+- Decision records 0063 and 0064, any record #22 needs, and the changelog in the M1 release PR.
 
 ## Retro
 
