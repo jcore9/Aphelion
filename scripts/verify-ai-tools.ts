@@ -1,0 +1,424 @@
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseArgs } from "node:util";
+import {
+  buildFor,
+  parseToolList,
+  processors,
+  toolName,
+  type Processor,
+  type Tool,
+  type ToolName,
+} from "../apps/server/src/tools/list.ts";
+import {
+  claudePlatformFor,
+  codexAssetFor,
+  mismatches,
+  opencodeAssetFor,
+  parseClaudeManifest,
+  parseGithubAsset,
+  parseSha256Sums,
+  type Expected,
+  type Parsed,
+} from "../apps/server/src/tools/vendor-checksums.ts";
+
+const usage = `usage:
+  bun scripts/verify-ai-tools.ts [--download] [--list FILE]
+      Check every entry of the list against its vendor. With --download, also
+      download each build from its listed address and check the file itself.
+  bun scripts/verify-ai-tools.ts --print NAME VERSION
+      Print the "builds" entry for a tool version, taken from the vendor.`;
+
+const claudeBase = "https://downloads.claude.ai/claude-code-releases";
+const claudeKeyUrl = "https://downloads.claude.ai/keys/claude-code.asc";
+const claudeKeyFingerprint = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE";
+const grokHosts = [
+  "https://x.ai/cli",
+  "https://storage.googleapis.com/grok-build-public-artifacts/cli",
+] as const;
+
+function checksumSourceOf(name: ToolName): Tool["checksumSource"] {
+  switch (name) {
+    case "claude":
+      return "vendor-manifest";
+    case "codex":
+      return "github-digest";
+    case "opencode":
+      return "sha256sums";
+    case "grok":
+      return "recorded";
+    default: {
+      const _exhaustive: never = name;
+      return _exhaustive;
+    }
+  }
+}
+
+const githubHeaders = (): Record<string, string> => {
+  const token = process.env["GITHUB_TOKEN"];
+  return token === undefined || token === ""
+    ? { accept: "application/vnd.github+json" }
+    : {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+      };
+};
+
+async function getText(url: string, headers?: Record<string, string>) {
+  const response = await fetch(url, headers === undefined ? {} : { headers });
+  if (!response.ok)
+    throw new Error(`${url} answered ${String(response.status)}`);
+  return response.text();
+}
+
+const hashes = new Map<string, Promise<{ sha256: string; size: number }>>();
+
+function hashUrl(url: string) {
+  const known = hashes.get(url);
+  if (known !== undefined) return known;
+  const pending = (async () => {
+    const response = await fetch(url);
+    if (!response.ok || response.body === null) {
+      throw new Error(`${url} answered ${String(response.status)}`);
+    }
+    const hash = createHash("sha256");
+    let size = 0;
+    await response.body.pipeTo(
+      new WritableStream<Uint8Array>({
+        write(chunk) {
+          hash.update(chunk);
+          size += chunk.byteLength;
+        },
+      }),
+    );
+    return { sha256: hash.digest("hex"), size };
+  })();
+  hashes.set(url, pending);
+  return pending;
+}
+
+const fail = (message: string): Parsed<never> => ({ ok: false, message });
+
+async function claudeExpected(
+  version: string,
+  processor: Processor,
+): Promise<Parsed<Expected>> {
+  const platform = claudePlatformFor(processor);
+  const text = await getText(`${claudeBase}/${version}/manifest.json`);
+  const parsed = parseClaudeManifest(text, version, platform);
+  if (!parsed.ok) return parsed;
+  return {
+    ok: true,
+    value: {
+      url: `${claudeBase}/${version}/${platform}/claude`,
+      ...parsed.value,
+      format: "binary",
+      entry: "claude",
+    },
+  };
+}
+
+function checkClaudeSignature(version: string) {
+  return async (): Promise<Parsed<string>> => {
+    if (spawnSync("gpg", ["--version"]).error !== undefined) {
+      return fail("gpg isn't installed, so the signature wasn't checked");
+    }
+    const home = mkdtempSync(join(tmpdir(), "verify-ai-tools-"));
+    try {
+      const manifest = join(home, "manifest.json");
+      writeFileSync(
+        manifest,
+        await getText(`${claudeBase}/${version}/manifest.json`),
+      );
+      const signature = join(home, "manifest.json.sig");
+      const sig = await fetch(`${claudeBase}/${version}/manifest.json.sig`);
+      if (!sig.ok)
+        return fail(`the manifest has no signature (${String(sig.status)})`);
+      writeFileSync(signature, new Uint8Array(await sig.arrayBuffer()));
+      const key = join(home, "key.asc");
+      writeFileSync(key, await getText(claudeKeyUrl));
+      const gpg = (...args: string[]) =>
+        spawnSync(
+          "gpg",
+          ["--homedir", home, "--batch", "--status-fd", "1", ...args],
+          {
+            encoding: "utf8",
+          },
+        );
+      gpg("--import", key);
+      const verified = gpg("--verify", signature, manifest);
+      const good = new RegExp(
+        `^\\[GNUPG:\\] VALIDSIG \\S+ .*${claudeKeyFingerprint}$`,
+        "m",
+      );
+      return verified.status === 0 && good.test(verified.stdout)
+        ? { ok: true, value: claudeKeyFingerprint }
+        : fail(
+            "gpg doesn't accept the manifest's signature from Anthropic's key",
+          );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  };
+}
+
+async function codexExpected(
+  version: string,
+  processor: Processor,
+): Promise<Parsed<Expected>> {
+  const asset = codexAssetFor(processor);
+  const text = await getText(
+    `https://api.github.com/repos/openai/codex/releases/tags/rust-v${version}`,
+    githubHeaders(),
+  );
+  const parsed = parseGithubAsset(text, asset);
+  if (!parsed.ok) return parsed;
+  return {
+    ok: true,
+    value: {
+      ...parsed.value,
+      format: "tar.gz",
+      entry: asset.replace(/\.tar\.gz$/, ""),
+    },
+  };
+}
+
+async function opencodeExpected(
+  version: string,
+  processor: Processor,
+): Promise<Parsed<Expected>> {
+  const asset = opencodeAssetFor(processor);
+  const release = parseGithubAsset(
+    await getText(
+      `https://api.github.com/repos/anomalyco/opencode/releases/tags/v${version}`,
+      githubHeaders(),
+    ),
+    asset,
+  );
+  if (!release.ok) return release;
+  const sums = parseSha256Sums(
+    await getText(
+      `https://github.com/anomalyco/opencode/releases/download/v${version}/SHA256SUMS`,
+    ),
+  );
+  const listed = sums.get(asset);
+  if (listed === undefined) return fail(`SHA256SUMS has no line for ${asset}`);
+  if (listed !== release.value.sha256) {
+    return fail(
+      `SHA256SUMS says ${listed} and GitHub's digest says ${release.value.sha256}`,
+    );
+  }
+  return {
+    ok: true,
+    value: { ...release.value, format: "tar.gz", entry: "opencode" },
+  };
+}
+
+async function grokExpected(
+  version: string,
+  processor: Processor,
+): Promise<Parsed<Expected>> {
+  const [primary, mirror] = grokHosts.map(
+    (host) => `${host}/grok-${version}-linux-${processor}`,
+  );
+  if (primary === undefined || mirror === undefined) return fail("no host");
+  const first = await hashUrl(primary);
+  const second = await hashUrl(mirror);
+  if (first.sha256 !== second.sha256 || first.size !== second.size) {
+    return fail(
+      `the two hosts differ: ${first.sha256} (${String(first.size)} bytes) at ${primary}, ${second.sha256} (${String(second.size)} bytes) at ${mirror}`,
+    );
+  }
+  return {
+    ok: true,
+    value: {
+      url: primary,
+      sha256: first.sha256 as Expected["sha256"],
+      size: first.size,
+      format: "binary",
+      entry: "grok",
+    },
+  };
+}
+
+function expectedFor(
+  name: ToolName,
+  version: string,
+  processor: Processor,
+): Promise<Parsed<Expected>> {
+  switch (name) {
+    case "claude":
+      return claudeExpected(version, processor);
+    case "codex":
+      return codexExpected(version, processor);
+    case "opencode":
+      return opencodeExpected(version, processor);
+    case "grok":
+      return grokExpected(version, processor);
+    default: {
+      const _exhaustive: never = name;
+      return _exhaustive;
+    }
+  }
+}
+
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+async function settled<T>(work: () => Promise<Parsed<T>>): Promise<Parsed<T>> {
+  try {
+    return await work();
+  } catch (error) {
+    return fail(errorText(error));
+  }
+}
+
+let failures = 0;
+const line = (state: "ok" | "FAIL" | "skip", text: string) => {
+  if (state === "FAIL") failures += 1;
+  console.log(`${state.padEnd(4)}  ${text}`);
+};
+
+async function checkEntry(tool: Tool, processor: Processor, download: boolean) {
+  const label = `${tool.name} ${tool.version} ${processor}`;
+  const available = buildFor(tool, processor);
+  if (available.kind === "unavailable") {
+    line("skip", `${label}: no build on this processor`);
+    return;
+  }
+  if (tool.checksumSource !== checksumSourceOf(tool.name)) {
+    line(
+      "FAIL",
+      `${label}: checksumSource is ${tool.checksumSource}, but ${tool.name} is checked by ${checksumSourceOf(tool.name)}`,
+    );
+    return;
+  }
+  const expected = await settled(() =>
+    expectedFor(tool.name, tool.version, processor),
+  );
+  if (!expected.ok) {
+    line("FAIL", `${label}: ${expected.message}`);
+    return;
+  }
+  const wrong = mismatches(available.build, expected.value);
+  if (wrong.length > 0) {
+    line("FAIL", `${label}: ${wrong.join("; ")}`);
+    return;
+  }
+  if (!download) {
+    line("ok", `${label}: matches the vendor (${available.build.sha256})`);
+    return;
+  }
+  const file = await settled(async () => ({
+    ok: true as const,
+    value: await hashUrl(available.build.url),
+  }));
+  if (!file.ok) {
+    line("FAIL", `${label}: ${file.message}`);
+  } else if (
+    file.value.sha256 !== available.build.sha256 ||
+    file.value.size !== available.build.size
+  ) {
+    line(
+      "FAIL",
+      `${label}: the download is ${file.value.sha256} (${String(file.value.size)} bytes), the list says ${available.build.sha256} (${String(available.build.size)} bytes)`,
+    );
+  } else {
+    line(
+      "ok",
+      `${label}: matches the vendor, and the download from ${available.build.url} hashes to ${available.build.sha256} (${String(available.build.size)} bytes)`,
+    );
+  }
+}
+
+async function checkList(file: string, download: boolean) {
+  const parsed = parseToolList(readFileSync(file, "utf8"));
+  if (!parsed.ok) {
+    console.error(`verify-ai-tools: ${parsed.message}`);
+    return 1;
+  }
+  for (const tool of parsed.list.tools) {
+    if (tool.name === "claude") {
+      const signature = await settled(checkClaudeSignature(tool.version));
+      if (signature.ok) {
+        line(
+          "ok",
+          `claude ${tool.version} manifest: signed by key ${signature.value}`,
+        );
+      } else if (signature.message.startsWith("gpg isn't installed")) {
+        line("skip", `claude ${tool.version} manifest: ${signature.message}`);
+      } else {
+        line("FAIL", `claude ${tool.version} manifest: ${signature.message}`);
+      }
+    }
+    for (const processor of processors) {
+      await checkEntry(tool, processor, download);
+    }
+  }
+  console.log(
+    failures === 0 ? "all entries match" : `${String(failures)} failed`,
+  );
+  return failures === 0 ? 0 : 1;
+}
+
+async function print(name: string, version: string) {
+  const known = toolName.safeParse(name);
+  if (!known.success || !/^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(version)) {
+    console.error(usage);
+    return 2;
+  }
+  const builds: Record<string, Expected> = {};
+  for (const processor of processors) {
+    const expected = await settled(() =>
+      expectedFor(known.data, version, processor),
+    );
+    if (!expected.ok) {
+      console.error(
+        `${known.data} ${version} ${processor}: ${expected.message}`,
+      );
+      return 1;
+    }
+    builds[processor] = expected.value;
+  }
+  console.log(JSON.stringify(builds, null, 2));
+  return 0;
+}
+
+let command;
+try {
+  command = parseArgs({
+    options: {
+      download: { type: "boolean" },
+      list: { type: "string" },
+      print: { type: "boolean" },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+} catch {
+  console.error(usage);
+  process.exit(2);
+}
+const { values, positionals } = command;
+
+if (values.print === true) {
+  const [name = "", version = ""] = positionals;
+  process.exit(
+    positionals.length === 2 && values.download === undefined
+      ? await print(name, version)
+      : (console.error(usage), 2),
+  );
+}
+if (positionals.length > 0) {
+  console.error(usage);
+  process.exit(2);
+}
+process.exit(
+  await checkList(
+    values.list ?? "deploy/ai-tools.json",
+    values.download === true,
+  ),
+);
