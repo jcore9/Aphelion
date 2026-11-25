@@ -118,7 +118,7 @@ The host restarts a plugin that crashes. A crash is any of these:
 
 - The process exits while it is running or starting.
 - The runner can't start it.
-- The runner hasn't finished launching it within 15 seconds. The host tells the runner to stop that run, and the runner kills the process as soon as it appears.
+- The runner hasn't finished launching it within 15 seconds. The host tells the runner to stop that run. If the process appears later, the runner kills it when it handles the late result, so for a short time it can run beside the plugin's next run.
 - It doesn't answer `initialize` within 10 seconds. The runner kills it.
 - It answers `initialize` with an error. The runner kills it.
 - It stops reading its standard input, or it writes faster than the host can handle. See [Talking to the host](#talking-to-the-host).
@@ -146,7 +146,7 @@ Each plugin with a server part is in one of these states. The host's `status` ca
 | `crashed` | The plugin crashed. The host restarts it after the wait in [Crashes and restarts](#crashes-and-restarts). |
 | `stopped` | The plugin was stopped on request, or it crashed too often. |
 
-Each start gets a new run number. Every message between the host and the runner carries it, so a late message from a killed process can't change the state of the new one. When a run is stopped while its process is running, the runner starts the next run of that plugin only after the old process is dead, and it answers each stop request once, when that happens. Each timer also has a purpose (the launch deadline, the `initialize` deadline, the shutdown grace time, or the restart wait). A timer counts only in the state that set it. For example, the `initialize` deadline can't cut the shutdown grace time short.
+Each start gets a new run number. Every message between the host and the runner carries it, so a late message from a killed process can't change the state of the new one. When a run is stopped while its process is running, the runner starts the next run of that plugin only after its kill of the old process has finished, and it answers each stop request once, at that point. If the kill reports processes that survived it, the runner logs them and still starts the next run. Each timer also has a purpose (the launch deadline, the `initialize` deadline, the shutdown grace time, or the restart wait). A timer counts only in the state that set it. For example, the `initialize` deadline can't cut the shutdown grace time short.
 
 ### Permissions
 

@@ -366,4 +366,39 @@ describe("the plugin runner's command order", () => {
       }).pipe(Effect.scoped),
     10_000,
   );
+  it.live(
+    "kills a live plugin at shutdown without waiting for another plugin's stuck launch",
+    () =>
+      Effect.gen(function* () {
+        const gated = yield* gatedProcesses;
+        const { a, b } = yield* memoryLinkPair<RunnerReply, RunnerRequest>(
+          framing(runnerReplySchema),
+          framing(runnerRequestSchema),
+        );
+        const replies = yield* collectReplies(a.incoming);
+        const runnerScope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(runnerScope, Exit.void));
+        yield* runRunner(b, quietOptions).pipe(
+          Effect.provide(gated.layer),
+          Effect.provideService(Scope.Scope, runnerScope),
+          Effect.forkIn(runnerScope),
+        );
+        yield* a.send(request("start", "quick"));
+        yield* eventually(() => replies.labels().includes("started quick 1"));
+        yield* gated.hold("spawn slow#1");
+        yield* Effect.addFinalizer(() => gated.release("spawn slow#1"));
+        yield* a.send(request("start", "slow"));
+        yield* eventually(() => gated.trace.includes("spawning slow#1"));
+        const closing = yield* Scope.close(runnerScope, Exit.void).pipe(
+          Effect.forkChild,
+        );
+        yield* eventually(() => gated.trace.includes("reaped quick#1"));
+        expect(gated.alive.has("quick#1")).toBe(false);
+        yield* gated.release("spawn slow#1");
+        yield* Fiber.join(closing).pipe(Effect.timeout("5 seconds"));
+        yield* settle;
+        expect([...gated.alive]).toEqual([]);
+      }).pipe(Effect.scoped),
+    10_000,
+  );
 });

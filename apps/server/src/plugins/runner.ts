@@ -148,6 +148,14 @@ export const runRunner = (
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
         yield* Queue.end(events);
+        yield* Effect.forEach(
+          [...slots.entries()],
+          ([plugin, slot]) =>
+            slot.phase === "launching"
+              ? Effect.void
+              : reap(plugin, slot.process),
+          { discard: true },
+        );
         yield* FiberSet.awaitEmpty(work);
         const unplaced = yield* Queue.clear(events);
         yield* Effect.forEach(
@@ -156,14 +164,6 @@ export const runRunner = (
             event.type === "launched"
               ? reap(event.plugin, event.process)
               : Effect.void,
-          { discard: true },
-        );
-        yield* Effect.forEach(
-          [...slots.entries()],
-          ([plugin, slot]) =>
-            slot.phase === "launching"
-              ? Effect.void
-              : reap(plugin, slot.process),
           { discard: true },
         );
       }),
@@ -373,9 +373,11 @@ export const runRunner = (
               return yield* stopped;
             }
             if (slot?.run !== run) return yield* stopped;
-            slots.delete(plugin);
-            yield* Queue.shutdown(slot.inbox);
-            if (slot.phase === "launching") return yield* stopped;
+            if (slot.phase === "launching") {
+              slots.delete(plugin);
+              yield* Queue.shutdown(slot.inbox);
+              return yield* stopped;
+            }
             slots.set(plugin, {
               phase: "stopping",
               run,
@@ -383,6 +385,7 @@ export const runRunner = (
               stopReplies: 1,
               next: undefined,
             });
+            yield* Queue.shutdown(slot.inbox);
             return yield* FiberSet.run(
               work,
               reap(plugin, slot.process).pipe(
