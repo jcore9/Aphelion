@@ -126,4 +126,5 @@ Each significant decision has one numbered record. A record lists the context, t
 | [0062](decisions/0062-one-main-branch.md) | From M1, Aphelion works on one `main` branch, and jcore9-bot squash-merges its own pull requests after another model family has reviewed them | Accepted |
 | [0063](decisions/0063-m1-planning-answers.md) | Before M2 approvals, the first bot works in its own folder, and M1 takes four other choices | Accepted |
 | [0064](decisions/0064-linked-equal-servers.md) | Two or more Aphelion servers can link up as equals, with groundwork in M1 and the build after v1.0 | Accepted |
+| [0065](decisions/0065-bot-adapter-runs-inside-the-bot.md) | The bot adapter runs inside the bot, not under the plugin runner | Proposed |
 | [0066](decisions/0066-grok-checksum-recorded-by-aphelion.md) | Aphelion records its own checksum for Grok Build, because xAI publishes none | Proposed |
