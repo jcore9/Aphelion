@@ -12,6 +12,9 @@
 | `aphelion plugin rollback ID` | Goes back to the version of plugin `ID` before the current one, and restarts the plugin on it |
 | `aphelion plugin restart ID` | Asks the running server to restart plugin `ID` on its approved version |
 | `aphelion plugin dev FOLDER` | Reloads the approved plugin in `FOLDER` through the running server, and again after each change to the folder. Works only in [dev mode](plugins.md#dev-mode). |
+| `aphelion tool list` | Lists the AI tools on Aphelion's list and whether each is installed |
+| `aphelion tool install NAME` | Downloads an AI tool from the list, checks it and installs it |
+| `aphelion tool remove NAME` | Removes an installed AI tool |
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
 | `aphelion device revoke ID` | Stops a device's token at once |
@@ -23,8 +26,9 @@
 | Option | Used by | Default | Meaning |
 | --- | --- | --- | --- |
 | `--config-dir DIR` | `--headless`, `config check` | `/etc/aphelion` | The folder with the [config files](config.md) |
-| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
+| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device`, `tool install`, `tool remove` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
 | `--plugins-dir DIR` | `plugin install`, `plugin update`, `plugin rollback` | `/opt/aphelion/plugins` | An absolute path. The folder where updates put each release, as `<id>@<version>`. `plugin install` refuses a folder there that updates manage. |
+| `--tools-dir DIR` | `tool` | `/opt/aphelion/tools` | An absolute path. The folder that holds the installed AI tools. |
 | `--approve DIGEST` | `plugin install`, `plugin update` | none | The value the preview printed. It approves exactly what the preview showed. |
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
@@ -227,6 +231,35 @@ b9e491d2e2e20b59	active	2027-02-20T22:29:30.928Z	"my laptop"
 ## `aphelion device revoke ID`
 
 Stops the token of the device with this id. A WebSocket that uses it closes within 5 seconds. It exits with code 1 when no active device has the id. Both outcomes are written to the [audit log](devices.md#what-is-audited).
+
+## `aphelion tool list`
+
+Prints a header line and one tab-separated line per tool on the list. The list is the copy of [`deploy/ai-tools.json`](https://github.com/jcore9/Aphelion/blob/main/deploy/ai-tools.json) that the image ships.
+
+```
+NAME	VERSION	STATE	STATUS-COMMAND
+claude	2.1.330	installed	claude auth status --text
+grok	1.0.92	not installed	-
+```
+
+`STATE` is `installed`, `not installed` or `unavailable`. A tool is `installed` when its pinned version is the one installed. A different installed version shows as `not installed`. `unavailable` means the list has no build for this processor. `STATUS-COMMAND` is the command that exits with 0 when the tool is signed in, or `-` when Aphelion has none for the tool.
+
+## `aphelion tool install NAME`
+
+Installs the tool `NAME` from the list: `claude`, `codex`, `grok` or `opencode`. The command:
+
+1. Takes the build for this processor. It refuses a name that isn't on the list, and a tool with no build for this processor.
+2. Downloads the build into a staging folder in the tools folder. It stops at the size the list gives, and refuses a download that is larger or smaller.
+3. Checks the SHA-256 against the list before it unpacks anything. A gzip archive is unpacked with `tar` only if every member is a plain file or folder inside the archive's own folder.
+4. Moves the result to `<tools folder>/<name>/<version>/`, sets mode `0755` on the program, and points `<tools folder>/<name>/current` at that folder with one atomic rename. It then deletes the tool's other version folders.
+
+Installing the version that is installed changes nothing. A run that stopped half way leaves only the staging folder or an unused link, and the next run clears them. The command holds the same lock as `plugin install`, and exits with code 1 when another install holds it. It exits with code 1 for every refusal, and prints the reason on standard error.
+
+The image links `/usr/local/bin/<name>` to the program in `current`, so a bot runs the tool by its name.
+
+## `aphelion tool remove NAME`
+
+Deletes `<tools folder>/<name>`. Running it again prints `<name> isn't installed.` and changes nothing. It doesn't touch the tool's sign-in in the `bots` volume.
 
 ## Building the binary
 

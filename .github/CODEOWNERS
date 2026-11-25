@@ -21,6 +21,7 @@ package.json @jcore9
 tsconfig*.json @jcore9
 
 # What the owner always decides.
+/deploy/ai-tools.json @jcore9
 /docs/decisions/ @jcore9
 /docs/plan/ @jcore9
 /SECURITY.md @jcore9

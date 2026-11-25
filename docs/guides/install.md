@@ -154,6 +154,8 @@ A **volume** is a folder that Docker keeps for the container. Aphelion has six. 
 | `plugin-data` | Data that plugins store |
 | `plugin-files` | The plugins' files |
 
+The seventh volume, `ai-tools`, holds the installed AI tools. The backup leaves it out, because [`aphelion tool install`](#install-an-ai-tool) rebuilds it from the list. A tool's sign-in is in `bots`, which the backup holds. After a restore, install each tool you use again, and you stay signed in.
+
 You keep two things, in two places:
 
 - The recovery copy of the bootstrap key, in your password manager. [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) makes it.
@@ -449,6 +451,56 @@ sudo docker compose exec -T --user harness aphelion aphelion plugin rollback <id
 
 The command prints `Went back from <id> <current version> to <earlier version>.` and then `<id> <earlier version> runs.` It deletes the version it left, so you can go back only once. To return to the newer version, [update the plugin](#update-a-plugin) again.
 
+## Install an AI tool
+
+The container image has no AI tool in it. Aphelion keeps a list of four tools, Claude Code, Codex, Grok Build and OpenCode, each pinned to one version. You install the ones you use. The list is [`deploy/ai-tools.json`](https://github.com/jcore9/Aphelion/blob/main/deploy/ai-tools.json). Each entry has the download address, the file's size and its **SHA-256**, a fingerprint that changes if one byte of the file changes. The install refuses a file whose SHA-256 or size differs from the list, and it refuses any name that isn't on the list.
+
+Tools live in the `ai-tools` volume, which the container sees at `/opt/aphelion/tools`. Bots can run what is in it, but can't change it. The volume survives an image rebuild. Run these steps while the service runs.
+
+1. See the list. `STATE` is `installed`, `not installed`, or `unavailable` when the tool has no build for this processor.
+
+   ```sh
+   sudo aphelion tool list
+   ```
+
+2. Install a tool. Use the name from the first column.
+
+   ```sh
+   sudo aphelion tool install claude
+   ```
+
+   The command downloads the file, checks it, and prints `Installed claude <version>.` and the command that signs in. If the checksum or size is wrong, it installs nothing and says what differed. Running the command again for the installed version changes nothing, and running it after an interrupted install finishes the job.
+
+3. Sign in as the `aphelion-bot` user, with the command step 2 printed. For Claude Code, run this in `/opt/aphelion/deploy`:
+
+   ```sh
+   sudo docker compose exec --user aphelion-bot aphelion claude auth login
+   ```
+
+   The sign-in commands are `claude auth login`, `codex login --device-auth`, `grok login --device-auth` and `opencode auth login`. The login stays in the `bots` volume, which the backup holds.
+
+4. Check the result. `sudo aphelion status` lists each installed tool and whether it is signed in. Grok Build and OpenCode show `sign-in state unknown`, because Aphelion has no command that checks them.
+
+The tools' own auto-update is off. Claude Code and Codex are switched off in the image. Grok Build and OpenCode have a setting (`--no-auto-update` and `"autoupdate": false`) that Aphelion applies when the bot adapters for them arrive in M4. A new version reaches the container only through a new entry in the list.
+
+**What the Grok Build checksum proves.** xAI publishes no checksum for Grok Build. The bot downloaded the file from both of xAI's addresses, saw that the two copies matched, and recorded their SHA-256 in the list, and you approved that when you merged the change. The install proves that the file hasn't changed since. It doesn't prove that the first copy came from xAI. [Decision 0066](https://github.com/jcore9/Aphelion/blob/main/docs/decisions/0066-grok-checksum-recorded-by-aphelion.md) has the reasoning.
+
+## Update an AI tool
+
+An update is a new entry in the list. When the list in a new Aphelion version names a newer version of a tool, install it again.
+
+1. Upgrade Aphelion, so that the image carries the new list ([Upgrade](#upgrade)).
+2. Run `sudo aphelion tool list`. A tool whose installed version differs from the list shows `not installed`.
+3. Run `sudo aphelion tool install <name>`. The command downloads the new version, switches to it in one step, and deletes the old version's files. A bot that is running the old version keeps running it until it restarts.
+
+## Remove an AI tool
+
+```sh
+sudo aphelion tool remove <name>
+```
+
+The command deletes the tool's files from the `ai-tools` volume and prints `Removed <name>.` A second run prints `<name> isn't installed.` The tool's sign-in stays in the `bots` volume. To sign out too, delete the hidden folder the tool made in the `aphelion-bot` user's home, `/var/lib/aphelion-bots`, such as `.claude`, `.codex` or `.grok`.
+
 ## Check the network boundary
 
 The container must not reach your LAN, the host or other tailnet devices ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check) connects to six targets as `aphelion-bot` inside the running container. Give it these targets, in this order:
@@ -519,7 +571,3 @@ Each command runs only if the one before it worked, so a mistyped tag stops the 
 `host/install` installs the new unit file and keeps the existing bootstrap key.
 
 If you upgrade from a version that kept plugins in `/opt/aphelion/deploy/plugins`, install each plugin again. That version mounted the host folder. This one keeps plugins in the `plugin-files` volume, and it checks every file of a plugin, so earlier approvals don't carry over. For each folder in `/opt/aphelion/deploy/plugins`, follow [Install a plugin](#install-a-plugin) from step 2. Until you do, the server doesn't start that plugin. Then you can delete `/opt/aphelion/deploy/plugins`. If the service then stops and the log shows `The secrets store holds a plain-text key from before the host credential`, see [Start a fresh store after an older install](#start-a-fresh-store-after-an-older-install). The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
-
-## Not covered yet
-
-- AI tools such as Claude Code come from a list in [#155](https://github.com/jcore9/Aphelion/issues/155).
