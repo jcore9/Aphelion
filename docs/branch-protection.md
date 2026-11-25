@@ -18,7 +18,7 @@ Two kinds of file hold the rules:
 
 At the end of a milestone, a release pull request goes from `dev` into `main`. It needs the same checks and the owner's approval. It merges with a merge commit, and `main` gets the milestone's tag from [decision 0003](decisions/0003-release-versioning.md). A hotfix pull request from a `hotfix/` branch goes into `main` the same way.
 
-From M1 on, release-please makes the tag and the GitHub release ([decision 0061](decisions/0061-release-please.md), steps in [the release guide](guides/releasing.md)). It keeps a release pull request open into `main` that sets the version and adds the changelog section, and merging it creates the tag. It opens that pull request with `GITHUB_TOKEN`, so GitHub doesn't start CI for it. Before merging, the owner closes and reopens it, which starts CI as the owner.
+From M1 on, release-please makes the tag and the GitHub release ([decision 0061](decisions/0061-release-please.md), steps in [the release guide](guides/releasing.md)). It keeps a release pull request open into `main` that sets the version and writes the release notes, and merging it creates the tag. It opens that pull request with `GITHUB_TOKEN`, so GitHub doesn't start CI for it. Before merging, the owner closes and reopens it, which starts CI as the owner.
 
 The bot opens release pull requests too. GitHub doesn't let the author of a pull request approve it, so a release pull request that the owner opens can't merge.
 

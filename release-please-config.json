@@ -6,6 +6,7 @@
   "prerelease": true,
   "prerelease-type": "alpha",
   "bump-minor-pre-major": true,
+  "skip-changelog": true,
   "changelog-sections": [
     { "type": "feat", "section": "Features" },
     { "type": "fix", "section": "Bug fixes" },

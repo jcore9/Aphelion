@@ -1,13 +1,15 @@
 # How a release happens
 
-From M1 on, a GitHub Action called release-please works out each version and changelog section from the pull request titles on `main` ([decision 0061](../decisions/0061-release-please.md)). The owner still approves every release, as a pull request. The tags follow [decision 0003](../decisions/0003-release-versioning.md).
+From M1 on, a GitHub Action called release-please works out each version and its release notes from the pull request titles on `main` ([decision 0061](../decisions/0061-release-please.md)). The owner still approves every release, as a pull request. The tags follow [decision 0003](../decisions/0003-release-versioning.md).
 
 ## During a milestone
 
 Each merge into `main` runs [`.github/workflows/release.yml`](https://github.com/jcore9/Aphelion/blob/main/.github/workflows/release.yml). It keeps one pull request open, titled like `chore(main): release 0.1.0-alpha.2`, on the branch `release-please--branches--main`. That pull request:
 
 - sets the version in `apps/server/package.json`, `apps/server/src/version.ts` and `.release-please-manifest.json`
-- adds a section for the new version at the top of `CHANGELOG.md`, built from the `feat:`, `fix:`, `perf:`, `docs:` and `revert:` titles merged since the last tag
+- writes the release notes in its own description, built from the `feat:`, `fix:`, `perf:`, `docs:` and `revert:` titles merged since the last tag
+
+Merging it copies those notes into the GitHub release. The repo has no `CHANGELOG.md`: the [releases page](https://github.com/jcore9/Aphelion/releases) is the changelog.
 
 It updates itself after every merge. Leave it open until the milestone ends.
 
@@ -15,7 +17,7 @@ GitHub doesn't run CI by itself for a pull request that a workflow opened or upd
 
 ## At the end of a milestone
 
-1. Check the release pull request. The version should match the milestone's row in decision 0003. Each changelog line should say what changed in words a user follows, and breaking changes should be called out. To change a line, edit the description of the merged pull request it came from, and add the new title between two marker lines, `BEGIN_COMMIT_OVERRIDE` and `END_COMMIT_OVERRIDE`. release-please uses that title instead the next time it runs.
+1. Check the release pull request. The version should match the milestone's row in decision 0003. Each line of the release notes should say what changed in words a user follows, and breaking changes should be called out. To change a line, edit the description of the merged pull request it came from, and add the new title between two marker lines, `BEGIN_COMMIT_OVERRIDE` and `END_COMMIT_OVERRIDE`. release-please uses that title instead the next time it runs.
 2. Start CI on its latest commit. If GitHub shows **Approve and run workflows** on the pull request, click it. Otherwise close the pull request and reopen it, which starts CI as you.
 3. Once they pass, approve and merge the release pull request. release-please then tags that commit, for example `v0.1.0-alpha.2`, and creates the GitHub release, marked as a pre-release.
 
@@ -53,12 +55,12 @@ Do them in this order. The alpha.1 merge into `main` starts the release workflow
    ```sh
    sha=$(gh api repos/jcore9/Aphelion/commits/main --jq .sha)
    gh api repos/jcore9/Aphelion/commits/$sha --jq .commit.message
-   awk '/^## v0.1.0-alpha.1/{f=1;next} /^## /{f=0} f' CHANGELOG.md > /tmp/notes.md
+   gh pr list --repo jcore9/Aphelion --base main --state merged --limit 1 --json body --jq '.[0].body' > /tmp/notes.md
    gh release create v0.1.0-alpha.1 --repo jcore9/Aphelion --target "$sha" \
      --prerelease --title v0.1.0-alpha.1 --notes-file /tmp/notes.md
    ```
 
-   The second command prints the commit's message. It should be the merge of the alpha.1 release pull request. If it isn't, find the right commit before you run the last command.
+   The second command prints the commit's message. It should be the merge of the alpha.1 release pull request. If it isn't, find the right commit before you run the last command. The third command copies that pull request's description, which holds the M0 release notes, into `/tmp/notes.md`. Read it before you run the last command.
 
 2. Turn on Settings → Actions → General → Workflow permissions → **Allow GitHub Actions to create and approve pull requests**. release-please opens its pull request with the workflow's own key, `GITHUB_TOKEN`, and GitHub allows that only with this setting.
 3. Run the release workflow again: `gh workflow run release.yml --repo jcore9/Aphelion --ref main`. It now starts from the tag. If a release pull request that lists every old commit is open anyway, close it and run the workflow again.

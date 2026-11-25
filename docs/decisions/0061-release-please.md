@@ -1,4 +1,4 @@
-# 0061. release-please sets the version, the changelog and the tag from commit titles, through a release PR into `main`
+# 0061. release-please sets the version, the release notes and the tag from commit titles, through a release PR into `main`
 
 - Status: Proposed
 - Date: 2026-11-24
@@ -9,7 +9,7 @@
 
 ## Context
 
-[Decision 0003](0003-release-versioning.md) sets one pre-release tag per milestone, such as `v0.1.0-alpha.2` for M1. For M0 the version and `CHANGELOG.md` were written by hand in #191. Pull request titles already follow Conventional Commits, a naming rule where the first word says what kind of change it is: `feat:` for a feature, `fix:` for a bug fix, `docs:` for docs, `chore:` for upkeep. A tool can read those titles and do the rest.
+[Decision 0003](0003-release-versioning.md) sets one pre-release tag per milestone, such as `v0.1.0-alpha.2` for M1. For M0 the version was set by hand in #191, and the M0 release notes were written by hand for the `v0.1.0-alpha.1` release. Pull request titles already follow Conventional Commits, a naming rule where the first word says what kind of change it is: `feat:` for a feature, `fix:` for a bug fix, `docs:` for docs, `chore:` for upkeep. A tool can read those titles and do the rest.
 
 After `v0.1.0-alpha.1` ships, the project moves to one branch: pull requests go straight into `main`, and a release is a tag on `main`. A follow-up decision retires `dev` and changes the rulesets and the branch protection docs. This record covers only the release tool.
 
@@ -30,9 +30,9 @@ Terms used below:
 
 release-please, run on each push to `main`, with its release PR into `main`, the standard setup for a project with one branch. The files are [`.github/workflows/release.yml`](https://github.com/jcore9/Aphelion/blob/main/.github/workflows/release.yml), [`release-please-config.json`](https://github.com/jcore9/Aphelion/blob/main/release-please-config.json) and [`.release-please-manifest.json`](https://github.com/jcore9/Aphelion/blob/main/.release-please-manifest.json). The action is pinned by commit, as the other actions are.
 
-- **Version files.** The release PR sets the version in `.release-please-manifest.json`, `apps/server/package.json` and `apps/server/src/version.ts`, and adds a section to the top of `CHANGELOG.md`. `bun.lock` is left out, because release-please can't read its format. A stale version there doesn't fail `bun install --frozen-lockfile`, and the next `bun install` corrects it.
+- **Version files.** The release PR sets the version in `.release-please-manifest.json`, `apps/server/package.json` and `apps/server/src/version.ts`, and writes the release notes in its own description. `bun.lock` is left out, because release-please can't read its format. A stale version there doesn't fail `bun install --frozen-lockfile`, and the next `bun install` corrects it.
 - **Pre-release numbers.** The config uses release-please's `prerelease` versioning with type `alpha`. A `feat:`, a `fix:` or a breaking change after `0.1.0-alpha.1` proposes `0.1.0-alpha.2`. The steps in 0003's table that aren't a number increase (M4's `0.1.0`, M5's `1.0.0-beta.1`, M8's `1.0.0`) need a one-time `release-as` override. [The release guide](../guides/releasing.md) gives the steps.
-- **Changelog.** Features, bug fixes, performance, docs and reverts show. Chores, CI, build, tests, refactors and style are hidden.
+- **Release notes, no `CHANGELOG.md`.** `skip-changelog` is on, so the notes live only in the release PR and then the GitHub release. T3 Code does the same: the [releases page](https://github.com/jcore9/Aphelion/releases) is where people look, and with one copy there is nothing to keep in step. Features, bug fixes, performance, docs and reverts show. Chores, CI, build, tests, refactors and style are hidden.
 - **Tags.** When the owner merges the release PR, release-please tags that commit on `main`, for example `v0.1.0-alpha.2`, and creates the GitHub release, marked as a pre-release.
 - **First tag.** `v0.1.0-alpha.1` is created by hand once, on `main`'s merge commit for the alpha.1 release, so release-please knows where M1 starts. The workflow first runs on that same merge, before the tag exists, so the owner runs it again once the tag is there.
 - **CI on the release PR.** GitHub doesn't start `pull_request` workflows for a PR that `GITHUB_TOKEN` opened or updated, so the required `lint`, `typecheck` and `test` checks don't run on their own. Starting CI from the workflow with `workflow_dispatch` isn't relied on, because those runs may not count toward a ruleset's required checks. At the milestone's end the owner closes and reopens the release PR, which starts CI as the owner, then merges it. No personal access token or new secret is added.
