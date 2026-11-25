@@ -402,9 +402,9 @@ M0 built the base: the server, the plugin runner, the install and backup guides,
 
 ### Exit test deviations
 
-- VM A ran both the install checks and the first half of the restore drill.
-- VM B was an existing Ubuntu 24.04.5 machine, not a fresh 26.04 one.
-- The backup lived on VM B, so it was copied locally instead of fetched over `ssh`.
+- Virtual machine A ran both the install checks and the first half of the restore drill.
+- Virtual machine B was an existing Ubuntu 24.04.5 machine, not a fresh 26.04 one.
+- The backup was copied directly on machine B instead of fetched over the network.
 - The host has no TPM (a chip that can seal keys), so the TPM checks did not apply.
 
 ### What went well
@@ -416,7 +416,7 @@ M0 built the base: the server, the plugin runner, the install and backup guides,
 
 ### What went badly
 
-- The 8 GB dev box could not run more than two delegates at once or a full lint (the style and rule checker). One full lint there took over 10 minutes and pushed the box into swap.
+- The 8 GB dev box could not run more than two delegates at once or a full lint (the style and rule checker). Two full lints at once took over 10 minutes and pushed the box into swap.
 - PR bodies were too long. The owner found them wordy.
 - The version constant still said `0.0.0` at the exit test, and the firewall problem was found only then. Both became release blockers.
 - One check (the plugin-template archive test) failed once without a known cause.
@@ -432,11 +432,11 @@ M0 built the base: the server, the plugin runner, the install and backup guides,
 
 ### Review follow-ups
 
-The [whole-repo review](https://github.com/jcore9/Aphelion/issues/144) left these items. Each has a home.
+Each item from the [whole-repo review](https://github.com/jcore9/Aphelion/issues/144) has an issue.
 
 | Finding | Issue | Milestone |
 | --- | --- | --- |
-| B1 firewall isolation | Fixed in [#191](https://github.com/jcore9/Aphelion/pull/191) | M0 |
+| B1 firewall isolation | Startup refuses the bad setting ([#191](https://github.com/jcore9/Aphelion/pull/191)). A live firewall reload can still drop the rules; tracked in [#18](https://github.com/jcore9/Aphelion/issues/18) | M0, M1 |
 | B2 version number | Fixed in [#191](https://github.com/jcore9/Aphelion/pull/191) | M0 |
 | F1 restore and old device access | [#199](https://github.com/jcore9/Aphelion/issues/199) | M1 |
 | F2 backup overwrites last copy | [#178](https://github.com/jcore9/Aphelion/issues/178) | M1 |
@@ -450,6 +450,7 @@ The [whole-repo review](https://github.com/jcore9/Aphelion/issues/144) left thes
 | D4 recovery and key custody | [#199](https://github.com/jcore9/Aphelion/issues/199), [#34](https://github.com/jcore9/Aphelion/issues/34) | M1, M3 |
 | Flaky archive check | [#203](https://github.com/jcore9/Aphelion/issues/203) | M1 |
 | Repeated commands after restart | [#18](https://github.com/jcore9/Aphelion/issues/18) | M1 |
+| Live host checks not repeated by reviewers | [#18](https://github.com/jcore9/Aphelion/issues/18) | M1 |
 | Codex and Grok live sign-in | [#114](https://github.com/jcore9/Aphelion/issues/114), [#44](https://github.com/jcore9/Aphelion/issues/44) | M4 |
 
 [M0-00]: https://github.com/jcore9/Aphelion/issues/1
