@@ -24,7 +24,7 @@ These Markdown files read the same on GitHub and on the docs site. `bun run docs
 
 ## Working on the repository
 
-- [Branch protection](branch-protection.md): how changes reach `dev` and `main`, and why.
+- [Branch protection](branch-protection.md): how changes reach `main`, and the rules that protect `main` and the release tags.
 
 ## Spike findings
 
@@ -121,3 +121,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0059](decisions/0059-backup-and-restore-drill.md) | A backup is one archive of the six volumes plus the key's recovery copy, and the M0 exit test restores it on a second VM | Proposed |
 | [0060](decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) | The server stays on Linux in Docker and also builds for arm64, API keys join sign-ins, and two plugin isolation gaps close in M5 | Proposed |
 | [0061](decisions/0061-release-please.md) | release-please sets the version, the release notes and the tag from commit titles, through a release PR into `main` | Proposed |
+| [0062](decisions/0062-one-main-branch.md) | From M1, Aphelion works on one `main` branch, and jcore9-bot squash-merges its own pull requests after another model family has reviewed them | Proposed |
