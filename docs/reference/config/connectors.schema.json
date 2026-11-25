@@ -13,5 +13,5 @@
   ],
   "additionalProperties": false,
   "title": "connectors.yaml",
-  "description": "Connector settings. It has no fields yet. Milestone M3 adds connector entries."
+  "description": "Connector settings. The file has no fields yet. Milestone M3 adds connector entries."
 }

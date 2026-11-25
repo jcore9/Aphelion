@@ -91,21 +91,21 @@ export const configAreas = {
   policy: defineArea({
     file: "policy.yaml",
     description:
-      "Approval rules. It has no fields yet. Issue M2-01 adds the policy model.",
+      "Approval rules. The file has no fields yet. Issue M2-01 adds the policy model.",
     migrations: [],
     fields: {},
   }),
   routines: defineArea({
     file: "routines.yaml",
     description:
-      "Scheduled and on-demand routines. It has no fields yet. Issue M6-02 adds routine definitions.",
+      "Scheduled and on-demand routines. The file has no fields yet. Issue M6-02 adds routine definitions.",
     migrations: [],
     fields: {},
   }),
   connectors: defineArea({
     file: "connectors.yaml",
     description:
-      "Connector settings. It has no fields yet. Milestone M3 adds connector entries.",
+      "Connector settings. The file has no fields yet. Milestone M3 adds connector entries.",
     migrations: [],
     fields: {},
   }),

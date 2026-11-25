@@ -13,5 +13,5 @@
   ],
   "additionalProperties": false,
   "title": "policy.yaml",
-  "description": "Approval rules. It has no fields yet. Issue M2-01 adds the policy model."
+  "description": "Approval rules. The file has no fields yet. Issue M2-01 adds the policy model."
 }
