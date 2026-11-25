@@ -34,6 +34,7 @@ describe("deploy/ai-tools.json", () => {
     if (!parsed.ok) throw new Error(parsed.message);
     for (const { name, version, builds } of parsed.list.tools) {
       for (const build of Object.values(builds)) {
+        if (build === undefined) continue;
         expect(build.url.startsWith("https://"), name).toBe(true);
         expect(build.url, name).toContain(version);
       }

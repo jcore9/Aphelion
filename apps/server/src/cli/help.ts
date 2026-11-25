@@ -1,6 +1,6 @@
 import { defaultConfigDir } from "../config";
 import { defaultLifetimeDays } from "../devices";
-import { defaultPluginsDir, defaultStateDir } from "./args";
+import { defaultPluginsDir, defaultStateDir, defaultToolsDir } from "./args";
 
 export const helpText = `Aphelion server and command line
 
@@ -53,8 +53,21 @@ Usage:
       reload it again each time its files change. Works only when the server
       runs with --plugin-dev FOLDER. Ctrl-C stops watching.
 
+  aphelion tool list [--tools-dir DIR]
+      List the AI tools on Aphelion's list. A tab-separated table of the name,
+      the pinned version, whether it is installed, unavailable on this
+      processor or not installed, and the command that checks its sign-in.
+
+  aphelion tool install NAME [--state-dir DIR] [--tools-dir DIR]
+      Download the pinned build of an AI tool from the list, check it against
+      the list's SHA-256 and size, and install it. Running it again for the
+      installed version changes nothing.
+
+  aphelion tool remove NAME [--state-dir DIR] [--tools-dir DIR]
+      Remove an installed AI tool. Its sign-in stays in the bots volume.
+
   aphelion --version
   aphelion --help
 
---config-dir is ${defaultConfigDir}, --state-dir is ${defaultStateDir} and
---plugins-dir is ${defaultPluginsDir} unless given.`;
+--config-dir is ${defaultConfigDir}, --state-dir is ${defaultStateDir},
+--plugins-dir is ${defaultPluginsDir} and --tools-dir is ${defaultToolsDir} unless given.`;

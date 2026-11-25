@@ -11,7 +11,9 @@ export const checksumSources = [
 
 export const maxBuildBytes = 1024 ** 3;
 
-export const toolName = z.enum(toolNames).brand<"ToolName">();
+export const toolName = z
+  .enum(toolNames, { error: "must be claude, codex, grok or opencode" })
+  .brand<"ToolName">();
 export type ToolName = z.infer<typeof toolName>;
 export type Processor = (typeof processors)[number];
 

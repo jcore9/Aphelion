@@ -11,9 +11,13 @@ import { CliIo } from "./io";
 import { pluginInstall } from "./plugin";
 import { pluginDev } from "./plugin-dev";
 import { pluginRestart, pluginRollback, pluginUpdate } from "./plugin-update";
+import { defaultToolListFile, toolInstall, toolList, toolRemove } from "./tool";
 
 export { CliIo, processIo } from "./io";
 export { CliFailure } from "./failure";
+
+const toolListFile = () =>
+  process.env["APHELION_TOOL_LIST"] ?? defaultToolListFile;
 
 const run = (command: Command) =>
   Effect.gen(function* () {
@@ -39,6 +43,12 @@ const run = (command: Command) =>
         return yield* pluginRestart(command);
       case "plugin dev":
         return yield* pluginDev(command);
+      case "tool list":
+        return yield* toolList(command, toolListFile());
+      case "tool install":
+        return yield* toolInstall(command, toolListFile());
+      case "tool remove":
+        return yield* toolRemove(command);
       case "device list":
         return yield* deviceList(command);
       case "device revoke":

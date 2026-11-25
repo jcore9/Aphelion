@@ -8,6 +8,7 @@ export const filesLockFile = "plugin-files.lock";
 export const withFilesLock = <A, E, R>(
   stateDir: string,
   use: Effect.Effect<A, E, R>,
+  busy = "Another plugin install, update or rollback is running, so try again when it finishes.",
 ) =>
   Effect.acquireUseRelease(
     Effect.try({
@@ -19,8 +20,7 @@ export const withFilesLock = <A, E, R>(
         lock.kind === "held"
           ? Effect.fail(
               new UpdateRefused({
-                reason:
-                  "Another plugin install, update or rollback is running, so try again when it finishes.",
+                reason: busy,
               }),
             )
           : Effect.succeed(lock),

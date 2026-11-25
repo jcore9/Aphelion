@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { defaultConfigDir } from "../config";
-import { defaultPluginsDir, defaultStateDir, parseCommandLine } from "./args";
+import {
+  defaultPluginsDir,
+  defaultStateDir,
+  defaultToolsDir,
+  parseCommandLine,
+} from "./args";
 
 const accepted = (argv: string[]) => {
   const result = parseCommandLine(argv);
@@ -117,6 +122,25 @@ describe("accepted command lines", () => {
         stateDir: "/s",
         pluginsDir: defaultPluginsDir,
         plugin: "weather",
+      },
+    ],
+    [["tool", "list"], { kind: "tool list", toolsDir: defaultToolsDir }],
+    [
+      ["tool", "install", "claude", "--tools-dir", "/t", "--state-dir", "/s"],
+      {
+        kind: "tool install",
+        stateDir: "/s",
+        toolsDir: "/t",
+        name: "claude",
+      },
+    ],
+    [
+      ["tool", "remove", "opencode"],
+      {
+        kind: "tool remove",
+        stateDir: defaultStateDir,
+        toolsDir: defaultToolsDir,
+        name: "opencode",
       },
     ],
     [
@@ -251,6 +275,19 @@ describe("refused command lines", () => {
       "--plugin-dev must be an absolute path",
     ],
     [["plugin", "dev"], '"plugin dev" needs a folder'],
+    [["tool", "install"], '"tool install" needs a tool name'],
+    [
+      ["tool", "install", "gemini"],
+      "the tool name must be claude, codex, grok or opencode",
+    ],
+    [
+      ["tool", "list", "--state-dir", "/s"],
+      '--state-dir isn\'t an option of "tool list"',
+    ],
+    [
+      ["tool", "remove", "claude", "--tools-dir", "tools"],
+      "--tools-dir must be an absolute path",
+    ],
     [["plugin", "rollback"], '"plugin rollback" needs a plugin id'],
     [
       ["plugin", "rollback", "weather", "--approve", "abc"],
