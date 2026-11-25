@@ -3,7 +3,7 @@
 - Issue: [M1-00](https://github.com/jcore9/Aphelion/issues/18)
 - Milestone: [M1 · One bot end to end](https://github.com/jcore9/Aphelion/milestone/2)
 - Release: v0.1.0-alpha.2 ([decision 0003](../../decisions/0003-release-versioning.md))
-- Status: Proposed. The owner approves this plan before any M1 work starts.
+- Status: Approved by merging #207 on 2026-11-25. Amended on 2026-11-25: CI runs the arm64 smoke test, because the owner has no arm64 machine.
 - Last updated: 2026-11-25
 
 M1 builds the first bot. It also makes the server easy to install and to run. Approvals come in M2, so the bot's powers are fixed and small in M1 ([decision 0063](../../decisions/0063-m1-planning-answers.md)).
@@ -245,10 +245,10 @@ Each section says what the issue builds, what it needs, which files it is expect
 
 ### #180 arm64 image (wave 2, owner path)
 
-- **Builds.** CI builds one image for both processors. The contract tests run on a hosted arm64 runner. The tool list gets per-processor entries.
+- **Builds.** CI builds one image for both processors. The contract tests run on a hosted arm64 runner. The tool list gets per-processor entries. A CI smoke job on the arm64 runner starts the image, checks `/health`, installs the arm64 Claude Code from the tool list, and runs `claude --version` as `aphelion-bot`.
 - **Needs.** M0-12, #155.
 - **Files.** `.github/workflows/ci.yml`, `deploy/Dockerfile`, the tool list, `docs/guides/install.md`.
-- **Check.** `deploy/test/image-contract.sh` passes on arm64 in CI. Live: the arm64 smoke test in the exit test.
+- **Check.** `deploy/test/image-contract.sh` and the smoke job pass on arm64 in CI. You don't run anything on arm64. Signing in and chatting on arm64 stay untested, and the install guide says so. Its "tested machines" means the CI runner.
 - **Waits for you.** It changes `.github/` and the tool list, both owner paths.
 
 ### #199 A restore makes every device enroll again (wave 2)
@@ -324,6 +324,7 @@ Propose these. The orchestrator files them after you approve.
 | Claude Code and the Agent SDK change between versions | The adapter breaks on an upgrade | Both are pinned and updated together. The recorded-stream tests catch a changed shape. |
 | The 8 GB dev box | A full lint or two builds can run it out of memory | At most two delegates at once. No full local lint. CI runs it. |
 | Some tools have no arm64 download | The tool shows as unavailable on arm64 | #155 marks it, and #180 checks each pinned tool. |
+| Nobody signs in or chats on arm64 | A fault there shows up only for a user | CI starts the image and runs Claude Code on arm64. The install guide says sign-in and chat on arm64 are untested. |
 | A vendor's checksum or download changes | An install fails, or an update installs the wrong file | The bot's version-bump pull request verifies against the vendor, and you approve it. |
 | Linking equal servers later means syncing data | A table that counts rows 1, 2, 3, or that assumes one server, needs a migration once servers link | M1 adds no such table. New tables use IDs that can't clash and name the server that wrote each record ([decision 0064](../../decisions/0064-linked-equal-servers.md)). The audit log is a known migration for later. |
 | The M0 reviewers didn't repeat the live host checks | Isolation or tailnet-only access may have drifted | The exit test runs them again on the release image. |
@@ -336,12 +337,12 @@ None remain from the M1 outlook. You answered five on 2026-11-25. [Decision 0063
 
 1. Approval of this plan, including the splits and the defaults in the Design notes. Say which defaults you change.
 2. Apply the updated `main` ruleset from #201 once it merges.
-3. For the exit test: a fresh Ubuntu LTS VM on your tailnet, a second one for the restore, and an arm64 machine or VM.
+3. For the exit test: a fresh Ubuntu LTS VM on your tailnet, and a second one for the restore.
 4. For the live key check: a throwaway Anthropic API key with a small spending limit.
 
 ## Exit test
 
-Run on the release image, on a fresh Ubuntu Server LTS VM with Tailscale. Use test data only. Each step gives what to type and what you must see. Part A is the smoke test. Run it on x86-64, then again on arm64. Part B runs once. The output of each step goes into the retro note.
+Run on the release image, on a fresh Ubuntu Server LTS VM with Tailscale. Use test data only. Each step gives what to type and what you must see. Part A is the smoke test. Part B runs once. Both run on x86-64. The arm64 smoke test runs in CI instead (#180), because you have no arm64 machine. The output of each step goes into the retro note.
 
 ### Part A: smoke test
 
@@ -356,7 +357,7 @@ Run on the release image, on a fresh Ubuntu Server LTS VM with Tailscale. Use te
 9. Kill the bot process. Expect: the bot resumes the session.
 10. Cancel a turn that started a detached process. Expect: no bot process is left (`ps` shows none).
 
-### Part B: once, on x86-64
+### Part B: once
 
 11. Installer safety. Point the installer at an image with a wrong digest. Expect: it refuses. Block the image download. Expect: it builds the image on the server.
 12. Your live key test, with a throwaway API key that has a small spending limit. Add the key while a sign-in exists: the bot uses the sign-in. Remove the sign-in: the bot uses the key. Run `aphelion key remove`: the bot reports no credential. Expect each result.
@@ -366,7 +367,7 @@ Run on the release image, on a fresh Ubuntu Server LTS VM with Tailscale. Use te
 16. Network. Run `ufw reload`, then `aphelion network-check`. Expect: it names each lost rule. Repeat the six connects from [decision 0022](../../decisions/0022-bot-network-boundary.md) as `aphelion-bot`. Expect: the first five fail. Reach the server from a device off the tailnet. Expect: no answer.
 17. Docker isolation, from inside the container. Expect: the host's files and sockets are out of reach.
 
-**What only CI can prove.** Link the passing CI run on the release commit. It must show: saved command IDs surviving a restart, server IDs on records, adapter replay, the fixes from #167 and #200, and all five required checks.
+**What only CI can prove.** Link the passing CI run on the release commit. It must show: saved command IDs surviving a restart, server IDs on records, adapter replay, the fixes from #167 and #200, the arm64 smoke job from #180, and all five required checks.
 
 ## Docs M1 produces
 
