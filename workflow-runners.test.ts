@@ -2,12 +2,29 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 
+// Standard runners for public repositories, which GitHub runs free:
+// https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 const freeRunners = new Set([
+  "ubuntu-slim",
   "ubuntu-latest",
+  "ubuntu-26.04",
   "ubuntu-24.04",
   "ubuntu-22.04",
+  "ubuntu-26.04-arm",
   "ubuntu-24.04-arm",
   "ubuntu-22.04-arm",
+  "windows-latest",
+  "windows-2025",
+  "windows-2025-vs2026",
+  "windows-2022",
+  "windows-11-arm",
+  "windows-11-vs2026-arm",
+  "macos-latest",
+  "macos-26",
+  "macos-15",
+  "macos-26-intel",
+  "macos-15-intel",
+  "xcode-27",
 ]);
 
 const workflows = join(import.meta.dirname, ".github/workflows");
@@ -46,12 +63,15 @@ test("the runner check accepts only plain free labels and rejects anything it ca
     "    runs-on: ubuntu-latest",
     '    runs-on: "ubuntu-24.04-arm"',
     "    runs-on: ubuntu-22.04 # standard",
+    "    runs-on: macos-latest",
+    "    runs-on: windows-11-arm",
     "      - uses: ./.github/workflows/local.yml",
     "      - uses: actions/checkout@v7",
   ];
   const rejected = [
     "    runs-on: ubuntu-24.04-arm-16core",
     "    runs-on: [self-hosted, linux]",
+    "    runs-on: macos-latest-xlarge",
     "    runs-on: ${{ matrix.os }}",
     '    "runs-on": ubuntu-latest',
     "  a: { runs-on: ubuntu-latest }",
