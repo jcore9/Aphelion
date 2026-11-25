@@ -12,42 +12,54 @@ const freeRunners = new Set([
 
 const workflows = join(import.meta.dirname, ".github/workflows");
 
-function runnersIn(text: string): string[] {
-  return [...text.matchAll(/^\s*runs-on:\s*(.+?)\s*$/gm)].flatMap((match) =>
-    match.slice(1).map((value) => value.replace(/^(["'])(.*)\1$/, "$2")),
-  );
+const plainRunsOn = /^\s*runs-on:\s*(["']?)([\w.-]+)\1\s*(#.*)?$/;
+const externalWorkflow =
+  /^\s*(-\s*)?uses:\s*["']?[^"'\s.][^"'\s]*\/\.github\/workflows\//;
+
+function problemsIn(text: string): string[] {
+  return text.split("\n").flatMap((line) => {
+    if (externalWorkflow.test(line)) return [line.trim()];
+    if (!line.includes("runs-on")) return [];
+    const runner = plainRunsOn.exec(line)?.[2];
+    return runner !== undefined && freeRunners.has(runner) ? [] : [line.trim()];
+  });
+}
+
+function workflowFiles(): string[] {
+  return readdirSync(workflows).map((name) => join(workflows, name));
 }
 
 test("every workflow job runs on a free standard GitHub-hosted runner", () => {
-  const found = readdirSync(workflows)
-    .filter((name) => /\.ya?ml$/.test(name))
-    .flatMap((name) =>
-      runnersIn(readFileSync(join(workflows, name), "utf8")).map((runner) => ({
-        workflow: name,
-        runner,
-      })),
-    );
-  expect(found.length).toBeGreaterThan(0);
-  expect(found.filter(({ runner }) => !freeRunners.has(runner))).toEqual([]);
+  const files = workflowFiles();
+  expect(files.some((file) => /runs-on/.test(readFileSync(file, "utf8")))).toBe(
+    true,
+  );
+  expect(
+    files.flatMap((file) =>
+      problemsIn(readFileSync(file, "utf8")).map((line) => ({ file, line })),
+    ),
+  ).toEqual([]);
 });
 
-test("the runner check rejects larger, self-hosted and computed runners and accepts standard ones", () => {
-  const jobs = [
-    "jobs:",
-    "  a:",
+test("the runner check accepts only plain free labels and rejects anything it can't read", () => {
+  const accepted = [
     "    runs-on: ubuntu-latest",
-    "  b:",
     '    runs-on: "ubuntu-24.04-arm"',
-    "  c:",
+    "    runs-on: ubuntu-22.04 # standard",
+    "      - uses: ./.github/workflows/local.yml",
+    "      - uses: actions/checkout@v7",
+  ];
+  const rejected = [
     "    runs-on: ubuntu-24.04-arm-16core",
-    "  d:",
     "    runs-on: [self-hosted, linux]",
-    "  e:",
     "    runs-on: ${{ matrix.os }}",
-  ].join("\n");
-  expect(runnersIn(jobs).filter((runner) => !freeRunners.has(runner))).toEqual([
-    "ubuntu-24.04-arm-16core",
-    "[self-hosted, linux]",
-    "${{ matrix.os }}",
-  ]);
+    '    "runs-on": ubuntu-latest',
+    "  a: { runs-on: ubuntu-latest }",
+    "    runs-on:",
+    "    uses: other-org/repo/.github/workflows/build.yml@v1",
+  ];
+  expect(problemsIn(accepted.join("\n"))).toEqual([]);
+  expect(problemsIn(rejected.join("\n"))).toEqual(
+    rejected.map((line) => line.trim()),
+  );
 });
