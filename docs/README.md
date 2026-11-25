@@ -20,6 +20,7 @@ These Markdown files read the same on GitHub and on the docs site. `bun run docs
 
 - [Install the headless server](guides/install.md): the host, the image, `aphelion.service`, plugins, the network check and upgrades.
 - [Write your first server plugin](guides/write-your-first-server-plugin.md): create a plugin from the template, test it, build it and reload it in dev mode.
+- [How a release happens](guides/releasing.md): the release pull requests, the version overrides, and the first tag.
 
 ## Working on the repository
 
@@ -119,3 +120,4 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0058](decisions/0058-specialized-bots.md) | Each bot starts with no connectors or plugins, and the owner switches on the ones it may use | Proposed |
 | [0059](decisions/0059-backup-and-restore-drill.md) | A backup is one archive of the six volumes plus the key's recovery copy, and the M0 exit test restores it on a second VM | Proposed |
 | [0060](decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) | The server stays on Linux in Docker and also builds for arm64, API keys join sign-ins, and two plugin isolation gaps close in M5 | Proposed |
+| [0061](decisions/0061-release-please.md) | release-please sets the version, the release notes and the tag from commit titles, through a release PR into `main` | Proposed |

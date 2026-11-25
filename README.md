@@ -12,7 +12,7 @@ The clients only connect to a server. They never run one ([decision 0017](docs/d
 
 ## Status
 
-Aphelion is pre-alpha. Work is in milestone M0, Foundations, and nothing is ready to install yet. The [M0 plan](docs/plan/milestones/M0-foundations.md) lists what M0 builds.
+Aphelion is alpha. M0, Foundations, ships as `v0.1.0-alpha.1`: a server you can [install](docs/guides/install.md), with device tokens, a secrets broker and plugins, but no bots yet. The [release notes](https://github.com/jcore9/Aphelion/releases) list what ships and the known limits. The [M0 plan](docs/plan/milestones/M0-foundations.md) lists what M0 builds.
 
 ## Docs
 

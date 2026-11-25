@@ -19,6 +19,19 @@ until ip -4 -o address show dev "$interface" 2>/dev/null | grep -qF " inet $addr
   sleep 2
 done
 
+# ufw's boot script loads both files in one sh, defaults first. Read them the same way.
+mapfile -t ufw < <(sh -c 'for f; do [ -r "$f" ] && . "$f"; done >/dev/null 2>&1
+  command printf "%s\n%s\nend\n" "${ENABLED-}" "${MANAGE_BUILTINS-}"' sh /etc/default/ufw /etc/ufw/ufw.conf)
+
+if [[ ${ufw[2]-} != end ]]; then
+  echo 'preflight: reading /etc/default/ufw and /etc/ufw/ufw.conf with sh stopped early, so the ufw settings are unknown. Fix those files so sh can load them.' >&2
+  exit 1
+fi
+if [[ ${ufw[0]} =~ ^(yes|YES)$ && ${ufw[1]} == yes ]]; then
+  echo 'preflight: ufw is enabled with MANAGE_BUILTINS=yes and can remove Docker and Aphelion firewall rules. Set MANAGE_BUILTINS=no in /etc/default/ufw, run sudo ufw reload, then run sudo systemctl restart docker.' >&2
+  exit 1
+fi
+
 host/firewall
 
 docker compose --profile '*' config |

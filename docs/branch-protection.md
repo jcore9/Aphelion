@@ -18,6 +18,8 @@ Two kinds of file hold the rules:
 
 At the end of a milestone, a release pull request goes from `dev` into `main`. It needs the same checks and the owner's approval. It merges with a merge commit, and `main` gets the milestone's tag from [decision 0003](decisions/0003-release-versioning.md). A hotfix pull request from a `hotfix/` branch goes into `main` the same way.
 
+From M1 on, release-please makes the tag and the GitHub release ([decision 0061](decisions/0061-release-please.md), steps in [the release guide](guides/releasing.md)). It keeps a release pull request open into `main` that sets the version and writes the release notes, and merging it creates the tag. It opens that pull request with `GITHUB_TOKEN`, so GitHub doesn't start CI for it. Before merging, the owner closes and reopens it, which starts CI as the owner.
+
 The bot opens release pull requests too. GitHub doesn't let the author of a pull request approve it, so a release pull request that the owner opens can't merge.
 
 After a hotfix merges into `main`, the bot opens a second pull request from the same `hotfix/` branch into `dev`. A pull request from `main` into `dev` would have the owner as its last pusher, so the owner's approval wouldn't count on `dev`.
@@ -67,7 +69,7 @@ The first line of `CODEOWNERS`, `* @jcore9`, makes the owner the code owner of e
 
 Some of those paths exist today:
 
-- `CODEOWNERS`, the rulesets, and the workflows
+- `CODEOWNERS`, the rulesets, the workflows, and the release-please config and manifest
 - every `package.json`, `bun.lock` and `bunfig.toml`, because they set the scripts that CI runs, the dependencies, and the package registry
 - `eslint.config.ts`, `lint-boundaries.test.ts`, `vitest.config.ts` and every `tsconfig*.json`, which enforce the boundaries in [decision 0023](decisions/0023-scaffold-toolchain.md)
 - the Bun-only adapter folder, `apps/server/src/adapters/`, which decision 0023 names
@@ -92,4 +94,4 @@ The `hooks/` pattern is limited to `apps/server`, because React code in `package
 
 - A user with the Write role can merge a pull request once it has the approvals and checks it needs. The bot can merge a pull request that the owner approved.
 - A workflow changed on a branch runs on that branch's pull request before anyone reviews it. Code owners control what merges, not what runs. Same-repository pull requests get the repository's Actions secrets, so secrets belong in an environment with required reviewers.
-- Tags aren't protected. The bot can push a tag such as `v0.1.0`.
+- Tags aren't protected. The bot can push a tag such as `v0.1.0`, and the release workflow creates tags with `GITHUB_TOKEN`.

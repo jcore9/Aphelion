@@ -1,0 +1,29 @@
+# Keeps one release PR open into main and tags the release when the owner
+# merges it. docs/guides/releasing.md explains the flow (decision 0061).
+name: Release
+
+on:
+  push:
+    branches: [main]
+  # Lets the owner run it again, for example after the first tag.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

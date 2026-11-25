@@ -15,7 +15,7 @@
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
 | `aphelion device revoke ID` | Stops a device's token at once |
-| `aphelion --version` | Prints `aphelion` and the version, such as `aphelion 0.0.0` |
+| `aphelion --version` | Prints `aphelion` and the version, such as `aphelion 0.1.0-alpha.1` |
 | `aphelion --help`, or `aphelion` alone | Prints the commands |
 
 ### Options
@@ -57,7 +57,7 @@ On `SIGTERM` or `SIGINT` it logs `server stopping`, closes the listener and the 
 The server logs JSON lines on standard output, through the redacting [logger](logging.md). A start looks like this:
 
 ```
-{"time":"2026-11-22T22:30:55.188Z","level":"info","msg":"server started","version":"0.0.0","address":"0.0.0.0","port":7400}
+{"time":"2026-11-22T22:30:55.188Z","level":"info","msg":"server started","version":"0.1.0-alpha.1","address":"0.0.0.0","port":7400}
 ```
 
 Headless mode never loads Electron or any GUI library. In the container, the [launcher](container.md#how-the-processes-start) creates the pipes and passes `--plugin-runner-fds 3,4`, and `--plugin-dev` when `APHELION_PLUGIN_DEV_FOLDER` is set and not empty.

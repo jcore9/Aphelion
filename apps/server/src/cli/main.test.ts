@@ -105,7 +105,7 @@ const dirs = () => ["--config-dir", configDir, "--state-dir", stateDir];
 test("aphelion --version runs as a program", async () => {
   const run = start(["--version"]);
   expect(await run.exited).toBe(0);
-  expect(run.stdout()).toMatch(/^aphelion \d+\.\d+\.\d+\n$/);
+  expect(run.stdout()).toMatch(/^aphelion \d+\.\d+\.\d+(-[0-9A-Za-z.]+)?\n$/);
 });
 
 test("aphelion --headless serves, checks tokens from device add, and stops on SIGTERM", async () => {
