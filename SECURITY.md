@@ -10,7 +10,7 @@ Include what you found, the steps to reproduce it, and the commit or version you
 
 ## Supported versions
 
-Aphelion is pre-alpha and has no release yet. Only the latest commit on `dev` gets fixes.
+Aphelion is pre-alpha. The latest release is `v0.1.0-alpha.1`. Fixes land on `main` and ship in the next release.
 
 ## In scope
 

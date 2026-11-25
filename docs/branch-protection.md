@@ -1,97 +1,88 @@
 # Branch protection
 
-Changes reach `dev` and `main` only through approved pull requests. The bot account `jcore9-bot` has the Write role ([decision 0005](decisions/0005-bot-account-authors-prs.md)). Without these rules, the Write role lets it push to either branch directly. With them, the owner's approval is the only way in, and that includes the owner's own changes.
+Aphelion has one long-lived branch, `main`. Changes reach it only through pull requests. The bot account `jcore9-bot` has the Write role ([decision 0005](decisions/0005-bot-account-authors-prs.md)). Without these rules, the Write role lets it push to `main` directly. With them, a pull request is the only way in, and the bot squash-merges its own pull requests only under the conditions below ([decision 0062](decisions/0062-one-main-branch.md)).
 
 Two kinds of file hold the rules:
 
-- [`.github/rulesets/dev.json`](https://github.com/jcore9/Aphelion/blob/dev/.github/rulesets/dev.json) and [`.github/rulesets/main.json`](https://github.com/jcore9/Aphelion/blob/dev/.github/rulesets/main.json) are GitHub repository rulesets. The bot can't change repository settings, so the owner applies them. [The rulesets README](https://github.com/jcore9/Aphelion/blob/dev/.github/rulesets/README.md) gives the steps.
-- [`.github/CODEOWNERS`](https://github.com/jcore9/Aphelion/blob/dev/.github/CODEOWNERS) names the owner, `@jcore9`, as the reviewer for each path.
-
-## How a change reaches `dev`
-
-1. The bot pushes a branch for one issue and opens a pull request into `dev`.
-2. CI runs `lint`, `typecheck` and `test` from [`.github/workflows/ci.yml`](https://github.com/jcore9/Aphelion/blob/dev/.github/workflows/ci.yml). All three must pass.
-3. The owner approves the pull request.
-4. The pull request is squash-merged. The squash commit takes the pull request's Conventional Commit title, which feeds the changelog.
+- [`.github/rulesets/main.json`](https://github.com/jcore9/Aphelion/blob/main/.github/rulesets/main.json) and [`.github/rulesets/tags.json`](https://github.com/jcore9/Aphelion/blob/main/.github/rulesets/tags.json) are GitHub repository rulesets, which are sets of rules for a branch or a tag. The bot can't change repository settings, so the owner applies them. [The rulesets README](https://github.com/jcore9/Aphelion/blob/main/.github/rulesets/README.md) gives the steps.
+- [`.github/CODEOWNERS`](https://github.com/jcore9/Aphelion/blob/main/.github/CODEOWNERS) names the owner, `@jcore9`, as the code owner of the paths the owner always decides. A code owner is the person GitHub asks to approve a pull request that changes those paths.
 
 ## How a change reaches `main`
 
-At the end of a milestone, a release pull request goes from `dev` into `main`. It needs the same checks and the owner's approval. It merges with a merge commit, and `main` gets the milestone's tag from [decision 0003](decisions/0003-release-versioning.md). A hotfix pull request from a `hotfix/` branch goes into `main` the same way.
+1. The bot pushes a branch for one issue and opens a pull request into `main`.
+2. CI runs `lint`, `typecheck` and `test` from [`.github/workflows/ci.yml`](https://github.com/jcore9/Aphelion/blob/main/.github/workflows/ci.yml). All three must pass.
+3. A model from another family than the author reviews the pull request, and the review is on record. The bot fixes or answers each finding.
+4. The bot squash-merges the pull request. A squash merge turns the pull request's commits into one commit. It takes the pull request's Conventional Commit title, which feeds the release notes.
+5. If the pull request changes a path that `CODEOWNERS` names, GitHub holds it until the owner approves. The bot also never merges anything under `.github/` without the owner.
 
-From M1 on, release-please makes the tag and the GitHub release ([decision 0061](decisions/0061-release-please.md), steps in [the release guide](guides/releasing.md)). It keeps a release pull request open into `main` that sets the version and writes the release notes, and merging it creates the tag. It opens that pull request with `GITHUB_TOKEN`, so GitHub doesn't start CI for it. Before merging, the owner closes and reopens it, which starts CI as the owner.
+The owner reviews all other merged work at the end of each milestone, before the release.
 
-The bot opens release pull requests too. GitHub doesn't let the author of a pull request approve it, so a release pull request that the owner opens can't merge.
+## The release pull request and the tags
 
-After a hotfix merges into `main`, the bot opens a second pull request from the same `hotfix/` branch into `dev`. A pull request from `main` into `dev` would have the owner as its last pusher, so the owner's approval wouldn't count on `dev`.
+From M1 on, release-please keeps one release pull request open into `main` ([decision 0061](decisions/0061-release-please.md), steps in [the release guide](guides/releasing.md)). It sets the version and writes the release notes. The owner approves and merges it at the end of the milestone. The bot never merges it. Merging it makes a tag, such as `v0.1.0-alpha.2`, and the GitHub release. A tag is a name fixed to one commit. The install guide clones a release tag.
+
+The release pull request is opened with `GITHUB_TOKEN`, so GitHub doesn't start CI for it. Before merging, the owner closes and reopens it, which starts CI as the owner.
+
+An urgent fix is a normal pull request into `main`. The owner then merges the release pull request early.
+
+The tag ruleset stops anyone from moving or deleting a `v*` tag, except a repository admin, who can fix a wrong tag. It can't stop someone from creating a tag. A personal-account repository can't give GitHub Actions a bypass in a ruleset, and release-please makes its tags through `GITHUB_TOKEN`. A rule against creating tags would block every release.
 
 ## The rules
 
-| Rule | `dev` | `main` |
+| Rule | `main` | `v*` tags |
 | --- | --- | --- |
-| Changes only through a pull request. Direct pushes are blocked. | Yes | Yes |
-| Force pushes and deletion are blocked. | Yes | Yes |
-| Approving reviews required | 1 | 1 |
-| A code owner must approve. | Yes | Yes |
-| A new push dismisses earlier approvals. | Yes | Yes |
-| Someone other than the last pusher must approve the last push. | Yes | No |
-| Required checks, reported by GitHub Actions | `lint`, `typecheck`, `test` | `lint`, `typecheck`, `test` |
-| The branch must be up to date with its base. | No | No |
-| Merge method | Squash | Merge commit |
-| Bypass actors | None | None |
+| Changes only through a pull request. Direct pushes are blocked. | Yes | Not applicable |
+| Force pushes and deletion are blocked. | Yes | Moving and deleting are blocked. |
+| Approving reviews required | 0 | Not applicable |
+| A code owner must approve. | Yes | Not applicable |
+| A new push dismisses earlier approvals. | Yes | Not applicable |
+| Required checks, reported by GitHub Actions | `lint`, `typecheck`, `test` | Not applicable |
+| The branch must be up to date with its base. | No | Not applicable |
+| Merge method | Squash | Not applicable |
+| Bypass actors | None | Repository admins |
 
-Nobody can bypass the rules, including the owner. In an emergency, the owner can set a ruleset's enforcement to **Disabled**, which leaves a record in the ruleset's history.
+Nobody can bypass the rules on `main`, including the owner. In an emergency, the owner can set a ruleset's enforcement to **Disabled**, which leaves a record in the ruleset's history.
 
-### Why `main` takes merge commits
+### Why squash
 
-A merge commit keeps the commits from `dev` as they are, so `main` stays an ancestor of `dev`. The next release pull request then shows only the commits since the last release. A squash or a rebase writes new commits onto `main` that `dev` doesn't have. `dev` accepts only squash merges, so those commits can't be merged back into `dev` with their history. Every later release pull request would then list old commits again.
+One pull request becomes one commit on `main`, with a title that follows the Conventional Commit rule. release-please reads those titles to work out the next version and the release notes. A merge commit or a rebase would add each commit of the branch, and their titles don't follow the rule.
 
-### Why `main` doesn't require approval of the last push
+### Why 0 approving reviews
 
-On a release pull request, the head branch is `dev`. Each merge into `dev` is a push by the person who merged it, and that person is usually the owner. If `main` required someone other than the last pusher to approve, the owner's approval would never count on a release pull request.
+GitHub never lets the author of a pull request approve it. The bot authors every pull request, so any number above 0 would block every merge by the bot. The other model family's review is on record in the pull request, and the bot merges only once its findings are fixed or answered. The code owner rule below still blocks the owner's paths.
 
-The rule isn't needed on `main` to stop the bot. The bot can't push to `dev`, and a push to a hotfix branch after approval still dismisses the approval.
+### Why a code owner must approve
+
+With "require review from code owners" on, a pull request that changes a path in `CODEOWNERS` can't merge without its code owner. This is how the owner keeps control of the paths below. A bot's approval never counts for them.
+
+GitHub's documents don't say for certain whether this rule still blocks a merge when 0 approvals are required. [Decision 0062](decisions/0062-one-main-branch.md) names this as an open risk. After the rulesets are applied, the bot opens a pull request that touches an owner path and checks that GitHub reports it blocked, without merging it. If GitHub would let it merge, the fallback is a second GitHub account that posts the review as a real approval, with 1 approving review required.
 
 ### Why the checks must come from GitHub Actions
 
 Anyone with the Write role can set a commit status with any name through the API. Each required check names GitHub Actions (app ID `15368`) as its source, so a status named `lint` from any other source doesn't count.
 
-The `docs` check from M0-16 isn't required yet. Requiring a check that never runs would block every pull request. M0-16 adds it to both rulesets.
+The `docs` check from M0-16 isn't required yet. Requiring a check that never runs would block every pull request. M0-16 adds it to the ruleset.
 
 ### Why branches don't have to be up to date
 
-Bringing a branch up to date is a new push, so it dismisses the approval. With several pull requests open at once, each merge into `dev` would cost every other pull request a new push and a new approval. CI also runs on each push to `dev`, so a break between two merged pull requests shows on `dev` straight away.
+Bringing a branch up to date is a new push, so it dismisses any approval. With several pull requests open at once, each merge into `main` would cost every other pull request a new push, a new CI run and a new review. CI also runs on each push to `main`, so a break between two merged pull requests shows on `main` straight away.
 
-When a pull request into `dev` does need the latest `dev`, the bot updates the branch. If the owner clicks **Update branch**, the owner becomes the last pusher, and the owner's approval no longer counts on that pull request.
+When a pull request does need the latest `main`, the bot updates the branch.
 
-## Code owners
+## What `CODEOWNERS` covers
 
-The first line of `CODEOWNERS`, `* @jcore9`, makes the owner the code owner of every path. A bot's approval therefore never merges a pull request on its own, even one from a fork. The plan's rollout lets manager bots approve docs-only and test-only pull requests into `dev` later. That step removes the `*` line. The lines below it then keep the security-sensitive paths with the owner.
+The owner is the code owner of the paths the owner always decides:
 
-Some of those paths exist today:
-
-- `CODEOWNERS`, the rulesets, the workflows, and the release-please config and manifest
+- `.github/`, which holds the rulesets, the workflows, the templates and `CODEOWNERS` itself
+- the release-please config and manifest
 - every `package.json`, `bun.lock` and `bunfig.toml`, because they set the scripts that CI runs, the dependencies, and the package registry
 - `eslint.config.ts`, `lint-boundaries.test.ts`, `vitest.config.ts` and every `tsconfig*.json`, which enforce the boundaries in [decision 0023](decisions/0023-scaffold-toolchain.md)
-- the Bun-only adapter folder, `apps/server/src/adapters/`, which decision 0023 names
 - the decision records, the plan, `SECURITY.md` and `LICENSE`
 
-The other paths are guesses at where future code will live. Most match a folder name in any package, so the code is covered wherever it lands:
-
-| Pattern | For |
-| --- | --- |
-| `secrets/`, `broker/` | The secrets broker (M0-14) and the secret backends (M3, [#17](https://github.com/jcore9/Aphelion/issues/17)) |
-| `plugin-host/`, `grants/`, `/packages/plugin-sdk/src/manifest*` | The plugin host, permission grants, and the manifest schema (M0-13) |
-| `auth/`, `devices/` | Device tokens (M0-10) and later sign-in |
-| `policy/`, `/apps/server/**/hooks/` | The policy engine and its hooks (M2) |
-| `gateway/` | The gateway |
-| `Dockerfile*`, `/.dockerignore`, `compose*.yaml`, `docker-compose*.yml` and similar | The image and the Compose file (M0-12) |
-| `*.service`, `install*.sh`, `/deploy/` | The host unit and the install script (M0-12) |
-| `managed-settings.json`, `requirements.toml` | The managed settings for the Claude Code, Grok and Codex CLIs (M0-12, M2-05) |
-
-The `hooks/` pattern is limited to `apps/server`, because React code in `packages/ui` often has a `hooks/` folder. The PR that creates one of these paths checks that a pattern covers it, and fixes `CODEOWNERS` if not.
+Security code isn't listed. That covers secrets, the broker, auth, devices, the plugin host, the gateway, policy, hooks, adapters, the Dockerfile, Compose files, deploy files and install scripts. The bot merges it after a model from another family has reviewed it, and the owner reviews it at the end of the milestone. Earlier versions of this page listed those paths with guesses at where future code would live. They are gone, along with the `* @jcore9` line that made the owner the code owner of everything.
 
 ## What the rules don't stop
 
-- A user with the Write role can merge a pull request once it has the approvals and checks it needs. The bot can merge a pull request that the owner approved.
+- A user with the Write role can merge a pull request once it has the approvals and checks it needs. That includes the bot, which is the point of this setup.
 - A workflow changed on a branch runs on that branch's pull request before anyone reviews it. Code owners control what merges, not what runs. Same-repository pull requests get the repository's Actions secrets, so secrets belong in an environment with required reviewers.
-- Tags aren't protected. The bot can push a tag such as `v0.1.0`, and the release workflow creates tags with `GITHUB_TOKEN`.
+- Anyone who can run a workflow with `GITHUB_TOKEN` can create a tag. The tag ruleset only stops a tag from being moved or deleted.

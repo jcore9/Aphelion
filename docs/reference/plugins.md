@@ -9,7 +9,7 @@ The host and the runner talk over a pipe that the container's init creates befor
 
 A plugin with only a client part has no process. The host starts nothing for it ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
 
-The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/plugins/). The runner's process handling is in [`apps/server/src/adapters/plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/adapters/plugin-processes.ts).
+The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/plugins/). The runner's process handling is in [`apps/server/src/adapters/plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/adapters/plugin-processes.ts).
 
 ## For plugin authors
 
@@ -260,7 +260,7 @@ The release workflow that `create:plugin` generates makes releases in this form 
 
 An artifact attestation is a signed statement from GitHub that a workflow run built a file with a given SHA-256 hash. GitHub signs it through Sigstore, a public signing service that also records every signature in a public log. Before Aphelion opens the archive, it checks all of these:
 
-- The signature leads back to Sigstore's keys in the trust root that ships with Aphelion, [`trusted-root.json`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/plugins/updates/trusted-root.json). Sigstore's transparency log and certificate log both recorded it.
+- The signature leads back to Sigstore's keys in the trust root that ships with Aphelion, [`trusted-root.json`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/plugins/updates/trusted-root.json). Sigstore's transparency log and certificate log both recorded it.
 - GitHub Actions signed it, for the workflow `.github/workflows/release.yml` of the repository the plugin names, run for the tag `v<version>`.
 - The signed statement describes a build of one file, `aphelion-plugin.tar`, whose SHA-256 equals that of the bytes Aphelion downloaded.
 
@@ -295,11 +295,11 @@ Aphelion sends no GitHub token, so public repositories work and private ones don
 
 #### Testing with a local GitHub
 
-`APHELION_GITHUB_API` is for tests only. Set it to an origin, such as `http://127.0.0.1:8099`, and `plugin update` sends every request there instead of to GitHub, over plain HTTP if the origin says so. The attestation check doesn't change, so only real attested releases pass. The image contract test runs [`deploy/test/fake-github.mjs`](https://github.com/jcore9/Aphelion/blob/dev/deploy/test/fake-github.mjs) in the container with the releases in [`apps/server/src/plugins/updates/fixtures`](https://github.com/jcore9/Aphelion/tree/dev/apps/server/src/plugins/updates/fixtures). Don't set the variable on a real server.
+`APHELION_GITHUB_API` is for tests only. Set it to an origin, such as `http://127.0.0.1:8099`, and `plugin update` sends every request there instead of to GitHub, over plain HTTP if the origin says so. The attestation check doesn't change, so only real attested releases pass. The image contract test runs [`deploy/test/fake-github.mjs`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/fake-github.mjs) in the container with the releases in [`apps/server/src/plugins/updates/fixtures`](https://github.com/jcore9/Aphelion/tree/main/apps/server/src/plugins/updates/fixtures). Don't set the variable on a real server.
 
 ### Dev mode
 
-Dev mode lets a plugin author reload one plugin without restarting the server. It is off unless you start the container with the override file [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/dev/deploy/compose.plugin-dev.yaml). That file mounts the folder named by `APHELION_PLUGIN_DEV_DIR` read-only at `/opt/aphelion/dev-plugin`, and starts the server with `--plugin-dev /opt/aphelion/dev-plugin`.
+Dev mode lets a plugin author reload one plugin without restarting the server. It is off unless you start the container with the override file [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/main/deploy/compose.plugin-dev.yaml). That file mounts the folder named by `APHELION_PLUGIN_DEV_DIR` read-only at `/opt/aphelion/dev-plugin`, and starts the server with `--plugin-dev /opt/aphelion/dev-plugin`.
 
 `plugin dev` talks to the server through the [control socket](#control-socket). In dev mode, the server also accepts reload requests on it.
 

@@ -1,6 +1,6 @@
 # Contributing to Aphelion
 
-Most of the code here is written by coding agents, and the owner reviews and merges it. These rules apply to people and agents alike. The [Development workflow](docs/plan/aphelion-plan.md#development-workflow) section of the plan is the full version.
+Most of the code here is written by coding agents. `jcore9-bot` merges most of it, and the owner reviews it. These rules apply to people and agents alike. The [Development workflow](docs/plan/aphelion-plan.md#development-workflow) section of the plan is the full version.
 
 ## Plan before code
 
@@ -13,10 +13,11 @@ Nothing is built without a written plan.
 ## One issue, one branch, one PR
 
 1. Pick an issue whose milestone plan is approved and whose dependencies have merged.
-2. Create a branch from `dev` for that issue alone. Name it `<type>/<issue-id>-<slug>`, for example `chore/M0-04-monorepo-scaffold` or `feat/M3-04-github-app`. The prefix is `feat/`, `fix/`, `docs/`, `spike/` or `chore/`.
-3. Open one small PR into `dev`. Aim for under about 400 changed lines, not counting tests and generated files. A PR never mixes a refactor with a feature, or two features.
-4. Fill in the PR template. Write `Closes #<issue>` and add the labels that apply. GitHub closes issues on its own only for PRs into `main`, so close the issue by hand once the PR merges into `dev`.
-5. Give the PR a Conventional Commit title, such as `feat(server): ...` or `docs: ...`. The owner squash-merges it into `dev`, and the title becomes the commit on `dev`.
+2. Create a branch from `main` for that issue alone. Name it `<type>/<issue-id>-<slug>`, for example `chore/M0-04-monorepo-scaffold` or `feat/M3-04-github-app`. The prefix is `feat/`, `fix/`, `docs/`, `spike/` or `chore/`.
+3. Open one small PR into `main`. Aim for under about 400 changed lines, not counting tests and generated files. A PR never mixes a refactor with a feature, or two features.
+4. Fill in the PR template. Write `Closes #<issue>` and add the labels that apply. GitHub closes the issue by itself when the PR merges.
+5. Give the PR a Conventional Commit title, such as `feat(server): ...` or `docs: ...`. The title becomes the squash commit on `main`.
+6. Wait for green checks and a review from another model family. Then `jcore9-bot` squash-merges the PR ([decision 0062](docs/decisions/0062-one-main-branch.md)). If the PR touches a path that [`.github/CODEOWNERS`](.github/CODEOWNERS) names, GitHub holds it until the owner approves. The owner reviews everything else at the end of the milestone.
 
 Spikes end in a written finding under `docs/spikes/`. Their prototype code stays on the `spike/` branch and never merges.
 
@@ -26,7 +27,7 @@ Coding agents open PRs from the `jcore9-bot` account, never from the owner's acc
 
 - Agents commit with the bot's noreply address, `356729618+jcore9-bot@users.noreply.github.com`.
 - PRs from the bot carry the `agent-authored` label.
-- Agents open PRs but never approve or merge them.
+- Agents open PRs but never approve them. Only `jcore9-bot` merges, and only under the rules in [decision 0062](docs/decisions/0062-one-main-branch.md). It never merges the release PR.
 
 ## Docs ship with the change
 

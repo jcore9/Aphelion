@@ -16,11 +16,14 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
 ## Install
 
-1. Clone the `dev` branch to `/opt/aphelion` as root. The service runs the files there, so only root may change them. Until the first release, only `dev` has the deployment files.
+1. Clone the latest release to `/opt/aphelion` as root. A release is a tag, a name fixed to one commit, so you install a version that was tested and not whatever is on `main` today. The service runs the files there, so only root may change them. The latest tag is on [the releases page](https://github.com/jcore9/Aphelion/releases). Put it in `tag`:
 
    ```sh
-   sudo git clone --branch dev https://github.com/jcore9/Aphelion.git /opt/aphelion
+   tag=v0.1.0-alpha.1
+   sudo git clone --branch "$tag" https://github.com/jcore9/Aphelion.git /opt/aphelion
    ```
+
+   Git says it is in a "detached HEAD" state. That is normal for a tag.
 
 2. Write the host's tailnet address to `/opt/aphelion/deploy/.env`.
 
@@ -350,7 +353,7 @@ sudo systemctl start aphelion
 
 ## What the service does
 
-[`aphelion.service`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/aphelion.service) starts at boot after Docker and Tailscale. It also starts whenever Docker starts, and stops when Docker stops. It decrypts the bootstrap key into `/run/credentials/aphelion.service/bootstrap`, a folder in memory that only root can read, and Compose gives that file to the container. Before each start, [`host/preflight`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/preflight) does three things:
+[`aphelion.service`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/aphelion.service) starts at boot after Docker and Tailscale. It also starts whenever Docker starts, and stops when Docker stops. It decrypts the bootstrap key into `/run/credentials/aphelion.service/bootstrap`, a folder in memory that only root can read, and Compose gives that file to the container. Before each start, [`host/preflight`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/preflight) does three things:
 
 1. It waits up to 120 seconds for `APHELION_TAILNET_ADDRESS` to appear on the tailnet interface, `tailscale0`. Docker can't publish a port on an address that doesn't exist yet.
 2. It installs the [host firewall](../reference/container.md#network) again. Firewall rules don't survive a reboot, so every start installs them.
@@ -427,7 +430,7 @@ The command prints `Went back from <id> <current version> to <earlier version>.`
 
 ## Check the network boundary
 
-The container must not reach your LAN, the host or other tailnet devices ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`host/network-check`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/network-check) connects to six targets as `aphelion-bot` inside the running container. Give it, in order:
+The container must not reach your LAN, the host or other tailnet devices ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check) connects to six targets as `aphelion-bot` inside the running container. Give it, in order:
 
 1. your LAN gateway, such as your router;
 2. the host's LAN address;
@@ -477,9 +480,13 @@ The launcher, the server, the broker, the plugin runner and the plugins all log 
 
 ## Upgrade
 
+Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), put it in `tag`, and check it out:
+
 ```sh
+tag=v0.1.0-alpha.2
 cd /opt/aphelion
-sudo git pull --ff-only
+sudo git fetch --tags
+sudo git checkout "$tag"
 cd deploy
 sudo docker compose build
 sudo host/install
