@@ -19,13 +19,14 @@ until ip -4 -o address show dev "$interface" 2>/dev/null | grep -qF " inet $addr
   sleep 2
 done
 
-# ufw sources these files as shell, so the last assignment wins.
-ufw_says_yes() {
-  grep -sE "^[[:blank:]]*$1=" "$2" | tail -n 1 |
-    grep -qE "^[[:blank:]]*$1=(yes|\"yes\"|'yes')[[:blank:]]*(#.*)?$"
+# ufw's boot script loads these files with sh, so read them the same way.
+ufw_setting() {
+  [[ -r $2 ]] || return 0
+  sh -c '. "$1" >/dev/null 2>&1; eval "printf %s \"\${$2-}\""' sh "$2" "$1"
 }
 
-if ufw_says_yes ENABLED /etc/ufw/ufw.conf && ufw_says_yes MANAGE_BUILTINS /etc/default/ufw; then
+if [[ $(ufw_setting ENABLED /etc/ufw/ufw.conf) == yes &&
+  $(ufw_setting MANAGE_BUILTINS /etc/default/ufw) == yes ]]; then
   echo 'preflight: ufw is enabled with MANAGE_BUILTINS=yes and can remove Docker and Aphelion firewall rules. Set MANAGE_BUILTINS=no in /etc/default/ufw, run sudo ufw reload, then run sudo systemctl restart docker.' >&2
   exit 1
 fi

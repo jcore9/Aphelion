@@ -45,8 +45,9 @@ The release pull request then proposes that version. After the release, the next
 
 The owner does these once.
 
-1. Turn on Settings → Actions → General → Workflow permissions → **Allow GitHub Actions to create and approve pull requests**. release-please opens its pull request with the workflow's own key, `GITHUB_TOKEN`, and GitHub allows that only with this setting.
-2. Right after the alpha.1 release merges into `main`, tag that merge commit as `v0.1.0-alpha.1`, so release-please knows where M1 starts:
+Do them in this order. The alpha.1 merge into `main` starts the release workflow before the tag exists. While the setting in step 2 is still off, that first run can't open a pull request, so it fails without harm.
+
+1. Right after the alpha.1 release merges into `main`, tag that merge commit as `v0.1.0-alpha.1`, so release-please knows where M1 starts:
 
    ```sh
    sha=$(gh api repos/jcore9/Aphelion/commits/main --jq .sha)
@@ -58,4 +59,5 @@ The owner does these once.
 
    The second command prints the commit's message. It should be the merge of the alpha.1 release pull request. If it isn't, find the right commit before you run the last command.
 
-3. Run the release workflow again: `gh workflow run release.yml --repo jcore9/Aphelion --ref main`. Its first run started with the merge in step 2, before the tag existed. Without the tag, release-please reads every commit since the repository began, and may open a release pull request that lists them all. The second run updates that pull request to start from the tag. If a release pull request that lists old commits is still open after it, close it.
+2. Turn on Settings → Actions → General → Workflow permissions → **Allow GitHub Actions to create and approve pull requests**. release-please opens its pull request with the workflow's own key, `GITHUB_TOKEN`, and GitHub allows that only with this setting.
+3. Run the release workflow again: `gh workflow run release.yml --repo jcore9/Aphelion --ref main`. It now starts from the tag. If a release pull request that lists every old commit is open anyway, close it and run the workflow again.
