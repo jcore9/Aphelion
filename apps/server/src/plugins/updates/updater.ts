@@ -24,6 +24,7 @@ import type { Database } from "../../store/database";
 import {
   readInstall,
   recordVersion,
+  switchedOffMessage,
   updateToken,
   type ApprovedVersion,
   type InstallRecord,
@@ -108,6 +109,7 @@ const missingFrom = (list: readonly Permission[]) => (grant: Permission) =>
 const installed = (db: Database, plugin: string) => {
   const record = readInstall(db, plugin);
   if (record === undefined) throw refuse(`${plugin} isn't installed.`);
+  if (!record.enabled) throw refuse(switchedOffMessage(plugin));
   return record;
 };
 

@@ -18,6 +18,7 @@ export interface Permission {
 export class PluginGrants extends Context.Service<
   PluginGrants,
   {
+    readonly isSwitchedOff: (plugin: string) => Effect.Effect<boolean>;
     readonly hasApproval: (approval: Approval) => Effect.Effect<boolean>;
     readonly allows: (
       approval: Approval,
@@ -54,6 +55,10 @@ export const sqlitePluginGrants = (db: Database) => {
       Effect.orElseSucceed(() => false),
     );
   return Layer.succeed(PluginGrants, {
+    isSwitchedOff: (plugin) =>
+      exists("SELECT 1 FROM plugin_installs WHERE plugin = ? AND enabled = 0", [
+        plugin,
+      ]),
     hasApproval: (approval) =>
       exists(approvedVersion, approvalParams(approval)),
     allows: (approval, { kind, name }) =>

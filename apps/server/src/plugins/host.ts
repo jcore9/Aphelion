@@ -182,6 +182,9 @@ export const pluginHostLayer = (options: HostOptions) =>
         approval: Approval,
       ) =>
         Effect.gen(function* () {
+          if (yield* grants.isSwitchedOff(approval.id)) {
+            return `switched off after a restore; run aphelion plugin enable ${approval.id}`;
+          }
           const again = `Run aphelion plugin install ${folder} to approve it.`;
           if (
             manifest.id !== approval.id ||

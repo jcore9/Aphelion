@@ -237,6 +237,7 @@ function harness(
   const { grants } = options;
   const grantsLayer = grants
     ? Layer.succeed(PluginGrants, {
+        isSwitchedOff: () => Effect.succeed(false),
         hasApproval: () => Effect.succeed(true),
         allows: ({ id }, permission) => {
           const allowed = grants(id, permission);
@@ -631,6 +632,58 @@ describe("the plugin host", () => {
           ]);
           yield* host.start(folder, granted);
           yield* waitFor("watcher", { state: "running" });
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "refuses to start a switched-off plugin and its calls, and starts it once switched on",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* tempStore;
+        const folder = yield* serverPlugin("watcher", {
+          events: ["bot.status"],
+        });
+        const approval = yield* approveFolder(db, folder, [
+          { kind: "events", name: "bot.status" },
+        ]);
+        const replies: Message[] = [];
+        const { layer, record } = harness(
+          {
+            watcher: (io) =>
+              Effect.gen(function* () {
+                yield* handshake(io);
+                replies.push(
+                  yield* io.call("events.subscribe", { event: "bot.status" }),
+                );
+                db.run("UPDATE plugin_installs SET enabled = 0");
+                replies.push(
+                  yield* io.call("events.subscribe", { event: "bot.status" }),
+                );
+                return yield* serveUntilShutdown(io);
+              }),
+          },
+          { store: db },
+        );
+        yield* Effect.gen(function* () {
+          const host = yield* PluginHost;
+          yield* host.start(folder, approval);
+          yield* waitFor("watcher", { state: "running" });
+          yield* waitUntil(() => replies.length === 2);
+          expect(replies[0]?.["result"]).toEqual({});
+          expect(replies[1]?.["result"]).toBeUndefined();
+          yield* host.stop("watcher");
+
+          const refused = yield* Effect.flip(host.start(folder, approval));
+          expect(refused.issues[0]?.message).toContain(
+            "switched off after a restore; run aphelion plugin enable watcher",
+          );
+          expect(record.spawned).toHaveLength(1);
+
+          db.run("UPDATE plugin_installs SET enabled = 1");
+          yield* host.start(folder, approval);
+          yield* waitFor("watcher", { state: "running" });
+          expect(record.spawned).toHaveLength(2);
         }).pipe(Effect.provide(layer));
       }).pipe(Effect.scoped),
   );

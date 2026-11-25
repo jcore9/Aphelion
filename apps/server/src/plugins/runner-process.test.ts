@@ -219,6 +219,7 @@ const startRunner = (
         Layer.provide(Layer.succeed(RunnerLink, link)),
         Layer.provide(
           Layer.succeed(PluginGrants, {
+            isSwitchedOff: () => Effect.succeed(false),
             hasApproval: () => Effect.succeed(true),
             allows: () => Effect.succeed(true),
           }),

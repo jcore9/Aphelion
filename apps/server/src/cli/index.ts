@@ -9,6 +9,7 @@ import { headless } from "./headless";
 import { helpText } from "./help";
 import { CliIo } from "./io";
 import { pluginInstall } from "./plugin";
+import { pluginEnable } from "./plugin-enable";
 import { pluginDev } from "./plugin-dev";
 import { restoreFinish } from "./restore";
 import { pluginRestart, pluginRollback, pluginUpdate } from "./plugin-update";
@@ -34,6 +35,8 @@ const run = (command: Command) =>
         return yield* pluginInstall(command);
       case "plugin update":
         return yield* pluginUpdate(command, process.env["APHELION_GITHUB_API"]);
+      case "plugin enable":
+        return yield* pluginEnable(command);
       case "plugin rollback":
         return yield* pluginRollback(command);
       case "plugin restart":

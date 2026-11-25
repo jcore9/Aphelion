@@ -506,6 +506,7 @@ test("plugin install approves every file, and an upgrade needs a token that name
   };
   expect(installed()).toEqual({
     plugin: "weather",
+    enabled: true,
     current: first,
     previous: undefined,
   });
@@ -522,6 +523,7 @@ test("plugin install approves every file, and an upgrade needs a token that name
   expect((await run([...command, "--approve", next])).code).toBe(0);
   expect(installed()).toEqual({
     plugin: "weather",
+    enabled: true,
     current: { ...first, version: "1.1.0", filesDigest: files(upgraded) },
     previous: first,
   });

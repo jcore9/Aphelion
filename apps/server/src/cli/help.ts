@@ -41,6 +41,11 @@ Usage:
       check that GitHub built it, and preview what it changes. Repeat with the
       displayed digest to install it and restart the plugin on it.
 
+  aphelion plugin enable ID [--approve DIGEST] [--state-dir DIR]
+      Switch a plugin back on after a restore switched it off. Prints the
+      permissions the plugin already has, then switches it on and restarts it
+      when repeated with the displayed digest.
+
   aphelion plugin rollback ID [--state-dir DIR] [--plugins-dir DIR]
       Go back to the version plugin ID ran before its last update or install,
       and restart the plugin on it.

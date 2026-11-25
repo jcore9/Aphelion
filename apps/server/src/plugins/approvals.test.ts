@@ -44,6 +44,7 @@ test("recording a version keeps the one it replaces as previous", async () => {
   recordVersion(db, version("1.0.0"));
   expect(readInstall(db, "weather")).toEqual({
     plugin: "weather",
+    enabled: true,
     current: version("1.0.0"),
     previous: undefined,
   });
@@ -56,6 +57,7 @@ test("recording a version keeps the one it replaces as previous", async () => {
   recordVersion(db, release);
   expect(readInstall(db, "weather")).toEqual({
     plugin: "weather",
+    enabled: true,
     current: release,
     previous: version("1.0.0"),
   });
@@ -63,12 +65,18 @@ test("recording a version keeps the one it replaces as previous", async () => {
   const again = { ...release, filesDigest: "digest-again" };
   recordVersion(db, again);
   expect(installedPlugins(db)).toEqual([
-    { plugin: "weather", current: again, previous: version("1.0.0") },
+    {
+      plugin: "weather",
+      enabled: true,
+      current: again,
+      previous: version("1.0.0"),
+    },
   ]);
 
   recordVersion(db, version("1.0.0"));
   expect(readInstall(db, "weather")).toEqual({
     plugin: "weather",
+    enabled: true,
     current: version("1.0.0"),
     previous: again,
   });
@@ -77,6 +85,7 @@ test("recording a version keeps the one it replaces as previous", async () => {
 test("only the dev folder's approval skips the files check", () => {
   const record = {
     plugin: "weather",
+    enabled: true,
     current: version("1.0.0"),
     previous: undefined,
   };
@@ -114,7 +123,7 @@ test("a run keeps its grants only while its exact approval stands", async () => 
     Effect.runSync(grants.allows(approval, status));
   recordVersion(db, version("1.0.0"));
   const first = approvalFor(
-    { plugin: "weather", current: version("1.0.0"), previous: undefined },
+    { plugin: "weather", current: version("1.0.0") },
     undefined,
   );
   const dev = { ...first, filesDigest: undefined };
@@ -146,7 +155,7 @@ test("a switched-off plugin has no approval and no grant, and switching it on re
   );
   recordVersion(db, version("1.0.0"));
   const approval = approvalFor(
-    { plugin: "weather", current: version("1.0.0"), previous: undefined },
+    { plugin: "weather", current: version("1.0.0") },
     undefined,
   );
   const status = { kind: "events", name: "bot.status" } as const;

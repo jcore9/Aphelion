@@ -60,6 +60,12 @@ export type Command =
       readonly approve: string | undefined;
     }
   | {
+      readonly kind: "plugin enable";
+      readonly stateDir: string;
+      readonly plugin: string;
+      readonly approve: string | undefined;
+    }
+  | {
       readonly kind: "plugin rollback";
       readonly stateDir: string;
       readonly pluginsDir: string;
@@ -124,6 +130,11 @@ const grammar: Record<
     words: 2,
     operand: "plugin id",
     flags: ["state-dir", "plugins-dir", "approve"],
+  },
+  "plugin enable": {
+    words: 2,
+    operand: "plugin id",
+    flags: ["state-dir", "approve"],
   },
   "plugin rollback": {
     words: 2,
@@ -349,6 +360,11 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
             : { kind, ...base },
       };
     }
+    case "plugin enable":
+      return {
+        ok: true,
+        command: { kind, stateDir, plugin: operand, approve: values.approve },
+      };
     case "plugin restart":
       return { ok: true, command: { kind, stateDir, plugin: operand } };
     case "plugin dev":
