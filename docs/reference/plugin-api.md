@@ -132,7 +132,7 @@ interface PluginContext {
   The SDK sends one network or secret call at a time, so a second call waits until the first one has its reply.
 - `secrets`: `use(operation, reference)` asks the host to run a named operation with a secret, such as a signed HTTP call.
   The plugin never receives the secret's value or the operation's result, and the call waits its turn like `network.get`.
-  The server offers no secret operations yet, so today a granted call fails with error `-32002`.
+  The deployed server runs no secret operations yet, so there a granted call fails with error `-32002`. `createTestHost` can run an operation that a test registers.
 - `log`: Writes a message to the plugin's log, which goes to the server's log.
 
 ### `PluginIO`
@@ -341,7 +341,7 @@ type RpcMessage =
 
 ### `SecretBackend`
 
-What a secret backend plugin implements for the schemes it lists in `contributes.secretSchemes`.
+What a secret backend plugin implements for the schemes it lists in `contributes.secretSchemes`. The deployed server doesn't call secret backends yet.
 
 ```ts
 type SecretBackend = {

@@ -16,6 +16,8 @@ You can do the first steps without a server. The tests run on their own.
 
 The server doesn't send any events yet. The template subscribes to `approval.requested`, which the server will send in a later milestone. Until then the plugin starts, subscribes and waits. The tests show what it does when an event arrives. You can't see an event arrive on a running server yet.
 
+Two more things aren't in the deployed server yet. The SDK has no typed settings or storage API, on the test host or the server. The server runs no secret operations, so `ctx.secrets.use` fails there with error `-32002`, even when you grant it. The test host can run an operation that your test registers, so a test can pass where the server refuses the call.
+
 ## Create the plugin
 
 1. In your Aphelion checkout, run the generator. Give it a folder that doesn't exist yet, outside the checkout.
@@ -74,7 +76,7 @@ The other file you don't need to touch is `src/index.ts`. It connects your plugi
 
 ## Run the tests
 
-Open `src/plugin.test.ts`. It runs your plugin against `createTestHost`, a fake Aphelion in the SDK. The fake follows the same rules as the real one, so a test can show that a plugin without a grant is refused. The template has two tests. One grants the event and checks the log. The other grants nothing and checks that `start` fails with error `-32001`, `Not granted`.
+Open `src/plugin.test.ts`. It runs your plugin against `createTestHost`, a fake Aphelion in the SDK. The fake checks grants and network calls the way the real server does, so a test can show that a plugin without a grant is refused. It also runs the secret operations that a test registers, which the server can't do yet. The template has two tests. One grants the event and checks the log. The other grants nothing and checks that `start` fails with error `-32001`, `Not granted`.
 
 1. Run the tests.
 

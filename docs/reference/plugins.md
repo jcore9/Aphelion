@@ -13,7 +13,7 @@ The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/b
 
 ## For plugin authors
 
-You don't have to write JSON-RPC by hand. The SDK, `@aphelion/plugin-sdk`, does it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them, and [the plugin API reference](plugin-api.md) lists every type and function in the SDK. The rest of this section says what the host does and expects, which is what the SDK builds on.
+You don't have to write JSON-RPC by hand. The SDK, `@aphelion/plugin-sdk`, does it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them, and [the plugin API reference](plugin-api.md) lists every type and function in the SDK. The SDK has no typed settings or storage API yet, on either host. A plugin's only storage is its data folder, which the deployed host sets up for it ([How your plugin is started](#how-your-plugin-is-started)). `createTestHost` has no data folder. The rest of this section says what the host does and expects, which is what the SDK builds on.
 
 ### How your plugin is started
 
@@ -49,7 +49,7 @@ Your plugin talks to the host in [JSON-RPC 2.0](https://www.jsonrpc.org/specific
 - Your plugin writes to its standard output.
 - A line can be at most 1 MiB. The runner drops a longer line and logs that it did.
 - An event the host sends uses that same limit. The limit is 1 MiB of UTF-8 bytes of the whole JSON-RPC line, envelope included, not counting the newline. The host sends a longer event to no plugin. `createTestHost`'s `publish` rejects it.
-- Anything your plugin writes to standard error goes to the server's log, one line per entry, up to 1000 lines a minute. The notes about dropped long lines count toward the same 1000. The runner drops the rest of that minute and logs that it did.
+- Anything your plugin writes to standard error goes to the server's log, one line per entry, up to 1000 lines a minute. The notes about dropped long lines count toward the same 1000. The runner drops the rest of that minute and logs that it did. `createTestHost` doesn't enforce this limit.
 
 Keep reading your standard input. Messages for your plugin wait in a buffer of about 16 MiB. The runner kills your plugin if either of these happens:
 
@@ -108,7 +108,7 @@ Subscriptions last until the process exits. After a restart, subscribe again. Ne
 
 ### Secrets
 
-Your plugin asks for a named operation with `secrets.use`. The host chooses the destination and keeps both the secret value and the upstream response. The current server registers no operations. The secrets broker belongs to [#104](https://github.com/jcore9/Aphelion/issues/104).
+Your plugin asks for a named operation with `secrets.use`. The host chooses the destination and keeps both the secret value and the upstream response. The current server registers no operations, so the deployed host doesn't run any `secrets.use` call yet and returns `-32002`. `createTestHost` can run an operation that a test registers, so a test can see the call succeed where the server refuses it. The secrets broker belongs to [#104](https://github.com/jcore9/Aphelion/issues/104).
 
 The host also refuses to send any message that holds a [`Secret`](secrets.md), because a `Secret` throws when it is turned into JSON. The event is then sent to no plugin.
 
@@ -199,7 +199,7 @@ You approve a plugin's permissions once, for the whole server, as described abov
 - The grant has no per-bot version. To limit one bot more, for example to read-only on GitHub, write a policy rule for that bot, that connector and those tools.
 - 1Password grants are the exception. They stay per item, per consumer and per bot ([decision 0020](../decisions/0020-1password-grok-bot-style.md)).
 
-The host decides from the manifest which plugins get a switch. A plugin gets one when it contributes something a bot calls: a tool, a connector or a custom MCP server. A plugin that only serves the server or the app has no switch, and is still limited to the permissions you granted it. That covers secret backends (`contributes.secretSchemes`), themes, notifiers, and UI plugins, including one that shows bot status. A bot adapter has no switch, because a bot's `provider` setting selects it. Reviewers and routine triggers have none either: the policy engine calls the reviewer, and each routine selects its trigger.
+The host decides from the manifest which plugins get a switch. A plugin gets one when it contributes something a bot calls: a tool, a connector or a custom MCP server. A plugin that only serves the server or the app has no switch, and is still limited to the permissions you granted it. That covers secret backends (`contributes.secretSchemes`), themes, notifiers, and UI plugins, including one that shows bot status. Nothing on the server runs secret backends, screens or UI slots yet, and `createTestHost` doesn't run them either. A bot adapter has no switch, because a bot's `provider` setting selects it. Reviewers and routine triggers have none either: the policy engine calls the reviewer, and each routine selects its trigger.
 
 No manifest field names a tool or a connector yet. The connector contract (M3-02) adds it. Until then, no plugin has a switch. The switches themselves come with M3-06, M4-02 and M5-13.
 
