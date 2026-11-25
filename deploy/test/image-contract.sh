@@ -412,10 +412,10 @@ cat >"$fakebin/iptables" <<'FAKE'
 #!/bin/bash
 [[ ${FAKE_FIREWALL:-present} == present ]]
 FAKE
-cat >"$fakebin/curl" <<'FAKE'
+cat >"$fakebin/curl" <<FAKE
 #!/bin/bash
-address=$(docker inspect --format '{{(index .NetworkSettings.Networks "aphelion-contract").IPAddress}}' "$FAKE_CONTAINER")
-exec /usr/bin/curl "${@//$APHELION_TAILNET_ADDRESS/$address}"
+address=\$(docker inspect --format '{{(index .NetworkSettings.Networks "aphelion-contract").IPAddress}}' "\$FAKE_CONTAINER")
+exec /usr/bin/curl "\${@//$APHELION_TAILNET_ADDRESS/\$address}"
 FAKE
 chmod +x "$fakebin"/*
 host_root=()
