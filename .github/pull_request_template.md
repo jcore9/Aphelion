@@ -1,4 +1,4 @@
-<!-- Title: a Conventional Commit, such as `feat(server): ...` or `docs: ...`. It becomes the squash commit on `dev`. -->
+<!-- Title: a Conventional Commit, such as `feat(server): ...` or `docs: ...`. It becomes the squash commit on `main`. -->
 
 Closes #
 

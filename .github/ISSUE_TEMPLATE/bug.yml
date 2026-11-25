@@ -16,7 +16,7 @@ body:
     id: version
     attributes:
       label: Version or commit
-      placeholder: "dev at 776e812"
+      placeholder: "v0.1.0-alpha.1, or main at 19232b9"
     validations:
       required: true
   - type: input
