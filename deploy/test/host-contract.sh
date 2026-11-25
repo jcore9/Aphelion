@@ -221,15 +221,18 @@ host/preflight >/dev/null 2>&1 || status=$?
 pass "preflight reads the ufw files as sh does: quotes, comments, the last line, command prefixes and ENABLED=YES, and refuses when sh stops early"
 rm -f /etc/ufw/ufw.conf /etc/default/ufw
 
-# The tests below need root-owned files, so hide the bind mount under a copy that root owns.
+make_deploy_root_owned() {
+  local copy
+  copy=$(mktemp -d)
+  cp -a /opt/aphelion/deploy/. "$copy/"
+  mount -t tmpfs tmpfs /opt/aphelion/deploy
+  cp -a "$copy/." /opt/aphelion/deploy/
+  chown -R root:root /opt/aphelion
+  chmod -R go-w /opt/aphelion
+  rm -rf "$copy"
+}
 cd /
-copy=$(mktemp -d)
-cp -a /opt/aphelion/deploy/. "$copy/"
-mount -t tmpfs tmpfs /opt/aphelion/deploy
-cp -a "$copy/." /opt/aphelion/deploy/
-chown -R root:root /opt/aphelion
-chmod -R go-w /opt/aphelion
-rm -rf "$copy"
+make_deploy_root_owned
 printf 'APHELION_TAILNET_ADDRESS=100.100.5.1\n' >/opt/aphelion/deploy/.env
 fakebin=$(mktemp -d)
 cat >"$fakebin/systemctl" <<'FAKE'
@@ -299,8 +302,8 @@ pass "the command refuses a user other than root with status 2, and --help works
 
 for bad in "" bogus "status extra" device "device frobnicate" "check now"; do
   status=0
-  # shellcheck disable=SC2086
-  error=$(as_root_aphelion $bad 2>&1 >/dev/null) || status=$?
+  read -ra words <<<"$bad" || true
+  error=$(as_root_aphelion "${words[@]}" 2>&1 >/dev/null) || status=$?
   [[ $status == 2 && $error == "usage:"* ]] ||
     fail "aphelion '$bad' didn't print usage and exit 2: $status $error"
 done
