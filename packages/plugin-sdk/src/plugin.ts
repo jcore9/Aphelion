@@ -19,7 +19,7 @@ export interface PluginContext {
   /** The plugin API version that the host runs, such as `0.2.2`. */
   readonly api: string;
   /**
-   * `subscribe(name, handle)` asks the host for an event, and the SDK then calls `handle` with each event's data.
+   * `subscribe(name, handle)` asks the host for an event, and the SDK then calls `handle` with each event's data each time the host delivers it. The deployed server doesn't publish events yet, so only a test host delivers one.
    * Once shutdown starts, the SDK calls no handler for a new event, and every call to the host fails with `the plugin is shutting down`.
    * It rejects with a `HostError` when the manifest's `permissions.events` doesn't list the event or the owner hasn't granted it.
    */
@@ -37,7 +37,7 @@ export interface PluginContext {
   /**
    * `use(operation, reference)` asks the host to run a named operation with a secret, such as a signed HTTP call.
    * The plugin never receives the secret's value or the operation's result, and the call waits its turn like `network.get`.
-   * The server offers no secret operations yet, so today a granted call fails with error `-32002`.
+   * The deployed server runs no secret operations yet, so there a granted call fails with error `-32002`. `createTestHost` can run an operation that a test registers.
    */
   readonly secrets: {
     use(operation: string, reference: SecretReference): Promise<void>;

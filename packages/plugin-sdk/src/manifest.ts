@@ -119,18 +119,18 @@ const permissions = {
   network: list(host, "Hostnames the plugin connects to."),
   uiSlots: list(
     dottedName,
-    "UI slots the plugin shows content in. The owner grants each one, because content there can show what is in a chat.",
+    "UI slots the plugin plans to show content in. The server doesn't act on it yet. Once it does, the owner grants each one, because content there can show what is in a chat.",
   ),
 };
 
 const contributions = {
   secretSchemes: list(
     scheme,
-    "Secret reference schemes the plugin resolves as a secret backend. The values it returns go only to the secrets broker.",
+    "Secret reference schemes the plugin would resolve as a secret backend. No server code runs secret backends yet. The values it returns would go only to the secrets broker.",
   ),
   screens: list(
     screen,
-    "Full pages the plugin's client part draws, each with an entry in the app's menu. They appear when the plugin is installed, with no grant.",
+    "Full pages the plugin's client part would draw, each with an entry in the app's menu. The app doesn't add menu entries yet. Once it does, they will appear when the plugin is installed, with no grant.",
   ),
 };
 
@@ -315,7 +315,7 @@ type ManifestWith<Present extends PluginSide> = Readonly<
 export type PluginManifest =
   ManifestWith<"server"> | ManifestWith<"client"> | ManifestWith<PluginSide>;
 
-/** A full page that a plugin's client part adds to the app's menu, from `contributes.screens`. */
+/** A full page that a plugin's client part declares in `contributes.screens`. The app's menu doesn't list it yet. */
 export type PluginScreen = PluginManifest["contributes"]["screens"][number];
 
 /** One problem that `parsePluginManifest` found. */
