@@ -72,7 +72,7 @@ const stoppedForFlood = (replies: readonly RunnerReply[]) =>
     (reply) => reply.type === "log" && reply.line === stoppedReading,
   );
 
-const japanese = "あ".repeat(maxPluginLineBytes);
+const japanese = "あ".repeat(Math.floor(maxPluginLineBytes / 3));
 const ascii = "a".repeat(maxPluginLineBytes);
 
 describe("the plugin input queue budget", () => {
@@ -80,7 +80,7 @@ describe("the plugin input queue budget", () => {
     "counts multibyte input in UTF-8 bytes, so text over the budget in bytes trips it",
     () =>
       Effect.gen(function* () {
-        const lines = Array.from({ length: 6 }, () => japanese);
+        const lines = Array.from({ length: 17 }, () => japanese);
         const total = lines.reduce((sum, line) => sum + line.length, 0);
         expect(total).toBeLessThan(maxPendingInputBytes);
         expect(total * 3).toBeGreaterThan(maxPendingInputBytes);
@@ -94,8 +94,8 @@ describe("the plugin input queue budget", () => {
     "accepts multibyte input that stays under the budget in UTF-8 bytes",
     () =>
       Effect.gen(function* () {
-        const lines = Array.from({ length: 5 }, () => japanese);
-        const bytes = lines.length * maxPluginLineBytes * 3;
+        const lines = Array.from({ length: 15 }, () => japanese);
+        const bytes = lines.length * japanese.length * 3;
         expect(bytes).toBeLessThan(maxPendingInputBytes);
         const replies = yield* sendInputs(lines);
         expect(stoppedForFlood(replies)).toBe(false);
@@ -107,7 +107,7 @@ describe("the plugin input queue budget", () => {
     "trips the budget for ASCII input of the same byte size as the multibyte overflow",
     () =>
       Effect.gen(function* () {
-        const lines = Array.from({ length: 18 }, () => ascii);
+        const lines = Array.from({ length: 17 }, () => ascii);
         expect(lines.length * maxPluginLineBytes).toBeGreaterThan(
           maxPendingInputBytes,
         );
