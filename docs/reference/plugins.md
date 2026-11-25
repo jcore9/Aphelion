@@ -118,6 +118,7 @@ The host restarts a plugin that crashes. A crash is any of these:
 
 - The process exits while it is running or starting.
 - The runner can't start it.
+- The runner hasn't finished launching it within 15 seconds. The host tells the runner to stop that run, and the runner kills the process if it appears later.
 - It doesn't answer `initialize` within 10 seconds. The runner kills it.
 - It answers `initialize` with an error. The runner kills it.
 - It stops reading its standard input, or it writes faster than the host can handle. See [Talking to the host](#talking-to-the-host).
@@ -139,13 +140,13 @@ Each plugin with a server part is in one of these states. The host's `status` ca
 | State | Meaning |
 | --- | --- |
 | `installed` | The host knows the plugin and hasn't started it. |
-| `starting` | The runner started the process, and the host waits for the `initialize` reply. |
+| `starting` | The runner is launching the process, then the host waits for the `initialize` reply. A launch has 15 seconds, and the `initialize` reply has 10 more. A slow launch of one plugin doesn't delay any other plugin. |
 | `running` | The plugin answered `initialize`. It gets the events it subscribed to and was granted. |
 | `stopping` | The host sent `shutdown` and waits 5 seconds before the runner kills the plugin. A plugin that is still starting is killed at once. When the server stops, every plugin is in this state at the same time. |
 | `crashed` | The plugin crashed. The host restarts it after the wait in [Crashes and restarts](#crashes-and-restarts). |
 | `stopped` | The plugin was stopped on request, or it crashed too often. |
 
-Each start gets a new run number. Every message between the host and the runner carries it, so a late message from a killed process can't change the state of the new one. Each timer also has a purpose (the `initialize` deadline, the shutdown grace time, or the restart wait). A timer counts only in the state that set it. For example, the `initialize` deadline can't cut the shutdown grace time short.
+Each start gets a new run number. Every message between the host and the runner carries it, so a late message from a killed process can't change the state of the new one. Each timer also has a purpose (the launch deadline, the `initialize` deadline, the shutdown grace time, or the restart wait). A timer counts only in the state that set it. For example, the `initialize` deadline can't cut the shutdown grace time short.
 
 ### Permissions
 

@@ -186,6 +186,7 @@ const framing = <T>(schema: Framing<T>["schema"]): Framing<T> => ({
 });
 
 const fastPolicy: RestartPolicy = {
+  launchMs: 5_000,
   handshakeMs: 1_000,
   graceMs: 100,
   firstRetryMs: 20,

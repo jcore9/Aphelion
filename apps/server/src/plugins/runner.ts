@@ -65,12 +65,32 @@ function logBudget() {
   };
 }
 
-interface Live {
+interface Inbox {
   readonly run: number;
-  readonly process: PluginProcess;
   readonly inbox: Queue.Queue<string>;
   pendingBytes: number;
 }
+
+type Slot =
+  | (Inbox & { readonly phase: "launching" })
+  | (Inbox & { readonly phase: "live"; readonly process: PluginProcess });
+
+type LiveSlot = Extract<Slot, { phase: "live" }>;
+
+type LoopEvent =
+  | RunnerRequest
+  | {
+      readonly type: "launched";
+      readonly plugin: string;
+      readonly run: number;
+      readonly process: PluginProcess;
+    }
+  | {
+      readonly type: "launch-failed";
+      readonly plugin: string;
+      readonly run: number;
+      readonly reason: string;
+    };
 
 export const runRunner = (
   link: Link<RunnerRequest, RunnerReply>,
@@ -78,7 +98,8 @@ export const runRunner = (
 ) =>
   Effect.gen(function* () {
     const processes = yield* PluginProcesses;
-    const live = new Map<string, Live>();
+    const slots = new Map<string, Slot>();
+    const events = yield* Queue.unbounded<LoopEvent, Cause.Done>();
 
     const report = (plugin: string | undefined) => (cleanup: Cleanup) =>
       Effect.sync(() => {
@@ -94,9 +115,11 @@ export const runRunner = (
       });
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(live.values(), ({ process }) => process.kill, {
-        discard: true,
-      }),
+      Effect.forEach(
+        [...slots.values()],
+        (slot) => (slot.phase === "live" ? slot.process.kill : Effect.void),
+        { discard: true },
+      ),
     );
     yield* processes.sweep.pipe(
       Effect.flatMap(report(undefined)),
@@ -139,7 +162,7 @@ export const runRunner = (
       );
     };
 
-    const fault = (plugin: string, entry: Live) =>
+    const fault = (plugin: string, entry: LiveSlot) =>
       Queue.shutdown(entry.inbox).pipe(
         Effect.andThen(
           link
@@ -152,7 +175,7 @@ export const runRunner = (
         ),
       );
 
-    const feed = (plugin: string, entry: Live) =>
+    const feed = (plugin: string, entry: LiveSlot) =>
       Effect.gen(function* () {
         for (;;) {
           const line = yield* Queue.take(entry.inbox);
@@ -163,9 +186,12 @@ export const runRunner = (
         }
       }).pipe(Effect.catchTag("TimeoutError", () => fault(plugin, entry)));
 
+    const killAndReap = (plugin: string, process: PluginProcess) =>
+      process.kill.pipe(Effect.flatMap(report(plugin)), Effect.forkScoped);
+
     const start = Effect.fnUntraced(function* (request: StartRequest) {
       const { plugin, run } = request;
-      if (live.has(plugin)) {
+      if (slots.has(plugin)) {
         return yield* link.send({
           type: "start-failed",
           plugin,
@@ -173,32 +199,49 @@ export const runRunner = (
           reason: "already running",
         });
       }
+      slots.set(plugin, {
+        phase: "launching",
+        run,
+        inbox: yield* Queue.unbounded<string>(),
+        pendingBytes: 0,
+      });
       const dataFolder = join(options.dataRoot, plugin);
-      const spawned = yield* Effect.result(
-        processes.spawn({
+      yield* processes
+        .spawn({
           plugin,
           folder: request.folder,
           entry: request.entry,
           dataFolder,
           env: pluginEnvironment(plugin, dataFolder),
-        }),
-      );
-      if (spawned._tag === "Failure") {
-        return yield* link.send({
-          type: "start-failed",
-          plugin,
-          run,
-          reason: spawned.failure.reason,
-        });
+        })
+        .pipe(
+          Effect.matchEffect({
+            onSuccess: (process) =>
+              Queue.offer(events, { type: "launched", plugin, run, process }),
+            onFailure: (failure) =>
+              Queue.offer(events, {
+                type: "launch-failed",
+                plugin,
+                run,
+                reason: failure.reason,
+              }),
+          }),
+          Effect.forkScoped({ startImmediately: true }),
+        );
+    });
+
+    const launched = Effect.fnUntraced(function* (
+      plugin: string,
+      run: number,
+      process: PluginProcess,
+    ) {
+      const slot = slots.get(plugin);
+      if (slot?.phase !== "launching" || slot.run !== run) {
+        yield* killAndReap(plugin, process);
+        return;
       }
-      const process = spawned.success;
-      const entry: Live = {
-        run,
-        process,
-        inbox: yield* Queue.unbounded<string>(),
-        pendingBytes: 0,
-      };
-      live.set(plugin, entry);
+      const entry: LiveSlot = { ...slot, phase: "live", process };
+      slots.set(plugin, entry);
       yield* link.send({ type: "started", plugin, run });
       const writer = yield* Effect.forkScoped(feed(plugin, entry));
       const budget = logBudget();
@@ -217,46 +260,76 @@ export const runRunner = (
             Effect.timeout("1 second"),
             Effect.ignore,
           );
-          if (live.get(plugin) !== entry) return;
-          live.delete(plugin);
+          if (slots.get(plugin) !== entry) return;
+          slots.delete(plugin);
           yield* link.send({ type: "exited", plugin, run, ...exit });
         }),
       );
     });
 
-    const handle = (request: RunnerRequest) =>
+    const handle = (event: LoopEvent) =>
       Effect.gen(function* () {
-        switch (request.type) {
+        switch (event.type) {
           case "start":
-            return yield* start(request);
-          case "stop": {
-            const entry = live.get(request.plugin);
-            if (entry?.run === request.run) {
-              live.delete(request.plugin);
-              yield* Queue.shutdown(entry.inbox);
-              yield* entry.process.kill.pipe(
-                Effect.flatMap(report(request.plugin)),
-              );
-            }
+            return yield* start(event);
+          case "launched":
+            return yield* launched(event.plugin, event.run, event.process);
+          case "launch-failed": {
+            const slot = slots.get(event.plugin);
+            if (slot?.phase !== "launching" || slot.run !== event.run) return;
+            slots.delete(event.plugin);
             return yield* link.send({
-              type: "stopped",
-              plugin: request.plugin,
-              run: request.run,
+              type: "start-failed",
+              plugin: event.plugin,
+              run: event.run,
+              reason: event.reason,
             });
           }
+          case "stop": {
+            const { plugin, run } = event;
+            const stopped = link.send({ type: "stopped", plugin, run });
+            const slot = slots.get(plugin);
+            if (slot?.run !== run) return yield* stopped;
+            slots.delete(plugin);
+            yield* Queue.shutdown(slot.inbox);
+            if (slot.phase === "launching") return yield* stopped;
+            return yield* slot.process.kill.pipe(
+              Effect.flatMap(report(plugin)),
+              Effect.andThen(stopped),
+              Effect.forkScoped,
+            );
+          }
           case "input": {
-            const entry = live.get(request.plugin);
-            if (entry?.run !== request.run) return;
-            if (!(yield* Queue.offer(entry.inbox, request.line))) return;
-            entry.pendingBytes += utf8Bytes(request.line);
-            if (entry.pendingBytes > maxPendingInputBytes) {
-              yield* fault(request.plugin, entry);
-            }
+            const slot = slots.get(event.plugin);
+            if (slot?.run !== event.run) return;
+            if (!(yield* Queue.offer(slot.inbox, event.line))) return;
+            slot.pendingBytes += utf8Bytes(event.line);
+            if (slot.pendingBytes <= maxPendingInputBytes) return;
+            if (slot.phase === "live") return yield* fault(event.plugin, slot);
+            slots.delete(event.plugin);
+            yield* Queue.shutdown(slot.inbox);
+            yield* link.send({
+              type: "log",
+              plugin: event.plugin,
+              run: event.run,
+              line: stoppedReading,
+            });
+            return yield* link.send({
+              type: "start-failed",
+              plugin: event.plugin,
+              run: event.run,
+              reason: stoppedReading,
+            });
           }
         }
       });
 
-    yield* Effect.forever(
-      Queue.take(link.incoming).pipe(Effect.flatMap(handle)),
+    yield* Queue.take(link.incoming).pipe(
+      Effect.flatMap((request) => Queue.offer(events, request)),
+      Effect.forever,
+      Effect.catchIf(Cause.isDone, () => Queue.end(events)),
+      Effect.forkScoped,
     );
+
+    yield* Effect.forever(Queue.take(events).pipe(Effect.flatMap(handle)));
   }).pipe(Effect.catchIf(Cause.isDone, () => Effect.void));

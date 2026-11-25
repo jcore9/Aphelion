@@ -31,6 +31,7 @@ describe("the plugin lifecycle", () => {
     expect(state).toEqual({ state: "running", run: 1, crashes: 0, since: 0 });
     expect(commands).toEqual([
       { type: "spawn", run: 1 },
+      { type: "arm", run: 1, deadline: "launch", ms: policy.launchMs },
       { type: "initialize" },
       { type: "arm", run: 1, deadline: "handshake", ms: policy.handshakeMs },
     ]);
@@ -132,9 +133,49 @@ describe("the plugin lifecycle", () => {
     expect(commands).toContainEqual({ type: "kill" });
   });
 
+  it("arms the launch deadline when the spawn command goes out", () => {
+    expect(play([{ type: "start" }]).commands).toEqual([
+      { type: "spawn", run: 1 },
+      { type: "arm", run: 1, deadline: "launch", ms: policy.launchMs },
+    ]);
+  });
+
+  it("counts one crash and stops the run when the launch deadline passes", () => {
+    const { state, commands } = play([
+      { type: "start" },
+      { type: "timer", run: 1, deadline: "launch" },
+    ]);
+    expect(state).toMatchObject({ state: "crashed", run: 1, crashes: 1 });
+    expect(commands).toContainEqual({ type: "kill" });
+    expect(commands).toContainEqual({
+      type: "arm",
+      run: 1,
+      deadline: "retry",
+      ms: policy.firstRetryMs,
+    });
+  });
+
+  it("ignores the launch deadline once the plugin has launched", () => {
+    const { state, commands } = play([
+      { type: "start" },
+      { type: "spawned", run: 1 },
+      { type: "timer", run: 1, deadline: "launch" },
+    ]);
+    expect(state).toMatchObject({ state: "starting", phase: "handshaking" });
+    expect(commands).not.toContainEqual({ type: "kill" });
+  });
+
+  it("ignores the handshake deadline while the plugin is still launching", () => {
+    const { state } = play([
+      { type: "start" },
+      { type: "timer", run: 1, deadline: "handshake" },
+    ]);
+    expect(state).toMatchObject({ state: "starting", phase: "launching" });
+  });
+
   it("starts the handshake deadline when initialize is sent, not at launch", () => {
     const launched = play([{ type: "start" }]);
-    expect(launched.commands).toEqual([{ type: "spawn", run: 1 }]);
+    expect(launched.commands).toContainEqual({ type: "spawn", run: 1 });
     expect(
       step(launched.state, { type: "spawned", run: 1 }, policy).commands,
     ).toContainEqual({
@@ -238,6 +279,7 @@ describe("the plugin lifecycle", () => {
     };
     expect(step(stopped, { type: "start" }, policy).state).toEqual({
       state: "starting",
+      phase: "launching",
       run: 5,
       crashes: 0,
     });

@@ -208,6 +208,7 @@ const startRunner = (
             logs.push(JSON.parse(line) as Record<string, unknown>),
         }),
         policy: {
+          launchMs: 10_000,
           handshakeMs: 10_000,
           graceMs: 200,
           firstRetryMs: 10_000,
