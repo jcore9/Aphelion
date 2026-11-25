@@ -30,6 +30,8 @@ export interface RunnerOptions {
 
 export const maxLogLinesPerMinute = 1000;
 
+const utf8Bytes = (text: string) => new TextEncoder().encode(text).byteLength;
+
 export const lineTooLong =
   "the plugin wrote a line longer than 1 MiB, and the runner dropped it";
 export const stoppedReading =
@@ -157,7 +159,7 @@ export const runRunner = (
           yield* entry.process
             .write(line)
             .pipe(Effect.timeout(options.inputDeadline));
-          entry.pendingBytes -= line.length;
+          entry.pendingBytes -= utf8Bytes(line);
         }
       }).pipe(Effect.catchTag("TimeoutError", () => fault(plugin, entry)));
 
@@ -246,7 +248,7 @@ export const runRunner = (
             const entry = live.get(request.plugin);
             if (entry?.run !== request.run) return;
             if (!(yield* Queue.offer(entry.inbox, request.line))) return;
-            entry.pendingBytes += request.line.length;
+            entry.pendingBytes += utf8Bytes(request.line);
             if (entry.pendingBytes > maxPendingInputBytes) {
               yield* fault(request.plugin, entry);
             }
