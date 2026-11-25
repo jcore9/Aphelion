@@ -9,6 +9,7 @@ import type {
   PluginIO,
   ServerPlugin,
 } from "./plugin.ts";
+import { lineQueue } from "./line-queue.ts";
 import { serve } from "./runtime.ts";
 import type { SecretReference } from "./secret-backend.ts";
 import {
@@ -108,50 +109,6 @@ function serverManifest(data: unknown): ServerManifest {
     throw new Error("the manifest has no server part");
   }
   return parsed.manifest;
-}
-
-function lineQueue() {
-  const queued: string[] = [];
-  let waiting: ((next: IteratorResult<string, undefined>) => void) | undefined;
-  let ended = false;
-  const end = () => {
-    ended = true;
-    waiting?.({ done: true, value: undefined });
-    waiting = undefined;
-  };
-  const iterator: AsyncIterator<string, undefined> = {
-    next: () => {
-      const line = queued.shift();
-      if (line !== undefined)
-        return Promise.resolve({ done: false, value: line });
-      if (ended) return Promise.resolve({ done: true, value: undefined });
-      return new Promise((resolve) => {
-        waiting = resolve;
-      });
-    },
-    return: () => {
-      end();
-      return Promise.resolve({ done: true, value: undefined });
-    },
-  };
-  const pushLine = (line: string) => {
-    if (ended) return;
-    if (waiting) {
-      const resolve = waiting;
-      waiting = undefined;
-      resolve({ done: false, value: line });
-    } else {
-      queued.push(line);
-    }
-  };
-  return {
-    push: (message: unknown) => {
-      pushLine(JSON.stringify(message));
-    },
-    pushLine,
-    end,
-    input: { [Symbol.asyncIterator]: () => iterator },
-  };
 }
 
 function adoptLater() {
@@ -350,8 +307,13 @@ export function createTestHost(manifestData: unknown): TestHost {
 
 export {
   fakeAdapter,
+  runTurn,
+  startAdapter,
+  type AdapterHarness,
+  type AdapterReply,
   type FakeAdapter,
   type FakeScript,
   type FakeStep,
+  type TurnRun,
 } from "./adapter-testing.ts";
 export { checkStream, type StreamViolation } from "./adapter-check.ts";

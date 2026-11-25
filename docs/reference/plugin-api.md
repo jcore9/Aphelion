@@ -547,6 +547,22 @@ type RpcMessage =
     };
 ```
 
+### `RunAdapterOptions`
+
+What `runAdapter` can be told.
+
+```ts
+interface RunAdapterOptions {
+  readonly decider?: Decider;
+  readonly cancelGraceMs?: number;
+  readonly decisionDeadlineMs?: number;
+}
+```
+
+- `decider`: Answers permission requests. The default is `denyAll`.
+- `cancelGraceMs`: How long a cancelled turn has to end by itself before the runtime ends it with `cancelled`, in milliseconds. The default is 5000.
+- `decisionDeadlineMs`: How long the decider has to answer, in milliseconds. After that the request is denied with reason `deadline`. The default is no deadline.
+
 ### `SecretBackend`
 
 What a secret backend plugin implements for the schemes it lists in `contributes.secretSchemes`. The deployed server doesn't call secret backends yet.
@@ -1116,6 +1132,20 @@ const rpcMessageSchema: z.ZodType<
 >;
 ```
 
+### `runAdapter`
+
+Runs a bot adapter on the given lines until the bot runner sends `shutdown` or closes its input. Most adapters call `mainAdapter` instead.
+The runtime numbers events, runs one turn at a time, checks every event with Zod before it sends it, settles each permission request exactly once, and cancels a turn that doesn't end.
+It rejects when writing a line fails or when the adapter's `open` fails.
+
+```ts
+function runAdapter(
+  adapter: BotAdapter,
+  io: PluginIO,
+  options?: RunAdapterOptions,
+): Promise<void>;
+```
+
 ### `secretsUseParams`
 
 The Zod schema for the params of `secrets.use`. The operation name is at most 128 characters, and the reference at most 1024.
@@ -1272,6 +1302,22 @@ function runPlugin(plugin: ServerPlugin, io: PluginIO): Promise<void>;
 
 ## `@aphelion/plugin-sdk/stdio`
 
+### `RunAdapterOptions`
+
+What `runAdapter` can be told.
+
+```ts
+interface RunAdapterOptions {
+  readonly decider?: Decider;
+  readonly cancelGraceMs?: number;
+  readonly decisionDeadlineMs?: number;
+}
+```
+
+- `decider`: Answers permission requests. The default is `denyAll`.
+- `cancelGraceMs`: How long a cancelled turn has to end by itself before the runtime ends it with `cancelled`, in milliseconds. The default is 5000.
+- `decisionDeadlineMs`: How long the decider has to answer, in milliseconds. After that the request is denied with reason `deadline`. The default is no deadline.
+
 ### `main`
 
 Runs a plugin on standard input and output, and exits the process when the plugin stops, with code 0, or 1 after an error.
@@ -1281,7 +1327,60 @@ It drops a line from the host that is longer than 1 MiB, and logs that it did.
 function main(plugin: ServerPlugin): void;
 ```
 
+### `mainAdapter`
+
+Runs a bot adapter on standard input and output, and exits the process when the adapter stops, with code 0, or 1 after an error.
+It drops a line from the bot runner that is longer than 1 MiB, and logs that it did.
+
+```ts
+function mainAdapter(adapter: BotAdapter, options?: RunAdapterOptions): void;
+```
+
 ## `@aphelion/plugin-sdk/testing`
+
+### `AdapterHarness`
+
+A fake bot runner that talks to an adapter's runtime over JSON lines, and keeps what it receives.
+
+```ts
+interface AdapterHarness {
+  readonly events: readonly AdapterEnvelope[];
+  readonly logs: readonly string[];
+  readonly problems: readonly string[];
+  readonly done: Promise<void>;
+  initialize(resume?: string | null): Promise<AdapterReply>;
+  startTurn(turn: string, text: string): Promise<AdapterReply>;
+  cancel(turn: string): Promise<AdapterReply>;
+  shutdown(): Promise<AdapterReply>;
+  untilEvent(
+    match: (event: AdapterEnvelope) => boolean,
+  ): Promise<AdapterEnvelope>;
+}
+```
+
+- `events`: The events that the adapter sent, in order.
+- `logs`: The messages that the runtime logged.
+- `problems`: Lines the runtime sent that the harness couldn't read, such as an event that fails its schema. A good test leaves this empty.
+- `done`: Settles when the runtime stops: it resolves after `shutdown` and rejects when the runtime fails.
+- `initialize`: Sends `initialize` for a bot called `bot-1` in the folder `/work`, with no session to resume unless `resume` says otherwise.
+- `startTurn`: Sends `turn.start`. The reply comes when the runtime accepts the turn, not when the turn ends.
+- `cancel`: Sends `turn.cancel`.
+- `shutdown`: Sends `shutdown` and waits for the reply.
+- `untilEvent`: Resolves with the first event that `match` accepts, including one that has arrived already.
+
+### `AdapterReply`
+
+The bot adapter's reply to a request, which is a result or an error.
+
+```ts
+type AdapterReply =
+  | {
+      readonly result: unknown;
+    }
+  | {
+      readonly error: RpcError;
+    };
+```
 
 ### `CallOutcome`
 
@@ -1447,6 +1546,24 @@ interface TestHost {
 - `logs`: The messages that the plugin and the SDK logged, in order.
 - `calls`: The requests that the plugin sent, with the answers, in the order the test host answered them.
 
+### `TurnRun`
+
+What `runTurn` returns.
+
+```ts
+interface TurnRun {
+  readonly reply: AdapterReply;
+  readonly events: readonly AdapterEnvelope[];
+  readonly logs: readonly string[];
+  readonly problems: readonly string[];
+}
+```
+
+- `reply`: The reply to `turn.start`. An error reply means the runtime refused the turn, and then nothing else ran.
+- `events`: Every event that the adapter sent, in order.
+- `logs`: The messages that the runtime logged.
+- `problems`: Lines the harness couldn't read.
+
 ### `checkStream`
 
 Checks the events of one bot process against the seven rules of [the bot adapter reference](bot-adapters.md#rules-a-stream-follows).
@@ -1470,6 +1587,29 @@ Makes an adapter that runs `script`. Its provider is `fake` unless `provider` sa
 
 ```ts
 function fakeAdapter(script: FakeScript, provider?: string): FakeAdapter;
+```
+
+### `runTurn`
+
+Runs one turn the way the bot runner does: `initialize`, `turn.start`, waiting for `turn.end`, then `shutdown`.
+`turn` is `t1` unless the options say otherwise, and `text` is `hello`.
+
+```ts
+function runTurn(
+  adapter: BotAdapter,
+  options?: RunAdapterOptions & { turn?: string; text?: string },
+): Promise<TurnRun>;
+```
+
+### `startAdapter`
+
+Starts the adapter's runtime with a fake bot runner on the other end of its lines.
+
+```ts
+function startAdapter(
+  adapter: BotAdapter,
+  options?: RunAdapterOptions,
+): AdapterHarness;
 ```
 
 ## Files

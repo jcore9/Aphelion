@@ -1,3 +1,4 @@
+export { runAdapter, type RunAdapterOptions } from "./adapter-runtime.ts";
 export {
   adapterApiVersion,
   adapterEnvelope,
