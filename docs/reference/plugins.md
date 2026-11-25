@@ -89,7 +89,7 @@ A handler that still runs after 3 seconds isn't stopped. The SDK logs `the handl
 | --- | --- | --- |
 | `events.subscribe` | `{ "event": "<name>" }` | `{}`. The error `-32001 Not granted` if the event isn't in your manifest's `permissions.events` or the owner hasn't granted it. |
 | `network.get` | `{ "url": "https://api.example.com/path" }` | `{ "status": 200, "body": "..." }`. The destination must be in `permissions.network` and granted. |
-| `secrets.use` | `{ "operation": "<name>", "reference": "<secret reference>" }` | `{}` after the host completes the operation. On the deployed host it never succeeds yet: `-32001 Not granted` without a grant for the secret reference, and `-32002` with one, because no operation is registered. The test host can succeed when a test registers an operation. |
+| `secrets.use` | `{ "operation": "<name>", "reference": "<secret reference>" }` | `{}` after the host completes the operation. On the deployed host it never succeeds yet. It returns `-32001 Not granted` without a grant for the secret reference, and `-32002` with one, because no operation is registered. The test host can succeed when a test registers an operation. |
 
 Subscriptions last until the process exits. After a restart, subscribe again. Network and secret operations require a running server part. Each plugin can have one such operation in progress at a time.
 
@@ -108,7 +108,7 @@ Subscriptions last until the process exits. After a restart, subscribe again. Ne
 
 ### Secrets
 
-Your plugin asks for a named operation with `secrets.use`. The host chooses the destination and keeps both the secret value and the upstream response. The current server registers no operations, so `secrets.use` never succeeds on the deployed host. Without a grant for the secret reference it returns `-32001`; with one, it returns `-32002`. `createTestHost` can run an operation that a test registers, so a test can see the call succeed where the server refuses it. The secrets broker belongs to [#104](https://github.com/jcore9/Aphelion/issues/104).
+Your plugin asks for a named operation with `secrets.use`. The host chooses the destination and keeps both the secret value and the upstream response. The current server registers no operations, so `secrets.use` never succeeds on the deployed host. Without a grant for the secret reference it returns `-32001`. With a grant it returns `-32002`. `createTestHost` can run an operation that a test registers, so a test can see the call succeed where the server refuses it. The secrets broker belongs to [#104](https://github.com/jcore9/Aphelion/issues/104).
 
 The host also refuses to send any message that holds a [`Secret`](secrets.md), because a `Secret` throws when it is turned into JSON. The event is then sent to no plugin.
 

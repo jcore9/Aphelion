@@ -61,13 +61,13 @@ export interface HostCall {
 }
 
 /**
- * A fake host for a plugin's tests. It checks grants, request shapes and secret operations the way the real host does. Network replies are fixtures from `respondToGet`, not real requests: it does no DNS lookup, public-address check or TLS.
+ * A fake host for a plugin's tests. It checks grants, request shapes and secret operations the way the real host does. Network replies are fixtures from `respondToGet`, not real requests. It does no DNS lookup, public-address check or TLS.
  * Unlike the real host, it can run secret operations that a test registers with `registerSecretOperation`.
  */
 export interface TestHost {
   /** Sets what the owner granted, replacing earlier grants. A grant counts only when the manifest also lists the permission. */
   setGrants(grants: readonly Grant[]): void;
-  /** Sets the fixture reply to `network.get` for one URL; nothing is fetched. A URL with no reply, a reply that takes more than 5 seconds, and a body larger than 64 KiB fail with `Operation failed`. */
+  /** Sets the fixture reply to `network.get` for one URL. Nothing is fetched. A URL with no reply, a reply that takes more than 5 seconds, and a body larger than 64 KiB fail with `Operation failed`. */
   respondToGet(url: string, respond: () => MaybePromise<NetworkReply>): void;
   /** Adds a named operation for `secrets.use`. While none is registered, `secrets.use` with a granted reference fails with error `-32002`. */
   registerSecretOperation(name: string, operation: FakeSecretOperation): void;

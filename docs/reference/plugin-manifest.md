@@ -49,7 +49,7 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
 | `permissions.network` | list of strings | no | Lowercase hostnames the plugin connects to, such as `api.github.com`, at most 253 characters. No scheme, port or path. Needs a server part. |
 | `permissions.uiSlots` | list of strings | no | UI slots the plugin shows content in. Each is words joined by dots, such as `bot.sidebar`, at most 128 characters. Needs a client part. |
 | `contributes.secretSchemes` | list of strings | no | Secret reference schemes the plugin resolves as a secret backend, such as `op`, at most 32 characters. The values it returns go only to the secrets broker. Needs a server part. See [Secret backends](#secret-backends). |
-| `contributes.screens` | list of objects | no | Full pages the plugin declares for the app, each with an entry in the app's menu. Declared only: the app doesn't show them yet. Needs a client part. See [Screens](#screens). |
+| `contributes.screens` | list of objects | no | Full pages the plugin declares for the app, each with an entry in the app's menu. The app doesn't show them yet. Needs a client part. See [Screens](#screens). |
 | `contributes.screens[].id` | string | yes, in a screen | The screen's id, with the same rules as the plugin `id`. Two screens in one plugin can't share an id. |
 | `contributes.screens[].title` | string | yes, in a screen | The screen's name in the menu, such as `Issues and PRs`, at most 64 characters. Visible text only, with the same characters as a secret reference, and no space at the start or end. It needs at least one letter, digit, punctuation mark or symbol, so a title made only of combining marks, such as `U+FE0F`, is refused. |
 | `contributes.screens[].icon` | string | no | The icon next to the title, from the app's icon set, such as `git-pull-request`, at most 64 characters. Lowercase letters and digits in words joined by single hyphens, starting with a letter. |
@@ -89,7 +89,7 @@ The `PluginManifest` type describes a manifest that `parsePluginManifest` accept
 
 ## Screens
 
-A screen is a full page that a plugin declares for the app, with its own entry in the app's menu. The server doesn't show screens yet; the planned client shell (M5) will, in the web app, the desktop app and the phone app. For example, a GitHub plugin could add a screen that lists your issues and pull requests.
+A screen is a full page that a plugin declares for the app, with its own entry in the app's menu. The app doesn't show screens yet. The client shell planned for M5 will show them in the web app, the desktop app and the phone app. For example, a GitHub plugin could add a screen that lists your issues and pull requests.
 
 - **The client part draws it**, in its sandbox, like everything else a client part shows. The sandbox has no network access ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
 - **The server part fetches its data.** In the GitHub example, the server part has a granted `network` permission for `api.github.com` and asks the host to make each call with the GitHub token, so the plugin never sees the token. It sends the results to the screen through the app's messages.

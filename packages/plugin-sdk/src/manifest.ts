@@ -119,18 +119,18 @@ const permissions = {
   network: list(host, "Hostnames the plugin connects to."),
   uiSlots: list(
     dottedName,
-    "UI slots the plugin plans to show content in. Declared only: the server doesn't act on it yet. Once it does, the owner grants each one, because content there can show what is in a chat.",
+    "UI slots the plugin plans to show content in. The server doesn't act on it yet. Once it does, the owner grants each one, because content there can show what is in a chat.",
   ),
 };
 
 const contributions = {
   secretSchemes: list(
     scheme,
-    "Secret reference schemes the plugin would resolve as a secret backend. Declared only: no server code runs secret backends yet. The values it returns would go only to the secrets broker.",
+    "Secret reference schemes the plugin would resolve as a secret backend. No server code runs secret backends yet. The values it returns would go only to the secrets broker.",
   ),
   screens: list(
     screen,
-    "Full pages the plugin's client part would draw, each with an entry in the app's menu. Declared only: the server doesn't add menu entries yet. Once it does, they will appear when the plugin is installed, with no grant.",
+    "Full pages the plugin's client part would draw, each with an entry in the app's menu. The app doesn't add menu entries yet. Once it does, they will appear when the plugin is installed, with no grant.",
   ),
 };
 
