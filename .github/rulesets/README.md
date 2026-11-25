@@ -74,6 +74,8 @@ Applying them needs the Admin role, so the owner runs these steps. Run the comma
 
    The four rules are `deletion`, `non_fast_forward`, `pull_request` and `required_status_checks`.
 
+8. Tell the bot you're done. It opens two small test pull requests. One touches no owner path, and the bot merges it. The other touches an owner path, and the bot only checks that GitHub blocks it until you approve, then closes it.
+
 ## Update a ruleset
 
 To apply a changed file, replace the existing ruleset by its ID. Don't create it a second time.

@@ -55,5 +55,6 @@ We measured that with 0 approvals and "require review from code owners", the bot
 - The owner runs the one-time steps in [the rulesets README](https://github.com/jcore9/Aphelion/blob/main/.github/rulesets/README.md): replace the `main` ruleset, add the tag ruleset, delete the `dev` ruleset and the `dev` branch, and set the merge and workflow settings. Until then, nobody merges.
 - `Closes #N` in a pull request now closes the issue by itself, because every pull request goes into the default branch.
 - The `dev` ruleset, the hotfix flow and the merge-commit rule go. [Branch protection](../branch-protection.md), [the contributing guide](https://github.com/jcore9/Aphelion/blob/main/CONTRIBUTING.md), the plan and the install and release guides change with this record.
+- Links to files on `dev` would break when the branch is deleted. This change points the docs, the generated reference pages and the code comments at `main`. A script did the same for the 132 issue bodies that linked to `dev`, on 2026-11-25. Old pull request descriptions and comments keep their `dev` links.
 - The owner reviews the bot-merged work at the end of each milestone, before approving the release pull request.
 - Revisit if a bot-merged change causes a bad release, or when Aphelion's own manager bots take over the merging.
