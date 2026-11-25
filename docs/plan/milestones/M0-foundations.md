@@ -409,14 +409,14 @@ M0 built the base: the server, the plugin runner, the install and backup guides,
 
 ### What went well
 
-- A second review by an AI from another vendor ("cross-family review") caught real defects, such as the missing firewall check and the wrong version number.
+- Reviews by an AI from another vendor ("cross-family review") caught real defects, such as the wrong version number and an installer that accepts a damaged recovery key.
 - The exit test on real machines found a firewall problem that unit tests could not.
 - Decision records kept choices written down. Retiring the `dev` branch for one `main` ([0062](../../decisions/0062-one-main-branch.md)) removed a merge step.
 - Delegates working in separate worktrees (private copies of the repository) kept parallel work apart.
 
 ### What went badly
 
-- The 8 GB dev box could not run more than two delegates at once or a full lint (the style and rule checker). Lint left on that box slowed everything.
+- The 8 GB dev box could not run more than two delegates at once or a full lint (the style and rule checker). One full lint there took over 10 minutes and pushed the box into swap.
 - PR bodies were too long. The owner found them wordy.
 - The version constant still said `0.0.0` at the exit test, and the firewall problem was found only then. Both became release blockers.
 - One check (the plugin-template archive test) failed once without a known cause.
