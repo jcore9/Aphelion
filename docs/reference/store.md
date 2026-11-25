@@ -28,12 +28,12 @@ Every connection uses WAL mode, enforces foreign keys and waits up to 5 seconds 
 
 `openSqlite` takes the path of a database file and nothing else. It throws `SqlitePathError`, before it creates anything on disk, for:
 
-- the empty string, or a name made only of spaces, which SQLite opens as a temporary database;
-- a name with spaces at the start or end, because Bun trims them, so `" :memory: "` would become `:memory:`;
-- `:memory:`, SQLite's name for a database held in memory;
-- any name that starts with `file:`.
+- The empty string, or a name made only of spaces. SQLite opens these as a temporary database.
+- A name with spaces at the start or end. Bun trims them, so `" :memory: "` would become `:memory:`.
+- `:memory:`, SQLite's name for a database held in memory.
+- Any name that starts with `file:`.
 
-Bun opens a `file:` name as an ordinary file today, so the last rule is a precaution. SQLite can also read such a name as a URI, a web-address-style name that carries options such as "keep this in memory", and refusing the prefix means that reading can never apply. A file whose name starts with `file:` still opens when you write it as `./file:aphelion.db` or as a full path. The server always stores its data in a file, and an in-memory database can't use WAL mode.
+Bun opens a `file:` name as an ordinary file today, so the last rule is a precaution. SQLite can also read such a name as a URI, a web-address-style name that carries options such as "keep this in memory". Refusing the prefix means that reading can never apply. A file whose name starts with `file:` still opens when you write it as `./file:aphelion.db` or as a full path. The server always stores its data in a file, and an in-memory database can't use WAL mode.
 
 ## Add a migration
 
