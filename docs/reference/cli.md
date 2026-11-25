@@ -1,6 +1,6 @@
 # The aphelion command
 
-`aphelion` is one program. It starts the server, checks the config, and manages device tokens. In the container it is the compiled binary that the image runs with `--headless` ([decision 0016](../decisions/0016-one-docker-container.md)). The desktop app doesn't bundle it ([decision 0017](../decisions/0017-desktop-remote-only.md)). [Decision 0048](../decisions/0048-cli-on-node-parseargs.md) explains how the command line is read.
+`aphelion` is one program. It starts the server, checks the config, and manages device tokens. In the container it is the compiled binary that the image runs with `--headless` ([decision 0016](../decisions/0016-one-docker-container.md)). The desktop app doesn't bundle it ([decision 0017](../decisions/0017-desktop-remote-only.md)). [Decision 0048](../decisions/0048-cli-on-node-parseargs.md) explains how the command line is read. On the host, [`sudo aphelion`](host-command.md) runs the `device` commands inside the container for you.
 
 ## Commands
 

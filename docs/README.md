@@ -42,6 +42,7 @@ Each spike answers its questions in writing before anything builds on it. Protot
 ## Reference
 
 - [The aphelion command](reference/cli.md): `--headless`, `--version`, `config check` and the `device` commands, their options, output and exit codes.
+- [The host command](reference/host-command.md): `sudo aphelion status`, `device` and `check` on the server, what each prints and its exit codes.
 - [Config reference](reference/config.md): the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md): the `Database` interface, and how to add a migration.
 - [Logging and the audit log](reference/logging.md): the log format, the redaction rules and how to add one, and the append-only audit table.

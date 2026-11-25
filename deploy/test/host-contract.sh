@@ -220,3 +220,128 @@ host/preflight >/dev/null 2>&1 || status=$?
 [[ $status == 1 ]] || fail "preflight went on when reading the ufw files stopped early"
 pass "preflight reads the ufw files as sh does: quotes, comments, the last line, command prefixes and ENABLED=YES, and refuses when sh stops early"
 rm -f /etc/ufw/ufw.conf /etc/default/ufw
+
+# The tests below need root-owned files, so hide the bind mount under a copy that root owns.
+cd /
+copy=$(mktemp -d)
+cp -a /opt/aphelion/deploy/. "$copy/"
+mount -t tmpfs tmpfs /opt/aphelion/deploy
+cp -a "$copy/." /opt/aphelion/deploy/
+chown -R root:root /opt/aphelion
+chmod -R go-w /opt/aphelion
+rm -rf "$copy"
+printf 'APHELION_TAILNET_ADDRESS=100.100.5.1\n' >/opt/aphelion/deploy/.env
+fakebin=$(mktemp -d)
+cat >"$fakebin/systemctl" <<'FAKE'
+#!/bin/bash
+case $1 in
+  is-enabled) echo enabled ;;
+  is-active) echo "${FAKE_SERVICE:-active}"; [[ ${FAKE_SERVICE:-active} == active ]] ;;
+esac
+FAKE
+cat >"$fakebin/curl" <<'FAKE'
+#!/bin/bash
+[[ ${FAKE_CONTAINER:-up} == up ]] || exit 7
+echo '{"status":"ok"}'
+FAKE
+cat >"$fakebin/docker" <<'FAKE'
+#!/bin/bash
+case " $* " in
+  *" ps "*)
+    [[ ${FAKE_CONTAINER:-up} == up ]] && echo fake-container-id
+    exit 0 ;;
+  *" --user harness aphelion aphelion device "*)
+    echo "the-token"
+    echo "Added device" >&2
+    exit "${FAKE_DEVICE_EXIT:-0}" ;;
+  *" --user aphelion-bot aphelion "*)
+    all="$*"
+    rest=${all#*--user aphelion-bot aphelion }
+    if [[ $rest == "sh -c "* ]]; then
+      tool=${rest##* }
+      [[ " ${FAKE_TOOLS:-} " == *" $tool "* ]]
+      exit
+    fi
+    echo "SECRET-FROM-THE-TOOL"
+    [[ " ${FAKE_SIGNED_IN:-} " == *" ${rest%% *} "* ]]
+    exit ;;
+esac
+FAKE
+chmod +x "$fakebin"/*
+as_root_aphelion() { PATH=$fakebin:$PATH /opt/aphelion/deploy/host/aphelion "$@"; }
+
+(umask 077 && printf '%s\n' "${key}Q" | systemd-creds encrypt --name=bootstrap - "$credential" 2>/dev/null)
+link=/usr/local/bin/aphelion
+export PATH=$fakebin:$PATH
+/opt/aphelion/deploy/host/install >/dev/null || fail "install failed with a host that has a bootstrap key"
+[[ $(readlink "$link") == /opt/aphelion/deploy/host/aphelion ]] || fail "install didn't link $link to the host command"
+before=$(stat -c '%i %Z' "$link")
+/opt/aphelion/deploy/host/install >/dev/null || fail "a second install failed"
+[[ $(stat -c '%i %Z' "$link") == "$before" ]] || fail "a second install changed the link"
+rm "$link"
+printf '#!/bin/sh\n' >"$link"
+if /opt/aphelion/deploy/host/install >/dev/null 2>&1; then fail "install replaced a file that isn't its link"; fi
+[[ $(cat "$link") == '#!/bin/sh' ]] || fail "install changed a file that isn't its link"
+rm "$link"
+ln -s /nowhere "$link"
+/opt/aphelion/deploy/host/install >/dev/null || fail "install failed over a link to another place"
+[[ $(readlink "$link") == /opt/aphelion/deploy/host/aphelion ]] || fail "install left a link that points elsewhere"
+pass "install links the host command into /usr/local/bin, changes nothing on a second run, and keeps a file it doesn't own"
+
+status=0
+error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" status 2>&1 >/dev/null) || status=$?
+[[ $status == 2 && $error == "Run it with sudo: sudo aphelion status" ]] ||
+  fail "the command didn't refuse a user other than root with status 2: $status $error"
+help=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" --help) || fail "--help needs root"
+[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* ]] ||
+  fail "--help doesn't list the commands: $help"
+pass "the command refuses a user other than root with status 2, and --help works for everyone"
+
+for bad in "" bogus "status extra" device "device frobnicate" "check now"; do
+  status=0
+  # shellcheck disable=SC2086
+  error=$(as_root_aphelion $bad 2>&1 >/dev/null) || status=$?
+  [[ $status == 2 && $error == "usage:"* ]] ||
+    fail "aphelion '$bad' didn't print usage and exit 2: $status $error"
+done
+pass "an unknown command or a wrong number of words prints the usage and exits 2"
+
+export FAKE_TOOLS="claude codex grok" FAKE_SIGNED_IN=claude
+status=0
+out=$(as_root_aphelion status 2>&1) || status=$?
+expected=$(printf '%s\n' \
+  "service: enabled, running" \
+  "container: running" \
+  "health: ok" \
+  "claude: signed in" \
+  "codex: not signed in, or the check failed" \
+  "grok: installed, sign-in state unknown")
+[[ $status == 0 && $out == "$expected" ]] || fail "status printed something else (exit $status): $out"
+[[ $out != *SECRET-FROM-THE-TOOL* ]] || fail "status printed the tool's own output"
+pass "status lists each installed AI tool with its sign-in state and never prints the tool's output"
+
+FAKE_TOOLS=codex FAKE_SIGNED_IN=codex
+out=$(as_root_aphelion status) || fail "status failed with only codex installed"
+[[ $out == *"codex: signed in"* && $out != *claude* && $out != *grok* ]] ||
+  fail "status listed a tool that isn't installed: $out"
+FAKE_TOOLS=""
+out=$(as_root_aphelion status) || fail "status failed with no AI tool installed"
+[[ $out == *"AI tools: none installed"* ]] || fail "status didn't say that no AI tool is installed: $out"
+pass "status lists only the installed tools, or says none is installed"
+
+status=0
+out=$(FAKE_CONTAINER=down as_root_aphelion status 2>&1) || status=$?
+[[ $status == 1 && $out == *"container: not running"* && $out == *"health: no answer"* ]] ||
+  fail "status didn't exit 1 with the container stopped (exit $status): $out"
+status=0
+out=$(FAKE_SERVICE=inactive as_root_aphelion status 2>&1) || status=$?
+[[ $status == 1 && $out == *"service: enabled, not running (inactive)"* ]] ||
+  fail "status didn't exit 1 with the service stopped (exit $status): $out"
+pass "status exits 1 when the container or the service isn't running"
+
+status=0
+stdout=$(FAKE_DEVICE_EXIT=3 as_root_aphelion device add laptop --days 30 2>/dev/null) || status=$?
+[[ $status == 3 && $stdout == the-token ]] || fail "device add changed the exit code or the standard output ($status, $stdout)"
+stderr=$(as_root_aphelion device list 2>&1 >/dev/null)
+[[ $stderr == "Added device" ]] || fail "device list changed the standard error: $stderr"
+pass "device runs the server's command as harness and passes its output and exit code through"

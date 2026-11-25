@@ -396,6 +396,87 @@ if [[ -n ${APHELION_TEST_TAILNET_ADDRESS:-} ]]; then
   pass "the port answers on the tailnet address only"
 fi
 
+host_deploy=$scratch/host-deploy
+fakebin=$scratch/fakebin
+mkdir "$host_deploy" "$fakebin"
+printf 'APHELION_TAILNET_ADDRESS=%s\n' "$APHELION_TAILNET_ADDRESS" >"$host_deploy/.env"
+touch "$scratch/credential"
+cat >"$fakebin/systemctl" <<'FAKE'
+#!/bin/bash
+case $1 in
+  is-enabled) echo enabled ;;
+  is-active) echo active ;;
+esac
+FAKE
+cat >"$fakebin/iptables" <<'FAKE'
+#!/bin/bash
+[[ ${FAKE_FIREWALL:-present} == present ]]
+FAKE
+cat >"$fakebin/curl" <<'FAKE'
+#!/bin/bash
+address=$(docker inspect --format '{{(index .NetworkSettings.Networks "aphelion-contract").IPAddress}}' "$FAKE_CONTAINER")
+exec /usr/bin/curl "${@//$APHELION_TAILNET_ADDRESS/$address}"
+FAKE
+chmod +x "$fakebin"/*
+host_root=()
+if ((EUID != 0)); then
+  if unshare --user --map-root-user true 2>/dev/null; then
+    host_root=(unshare --user --map-root-user)
+  else
+    host_root=(sudo -n --preserve-env)
+  fi
+fi
+host_aphelion() {
+  APHELION_DEPLOY=$host_deploy APHELION_CREDENTIAL=${APHELION_CREDENTIAL:-$scratch/credential} FAKE_CONTAINER=$container \
+    COMPOSE_PROJECT_NAME=$project COMPOSE_FILE=$PWD/deploy/compose.yaml:$scratch/override.yaml \
+    "${host_root[@]}" env "PATH=$fakebin:$PATH" deploy/host/aphelion "$@"
+}
+
+device_err=$scratch/device.err
+token=$(host_aphelion device add contract-laptop --days 30 2>"$device_err") || fail "device add failed: $(cat "$device_err")"
+[[ $token =~ ^[^[:space:]]+$ ]] || fail "device add printed more than the token on standard output: $token"
+device_id=$(sed -n 's/^Added device "contract-laptop" with id \([0-9a-f]\{16\}\)\..*/\1/p' "$device_err")
+[[ -n $device_id ]] || fail "device add printed no device id: $(cat "$device_err")"
+listed=$(host_aphelion device list) || fail "device list failed"
+grep -qP "^$device_id\tactive\t\S+\t\"contract-laptop\"$" <<<"$listed" || fail "device list doesn't show the new device: $listed"
+revoked=$(host_aphelion device revoke "$device_id" 2>&1) || fail "device revoke failed: $revoked"
+[[ $revoked == "Revoked device $device_id." ]] || fail "device revoke printed something else: $revoked"
+grep -qP "^$device_id\trevoked\t" < <(host_aphelion device list) || fail "device list doesn't show the device as revoked"
+status=0
+refused=$(host_aphelion device revoke "$device_id" 2>&1) || status=$?
+[[ $status == 1 && $refused == "No active device has the id $device_id."* ]] ||
+  fail "revoking a revoked device didn't exit 1 with the server's message (exit $status): $refused"
+pass "device add prints only the token on standard output, and device list and revoke pass the server's output and exit codes through"
+
+status=0
+shown=$(host_aphelion status 2>&1) || status=$?
+[[ $status == 0 && $shown == $'service: enabled, running\ncontainer: running\nhealth: ok\nAI tools: none installed' ]] ||
+  fail "status printed something else (exit $status): $shown"
+pass "status shows the running service, container and health, and no AI tool"
+
+status=0
+checked=$(host_aphelion check 2>&1) || status=$?
+read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \2/p' <<<"$checked")
+[[ $status == 0 && -n $total && $passed == "$total" && $checked != *FAIL* ]] ||
+  fail "check didn't pass every check (exit $status): $checked"
+for name in "the service is enabled and running" "the container is running" "/health answers on the tailnet address" \
+  "config check accepts the Compose file" "the container is hardened" "the bootstrap credential exists" "the firewall chains exist"; do
+  grep -qx "ok    $name" <<<"$checked" || fail "check didn't print ok for: $name"
+done
+pass "check passes every check against the running container"
+
+status=0
+checked=$(APHELION_CREDENTIAL=$scratch/no-such-file FAKE_FIREWALL=missing host_aphelion check 2>&1) || status=$?
+[[ $status == 1 ]] || fail "check exited $status with a missing credential and no firewall chains"
+grep -qx "FAIL  the bootstrap credential exists: $scratch/no-such-file is missing. Run host/install." <<<"$checked" ||
+  fail "check didn't report the missing credential: $checked"
+grep -qx "FAIL  the firewall chains exist: the APHELION-FORWARD chain is missing. Restart the service to install it." <<<"$checked" ||
+  fail "check didn't report the missing firewall chains: $checked"
+read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \2/p' <<<"$checked")
+[[ $checked == *"ok    the container is hardened"* && -n $total && $passed == $((total - 2)) ]] ||
+  fail "check didn't still run the other checks and count two failures: $checked"
+pass "check reports each failed check with its cause, keeps going, and exits 1"
+
 started=$SECONDS
 "${compose[@]}" stop >/dev/null 2>&1
 [[ $(docker inspect --format '{{.State.ExitCode}}' "$container") == 0 ]] || fail "a clean stop exited non-zero"
@@ -404,6 +485,18 @@ for text in "the launcher is stopping" '"msg":"server stopping"'; do
   "${compose[@]}" logs --no-color 2>&1 | grep -F "$text" >/dev/null || fail "the stop never logged: $text"
 done
 pass "docker compose stop stops every process and exits 0"
+
+status=0
+shown=$(host_aphelion status 2>&1) || status=$?
+[[ $status == 1 && $shown == *"container: not running"* && $shown == *"health: no answer"* ]] ||
+  fail "status didn't exit 1 with the container stopped (exit $status): $shown"
+status=0
+checked=$(host_aphelion check 2>&1) || status=$?
+[[ $status == 1 ]] || fail "check exited $status with the container stopped"
+for name in "the container is running" "/health answers on the tailnet address" "the container is hardened"; do
+  grep -q "^FAIL  $name: " <<<"$checked" || fail "check didn't print FAIL for: $name"
+done
+pass "with the container stopped, status exits 1 and check fails the container, health and hardening checks"
 
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 sleep 1

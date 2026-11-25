@@ -4,6 +4,7 @@ set -euo pipefail
 readonly root=/opt/aphelion
 readonly unit=/etc/systemd/system/aphelion.service
 readonly credential=/etc/credstore.encrypted/aphelion-bootstrap
+readonly command_link=/usr/local/bin/aphelion
 
 if ((EUID != 0)); then
   echo "install: run this with sudo" >&2
@@ -21,6 +22,11 @@ for path in "$root" "$root/deploy" "$root/deploy/host"; do
 done
 if [[ ! -f $root/deploy/.env ]]; then
   echo "install: create $root/deploy/.env with APHELION_TAILNET_ADDRESS first" >&2
+  exit 1
+fi
+
+if [[ -e $command_link && ! -L $command_link ]]; then
+  echo "install: $command_link exists and isn't a link, so install leaves it alone. Move it away first." >&2
   exit 1
 fi
 
@@ -51,6 +57,9 @@ else
   echo "  sudo systemd-creds decrypt --name=bootstrap $credential -"
 fi
 install -o root -g root -m 0644 "$root/deploy/host/aphelion.service" "$unit"
+[[ $(readlink "$command_link" 2>/dev/null) == "$root/deploy/host/aphelion" ]] ||
+  ln -sfn "$root/deploy/host/aphelion" "$command_link"
 systemctl daemon-reload
 systemctl enable aphelion.service
 echo "install: aphelion.service is installed and enabled. Start it with: sudo systemctl start aphelion"
+echo "install: $command_link is the aphelion command. Try: sudo aphelion status"
