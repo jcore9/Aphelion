@@ -8,6 +8,167 @@ A `z.ZodType<T>` on this page is a [Zod](https://zod.dev/) schema. Its `parse` m
 
 ## `@aphelion/plugin-sdk`
 
+### `AdapterContext`
+
+What an adapter receives when the bot runner starts it.
+
+```ts
+interface AdapterContext {
+  readonly bot: {
+    readonly id: string;
+  };
+  readonly folder: string;
+  readonly resume: SessionRef | null;
+  decide(request: PermissionRequest): Promise<PermissionDecision>;
+  log(message: string): void;
+}
+```
+
+- `bot`: The bot the adapter runs for.
+- `folder`: The absolute path of the folder the vendor's CLI works in.
+- `resume`: The vendor session to resume, or `null` to start a new one.
+- `decide`: Asks whether a tool may run. The runtime puts `permission.request` and `permission.decision` on the stream, so the adapter reports nothing itself.
+  It always resolves. A request that is invalid, comes after the turn ended or after a cancel, or isn't answered in time resolves as `deny`.
+- `log`: Writes a message to the server's log. Never pass event payloads.
+
+### `AdapterEnvelope`
+
+One event on the wire, with its number and its turn.
+
+```ts
+type AdapterEnvelope = {
+  seq: number;
+  turn: (string & import("zod").$brand<"TurnId">) | null;
+  event:
+    | { type: "session"; ref: string & import("zod").$brand<"SessionRef"> }
+    | { type: "text.delta"; text: string }
+    | {
+        type: "tool.start";
+        call: string & import("zod").$brand<"ToolCallId">;
+        tool: string;
+        kind: "file.read" | "file.write" | "shell" | "web" | "other";
+      }
+    | {
+        type: "tool.end";
+        call: string & import("zod").$brand<"ToolCallId">;
+        outcome: "error" | "ok" | "denied" | "cancelled";
+      }
+    | {
+        type: "usage";
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheWriteTokens: number;
+        costUsd: number | null;
+      }
+    | {
+        type: "error";
+        code:
+          | "cli-not-found"
+          | "cli-exited"
+          | "signed-out"
+          | "rate-limited"
+          | "vendor"
+          | "adapter";
+      }
+    | {
+        type: "turn.end";
+        reason:
+          "error" | "denied" | "cancelled" | "completed" | "limit" | "refused";
+      }
+    | {
+        type: "permission.request";
+        request: string & import("zod").$brand<"PermissionRequestId">;
+        call: (string & import("zod").$brand<"ToolCallId">) | null;
+        tool: string;
+        kind: "file.read" | "file.write" | "shell" | "web" | "other";
+        pathCount: number;
+        hasCommand: boolean;
+      }
+    | {
+        type: "permission.decision";
+        request: string & import("zod").$brand<"PermissionRequestId">;
+        decision: "allow" | "deny";
+        by: "rule" | "policy" | "owner" | "default";
+        reason: string;
+      };
+};
+```
+
+### `AdapterEvent`
+
+An event that an adapter yields: `session`, `text.delta`, `tool.start`, `tool.end`, `usage`, `error` or `turn.end`.
+
+```ts
+type AdapterEvent =
+  | { type: "session"; ref: string & import("zod").$brand<"SessionRef"> }
+  | { type: "text.delta"; text: string }
+  | {
+      type: "tool.start";
+      call: string & import("zod").$brand<"ToolCallId">;
+      tool: string;
+      kind: "file.read" | "file.write" | "shell" | "web" | "other";
+    }
+  | {
+      type: "tool.end";
+      call: string & import("zod").$brand<"ToolCallId">;
+      outcome: "error" | "ok" | "denied" | "cancelled";
+    }
+  | {
+      type: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      costUsd: number | null;
+    }
+  | {
+      type: "error";
+      code:
+        | "cli-not-found"
+        | "cli-exited"
+        | "signed-out"
+        | "rate-limited"
+        | "vendor"
+        | "adapter";
+    }
+  | {
+      type: "turn.end";
+      reason:
+        "error" | "denied" | "cancelled" | "completed" | "limit" | "refused";
+    };
+```
+
+### `AdapterSession`
+
+One running conversation with the vendor's CLI.
+
+```ts
+interface AdapterSession {
+  turn(input: TurnInput, signal: AbortSignal): AsyncIterable<AdapterEvent>;
+  close?(): MaybePromise<void>;
+}
+```
+
+- `turn`: Runs one prompt and yields the turn's events in order, ending with exactly one `turn.end`.
+  `signal` aborts when the turn is cancelled or fails. The adapter stops the vendor's work, and may still yield `turn.end` and `tool.end`.
+  A `tool.end` may come after `turn.end`, from this stream or from a later turn's stream, for a call that is still running.
+- `close`: Closes the vendor's session. The runtime calls it once on shutdown.
+
+### `BotAdapter`
+
+What a bot tool implements: a function from one prompt to a stream of normalized events.
+
+```ts
+interface BotAdapter {
+  readonly provider: string;
+  open(context: AdapterContext): MaybePromise<AdapterSession>;
+}
+```
+
+- `provider`: The provider's name. It matches the bot's `provider` and the manifest's `contributes.botAdapter.provider`.
+- `open`: Opens a session. The runtime calls it once, when the bot runner sends `initialize`.
+
 ### `Cleanup`
 
 A function that `start` can return. The SDK calls it once when the plugin shuts down, and logs an error if it throws.
@@ -23,6 +184,17 @@ The names of the lists in a manifest's `contributes`.
 
 ```ts
 type ContributionKind = "secretSchemes" | "screens";
+```
+
+### `Decider`
+
+Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends.
+
+```ts
+type Decider = (
+  request: PermissionRequest,
+  signal: AbortSignal,
+) => MaybePromise<PermissionDecision>;
 ```
 
 ### `HostError`
@@ -91,12 +263,48 @@ interface NetworkReply {
 - `status`: The HTTP status code.
 - `body`: The response body as text. The host fails a response whose body is larger than 64 KiB.
 
+### `PermissionDecision`
+
+The answer to one permission request. It covers that request only, never a whole session.
+
+```ts
+type PermissionDecision = {
+  decision: "allow" | "deny";
+  by: "rule" | "policy" | "owner" | "default";
+  reason: string;
+};
+```
+
 ### `PermissionKind`
 
 The names of the lists in a manifest's `permissions`.
 
 ```ts
 type PermissionKind = "events" | "secrets" | "network" | "uiSlots";
+```
+
+### `PermissionRequest`
+
+What an adapter asks before a tool runs. `truncated` is true when the adapter cut a path list or a command to fit.
+
+```ts
+type PermissionRequest = {
+  request: string & import("zod").$brand<"PermissionRequestId">;
+  call: (string & import("zod").$brand<"ToolCallId">) | null;
+  tool: string;
+  kind: "file.read" | "file.write" | "shell" | "web" | "other";
+  paths: string[];
+  command: string | null;
+  truncated: boolean;
+};
+```
+
+### `PermissionRequestId`
+
+The id of one permission request.
+
+```ts
+type PermissionRequestId = string & import("zod").$brand<"PermissionRequestId">;
 ```
 
 ### `PluginContext`
@@ -373,6 +581,267 @@ interface ServerPlugin {
   If `start` throws or rejects, the plugin stops with that error.
   At shutdown the SDK waits for `start` to finish before it runs the cleanup that `start` returned.
 
+### `SessionRef`
+
+The vendor's id for a session, which the bot runner saves so the bot can resume it.
+
+```ts
+type SessionRef = string & import("zod").$brand<"SessionRef">;
+```
+
+### `StreamEvent`
+
+An event as it leaves the bot process.
+
+```ts
+type StreamEvent =
+  | { type: "session"; ref: string & import("zod").$brand<"SessionRef"> }
+  | { type: "text.delta"; text: string }
+  | {
+      type: "tool.start";
+      call: string & import("zod").$brand<"ToolCallId">;
+      tool: string;
+      kind: "file.read" | "file.write" | "shell" | "web" | "other";
+    }
+  | {
+      type: "tool.end";
+      call: string & import("zod").$brand<"ToolCallId">;
+      outcome: "error" | "ok" | "denied" | "cancelled";
+    }
+  | {
+      type: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      costUsd: number | null;
+    }
+  | {
+      type: "error";
+      code:
+        | "cli-not-found"
+        | "cli-exited"
+        | "signed-out"
+        | "rate-limited"
+        | "vendor"
+        | "adapter";
+    }
+  | {
+      type: "turn.end";
+      reason:
+        "error" | "denied" | "cancelled" | "completed" | "limit" | "refused";
+    }
+  | {
+      type: "permission.request";
+      request: string & import("zod").$brand<"PermissionRequestId">;
+      call: (string & import("zod").$brand<"ToolCallId">) | null;
+      tool: string;
+      kind: "file.read" | "file.write" | "shell" | "web" | "other";
+      pathCount: number;
+      hasCommand: boolean;
+    }
+  | {
+      type: "permission.decision";
+      request: string & import("zod").$brand<"PermissionRequestId">;
+      decision: "allow" | "deny";
+      by: "rule" | "policy" | "owner" | "default";
+      reason: string;
+    };
+```
+
+### `ToolCallId`
+
+The id of one tool call.
+
+```ts
+type ToolCallId = string & import("zod").$brand<"ToolCallId">;
+```
+
+### `ToolKind`
+
+What a tool does, in terms that don't depend on the vendor.
+
+```ts
+type ToolKind = "file.read" | "file.write" | "shell" | "web" | "other";
+```
+
+### `TurnId`
+
+The id of one turn, the bot's work on one prompt.
+
+```ts
+type TurnId = string & import("zod").$brand<"TurnId">;
+```
+
+### `TurnInput`
+
+The prompt the bot runner sends for one turn.
+
+```ts
+interface TurnInput {
+  readonly turn: TurnId;
+  readonly text: string;
+}
+```
+
+- `turn`: The turn's id.
+- `text`: The prompt, at most 256 KiB.
+
+### `adapterApiVersion`
+
+The bot adapter API version that this SDK runs, such as `0.1.0`. A new event or field raises the minor version. A changed or removed one raises the major version.
+
+```ts
+const adapterApiVersion: "0.1.0";
+```
+
+### `adapterEnvelope`
+
+The Zod schema for the params of the `event` notification: `seq`, the turn's id and the event.
+`turn` is `null` only for `session` and for an `error` outside a turn.
+
+```ts
+const adapterEnvelope: z.ZodType<{
+  seq: number;
+  turn: (string & import("zod").$brand<"TurnId">) | null;
+  event:
+    | { type: "session"; ref: string & import("zod").$brand<"SessionRef"> }
+    | { type: "text.delta"; text: string }
+    | {
+        type: "tool.start";
+        call: string & import("zod").$brand<"ToolCallId">;
+        tool: string;
+        kind: "file.read" | "file.write" | "shell" | "web" | "other";
+      }
+    | {
+        type: "tool.end";
+        call: string & import("zod").$brand<"ToolCallId">;
+        outcome: "error" | "ok" | "denied" | "cancelled";
+      }
+    | {
+        type: "usage";
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheWriteTokens: number;
+        costUsd: number | null;
+      }
+    | {
+        type: "error";
+        code:
+          | "cli-not-found"
+          | "cli-exited"
+          | "signed-out"
+          | "rate-limited"
+          | "vendor"
+          | "adapter";
+      }
+    | {
+        type: "turn.end";
+        reason:
+          "error" | "denied" | "cancelled" | "completed" | "limit" | "refused";
+      }
+    | {
+        type: "permission.request";
+        request: string & import("zod").$brand<"PermissionRequestId">;
+        call: (string & import("zod").$brand<"ToolCallId">) | null;
+        tool: string;
+        kind: "file.read" | "file.write" | "shell" | "web" | "other";
+        pathCount: number;
+        hasCommand: boolean;
+      }
+    | {
+        type: "permission.decision";
+        request: string & import("zod").$brand<"PermissionRequestId">;
+        decision: "allow" | "deny";
+        by: "rule" | "policy" | "owner" | "default";
+        reason: string;
+      };
+}>;
+```
+
+### `adapterEvent`
+
+The Zod schema for an event that an adapter yields. The runtime adds `seq` and `turn`.
+No field can hold a command, a path or free text, except the text of `text.delta`.
+
+```ts
+const adapterEvent: z.ZodType<
+  | { type: "session"; ref: string & import("zod").$brand<"SessionRef"> }
+  | { type: "text.delta"; text: string }
+  | {
+      type: "tool.start";
+      call: string & import("zod").$brand<"ToolCallId">;
+      tool: string;
+      kind: "file.read" | "file.write" | "shell" | "web" | "other";
+    }
+  | {
+      type: "tool.end";
+      call: string & import("zod").$brand<"ToolCallId">;
+      outcome: "error" | "ok" | "denied" | "cancelled";
+    }
+  | {
+      type: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      costUsd: number | null;
+    }
+  | {
+      type: "error";
+      code:
+        | "cli-not-found"
+        | "cli-exited"
+        | "signed-out"
+        | "rate-limited"
+        | "vendor"
+        | "adapter";
+    }
+  | {
+      type: "turn.end";
+      reason:
+        "error" | "denied" | "cancelled" | "completed" | "limit" | "refused";
+    }
+>;
+```
+
+### `adapterInitializeParams`
+
+The Zod schema for the params of the bot runner's `initialize` request.
+
+```ts
+const adapterInitializeParams: z.ZodType<{
+  api: string;
+  bot: { id: string };
+  folder: string;
+  resume: (string & import("zod").$brand<"SessionRef">) | null;
+}>;
+```
+
+### `adapterMethods`
+
+The methods that the bot runner and the adapter send over their JSON lines. `permissionAsk` is reserved for M2.
+
+```ts
+const adapterMethods: {
+  readonly initialize: "initialize";
+  readonly turnStart: "turn.start";
+  readonly turnCancel: "turn.cancel";
+  readonly shutdown: "shutdown";
+  readonly event: "event";
+  readonly permissionAsk: "permission.ask";
+};
+```
+
+### `denyAll`
+
+A `Decider` that denies every request with `by: "default"`.
+
+```ts
+const denyAll: Decider;
+```
+
 ### `eventParams`
 
 The Zod schema for the params of the host's `event` notification.
@@ -458,6 +927,44 @@ Checks the parsed JSON of `aphelion-plugin.json`, including its API range. It re
 
 ```ts
 function parsePluginManifest(data: unknown): ManifestResult;
+```
+
+### `permissionDecision`
+
+The Zod schema for the answer to a permission request. `reason` is a short code, such as `outside-folder`, never text.
+
+```ts
+const permissionDecision: z.ZodType<{
+  decision: "allow" | "deny";
+  by: "rule" | "policy" | "owner" | "default";
+  reason: string;
+}>;
+```
+
+### `permissionRequest`
+
+The Zod schema for a permission request as the adapter hands it to `decide`. The paths and the command stay in memory and never go into an event.
+
+```ts
+const permissionRequest: z.ZodType<{
+  request: string & import("zod").$brand<"PermissionRequestId">;
+  call: (string & import("zod").$brand<"ToolCallId">) | null;
+  tool: string;
+  kind: "file.read" | "file.write" | "shell" | "web" | "other";
+  paths: string[];
+  command: string | null;
+  truncated: boolean;
+}>;
+```
+
+### `permissionRequestId`
+
+The Zod schema for a permission request's id. The adapter picks it. It has the same form as a tool call's id.
+
+```ts
+const permissionRequestId: z.ZodType<
+  string & import("zod").$brand<"PermissionRequestId">
+>;
 ```
 
 ### `pluginApiVersion`
@@ -617,6 +1124,75 @@ The Zod schema for the params of `secrets.use`. The operation name is at most 12
 const secretsUseParams: z.ZodType<{ operation: string; reference: string }>;
 ```
 
+### `sessionRef`
+
+The Zod schema for the vendor's session id. The id is opaque: 1 to 256 printable ASCII characters.
+
+```ts
+const sessionRef: z.ZodType<string & import("zod").$brand<"SessionRef">>;
+```
+
+### `streamEvent`
+
+The Zod schema for every event that leaves the bot process. It adds `permission.request` and `permission.decision`, which only the runtime sends.
+
+```ts
+const streamEvent: z.ZodType<
+  | { type: "session"; ref: string & import("zod").$brand<"SessionRef"> }
+  | { type: "text.delta"; text: string }
+  | {
+      type: "tool.start";
+      call: string & import("zod").$brand<"ToolCallId">;
+      tool: string;
+      kind: "file.read" | "file.write" | "shell" | "web" | "other";
+    }
+  | {
+      type: "tool.end";
+      call: string & import("zod").$brand<"ToolCallId">;
+      outcome: "error" | "ok" | "denied" | "cancelled";
+    }
+  | {
+      type: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      costUsd: number | null;
+    }
+  | {
+      type: "error";
+      code:
+        | "cli-not-found"
+        | "cli-exited"
+        | "signed-out"
+        | "rate-limited"
+        | "vendor"
+        | "adapter";
+    }
+  | {
+      type: "turn.end";
+      reason:
+        "error" | "denied" | "cancelled" | "completed" | "limit" | "refused";
+    }
+  | {
+      type: "permission.request";
+      request: string & import("zod").$brand<"PermissionRequestId">;
+      call: (string & import("zod").$brand<"ToolCallId">) | null;
+      tool: string;
+      kind: "file.read" | "file.write" | "shell" | "web" | "other";
+      pathCount: number;
+      hasCommand: boolean;
+    }
+  | {
+      type: "permission.decision";
+      request: string & import("zod").$brand<"PermissionRequestId">;
+      decision: "allow" | "deny";
+      by: "rule" | "policy" | "owner" | "default";
+      reason: string;
+    }
+>;
+```
+
 ### `subscribeParams`
 
 The Zod schema for the params of `events.subscribe`. The event name is at most 128 characters.
@@ -634,6 +1210,53 @@ const success: (
   id: RpcId,
   result: unknown,
 ) => { jsonrpc: string; id: RpcId; result: unknown };
+```
+
+### `toolCallId`
+
+The Zod schema for a tool call's id. The adapter picks it, usually the vendor's own id. It is 1 to 128 letters, digits, `_`, `.`, `:` or `-`.
+
+```ts
+const toolCallId: z.ZodType<string & import("zod").$brand<"ToolCallId">>;
+```
+
+### `toolKind`
+
+The Zod schema for a tool's kind. The adapter maps each vendor tool to one kind, and a tool it doesn't know is `other`.
+
+```ts
+const toolKind: z.ZodType<
+  "file.read" | "file.write" | "shell" | "web" | "other"
+>;
+```
+
+### `turnCancelParams`
+
+The Zod schema for the params of the bot runner's `turn.cancel` request.
+
+```ts
+const turnCancelParams: z.ZodType<{
+  turn: string & import("zod").$brand<"TurnId">;
+}>;
+```
+
+### `turnId`
+
+The Zod schema for a turn's id. The bot runner picks it. It is 1 to 64 letters, digits, `_` or `-`.
+
+```ts
+const turnId: z.ZodType<string & import("zod").$brand<"TurnId">>;
+```
+
+### `turnStartParams`
+
+The Zod schema for the params of the bot runner's `turn.start` request. The prompt is at most 256 KiB.
+
+```ts
+const turnStartParams: z.ZodType<{
+  turn: string & import("zod").$brand<"TurnId">;
+  text: string;
+}>;
 ```
 
 ## `@aphelion/plugin-sdk/runtime`
