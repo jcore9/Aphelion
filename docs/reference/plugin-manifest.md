@@ -1,6 +1,6 @@
 # Plugin manifest
 
-Every plugin has one manifest, a JSON file named `aphelion-plugin.json` in the plugin's folder, next to its `package.json`. The manifest says who the plugin is, which version of the plugin API it was written for, which parts it has, what it needs and what it adds. The host reads the plugin's permissions from the manifest and from nowhere else. There is no other registration step ([decision 0038](../decisions/0038-plugin-manifest-and-api-range.md)).
+Every plugin has one manifest, a JSON file named `aphelion-plugin.json` in the plugin's folder, next to its `package.json`. The manifest says who the plugin is and which version of the plugin API it was written for. It also says which parts the plugin has, what it needs and what it adds. The host reads the plugin's permissions from the manifest and from nowhere else. There is no other registration step ([decision 0038](../decisions/0038-plugin-manifest-and-api-range.md)).
 
 `@aphelion/plugin-sdk` exports the schema as `pluginManifestSchema` and the check as `parsePluginManifest`.
 
@@ -59,7 +59,7 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
 
 The manifest has no format version of its own. The `api` range covers it, because the manifest's format is part of the plugin API.
 
-Each entry under `permissions` is something the owner grants. UI slots are on that list, not under `contributes`, because content shown inside the chat can reveal what is in the chat ([decision 0038](../decisions/0038-plugin-manifest-and-api-range.md)). A secret scheme and a screen are contributions: they say what the plugin offers, and grant nothing to the plugin.
+Each entry under `permissions` is something the owner grants. UI slots are on that list, not under `contributes`, because content shown inside the chat can reveal what is in the chat ([decision 0038](../decisions/0038-plugin-manifest-and-api-range.md)). A secret scheme and a screen are contributions. They say what the plugin offers, and grant nothing to the plugin.
 
 What the host does with each permission, such as asking the owner to grant it, is the plugin host's job (M0-13c). The manifest only declares it. Event names, UI slots and icon names aren't checked against a list yet, because the protocol and the client haven't defined them.
 
@@ -70,7 +70,7 @@ The `id` names the plugin's data folder on the server. Windows reserves some fil
 A plugin has a server part, a client part, or both ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)). A manifest with neither is refused.
 
 - The **server part** runs on the server. The plugin runner (M0-13b) starts it in its own process, as the `aphelion-plugins` user.
-- The **client part** runs in the app: the web app, the desktop app and the future phone app. It is installed once, on the server, and every client downloads it from the server when it connects. Nothing is installed on a device. It always runs in a sandbox, an isolated frame (an iframe on web and desktop, a WebView on the phone) that talks to the app only through messages. It never runs with full access to the app.
+- The **client part** runs in the app, which is the web app, the desktop app and the future phone app. It is installed once, on the server. Every client downloads it from the server when it connects. Nothing is installed on a device. It always runs in a sandbox, which is an isolated frame that talks to the app only through messages. The frame is an iframe on web and desktop and a WebView on the phone. The client part never runs with full access to the app.
 
 Some permissions and contributions only make sense for one part. A list that needs a part the plugin doesn't have is refused, with the reason `needs a server part` or `needs a client part`. An empty list is allowed on either side.
 
@@ -85,21 +85,21 @@ Some permissions and contributions only make sense for one part. A list that nee
 
 Each permission is granted to the plugin as a whole. When a plugin has both parts, events it is granted can go to either part.
 
-The `PluginManifest` type describes a manifest that `parsePluginManifest` accepted. It has three shapes: server only, client only, or both. A list the plugin's parts can't use has the type `readonly never[]`, which is always empty, and every list is read-only. `pluginManifestSchema` on its own returns a looser type, so read manifests through `parsePluginManifest`.
+The `PluginManifest` type describes a manifest that `parsePluginManifest` accepted. It has three shapes. The plugin has a server part only, a client part only, or both parts. A list the plugin's parts can't use has the type `readonly never[]`, which is always empty, and every list is read-only. `pluginManifestSchema` on its own returns a looser type, so read manifests through `parsePluginManifest`.
 
 ## Screens
 
 A screen is a full page that a plugin declares for the app, with its own entry in the app's menu. The app doesn't show screens yet. The client shell planned for M5 will show them in the web app, the desktop app and the phone app. For example, a GitHub plugin could add a screen that lists your issues and pull requests.
 
 - **The client part draws it**, in its sandbox, like everything else a client part shows. The sandbox has no network access ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
-- **The server part fetches its data.** In the GitHub example, the server part has a granted `network` permission for `api.github.com` and asks the host to make each call with the GitHub token, so the plugin never sees the token. It sends the results to the screen through the app's messages.
-- **A screen needs no grant.** Once screens ship, it will appear when the plugin is installed, unlike a UI slot, which the owner grants one by one. A screen can only show what its plugin can already reach, and that still goes through the plugin's granted permissions. The owner will be able to turn a screen off later.
+- **The server part fetches its data.** In the GitHub example, the server part has a granted `network` permission for `api.github.com`. It asks the host to make each call with the GitHub token, so the plugin never sees the token. It sends the results to the screen through the app's messages.
+- **A screen needs no grant.** Once screens ship, a screen will appear when the plugin is installed. A UI slot is different, because the owner grants UI slots one by one. A screen can only show what its plugin can already reach. That access still goes through the plugin's granted permissions. The owner will be able to turn a screen off later.
 
-The app's menu lists every screen from every installed plugin, sorted by `menuOrder`. Screens without one come last. The menu itself, how screens from different plugins are told apart, and how the owner turns a screen off belong to the client shell (M5). So does the app's icon set: until it exists, any well-formed `icon` name is accepted.
+The app's menu lists every screen from every installed plugin, sorted by `menuOrder`. Screens without one come last. The menu itself, how screens from different plugins are told apart, and how the owner turns a screen off belong to the client shell (M5). So does the app's icon set. Until it exists, the manifest accepts any well-formed `icon` name.
 
 ## Secrets
 
-A plugin never receives a secret's value. `permissions.secrets` lists the secrets a plugin may ask the host to use for it. For example, the plugin asks "make this HTTP call with my GitHub token", and the host makes the call with the token in it. The value stays inside the host and the secrets broker, in the `Secret` wrapper that is never serialized, so the plugin has nothing it could send to a device. The operations a plugin can ask for are designed in the plugin runner (M0-13b), the permission grants (M0-13c) and the M3 connector gateway ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
+A plugin never receives a secret's value. `permissions.secrets` lists the secrets a plugin may ask the host to use for it. For example, the plugin asks "make this HTTP call with my GitHub token", and the host makes the call with the token in it. The value stays inside the host and the secrets broker, in the `Secret` wrapper that is never serialized. So the plugin has nothing it could send to a device. The operations a plugin can ask for are designed in three places. These are the plugin runner (M0-13b), the permission grants (M0-13c) and the M3 connector gateway ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
 
 The one exception is a [secret backend](#secret-backends). It produces values, so it sees the values it produces. It hands them only to the secrets broker, never to another plugin or a client part.
 
@@ -111,7 +111,7 @@ The one exception is a [secret backend](#secret-backends). It produces values, s
 - It may start with `./`. No part may be `.` or `..`, and no part may be empty, so `dist//index.js` and `dist/` are refused.
 - No URL or other scheme, such as `file://`. No absolute path, such as `/opt/x.js`, `C:/x.js` or `//server/share/x.js`. No `\`, no NUL and no other control characters.
 
-This check reads the text only. When the server loads or serves a part, it must still check that the resolved file is inside the plugin's folder, including after it follows symbolic links. The plugin runner (M0-13b) does this for the server part, and the M5 client-part delivery does it for the client part.
+This check reads the text only. When the server loads or serves a part, it must still check that the resolved file is inside the plugin's folder. The check includes following symbolic links. The plugin runner (M0-13b) does this for the server part, and the M5 client-part delivery does it for the client part.
 
 ## The API range
 
@@ -150,7 +150,7 @@ A secret backend is a plugin that turns a secret reference, such as `op://vault/
 
 `parsePluginManifest` returns `{ ok: true, manifest }`, or `{ ok: false, issues }`. Each issue names the field by its path, such as `permissions.events[1]`, and gives a fixed reason. A reason never repeats text from the manifest, so a hostile manifest can't put its own text into the host's logs. For the same reason, an unknown field is reported by the object that holds it, not by its name.
 
-The returned issues never repeat manifest text. One exception sits outside them: when the environment variable `NODE_DEBUG` includes `semver`, the `semver` package prints each range it reads to standard error. The host must not set `NODE_DEBUG=semver`.
+The returned issues never repeat manifest text. One exception sits outside them. When the environment variable `NODE_DEBUG` includes `semver`, the `semver` package prints each range it reads to standard error. The host must not set `NODE_DEBUG=semver`.
 
 ## Checks the plugin runner adds
 
@@ -184,7 +184,7 @@ Adds the optional `repository` field, which names the GitHub repository whose re
 
 Adds `contributes.screens` ([decision 0042, amendment](../decisions/0042-plugin-server-and-client-parts.md#amendment-plugin-screens)). The field is optional, so it adds to the API, and by the rule in [The API range](#the-api-range) the patch version goes up. A 0.2.0 manifest is still valid and means the same. Two cases to know:
 
-- A plugin with screens should set `api` to `^0.2.1`. A 0.2.0 host still refuses it, but not by the range: the host checks the manifest's fields first, so the reason is `contributes: has an unknown field`.
+- A plugin with screens should set `api` to `^0.2.1`. A 0.2.0 host still refuses it, but not by the range. The host checks the manifest's fields first, so the reason is `contributes: has an unknown field`.
 - A manifest whose `api` is exactly `0.2.0`, with no `^` or `~`, includes only 0.2.0, so a 0.2.1 host refuses it by its range. Use `^0.2.0` to accept every 0.2.x.
 
 ### 0.2.0
@@ -202,4 +202,4 @@ The first version ([decision 0038](../decisions/0038-plugin-manifest-and-api-ran
 
 ## JSON Schema for editors
 
-[`plugin-manifest.schema.json`](https://github.com/jcore9/Aphelion/blob/main/packages/plugin-sdk/plugin-manifest.schema.json) ships in `@aphelion/plugin-sdk`. Point the manifest's `$schema` field at it, as in the example, and editors such as VS Code check the manifest as you type. The JSON Schema can't express the API-range rule, so only `parsePluginManifest` checks `api`. The rules in [Server and client parts](#server-and-client-parts) are in the JSON Schema too, generated from the same table the parser uses. The JSON Schema can't say that screen ids must differ, so only `parsePluginManifest` checks that. The patterns for secret references and screen titles use Unicode character classes such as `\p{L}`, so a checker must read patterns in Unicode mode, as the JSON Schema library Ajv does by default. A test regenerates the file from the schema and fails when the committed copy is out of date. To regenerate it, run `bun --bun vitest run -u packages/plugin-sdk`.
+[`plugin-manifest.schema.json`](https://github.com/jcore9/Aphelion/blob/main/packages/plugin-sdk/plugin-manifest.schema.json) ships in `@aphelion/plugin-sdk`. Point the manifest's `$schema` field at it, as in the example, and editors such as VS Code check the manifest as you type. The JSON Schema can't express the API-range rule, so only `parsePluginManifest` checks `api`. The rules in [Server and client parts](#server-and-client-parts) are in the JSON Schema too, generated from the same table the parser uses. The JSON Schema can't say that screen ids must differ, so only `parsePluginManifest` checks that. The patterns for secret references and screen titles use Unicode character classes such as `\p{L}`. A checker must read the patterns in Unicode mode. The JSON Schema library Ajv does this by default. A test regenerates the file from the schema and fails when the committed copy is out of date. To regenerate it, run `bun --bun vitest run -u packages/plugin-sdk`.

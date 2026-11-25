@@ -1,23 +1,23 @@
 # Logging and the audit log
 
-The server keeps two records of what it does. The log is for people who debug the server: one JSON object per line on standard output. The audit log is a table in the SQLite store that says who did what, and what came of it. Code can add rows to the audit log, but it can't change or remove them. [Decision 0036](../decisions/0036-logging-library.md) explains why the server writes its own logs instead of using a library.
+The server keeps two records of what it does. The log is for people who debug the server. It is one JSON object per line on standard output. The audit log is a table in the SQLite store that says who did what, and what came of it. Code can add rows to the audit log, but it can't change or remove them. [Decision 0036](../decisions/0036-logging-library.md) explains why the server writes its own logs instead of using a library.
 
 ## How secrets are kept out
 
 The owner decided on 2026-11-22 to rely on structure, not on searching free text. There are three layers, and a fourth that is only a backup:
 
 1. **The `Secret` type.** A wrapper that holds a secret and always hides itself when it is logged. Code that handles a secret keeps it in this wrapper. [The secrets reference](secrets.md) describes it, and [values that redact themselves](#values-that-redact-themselves) explains the hook it uses.
-2. **Fixed messages and named fields.** Every log message is fixed text, written in the code, and the same holds for the audit `action`. The compiler catches ordinary mistakes, such as pasting a value into the message. Data goes only in named fields, and a field whose name says it holds a secret, such as `password` or `token`, is hidden whatever its value is. [Fixed messages](#fixed-messages) explains the rule.
+2. **Fixed messages and named fields.** Every log message is fixed text, written in the code, and the same holds for the audit `action`. The compiler catches ordinary mistakes, such as pasting a value into the message. Data goes only in named fields. A field whose name says it holds a secret, such as `password` or `token`, is hidden whatever its value is. [Fixed messages](#fixed-messages) explains the rule.
 3. **Masking known secret values.** When the server learns a secret's exact value, it registers it with `maskSecretValue`. From then on, every occurrence of that exact text is replaced with `[REDACTED]`. [Known secret values](#known-secret-values) explains it.
-4. **Pattern scanning, as a backup.** The redactor also searches text for known token formats, such as GitHub tokens and `Bearer` headers. It can't recognize every secret. [What redaction doesn't catch](#what-redaction-doesnt-catch) lists its known gaps, and they are listed rather than chased.
+4. **Pattern scanning, as a backup.** The redactor also searches text for known token formats, such as GitHub tokens and `Bearer` headers. It can't recognize every secret. [What redaction doesn't catch](#what-redaction-doesnt-catch) lists its known gaps. Aphelion lists those gaps and doesn't add patterns to close them.
 
 Established tools work the same way. Checked on 2026-11-22:
 
 - GitHub Actions masks a secret by registering its exact value with `::add-mask::` ([workflow commands](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands)).
 - pino hides fixed field paths, not patterns ([pino 10.4.0 redaction](https://unpkg.com/pino@10.4.0/docs/redaction.md)).
 - Effect wraps secrets in a `Redacted` type that hides itself ([Effect `Redacted`](https://effect.website/docs/data-types/redacted/)).
-- T3 Code 0.1.12, inspected in its bundled code, uses Effect's `Redacted`, hides HTTP headers and URL parameters by name, uses one pattern for URL credentials, and replaces a token it knows by its exact value. It keeps no broad list of token patterns.
-- OWASP ASVS chapter V7 requires that logs hold no secrets ([V7: Error Handling and Logging](https://github.com/OWASP/ASVS/blob/master/4.0/en/0x15-V7-Error-Logging.md)).
+- Inspecting its bundled code shows that T3 Code 0.1.12 uses Effect's `Redacted` and hides HTTP headers and URL parameters by name. It uses one pattern for URL credentials and replaces a token it knows by its exact value. It keeps no broad list of token patterns.
+- OWASP ASVS chapter V7, titled Error Handling and Logging, requires that logs hold no secrets ([chapter V7](https://github.com/OWASP/ASVS/blob/master/4.0/en/0x15-V7-Error-Logging.md)).
 
 Both the log and the audit log pass through the same redactor.
 
@@ -48,11 +48,11 @@ Each call writes one line. A line is a JSON object with `time`, `level` and `msg
 
 The logger redacts the fields first and adds `time`, `level` and `msg` afterwards, so a field can't replace them. A field named `time`, `level` or `msg` is dropped. If the fields object turns into something other than an object, for example because it has its own `toJSON`, the result is written under `fields`.
 
-The tests cover getters, `toJSON` methods and `redactSelf` methods that throw, a proxy that throws, nesting 10,000 levels deep, and a message that isn't a string. In each case the call writes one line and doesn't throw. A `write` function that throws still makes the call throw.
+The tests cover getters, `toJSON` methods and `redactSelf` methods that throw. They also cover a proxy that throws, nesting 10,000 levels deep, and a message that isn't a string. In each case the call writes one line and doesn't throw. A `write` function that throws still makes the call throw.
 
 ### Fixed messages
 
-A log message is fixed text: a string written directly in the code, such as `"bot started"`. Anything that changes from call to call, such as a user name or an error, goes in a named field instead.
+A log message is fixed text. It is a string written directly in the code, such as `"bot started"`. Anything that changes from call to call, such as a user name or an error, goes in a named field instead.
 
 ```ts
 log.info("bot started", { botId }); // compiles
@@ -60,7 +60,7 @@ log.info(`bot ${botId} started`); // fails typecheck
 log.info(message); // fails typecheck when message is a string variable
 ```
 
-This is why the rule exists. A field has a name, and the redactor hides a field by its name, such as `password` or `token`, whatever is in it. Text built into the message has no name, so only pattern scanning could find a secret in it, and pattern scanning misses secrets it doesn't recognize. Keeping messages fixed means every piece of data reaches the log under a name.
+The rule exists because a field has a name. The redactor hides a field by its name, such as `password` or `token`, whatever is in it. Text built into the message has no name. So only pattern scanning could find a secret in it, and pattern scanning misses secrets it doesn't recognize. Keeping messages fixed means every piece of data reaches the log under a name.
 
 The compiler checks the rule. It is a guard against ordinary mistakes, such as pasting a value into a message, not a guarantee. Code that deliberately works around the types can still pass a variable. That is why exact-value masking and pattern scanning still run on every message. The type `FixedText` accepts a string written in the code, a choice between such strings, and a template made only of constants. It rejects a variable of type `string`, a template with a value in it, and a choice in which any branch is one of those. `bun run typecheck` fails on a call that breaks the rule. The tests in `apps/server/src/log/logger.test.ts` and `apps/server/src/audit/audit.test.ts` prove each rejected form with `@ts-expect-error` lines.
 
@@ -98,7 +98,7 @@ How the redactor writes other values:
 
 ## Redaction rules
 
-The rules live in `defaultRules` in `apps/server/src/log/redact.ts`. There are two kinds. The output is plain data: objects, arrays, strings, numbers, booleans and `null`.
+The rules live in `defaultRules` in `apps/server/src/log/redact.ts`. There are two kinds. The output is plain data. It holds objects, arrays, strings, numbers, booleans and `null`.
 
 ### By field name
 
@@ -106,7 +106,7 @@ The redactor compares a field name in lower case, with everything except letters
 
 `token`, `password`, `passwd`, `passphrase`, `secret`, `secrets`, `authorization`, `cookie`, `credential`, `credentials`, `apikey`, `accesskey`, `secretkey`, `privatekey`.
 
-It is also redacted when the whole name is one of these, in `exactFieldNames`: `pass`, `pwd`. These two only match whole names, because words such as `bypass` end in them.
+It is also redacted when the whole name is `pass` or `pwd`, the entries in `exactFieldNames`. These two only match whole names, because words such as `bypass` end in them.
 
 So `accessToken`, `ACCESSTOKEN`, `refresh_token`, `x-api-key` and `set-cookie` are redacted. `inputTokens`, `tokenCount`, `secretRef`, `cacheKey` and `bypass` are kept. The whole value is replaced, whatever it is, and the redactor never reads it. The rule applies at any depth, inside arrays, and to the fields of errors.
 
@@ -117,9 +117,9 @@ So `accessToken`, `ACCESSTOKEN`, `refresh_token`, `x-api-key` and `set-cookie` a
 - Values shorter than 8 characters (`minimumMaskLength`) are ignored, so that a short common word is never masked.
 - When registered values contain or overlap each other, the whole run they cover becomes one `[REDACTED]`.
 - The mask also applies to object keys, and to numbers and `bigint` values through their text form. A number whose text is a registered value is written as `"[REDACTED]"`.
-- When a value is registered, its base64 form, its `encodeURIComponent` form and its JSON-escaped form are registered too, each only when it differs from the value and is 8 or more characters long. This follows the GitHub Actions runner, which registers encoded forms of each mask ([`HostContext.cs`](https://github.com/actions/runner/blob/main/src/Runner.Common/HostContext.cs)).
+- When a value is registered, its base64 form, its `encodeURIComponent` form and its JSON-escaped form are registered too. Each is registered only when it differs from the value and is 8 or more characters long. This follows the GitHub Actions runner, which registers encoded forms of each mask ([`HostContext.cs`](https://github.com/actions/runner/blob/main/src/Runner.Common/HostContext.cs)).
 - `unmaskSecretValue(value)` removes a value and its encoded forms. The list counts how many times each value was registered, so a value stays masked until each `maskSecretValue` call for it has a matching `unmaskSecretValue`.
-- The list holds at most 10,000 values (`maskLimit`). Once it is full, `maskSecretValue` throws a `MaskListFullError` and adds nothing, and the values already on the list stay masked. This fails closed: a secret that can't be masked can't be used either, because `Secret.make` lets this error through and makes no `Secret`. Registering a value that is already on the list doesn't throw. The list never drops an old value on its own, because that would quietly stop masking it.
+- The list holds at most 10,000 values (`maskLimit`). Once it is full, `maskSecretValue` throws a `MaskListFullError` and adds nothing. The values already on the list stay masked. This fails closed, which means it refuses instead of continuing without protection. A secret that can't be masked can't be used either, because `Secret.make` lets this error through and makes no `Secret`. Registering a value that is already on the list doesn't throw. The list never drops an old value on its own, because that would quietly stop masking it.
 - `maskSecretValue` returns `"masked"` on success, and `"too short"` for a value under 8 characters, which isn't masked.
 - The list lives only in the server's memory, from registration until `unmaskSecretValue` or the end of the process. It is never written anywhere, and nothing can read it back.
 - `Secret.make` calls `maskSecretValue`, and `secret.wipe()` calls `unmaskSecretValue` ([secrets reference](secrets.md#what-a-secret-guarantees)).
@@ -132,8 +132,8 @@ JSON inside a string is parsed, not searched. The redactor scans the string once
 
 - A segment can be at most 64 KB long (`jsonParseLimit`), counted in UTF-16 code units, which is what JavaScript's `length` counts. A longer segment goes to the text rules.
 - The redactor parses at most the first 16 segments in a string (`jsonSegmentLimit`). The rest go to the text rules.
-- If redacting the parsed segment changes nothing, the segment stays exactly as it was, byte for byte, and only the text rules run on it.
-- If something in it was redacted, the segment is written back with `JSON.stringify`. The original spacing is lost, escapes such as `\u0077` come back as the characters they stand for, and numbers are rewritten too. For example, `9007199254740993` becomes `9007199254740992` and `1e400` becomes `null`.
+- If redacting the parsed segment changes nothing, the segment stays exactly as it was, byte for byte. Only the text rules run on it.
+- If something in it was redacted, the segment is written back with `JSON.stringify`. The original spacing is lost. Escapes such as `\u0077` come back as the characters they stand for, and numbers are rewritten too. For example, `9007199254740993` becomes `9007199254740992` and `1e400` becomes `null`.
 
 So `received {"password":1234} then {"status":"done"}` becomes `received {"password":"[REDACTED]"} then {"status":"done"}`. JSON encoded inside a JSON string is handled the same way. Text between the segments, and segments that don't parse, go to the text rules below.
 
@@ -147,11 +147,11 @@ The text rules match the same field names in these forms:
 | `name=value` elsewhere, as in an environment variable | `GITHUB_TOKEN=abc PORT=8080` | `GITHUB_TOKEN=[REDACTED] PORT=8080`. The value ends at whitespace, `&`, `#`, `"`, `'`, a backtick, `,` or `;`. |
 | A JSON string field in text that doesn't parse | `{"password":"abc",` | `{"password":"[REDACTED]",`. Escapes in the name, such as `\u0077`, are decoded before the name is compared. Names up to 1,024 characters are checked. If the value has no closing quote, it is masked to the end of the string. |
 
-The redactor runs the value patterns below first, and these name rules after them. A test puts each rule's target next to every other rule's target, separated by `"`, `'`, a backtick, `","`, `", "` or a space, and checks that both stay masked.
+The redactor runs the value patterns below first, and these name rules after them. A test puts each rule's target next to every other rule's target and checks that both stay masked. The separators are `"`, `'`, a backtick, `","`, `", "` and a space.
 
 ### By value pattern
 
-Every string is searched for these patterns, in `valueRules`, and each match is replaced. The rest of the string stays. Each rule is written so that it doesn't scan the same run of characters again from every position inside it. A test runs the text rules on 29 hostile strings of about 1 MB, 9 of them shaped like JSON, and requires each to finish in under 1 second. On the development machine on 2026-11-22, each took under 100 ms.
+Every string is searched for these patterns, in `valueRules`, and each match is replaced. The rest of the string stays. Each rule is written so that it doesn't scan the same run of characters again from every position inside it. A test runs the text rules on 29 hostile strings of about 1 MB. A hostile string is built to make a pattern run slowly. Nine of the strings are shaped like JSON. The test requires each to finish in under 1 second. On the development machine on 2026-11-22, each took under 100 ms.
 
 | Pattern | Matches |
 | --- | --- |
@@ -185,25 +185,25 @@ class Secret {
 
 ### What redaction doesn't catch
 
-These gaps are known and accepted. The first three layers, not more patterns, are the answer to them. These reach the log unchanged, unless the value was registered with `maskSecretValue`:
+These gaps are known and accepted. The first three layers, not more patterns, are the answer to them. The following reach the log unchanged, unless the value was registered with `maskSecretValue`:
 
 - A secret with no known format, in a field whose name isn't on the list. Examples are a password in a field named `value`, or a list of tokens named `tokens`.
 - A secret used as a field name, for example an object keyed by token.
 - A secret in a `name=value` pair whose value is in quotes, as in `password="abc"`.
-- In JSON that doesn't parse, is over 64 KB, or comes after the 16th segment: a field whose value isn't a string, as in `{"password": 1234}`, or whose name is longer than 1,024 characters or contains an escaped quote `\"`.
-- A secret in a message built at run time, if the code works around the compiler check, unless the value is registered or matches a pattern.
-- A registered value in a different case, a part of a registered value, or the base64 of a registered value inside a longer base64 text, where it starts at a different offset.
+- A field in JSON that doesn't parse, is over 64 KB, or comes after the 16th segment. This holds when the field's value isn't a string, as in `{"password": 1234}`. It also holds when the field's name is longer than 1,024 characters or contains an escaped quote `\"`.
+- A secret in a message built at run time, when the code works around the compiler check. Only a registered value or a matching pattern catches it.
+- A registered value in a different case, or a part of a registered value. The same holds for the base64 of a registered value inside a longer base64 text, when it starts at a different offset.
 - Two JSON Web Tokens joined by `-`. The second one isn't matched.
 - A secret that has been encoded, such as base64 of a token, or split across two fields.
 - What a `toJSON` or `redactSelf` method returns, beyond the rules above.
 
-Some ordinary text is redacted by mistake. Examples are a word of 8 or more characters after `Bearer` or `Basic`, as in "Basic configuration", and any field whose name ends in `token`, such as `csrfToken`.
+Some ordinary text is redacted by mistake. Examples are a word of 8 or more characters after `Bearer` or `Basic`, as in "Basic configuration". Another example is any field whose name ends in `token`, such as `csrfToken`.
 
 Code that handles a secret wraps it in the `Secret` type, instead of relying on these rules.
 
 ## Add a redaction rule
 
-1. Add the field name to `fieldNameEndings` or `exactFieldNames`, or add a value rule to `valueRules`, in `defaultRules` in `apps/server/src/log/redact.ts`. Write a field name in lower case with no separators. Build a value rule with `pattern(name, regex)`, and give the regex the `g` flag, or it replaces only the first match in a string. Start a token pattern with the one-character lookbehind `(?<![A-Za-z0-9_])`, and don't put anything after an unbounded part such as `[\w-]{20,}`. A pattern that can fail after a long scan, and start again inside the same run, slows down on long strings. A name rule stops at `"`, and outside URLs at `'` and a backtick too.
+1. Add the field name to `fieldNameEndings` or `exactFieldNames`, or add a value rule to `valueRules`, in `defaultRules` in `apps/server/src/log/redact.ts`. Write a field name in lower case with no separators. Build a value rule with `pattern(name, regex)`, and give the regex the `g` flag, or it replaces only the first match in a string. Start a token pattern with the one-character lookbehind `(?<![A-Za-z0-9_])`. It requires that no letter, digit or `_` comes before the token. Don't put anything after an unbounded part such as `[\w-]{20,}`. A pattern that can fail after a long scan, and start again inside the same run, slows down on long strings. A name rule stops at `"`, and outside URLs at `'` and a backtick too.
 2. Add a case to `byFieldName` or `byValuePattern` in `apps/server/src/log/redact.test.ts`. Set `secret` to the part that must disappear, and set `kept` to a similar ordinary value that must stay. For a value rule, add a long hostile string to `large hostile strings` in the same file.
 3. Add the rule to the lists on this page.
 4. Run `bun run test`.
@@ -225,7 +225,7 @@ The `audit_log` table in the SQLite store holds one row per audited action. M2's
 | `request_id` | Text or empty | The request that caused it. The same ID can appear in log lines. |
 | `detail` | Text | A JSON object with anything else, after redaction. `{}` when empty. |
 
-`appendAudit` applies the text rules, including exact-value masks, to the free-text columns `actor_id`, `action`, `bot_id`, `session_id` and `request_id`, and the full redactor to `detail`, before the insert. `actor_kind` and `outcome` aren't masked. They must be one of the values in their lists, `actorKinds` and `outcomes`, so they can't hold a secret, and `appendAudit` throws a `TypeError` and writes no row if one isn't. If the redacted `detail` isn't an object, for example because it couldn't be read, the row is stored with the detail `{"unreadable":true}`, so the write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked in `apps/server/src/audit/index.ts`, not by SQLite, so a later milestone can add a value without rebuilding the table.
+Before the insert, `appendAudit` applies the text rules, including exact-value masks, to the free-text columns `actor_id`, `action`, `bot_id`, `session_id` and `request_id`. It applies the full redactor to `detail`. `actor_kind` and `outcome` aren't masked. Each must be one of the values in its list, `actorKinds` or `outcomes`, so it can't hold a secret. If one isn't, `appendAudit` throws a `TypeError` and writes no row. If the redacted `detail` isn't an object, the row is stored with the detail `{"unreadable":true}`. An example is a `detail` that couldn't be read. The write still succeeds. The table rejects an `id` below 1, an empty `actor_kind`, `action` or `outcome`, and a `detail` that isn't a JSON object. The lists of actor kinds and outcomes are checked in `apps/server/src/audit/index.ts`, not by SQLite. So a later milestone can add a value without rebuilding the table.
 
 Write a row with `appendAudit`, which returns the new row's `id`:
 
