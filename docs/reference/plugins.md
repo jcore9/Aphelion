@@ -63,7 +63,7 @@ The host has a similar limit the other way. If more than about 16 MiB, or more t
 | Message | Kind | Params | What your plugin does |
 | --- | --- | --- | --- |
 | `initialize` | request | `{ "api": "<host plugin API>", "plugin": "<id>" }` | Reply with any result, such as `{}`, within 10 seconds after the host sends it. The host counts the plugin as running only after this reply. An error reply counts as a crash. |
-| `event` | notification | `{ "name": "<event>", "data": <event data> }` | Handle the event. You get only events you subscribed to and were granted. |
+| `event` | notification | `{ "name": "<event>", "data": <event data> }` | Handle the event. You get only events you subscribed to and were granted. The deployed server sends no events yet. |
 | `shutdown` | notification | none | Finish your work and exit. The runner kills the plugin if it is still running 5 seconds later. See [When your plugin stops](#when-your-plugin-stops). |
 
 ### When your plugin stops
