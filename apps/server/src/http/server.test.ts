@@ -8,6 +8,7 @@ import { Duration, Effect } from "effect";
 import { HttpServer } from "effect/http";
 import { afterAll } from "vitest";
 import { addDevice, revokeDevice } from "../devices";
+import { finishRestore } from "../restore";
 import { openStore } from "../store";
 import { serveHttp } from "./index";
 
@@ -321,5 +322,47 @@ layer(
         reason: "token no longer valid",
       });
     }),
+  );
+});
+
+layer(
+  serveHttp({ address: "127.0.0.1", port: 0 }, db, {
+    recheckEvery: Duration.millis(20),
+  }),
+  live,
+)("the server after a restore", (it) => {
+  it.effect(
+    "refuses every token from before the restore, over HTTP and WebSocket, until a device is enrolled",
+    () =>
+      Effect.gen(function* () {
+        const phone = addDevice(db, { name: "phone" });
+        const socket = yield* openLive(bearer(phone.token));
+        expect(yield* stillOpenAfter(socket, 100)).toBe(true);
+
+        finishRestore(db);
+
+        expect(yield* closedBy(socket)).toEqual({
+          code: 1008,
+          reason: "token no longer valid",
+        });
+        for (const token of [valid, phone.token]) {
+          for (const path of paths.filter((p) => p !== "/ws")) {
+            expect(
+              yield* request(path, { headers: bearer(token) }),
+            ).toMatchObject({ status: 401, body: "" });
+          }
+          expect(yield* openWebSocket("/ws", bearer(token))).toBe("refused");
+        }
+        expect(yield* request("/health")).toMatchObject({ status: 200 });
+
+        const fresh = addDevice(
+          db,
+          { name: "phone" },
+          new Date(Date.now() + 5000),
+        );
+        expect(
+          yield* request("/api/status", { headers: bearer(fresh.token) }),
+        ).toMatchObject({ status: 404 });
+      }),
   );
 });

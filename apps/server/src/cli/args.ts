@@ -75,6 +75,7 @@ export type Command =
       readonly stateDir: string;
       readonly folder: string;
     }
+  | { readonly kind: "restore finish"; readonly stateDir: string }
   | { readonly kind: "device list"; readonly stateDir: string }
   | {
       readonly kind: "device revoke";
@@ -131,6 +132,7 @@ const grammar: Record<
   },
   "plugin restart": { words: 2, operand: "plugin id", flags: ["state-dir"] },
   "plugin dev": { words: 2, operand: "folder", flags: ["state-dir"] },
+  "restore finish": { words: 2, flags: ["state-dir"] },
   "device list": { words: 2, flags: ["state-dir"] },
   "device revoke": { words: 2, operand: "id", flags: ["state-dir"] },
 };
@@ -351,6 +353,7 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
       return { ok: true, command: { kind, stateDir, plugin: operand } };
     case "plugin dev":
       return { ok: true, command: { kind, stateDir, folder: operand } };
+    case "restore finish":
     case "device list":
       return { ok: true, command: { kind, stateDir } };
     case "device revoke": {

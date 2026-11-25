@@ -53,6 +53,11 @@ Usage:
       reload it again each time its files change. Works only when the server
       runs with --plugin-dev FOLDER. Ctrl-C stops watching.
 
+  aphelion restore finish [--state-dir DIR]
+      Run once after restoring a backup, before the server starts. Revokes
+      every device token, switches every plugin off, and lists the commands
+      that switch the plugins back on.
+
   aphelion --version
   aphelion --help
 

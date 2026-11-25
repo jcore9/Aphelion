@@ -191,3 +191,17 @@ export function installedPlugins(db: Database): InstallRecord[] {
     .all("SELECT plugin FROM plugin_installs ORDER BY plugin")
     .flatMap((row) => readInstall(db, String(row["plugin"])) ?? []);
 }
+
+export function switchOffPlugins(db: Database): string[] {
+  return db
+    .all(
+      "UPDATE plugin_installs SET enabled = 0 WHERE enabled = 1 RETURNING plugin",
+    )
+    .map((row) => String(row["plugin"]));
+}
+
+export function switchedOffPlugins(db: Database): string[] {
+  return db
+    .all("SELECT plugin FROM plugin_installs WHERE enabled = 0 ORDER BY plugin")
+    .map((row) => String(row["plugin"]));
+}

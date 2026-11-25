@@ -89,6 +89,7 @@ test("--help and no arguments print the commands", async () => {
       "aphelion device add NAME",
       "aphelion device list",
       "aphelion device revoke ID",
+      "aphelion restore finish",
       "aphelion --version",
     ]) {
       expect(out.join("\n")).toContain(command);
@@ -360,6 +361,41 @@ test("device list shows each device's status, and revoke stops a token", async (
   const again = await run(["device", "revoke", ids[0] ?? "", ...state]);
   expect(again.code).toBe(1);
   expect(again.err[0]).toContain("No active device has the id");
+});
+
+test("restore finish revokes every device, lists the plugins it switched off, and refuses a missing database", async () => {
+  const state = ["--state-dir", stateDir];
+  const missing = await run(["restore", "finish", ...state]);
+  expect(missing.code).toBe(1);
+  expect(missing.err[0]).toContain("There is no database at");
+  expect(await readdir(stateDir)).toEqual([]);
+
+  await run(["device", "add", "laptop", ...state]);
+  const first = await run(["restore", "finish", ...state]);
+  expect(first).toEqual({
+    code: 0,
+    out: [
+      "Restore finished. Every device token is revoked.",
+      "Enroll a device: aphelion device add NAME",
+    ],
+    err: [],
+  });
+  const listed = await run(["device", "list", ...state]);
+  expect(listed.out.slice(1).map((line) => line.split("\t")[1])).toEqual([
+    "revoked",
+  ]);
+  expect(await run(["restore", "finish", ...state])).toEqual(first);
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await run(["device", "add", "phone", ...state]);
+  const again = await run(["restore", "finish", ...state]);
+  expect(again).toEqual({
+    code: 1,
+    out: [],
+    err: [
+      "restore finish already ran, and devices were enrolled since. Nothing changed.",
+    ],
+  });
 });
 
 test("an unexpected error prints its message and exits 1", async () => {

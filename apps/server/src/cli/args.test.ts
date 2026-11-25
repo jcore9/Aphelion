@@ -165,6 +165,14 @@ describe("accepted command lines", () => {
     ],
     [["device", "list"], { kind: "device list", stateDir: defaultStateDir }],
     [
+      ["restore", "finish"],
+      { kind: "restore finish", stateDir: defaultStateDir },
+    ],
+    [
+      ["restore", "finish", "--state-dir", "/data"],
+      { kind: "restore finish", stateDir: "/data" },
+    ],
+    [
       ["device", "revoke", "0123456789abcdef"],
       {
         kind: "device revoke",

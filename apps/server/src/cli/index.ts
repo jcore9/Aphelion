@@ -10,6 +10,7 @@ import { helpText } from "./help";
 import { CliIo } from "./io";
 import { pluginInstall } from "./plugin";
 import { pluginDev } from "./plugin-dev";
+import { restoreFinish } from "./restore";
 import { pluginRestart, pluginRollback, pluginUpdate } from "./plugin-update";
 
 export { CliIo, processIo } from "./io";
@@ -39,6 +40,8 @@ const run = (command: Command) =>
         return yield* pluginRestart(command);
       case "plugin dev":
         return yield* pluginDev(command);
+      case "restore finish":
+        return yield* restoreFinish(command);
       case "device list":
         return yield* deviceList(command);
       case "device revoke":
