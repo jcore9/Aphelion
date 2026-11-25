@@ -401,4 +401,32 @@ describe("the plugin runner's command order", () => {
       }).pipe(Effect.scoped),
     10_000,
   );
+  it.live(
+    "answers a stop during a launch at once, and kills the child when the launch finishes",
+    () =>
+      Effect.gen(function* () {
+        const gated = yield* gatedProcesses;
+        const { a, b } = yield* memoryLinkPair<RunnerReply, RunnerRequest>(
+          framing(runnerReplySchema),
+          framing(runnerRequestSchema),
+        );
+        const replies = yield* collectReplies(a.incoming);
+        yield* runRunner(b, quietOptions).pipe(
+          Effect.provide(gated.layer),
+          Effect.forkScoped,
+        );
+        yield* gated.hold("spawn slow#1");
+        yield* Effect.addFinalizer(() => gated.release("spawn slow#1"));
+        yield* a.send(request("start", "slow"));
+        yield* eventually(() => gated.trace.includes("spawning slow#1"));
+        yield* a.send(request("stop", "slow"));
+        yield* eventually(() => replies.labels().includes("stopped slow 1"));
+        expect(gated.trace).not.toContain("spawned slow#1");
+        yield* gated.release("spawn slow#1");
+        yield* eventually(() => gated.trace.includes("reaped slow#1"));
+        expect(replies.labels()).not.toContain("started slow 1");
+        expect([...gated.alive]).toEqual([]);
+      }).pipe(Effect.scoped),
+    10_000,
+  );
 });
