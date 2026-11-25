@@ -1,6 +1,6 @@
 # 0051. The plugin dev kit has a stdio entry in the SDK, reloads through the running server, and generates from a checkout
 
-- Status: Proposed
+- Status: Accepted (approved by merging #158 on 2026-11-23)
 - Date: 2026-11-23
 - Proposed by: the plugin dev kit PR ([#106](https://github.com/jcore9/Aphelion/issues/106))
 - Answers: how a plugin author writes, tests and reloads a server plugin without writing JSON-RPC by hand

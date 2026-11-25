@@ -1,6 +1,6 @@
 # 0056. The test host rejects an event the real host would refuse, and `plugin dev` reports a crash after the handshake
 
-- Status: Proposed
+- Status: Accepted (approved by merging #172 on 2026-11-23)
 - Date: 2026-11-23
 - Decided by: project owner
 - Proposed by: the orchestrator, in the PR for [#166](https://github.com/jcore9/Aphelion/issues/166) (M0-22)

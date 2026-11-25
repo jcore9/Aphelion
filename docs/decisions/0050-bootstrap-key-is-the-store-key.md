@@ -1,6 +1,6 @@
 # 0050. The host's bootstrap credential is the local store's age key
 
-- Status: Proposed
+- Status: Accepted (approved by merging #157 on 2026-11-23)
 - Date: 2026-11-23
 - Proposed by: the bootstrap secret PR ([#105](https://github.com/jcore9/Aphelion/issues/105))
 - Answers: which secret the host delivers to the broker, and how the broker uses it to unseal the local store

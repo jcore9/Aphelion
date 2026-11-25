@@ -1,6 +1,6 @@
 # 0052. A test generates the plugin API reference from the SDK's types and doc comments with the TypeScript compiler, and fails when the page is stale
 
-- Status: Proposed
+- Status: Accepted (approved by merging #162 on 2026-11-23)
 - Date: 2026-11-23
 - Proposed by: the plugin API reference PR ([#102](https://github.com/jcore9/Aphelion/issues/102))
 - Answers: which generator turns `@aphelion/plugin-sdk` into the published plugin API reference, and how CI catches a stale page

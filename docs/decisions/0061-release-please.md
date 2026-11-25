@@ -1,6 +1,6 @@
 # 0061. release-please sets the version, the release notes and the tag from commit titles, through a release PR into `main`
 
-- Status: Proposed
+- Status: Accepted (approved by merging #191 on 2026-11-25)
 - Date: 2026-11-24
 - Decided by: project owner
 - Proposed by: [#191](https://github.com/jcore9/Aphelion/pull/191)

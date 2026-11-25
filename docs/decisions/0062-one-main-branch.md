@@ -1,6 +1,6 @@
 # 0062. One `main` branch, and the bot merges its own pull requests
 
-- Status: Proposed
+- Status: Accepted (approved by merging #195 on 2026-11-25)
 - Date: 2026-11-25
 - Decided by: project owner
 - Proposed by: [#194](https://github.com/jcore9/Aphelion/issues/194)

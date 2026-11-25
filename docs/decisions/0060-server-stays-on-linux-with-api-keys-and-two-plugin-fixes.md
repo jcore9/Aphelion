@@ -1,6 +1,6 @@
 # 0060. The server stays on Linux in Docker and also builds for arm64, API keys join sign-ins, and two plugin isolation gaps close in M5
 
-- Status: Proposed
+- Status: Accepted (approved by merging #186 on 2026-11-24)
 - Date: 2026-11-24
 - Decided by: project owner
 - Proposed by: the #174 exit review PR ([#174](https://github.com/jcore9/Aphelion/issues/174))

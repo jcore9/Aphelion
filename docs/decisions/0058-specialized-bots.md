@@ -1,6 +1,6 @@
 # 0058. Each bot starts with no connectors or plugins, and the owner switches on the ones it may use
 
-- Status: Proposed
+- Status: Accepted (approved by merging #176 on 2026-11-24)
 - Date: 2026-11-23
 - Decided by: project owner
 - Proposed by: the M0-19 PR ([#161](https://github.com/jcore9/Aphelion/issues/161))

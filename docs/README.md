@@ -108,20 +108,20 @@ One numbered record per significant decision: context, options, choice, conseque
 | [0045](decisions/0045-no-bot-namespaces-default-seccomp.md) | Bots get no namespaces of their own, the container keeps Docker's default seccomp profile, and Codex runs without its own sandbox | Accepted |
 | [0046](decisions/0046-plugin-runner-kills-process-trees.md) | The plugin runner adopts every process its plugins leave behind, and freezes then kills a plugin's whole process tree | Accepted |
 | [0047](decisions/0047-repo-layout.md) | The code is split into apps and shared packages, and the server and its CLI are one package in `apps/server` | Accepted |
-| [0048](decisions/0048-cli-on-node-parseargs.md) | The aphelion command reads its command line with Node's parseArgs, and Docker's Compose output reaches config check through standard input | Proposed |
-| [0049](decisions/0049-ai-tools-installed-from-a-list.md) | The container image ships no AI tool, and the owner installs AI tools from a list | Proposed |
-| [0050](decisions/0050-bootstrap-key-is-the-store-key.md) | The host's bootstrap credential is the local store's age key | Proposed |
-| [0051](decisions/0051-plugin-dev-kit.md) | The plugin dev kit has a stdio entry in the SDK, reloads through the running server, and generates from a checkout | Proposed |
-| [0052](decisions/0052-plugin-api-reference-generator.md) | A test generates the plugin API reference from the SDK's types and doc comments with the TypeScript compiler, and fails when the page is stale | Proposed |
-| [0053](decisions/0053-1password-token-and-move-to-m3.md) | The 1Password token lives in the local store, and the 1Password plugin moves from M0 to M3 | Proposed |
-| [0054](decisions/0054-graceful-plugin-stop-deadlines.md) | At service stop each plugin gets 5 seconds with a 10-second cap for all, and the SDK waits up to 3 seconds for running event handlers before cleanup | Proposed |
-| [0055](decisions/0055-compose-check-server-listener.md) | With `--compose`, the config check requires the server to listen on 0.0.0.0 port 7400 | Proposed |
-| [0056](decisions/0056-test-host-event-limit-and-dev-crash-notice.md) | The test host rejects an event the real host would refuse, and `plugin dev` reports a crash after the handshake | Proposed |
-| [0057](decisions/0057-plugin-updates-from-github-releases.md) | The server updates a plugin from its GitHub releases, proven genuine by an artifact attestation, on the owner's approval and with no restart | Proposed |
-| [0058](decisions/0058-specialized-bots.md) | Each bot starts with no connectors or plugins, and the owner switches on the ones it may use | Proposed |
-| [0059](decisions/0059-backup-and-restore-drill.md) | A backup is one archive of the six volumes plus the key's recovery copy, and the M0 exit test restores it on a second VM | Proposed |
-| [0060](decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) | The server stays on Linux in Docker and also builds for arm64, API keys join sign-ins, and two plugin isolation gaps close in M5 | Proposed |
-| [0061](decisions/0061-release-please.md) | release-please sets the version, the release notes and the tag from commit titles, through a release PR into `main` | Proposed |
-| [0062](decisions/0062-one-main-branch.md) | From M1, Aphelion works on one `main` branch, and jcore9-bot squash-merges its own pull requests after another model family has reviewed them | Proposed |
-| [0063](decisions/0063-m1-planning-answers.md) | Before M2 approvals, the first bot works in its own folder, and M1 takes four other choices | Proposed |
-| [0064](decisions/0064-linked-equal-servers.md) | Two or more Aphelion servers can link up as equals, with groundwork in M1 and the build after v1.0 | Proposed |
+| [0048](decisions/0048-cli-on-node-parseargs.md) | The aphelion command reads its command line with Node's parseArgs, and Docker's Compose output reaches config check through standard input | Accepted |
+| [0049](decisions/0049-ai-tools-installed-from-a-list.md) | The container image ships no AI tool, and the owner installs AI tools from a list | Accepted |
+| [0050](decisions/0050-bootstrap-key-is-the-store-key.md) | The host's bootstrap credential is the local store's age key | Accepted |
+| [0051](decisions/0051-plugin-dev-kit.md) | The plugin dev kit has a stdio entry in the SDK, reloads through the running server, and generates from a checkout | Accepted |
+| [0052](decisions/0052-plugin-api-reference-generator.md) | A test generates the plugin API reference from the SDK's types and doc comments with the TypeScript compiler, and fails when the page is stale | Accepted |
+| [0053](decisions/0053-1password-token-and-move-to-m3.md) | The 1Password token lives in the local store, and the 1Password plugin moves from M0 to M3 | Accepted |
+| [0054](decisions/0054-graceful-plugin-stop-deadlines.md) | At service stop each plugin gets 5 seconds with a 10-second cap for all, and the SDK waits up to 3 seconds for running event handlers before cleanup | Accepted |
+| [0055](decisions/0055-compose-check-server-listener.md) | With `--compose`, the config check requires the server to listen on 0.0.0.0 port 7400 | Accepted |
+| [0056](decisions/0056-test-host-event-limit-and-dev-crash-notice.md) | The test host rejects an event the real host would refuse, and `plugin dev` reports a crash after the handshake | Accepted |
+| [0057](decisions/0057-plugin-updates-from-github-releases.md) | The server updates a plugin from its GitHub releases, proven genuine by an artifact attestation, on the owner's approval and with no restart | Accepted |
+| [0058](decisions/0058-specialized-bots.md) | Each bot starts with no connectors or plugins, and the owner switches on the ones it may use | Accepted |
+| [0059](decisions/0059-backup-and-restore-drill.md) | A backup is one archive of the six volumes plus the key's recovery copy, and the M0 exit test restores it on a second VM | Accepted |
+| [0060](decisions/0060-server-stays-on-linux-with-api-keys-and-two-plugin-fixes.md) | The server stays on Linux in Docker and also builds for arm64, API keys join sign-ins, and two plugin isolation gaps close in M5 | Accepted |
+| [0061](decisions/0061-release-please.md) | release-please sets the version, the release notes and the tag from commit titles, through a release PR into `main` | Accepted |
+| [0062](decisions/0062-one-main-branch.md) | From M1, Aphelion works on one `main` branch, and jcore9-bot squash-merges its own pull requests after another model family has reviewed them | Accepted |
+| [0063](decisions/0063-m1-planning-answers.md) | Before M2 approvals, the first bot works in its own folder, and M1 takes four other choices | Accepted |
+| [0064](decisions/0064-linked-equal-servers.md) | Two or more Aphelion servers can link up as equals, with groundwork in M1 and the build after v1.0 | Accepted |

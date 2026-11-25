@@ -1,6 +1,6 @@
 # 0055. With `--compose`, the config check requires the server to listen on 0.0.0.0 port 7400
 
-- Status: Proposed
+- Status: Accepted (approved by merging #171 on 2026-11-23)
 - Date: 2026-11-23
 - Decided by: project owner
 - Proposed by: the orchestrator, in the PR for [#165](https://github.com/jcore9/Aphelion/issues/165) (M0-21)

@@ -1,6 +1,6 @@
 # 0057. The server updates a plugin from its GitHub releases, proven genuine by an artifact attestation, on the owner's approval and with no restart
 
-- Status: Proposed
+- Status: Accepted (approved by merging #175 on 2026-11-24)
 - Date: 2026-11-23
 - Decided by: project owner, for the choices marked "owner" in the options
 - Proposed by: the M0-13f PR ([#159](https://github.com/jcore9/Aphelion/issues/159))

@@ -1,6 +1,6 @@
 # 0054. At service stop each plugin gets 5 seconds with a 10-second cap for all, and the SDK waits up to 3 seconds for running event handlers before cleanup
 
-- Status: Proposed
+- Status: Accepted (approved by merging #170 on 2026-11-23)
 - Date: 2026-11-23
 - Decided by: project owner
 - Proposed by: the orchestrator, in the PR for [#164](https://github.com/jcore9/Aphelion/issues/164) (M0-20)

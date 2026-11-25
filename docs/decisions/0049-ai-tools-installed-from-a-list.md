@@ -1,6 +1,6 @@
 # 0049. The container image ships no AI tool, and the owner installs AI tools from a list
 
-- Status: Proposed
+- Status: Accepted (approved by merging #156 on 2026-11-23)
 - Date: 2026-11-22
 - Decided by: project owner
 - Proposed by: the container image PR ([#14](https://github.com/jcore9/Aphelion/issues/14))
