@@ -35,11 +35,11 @@ release-please, run on each push to `main`, with its release PR into `main`, the
 - **Changelog.** Features, bug fixes, performance, docs and reverts show. Chores, CI, build, tests, refactors and style are hidden.
 - **Tags.** When the owner merges the release PR, release-please tags that commit on `main`, for example `v0.1.0-alpha.2`, and creates the GitHub release, marked as a pre-release.
 - **First tag.** `v0.1.0-alpha.1` is created by hand once, on `main`'s merge commit for the alpha.1 release, so release-please knows where M1 starts. The workflow first runs on that same merge, before the tag exists, so the owner runs it again once the tag is there.
-- **CI on the release PR.** GitHub doesn't start `pull_request` workflows for a PR that `GITHUB_TOKEN` opened or updated, so the required `lint`, `typecheck` and `test` checks would never run. `GITHUB_TOKEN` may start a `workflow_dispatch` run, so `ci.yml` accepts one, and the release workflow starts CI on the release branch after each update. Those runs report under the same check names, on the same commit, from GitHub Actions. If they don't satisfy the required checks, the fallback is for the owner to close and reopen the release PR, which starts CI as the owner. No personal access token or new secret is added.
-- **Permissions.** The release job may write contents (tags, the release branch), pull requests and actions (to start CI), and nothing else.
+- **CI on the release PR.** GitHub doesn't start `pull_request` workflows for a PR that `GITHUB_TOKEN` opened or updated, so the required `lint`, `typecheck` and `test` checks don't run on their own. Starting CI from the workflow with `workflow_dispatch` isn't relied on, because those runs may not count toward a ruleset's required checks. At the milestone's end the owner closes and reopens the release PR, which starts CI as the owner, then merges it. No personal access token or new secret is added.
+- **Permissions.** The release job may write contents (tags, the release branch) and pull requests, and nothing else.
 
 ## Consequences
 
 - The owner sets one repository setting once: Settings → Actions → General → Workflow permissions → **Allow GitHub Actions to create and approve pull requests**. Without it, release-please can't open its PR. The setting also lets a workflow approve a PR, but a code owner's approval is still required to merge, so it doesn't open a way around the owner.
-- Whether the dispatched CI runs count as the required checks can only be seen on GitHub, on the first release PR.
-- Revisit if they don't, or when the desktop and mobile apps need their own version numbers.
+- The owner closes and reopens each release PR once before merging it.
+- Revisit if that step becomes a chore, for example with a GitHub App token, or when the desktop and mobile apps need their own version numbers.

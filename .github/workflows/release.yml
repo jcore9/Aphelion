@@ -11,8 +11,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  # Lets the job start ci.yml on the release branch.
-  actions: write
 
 concurrency:
   group: release
@@ -29,12 +27,3 @@ jobs:
           target-branch: main
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # A PR that GITHUB_TOKEN opens or updates starts no pull_request
-      # workflow, so the required checks would never run on it. GITHUB_TOKEN
-      # may start workflow_dispatch, and those runs report on the same commit.
-      - if: steps.release.outputs.prs_created == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
-        run: gh workflow run ci.yml --ref "$BRANCH"
