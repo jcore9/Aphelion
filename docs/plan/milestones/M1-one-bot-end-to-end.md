@@ -372,7 +372,7 @@ Run on the release image, on a fresh Ubuntu Server LTS VM with Tailscale. Use te
 
 - The install guide, with `aphelion` commands in place of Docker steps, and the bot's powers and their limit.
 - The adapter contract, Claude adapter, session and history references, and the test client guide.
-- Decision records 0063 and 0064, any record #22 needs, and the changelog in the M1 release PR.
+- Decision records 0063 and 0064, any record #22 needs, and the release notes in the M1 release PR.
 
 ## Retro
 

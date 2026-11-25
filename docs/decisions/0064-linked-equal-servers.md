@@ -46,12 +46,12 @@ Aphelion will support equal linked servers. The timing is:
    - The new tables from message history ([#23](https://github.com/jcore9/Aphelion/issues/23)), and any other new table in M1, use IDs that can't clash between servers, such as UUIDv7. They don't count 1, 2, 3.
    - Each saved record names the server that wrote it.
    - Existing tables stay as they are. The audit log, `audit_log`, uses integer IDs. Moving it to IDs that can't clash is a known migration for later.
-2. **M4: a design spike on linking equal servers.** It answers four questions. How do history, approvals and settings stay in step? How do the servers trust each other over Tailscale? What happens when one server is offline? How is a bot placed on a server?
-3. **After M8: its own milestone** builds the feature.
+2. **M4: a design spike on linking equal servers ([#205](https://github.com/jcore9/Aphelion/issues/205)).** It answers four questions. How do history, approvals and settings stay in step? How do the servers trust each other over Tailscale? What happens when one server is offline? How is a bot placed on a server?
+3. **After M8: its own milestone** builds the feature ([#206](https://github.com/jcore9/Aphelion/issues/206), in M9 · Later until that milestone is planned).
 
 ## Consequences
 
 - #23 and any new M1 table carry the ID rule and the writer column. The [M1 plan](../plan/milestones/M1-one-bot-end-to-end.md) says so and lists the risk.
 - The bot runner already sits behind one message channel ([#22](https://github.com/jcore9/Aphelion/issues/22)). A bot on another server would use the same channel, so M1 adds nothing for it.
-- The orchestrator files the M4 spike and a placeholder for the later milestone. The project plan's milestone list stays unchanged for now.
+- The M4 spike is [#205](https://github.com/jcore9/Aphelion/issues/205) and the build is [#206](https://github.com/jcore9/Aphelion/issues/206). The project plan's milestone list stays unchanged for now.
 - Revisit this record when the M4 spike reports.
