@@ -13,7 +13,7 @@ Two kinds of file hold the rules:
 2. CI runs `lint`, `typecheck` and `test` from [`.github/workflows/ci.yml`](https://github.com/jcore9/Aphelion/blob/main/.github/workflows/ci.yml). All three must pass.
 3. A model from another family than the author reviews the pull request, and the review is on record. The bot fixes or answers each finding.
 4. The bot squash-merges the pull request. A squash merge turns the pull request's commits into one commit. It takes the pull request's Conventional Commit title, which feeds the release notes.
-5. If the pull request changes a path that `CODEOWNERS` names, the bot waits for the owner's approval before it merges. GitHub should also hold the pull request until then. A test after the rulesets are applied checks that, as described below.
+5. If the pull request changes a path that `CODEOWNERS` names, the bot waits for the owner's approval before it merges. GitHub also holds the pull request until then, as the test below showed.
 
 The owner reviews all other merged work at the end of each milestone, before the release.
 
@@ -49,13 +49,13 @@ One pull request becomes one commit on `main`, with a title that follows the Con
 
 ### Why 0 approving reviews
 
-GitHub never lets the author of a pull request approve it. The bot authors every pull request, so any number above 0 would block every merge by the bot. The other model family's review is on record in the pull request, and the bot merges only once its findings are fixed or answered. For the owner's paths, the bot waits for the owner's approval, and the code owner rule below should make GitHub wait too.
+GitHub never lets the author of a pull request approve it. The bot authors every pull request, so any number above 0 would block every merge by the bot. The other model family's review is on record in the pull request, and the bot merges only once its findings are fixed or answered. For the owner's paths, the bot waits for the owner's approval, and the code owner rule below makes GitHub wait too.
 
 ### Why a code owner must approve
 
-With "require review from code owners" on, GitHub is meant to stop a pull request that changes a path in `CODEOWNERS` until its code owner approves. This is how the owner keeps control of the paths below. A bot's approval never counts for them.
+With "require review from code owners" on, GitHub stops a pull request that changes a path in `CODEOWNERS` until its code owner approves. This is how the owner keeps control of the paths below. A bot's approval never counts for them.
 
-GitHub's documents don't say for certain whether this rule still blocks a merge when 0 approvals are required. [Decision 0062](decisions/0062-one-main-branch.md) names this as an open risk. After the rulesets are applied, the bot opens a test pull request that touches an owner path and waits for its checks to pass. It then checks that GitHub still refuses to merge it and asks `@jcore9` to review. The bot never merges the test, and it merges nothing else until the test gives that result. If GitHub would let it merge, the fallback is a second GitHub account that posts the review as a real approval, with 1 approving review required.
+GitHub's documents don't say whether this rule still blocks a merge when 0 approvals are required, so [decision 0062](decisions/0062-one-main-branch.md) named it as an open risk. A test on 2026-11-25 settled it. Test pull request [#197](https://github.com/jcore9/Aphelion/pull/197) changed a decision record. With all its checks green and no conflicts, GitHub still refused to merge it and asked `@jcore9` to review it as code owner. The bot closed it without merging. If GitHub ever stops holding these pull requests, the fallback in decision 0062 applies: a second GitHub account posts the review as a real approval, with 1 approving review required.
 
 ### Why the checks must come from GitHub Actions
 
