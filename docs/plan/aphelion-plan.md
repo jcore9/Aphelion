@@ -441,7 +441,7 @@ The harness is plugin-first. Core features ship as first-party plugins on the sa
 | --- | --- | --- | --- |
 | Theme | Colors, type, spacing, motion, icons, chat backgrounds, declarative animations | Client | Data only, no code |
 | UI plugin | Panels, message renderers, chat-panel effects and animations, commands | ~~Client~~ Client, installed on the server and downloaded by every client ([0042](../decisions/0042-plugin-server-and-client-parts.md)) | ~~Sandboxed iframe, talks to the app through a message API~~ Always sandboxed: an iframe on web and desktop, a WebView on the phone, talking to the app only through messages ([0042](../decisions/0042-plugin-server-and-client-parts.md)) |
-| Server plugin | Bot adapters, connectors, secret backends, notifiers, triggers, reviewers | Harness or gateway host | Separate process ~~under its own Unix user~~ under the shared `aphelion-plugins` user, started by the plugin runner ([0018](../decisions/0018-shared-plugin-user.md)), JSON-RPC to the host |
+| Server plugin | Bot adapters (decision 0065: it runs inside the bot, not under the plugin runner), connectors, secret backends, notifiers, triggers, reviewers | Harness or gateway host | Separate process ~~under its own Unix user~~ under the shared `aphelion-plugins` user, started by the plugin runner ([0018](../decisions/0018-shared-plugin-user.md)), JSON-RPC to the host |
 
 > Amended by [decision 0042](../decisions/0042-plugin-server-and-client-parts.md). One plugin can have a server part, a client part, or both. The server part runs like a server plugin, and the client part runs like a UI plugin. The original table treated them as separate plugin types.
 

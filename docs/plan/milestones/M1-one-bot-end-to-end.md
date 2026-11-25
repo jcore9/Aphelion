@@ -190,7 +190,7 @@ Each section says what the issue builds, what it needs, which files it is expect
 
 ### #19 Bot adapter contract (wave 1)
 
-- **Builds.** The plugin interface that emits normalized events: text delta, tool start and end, permission request, turn end, error and usage. It is the only thing a new bot tool must implement. M4 adds Grok and Codex behind it.
+- **Builds.** The adapter interface that emits normalized events: text delta, tool start and end, permission request, turn end, error and usage. It is the only thing a new bot tool must implement. M4 adds Grok and Codex behind it. The adapter runs inside the bot, not under the plugin runner ([decision 0065](../../decisions/0065-bot-adapter-runs-inside-the-bot.md)).
 - **Needs.** M0-13, the plugin host.
 - **Files.** `packages/plugin-sdk/src/`, `packages/protocol/src/`, `docs/reference/`.
 - **Check.** Unit tests of the event shapes. A fake adapter passes the contract tests.
@@ -236,7 +236,7 @@ Each section says what the issue builds, what it needs, which files it is expect
 
 ### #20 Claude adapter (wave 2, owner path)
 
-- **Builds.** The adapter plugin, using `@anthropic-ai/claude-agent-sdk` and the `claude` binary from #155. It answers every permission request with the fixed rule above. It answers the open points in [decision 0034](../../decisions/0034-vendor-protocol-per-cli.md). With fake keys, no key shows in output or logs, including at shutdown.
+- **Builds.** The Claude adapter, which runs inside the bot, not under the plugin runner ([decision 0065](../../decisions/0065-bot-adapter-runs-inside-the-bot.md)), using `@anthropic-ai/claude-agent-sdk` and the `claude` binary from #155. It answers every permission request with the fixed rule above. It answers the open points in [decision 0034](../../decisions/0034-vendor-protocol-per-cli.md). With fake keys, no key shows in output or logs, including at shutdown.
 - **Constraints.** It sets the explicit path to the pinned `claude` binary on every call. The SDK is pinned to the matching CLI version, and the image leaves out the SDK's bundled copy. Managed settings ban the bypass modes (`auto` and `bypassPermissions`), and the adapter always passes `permissionMode: "default"`.
 - **Needs.** #19, #155.
 - **Files.** A new plugin folder under `apps/server/plugins/` or `packages/`, `bun.lock`, `docs/reference/`.
