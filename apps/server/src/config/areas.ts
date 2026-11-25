@@ -90,7 +90,8 @@ export const configAreas = {
   }),
   policy: defineArea({
     file: "policy.yaml",
-    description: "Approval rules. It has no fields yet. Issue M2-01 adds the policy model.",
+    description:
+      "Approval rules. It has no fields yet. Issue M2-01 adds the policy model.",
     migrations: [],
     fields: {},
   }),
