@@ -50,7 +50,11 @@ container_id() {
 }
 
 tailnet_address() {
-  sed -n 's/^APHELION_TAILNET_ADDRESS=//p' "$APHELION_DEPLOY/.env" 2>/dev/null | tail -n 1 | tr -d "\"'"
+  local value
+  value=$(sed -n 's/^APHELION_TAILNET_ADDRESS=//p' "$APHELION_DEPLOY/.env" 2>/dev/null | tail -n 1)
+  value=${value%%[[:space:]]#*}
+  value=${value//[\"\']/}
+  echo "${value%%[[:space:]]*}"
 }
 
 health_url() {
@@ -229,8 +233,8 @@ case ${1:-} in
     "cmd_$1"
     ;;
   device)
-    case ${2:-} in
-      add | list | revoke) cmd_device "${@:2}" ;;
+    case ${2:-}:$# in
+      add:[3-9] | list:2 | revoke:3) cmd_device "${@:2}" ;;
       *) usage_error ;;
     esac
     ;;

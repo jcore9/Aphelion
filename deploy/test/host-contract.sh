@@ -244,7 +244,7 @@ esac
 FAKE
 cat >"$fakebin/curl" <<'FAKE'
 #!/bin/bash
-[[ ${FAKE_CONTAINER:-up} == up ]] || exit 7
+[[ ${FAKE_CONTAINER:-up} == up && ${*: -1} == http://100.100.5.1:7400/health ]] || exit 7
 echo '{"status":"ok"}'
 FAKE
 cat >"$fakebin/docker" <<'FAKE'
@@ -289,7 +289,10 @@ rm "$link"
 ln -s /nowhere "$link"
 /opt/aphelion/deploy/host/install >/dev/null || fail "install failed over a link to another place"
 [[ $(readlink "$link") == /opt/aphelion/deploy/host/aphelion ]] || fail "install left a link that points elsewhere"
-pass "install links the host command into /usr/local/bin, changes nothing on a second run, and keeps a file it doesn't own"
+chmod 0777 /opt/aphelion/deploy/host/aphelion
+if /opt/aphelion/deploy/host/install >/dev/null 2>&1; then fail "install linked a host command that anyone can write"; fi
+chmod 0755 /opt/aphelion/deploy/host/aphelion
+pass "install links the host command into /usr/local/bin, changes nothing on a second run, keeps a file it doesn't own, and refuses a command others can write"
 
 status=0
 error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" status 2>&1 >/dev/null) || status=$?
@@ -300,7 +303,7 @@ help=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" --help) || fai
   fail "--help doesn't list the commands: $help"
 pass "the command refuses a user other than root with status 2, and --help works for everyone"
 
-for bad in "" bogus "status extra" device "device frobnicate" "check now"; do
+for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b"; do
   status=0
   read -ra words <<<"$bad" || true
   error=$(as_root_aphelion "${words[@]}" 2>&1 >/dev/null) || status=$?
@@ -331,6 +334,13 @@ FAKE_TOOLS=""
 out=$(as_root_aphelion status) || fail "status failed with no AI tool installed"
 [[ $out == *"AI tools: none installed"* ]] || fail "status didn't say that no AI tool is installed: $out"
 pass "status lists only the installed tools, or says none is installed"
+
+cp /opt/aphelion/deploy/.env /opt/aphelion/deploy/.env.saved
+printf 'APHELION_TAILNET_ADDRESS="100.100.5.1" # the tailnet address\n' >/opt/aphelion/deploy/.env
+out=$(as_root_aphelion status) || fail "status failed with a comment after the tailnet address in .env: $out"
+[[ $out == *"health: ok"* ]] || fail "status didn't read the tailnet address past a comment in .env: $out"
+mv /opt/aphelion/deploy/.env.saved /opt/aphelion/deploy/.env
+pass "status reads the tailnet address from .env as Compose does, past quotes and a comment"
 
 status=0
 out=$(FAKE_CONTAINER=down as_root_aphelion status 2>&1) || status=$?

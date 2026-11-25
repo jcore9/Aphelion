@@ -423,13 +423,15 @@ if ((EUID != 0)); then
   if unshare --user --map-root-user true 2>/dev/null; then
     host_root=(unshare --user --map-root-user)
   else
-    host_root=(sudo -n --preserve-env)
+    host_root=(sudo -n)
   fi
 fi
 host_aphelion() {
-  APHELION_DEPLOY=$host_deploy APHELION_CREDENTIAL=${APHELION_CREDENTIAL:-$scratch/credential} FAKE_CONTAINER=$container \
-    COMPOSE_PROJECT_NAME=$project COMPOSE_FILE=$PWD/deploy/compose.yaml:$scratch/override.yaml \
-    "${host_root[@]}" env "PATH=$fakebin:$PATH" deploy/host/aphelion "$@"
+  "${host_root[@]}" env "PATH=$fakebin:$PATH" \
+    "APHELION_DEPLOY=$host_deploy" "APHELION_CREDENTIAL=${APHELION_CREDENTIAL:-$scratch/credential}" \
+    "FAKE_CONTAINER=$container" "FAKE_FIREWALL=${FAKE_FIREWALL:-}" \
+    "COMPOSE_PROJECT_NAME=$project" "COMPOSE_FILE=$PWD/deploy/compose.yaml:$scratch/override.yaml" \
+    deploy/host/aphelion "$@"
 }
 
 device_err=$scratch/device.err

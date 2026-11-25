@@ -14,7 +14,7 @@ if [[ $(cd "$(dirname "$0")/../.." && pwd -P) != "$root" ]]; then
   echo "install: clone Aphelion to $root first. The unit runs the files there." >&2
   exit 1
 fi
-for path in "$root" "$root/deploy" "$root/deploy/host"; do
+for path in "$root" "$root/deploy" "$root/deploy/host" "$root/deploy/host/aphelion"; do
   if [[ $(stat -c '%u' "$path") != 0 ]] || (($(stat -c '%a' "$path" | sed 's/^/8#/') & 8#022)); then
     echo "install: $path must be owned by root and writable only by root" >&2
     exit 1
