@@ -46,6 +46,8 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
    sudo host/install
    ```
 
+   The script also links `/usr/local/bin/aphelion` to the `aphelion` command for the host, so `sudo aphelion` works from any folder. [The host command](../reference/host-command.md) describes it. Running the script again keeps the link as it is.
+
    The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens the store. The bootstrap key unlocks the store ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
 
    The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a whole key, the script stops and leaves the file and the service as they are.
@@ -71,10 +73,27 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 8. Add a device token for your first client. The command prints the token once.
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion device add laptop
+   sudo aphelion device add laptop
    ```
 
-Run every `docker compose` command in this guide from `/opt/aphelion/deploy`, so Compose finds the Compose file and `.env`.
+9. Check the host. `check` prints `ok` or `FAIL` for each check the host can run alone, and how many passed. You should see no `FAIL`. `sudo aphelion status` shows whether the service, the container and each installed AI tool are up.
+
+   ```sh
+   sudo aphelion check
+   ```
+
+Run every `docker compose` command in this guide from `/opt/aphelion/deploy`, so Compose finds the Compose file and `.env`. The `aphelion` command works from any folder.
+
+### What it runs underneath
+
+`sudo aphelion device …` runs the server's own `aphelion` command inside the container, as the `harness` user, and passes its output and exit code through:
+
+```sh
+cd /opt/aphelion/deploy
+sudo docker compose exec -T --user harness aphelion aphelion device add laptop
+```
+
+`status` and `check` ask `systemctl`, `docker compose ps`, `docker inspect`, `curl` and `iptables` read-only questions. [The host command](../reference/host-command.md) lists each one.
 
 ## Keep a recovery copy of the bootstrap key
 
@@ -289,7 +308,7 @@ Run three checks from `/opt/aphelion/deploy` once the service has started. They 
 3. The database history is there. You should see the device `drill-laptop` with the same ID that `device add` printed on the old host.
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion device list
+   sudo aphelion device list
    ```
 
 If a check doesn't show what it should, write down the command and its output.
@@ -307,7 +326,7 @@ Use this on the old host, before [Back up](#back-up). It makes one secret, one a
 2. Add the test device. The command discards its token. You should see its ID and expiry on the screen.
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion device add drill-laptop > /dev/null
+   sudo aphelion device add drill-laptop > /dev/null
    ```
 
 3. Unpack the test plugin from the repository into a folder, and make its files readable by everyone and writable only by you.
@@ -337,7 +356,7 @@ Use this on the old host, before [Back up](#back-up). It makes one secret, one a
 7. Check that the device is listed, then follow [Back up](#back-up).
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion device list
+   sudo aphelion device list
    ```
 
 ## Start a fresh store after an older install

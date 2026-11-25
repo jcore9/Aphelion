@@ -1,0 +1,242 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly APHELION_DEPLOY=${APHELION_DEPLOY:-/opt/aphelion/deploy}
+readonly APHELION_CREDENTIAL=${APHELION_CREDENTIAL:-/etc/credstore.encrypted/aphelion-bootstrap}
+readonly service=aphelion
+readonly health_port=7400
+readonly hardening='true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"]'
+
+readonly AI_TOOL_NAMES=(claude codex grok)
+readonly -A AI_TOOL_SIGN_IN_CHECKS=([claude]="auth status --text" [codex]="login status" [grok]="")
+
+usage() {
+  cat <<'USAGE'
+usage:
+  aphelion status                      show whether the service, the container and the AI tools are up
+  aphelion device add NAME [--days N]  add a device and print its token
+  aphelion device list                 list the devices
+  aphelion device revoke ID            stop a device from signing in
+  aphelion check                       run every check the host can run alone
+  aphelion --help                      show this text
+
+Run it as root: sudo aphelion status
+The device commands run the server's own aphelion command inside the container.
+USAGE
+}
+
+fail() {
+  echo "aphelion: $*" >&2
+  exit 1
+}
+
+usage_error() {
+  usage >&2
+  exit 2
+}
+
+compose() {
+  docker compose --project-directory "$APHELION_DEPLOY" "$@"
+}
+
+in_container() {
+  local user=$1
+  shift
+  compose exec -T --user "$user" "$service" "$@"
+}
+
+container_id() {
+  compose ps --status running --quiet "$service" 2>/dev/null
+}
+
+tailnet_address() {
+  local value
+  value=$(sed -n 's/^APHELION_TAILNET_ADDRESS=//p' "$APHELION_DEPLOY/.env" 2>/dev/null | tail -n 1)
+  value=${value%%[[:space:]]#*}
+  value=${value//[\"\']/}
+  echo "${value%%[[:space:]]*}"
+}
+
+health_url() {
+  local address
+  address=$(tailnet_address)
+  [[ -n $address ]] || return 1
+  echo "http://$address:$health_port/health"
+}
+
+service_state() {
+  local enabled active
+  enabled=$(systemctl is-enabled "$service" 2>/dev/null) || true
+  active=$(systemctl is-active "$service" 2>/dev/null) || true
+  enabled=${enabled:-not installed}
+  if [[ $active == active ]]; then
+    echo "$enabled, running"
+  else
+    echo "$enabled, not running (${active:-unknown})"
+  fi
+}
+
+service_is_up() {
+  [[ $(service_state) == "enabled, running" ]]
+}
+
+health_answers() {
+  local url
+  url=$(health_url) || return 1
+  [[ $(curl --silent --max-time 5 "$url" 2>/dev/null) == '{"status":"ok"}' ]]
+}
+
+check_service() {
+  service_is_up || { echo "$(service_state). Start it with: sudo systemctl enable --now aphelion"; return 1; }
+}
+
+check_container() {
+  [[ -n $(container_id) ]] || { echo "docker compose shows no running $service container"; return 1; }
+}
+
+check_health() {
+  local url
+  url=$(health_url) || { echo "set APHELION_TAILNET_ADDRESS in $APHELION_DEPLOY/.env"; return 1; }
+  health_answers || { echo "no {\"status\":\"ok\"} from $url"; return 1; }
+}
+
+check_config() {
+  local output
+  output=$(compose --profile '*' config 2>/dev/null |
+    compose run --rm -T --user harness "$service" aphelion config check --compose - 2>&1) ||
+    { echo "${output##*$'\n'}"; return 1; }
+}
+
+check_hardening() {
+  local id found mounts
+  id=$(container_id)
+  [[ -n $id ]] || { echo "no running container to inspect"; return 1; }
+  found=$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}}' "$id") ||
+    { echo "docker inspect failed"; return 1; }
+  [[ $found == "$hardening" ]] || { echo "docker inspect shows $found, not $hardening"; return 1; }
+  mounts=$(docker inspect --format '{{json .Mounts}}' "$id") || { echo "docker inspect failed"; return 1; }
+  [[ $mounts != *docker.sock* ]] || { echo "the Docker socket is mounted"; return 1; }
+}
+
+check_credential() {
+  [[ -f $APHELION_CREDENTIAL ]] || { echo "$APHELION_CREDENTIAL is missing. Run host/install."; return 1; }
+}
+
+check_firewall() {
+  local chain
+  for chain in APHELION-FORWARD APHELION-INPUT; do
+    iptables -w 10 -t mangle -S "$chain" >/dev/null 2>&1 ||
+      { echo "the $chain chain is missing. Restart the service to install it."; return 1; }
+  done
+}
+
+check_cpu() {
+  grep -qw sse4_2 /proc/cpuinfo ||
+    { echo "Bun needs sse4_2. On a Proxmox VM, set the CPU type to host."; return 1; }
+}
+
+report_ai_tool() {
+  local name=$1 sign_in_check
+  local -a words
+  sign_in_check=${AI_TOOL_SIGN_IN_CHECKS[$name]}
+  in_container aphelion-bot sh -c 'command -v "$1"' _ "$name" >/dev/null 2>&1 </dev/null || return 1
+  if [[ -z $sign_in_check ]]; then
+    echo "$name: installed, sign-in state unknown"
+    return 0
+  fi
+  read -ra words <<<"$sign_in_check"
+  if in_container aphelion-bot "$name" "${words[@]}" >/dev/null 2>&1 </dev/null; then
+    echo "$name: signed in"
+  else
+    echo "$name: not signed in, or the check failed"
+  fi
+}
+
+report_ai_tools() {
+  local name lines
+  lines=$(for name in "${AI_TOOL_NAMES[@]}"; do report_ai_tool "$name" || true; done)
+  echo "${lines:-AI tools: none installed}"
+}
+
+cmd_status() {
+  local up=1 running=0 url
+  echo "service: $(service_state)"
+  service_is_up || up=0
+  if [[ -n $(container_id) ]]; then
+    echo "container: running"
+    running=1
+  else
+    echo "container: not running"
+  fi
+  if health_answers; then
+    echo "health: ok"
+  else
+    url=$(health_url) || url="http://ADDRESS:$health_port/health, because $APHELION_DEPLOY/.env has no APHELION_TAILNET_ADDRESS"
+    echo "health: no answer from $url"
+    up=0
+  fi
+  if ((running)); then
+    report_ai_tools
+  else
+    echo "AI tools: unknown, the container isn't running"
+  fi
+  ((up))
+}
+
+run_check() {
+  local label=$1 cause
+  if cause=$("$2" 2>&1); then
+    echo "ok    $label"
+  else
+    echo "FAIL  $label: $cause"
+    return 1
+  fi
+}
+
+cmd_check() {
+  local failed=0 total=0
+  tally() {
+    total=$((total + 1))
+    run_check "$@" || failed=$((failed + 1))
+  }
+  tally "the service is enabled and running" check_service
+  tally "the container is running" check_container
+  tally "/health answers on the tailnet address" check_health
+  tally "config check accepts the Compose file" check_config
+  tally "the container is hardened" check_hardening
+  tally "the bootstrap credential exists" check_credential
+  tally "the firewall chains exist" check_firewall
+  if [[ $(uname -m) == x86_64 ]]; then
+    tally "the processor has sse4_2" check_cpu
+  fi
+  echo "$((total - failed)) of $total checks passed"
+  ((failed == 0))
+}
+
+cmd_device() {
+  compose exec -T --user harness "$service" aphelion device "$@"
+}
+
+case ${1:-} in
+  -h | --help | help)
+    usage
+    exit 0
+    ;;
+esac
+if ((EUID != 0)); then
+  echo "Run it with sudo: sudo aphelion $*" >&2
+  exit 2
+fi
+case ${1:-} in
+  status | check)
+    (($# == 1)) || usage_error
+    "cmd_$1"
+    ;;
+  device)
+    case ${2:-}:$# in
+      add:[3-9] | list:2 | revoke:3) cmd_device "${@:2}" ;;
+      *) usage_error ;;
+    esac
+    ;;
+  *) usage_error ;;
+esac

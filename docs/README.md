@@ -42,6 +42,7 @@ A spike is a research task. Each spike answers its questions in writing before a
 ## Reference
 
 - [The aphelion command](reference/cli.md) covers `--headless`, `--version`, `config check` and the `device` commands, their options, output and exit codes.
+- [The host command](reference/host-command.md) covers `sudo aphelion status`, `device` and `check` on the server, what each prints and its exit codes.
 - [Config reference](reference/config.md) covers the files in `/etc/aphelion/`, their fields and versions, the owner and mode check, and the errors.
 - [The SQLite store](reference/store.md) covers the `Database` interface and how to add a migration.
 - [Logging and the audit log](reference/logging.md) covers the log format, the redaction rules and how to add one, and the append-only audit table.
