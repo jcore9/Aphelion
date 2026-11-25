@@ -1,6 +1,6 @@
 [Unit]
 Description=Aphelion headless server
-Documentation=https://github.com/jcore9/Aphelion/blob/dev/docs/guides/install.md
+Documentation=https://github.com/jcore9/Aphelion/blob/main/docs/guides/install.md
 Requires=docker.service
 After=docker.service tailscaled.service network-online.target
 Wants=tailscaled.service network-online.target

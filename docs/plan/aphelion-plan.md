@@ -695,7 +695,9 @@ Issue-sized tasks for every milestone, each with acceptance criteria and depende
 
 **Every milestone opens with a planning issue (M#-00):** a short written plan covering scope, design notes, risks and open questions, reviewed before the milestone's other issues start. The milestone closes only when its docs are updated and a short retro note is written.
 
-**Workflow:** follow Development workflow in the plan. Branch from `dev` per issue (`feat/M3-04-github-app`), open one small PR per issue into `dev`, and merge `dev` into `main` only through an approved release PR at the end of a milestone. Coding tools open PRs but never approve or merge them; manager bots can merge into dev only under the bot approval rules.
+**Workflow:** follow Development workflow in the plan. Branch from `main` per issue (`feat/M3-04-github-app`) and open one small PR per issue into `main`. The bot squash-merges it after a review from another model family, unless it touches an owner path. At the end of a milestone the user merges the release PR, which tags `main`.
+
+> Amended by [decision 0062](../decisions/0062-one-main-branch.md). The original said: "follow Development workflow in the plan. Branch from `dev` per issue (`feat/M3-04-github-app`), open one small PR per issue into `dev`, and merge `dev` into `main` only through an approved release PR at the end of a milestone. Coding tools open PRs but never approve or merge them; manager bots can merge into dev only under the bot approval rules."
 
 ## M0 · Foundations (v0.1)
 
@@ -827,7 +829,7 @@ M0-16 sits out of numeric order so that every existing ID, and every reference t
 | M8-02 | Forgejo connector | Same tool set, policy model and Work view support as GitHub | M3-02, M5-06 |
 | M8-03 | Notion connector (read-only first) | Read tools first; writes default to ask | M3-02 |
 | M8-04 | Gmail connector (read-only first) | Read and search first; sending defaults to ask | M3-02 |
-| M8-05 | Bot PR approval policy | Policy rule that lets a manager bot approve and merge into `dev` only when CI is green, the diff is under the size limit, no dependencies or security-sensitive paths change, and the reviewer differs from the author; never `main`; daily digest of bot merges with one-click revert | M3-04, M8-01, M6-04 |
+| M8-05 | Bot PR approval policy | Policy rule that lets a manager bot merge into `main` ~~approve and merge into `dev`~~ only when CI is green, the diff is under the size limit, no owner paths ~~no dependencies or security-sensitive paths~~ change, and the reviewer comes from another model family than the author ~~differs from the author~~; never the release PR ~~never `main`~~; daily digest of bot merges with one-click revert ([decision 0062](../decisions/0062-one-main-branch.md)) | M3-04, M8-01, M6-04 |
 
 ## M9 · Later
 

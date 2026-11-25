@@ -11,7 +11,7 @@
 `aphelion config check --compose` reads the output of `docker compose config` and refuses a port published anywhere but the tailnet ([the Compose port rule](../reference/server.md#the-compose-port-rule)). It didn't compare that output with `server.yaml`. A config with `address: 127.0.0.1` and `port: 7401` passed against the shipped Compose file, and the server then couldn't be reached:
 
 - Compose forwards a connection from the host to the container's own network interface. A server that listens on `127.0.0.1` inside the container never sees it.
-- The host firewall lets new connections into the container only on port 7400 ([`deploy/host/firewall`](https://github.com/jcore9/Aphelion/blob/dev/deploy/host/firewall)). A server on any other port can't be reached, whatever the Compose file forwards.
+- The host firewall lets new connections into the container only on port 7400 ([`deploy/host/firewall`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/firewall)). A server on any other port can't be reached, whatever the Compose file forwards.
 
 A test on Docker 29 with Bun 1.4.5, on an IPv4-only bridge network like Aphelion's, showed a server on `127.0.0.1` refuses forwarded connections, and a server on `0.0.0.0` or `::` answers them. `::` works only while the host allows IPv6 in the container.
 

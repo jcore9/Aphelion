@@ -50,7 +50,7 @@ At service stop:
 
 - The host stops taking `start` requests and sends `shutdown` to every running plugin at the same time.
 - Each plugin gets the usual 5 seconds (`RestartPolicy.graceMs`) before the runner kills it.
-- One deadline of 10 seconds (`defaultStopDeadlineMs` in [`host.ts`](https://github.com/jcore9/Aphelion/blob/dev/apps/server/src/plugins/host.ts)) caps the whole plugin stop. After 9 seconds, the host tells the runner to kill every plugin that is still running, and logs which ones. It then closes the pipe to the runner.
+- One deadline of 10 seconds (`defaultStopDeadlineMs` in [`host.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/plugins/host.ts)) caps the whole plugin stop. After 9 seconds, the host tells the runner to kill every plugin that is still running, and logs which ones. It then closes the pipe to the runner.
 
 In the SDK, once shutdown starts:
 

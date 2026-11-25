@@ -187,7 +187,7 @@ const part = (description: string) =>
     .describe(description);
 
 /**
- * The Zod schema for `aphelion-plugin.json`, whose fields [the plugin manifest reference](https://github.com/jcore9/Aphelion/blob/dev/docs/reference/plugin-manifest.md) lists.
+ * The Zod schema for `aphelion-plugin.json`, whose fields [the plugin manifest reference](https://github.com/jcore9/Aphelion/blob/main/docs/reference/plugin-manifest.md) lists.
  * It fills in empty lists and checks that `api` is a valid version range, but not that the range includes `pluginApiVersion`. `parsePluginManifest` checks both.
  */
 export const pluginManifestSchema = z
