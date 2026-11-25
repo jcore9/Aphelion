@@ -13,5 +13,5 @@
   ],
   "additionalProperties": false,
   "title": "routines.yaml",
-  "description": "Scheduled and on-demand routines. No fields yet: M6-02 adds routine definitions."
+  "description": "Scheduled and on-demand routines. The file has no fields yet. Issue M6-02 adds routine definitions."
 }
