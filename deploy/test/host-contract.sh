@@ -213,5 +213,10 @@ printf 'MANAGE_BUILTINS=yes\n' >/etc/default/ufw
 status=0
 host/preflight >/dev/null 2>&1 || status=$?
 [[ $status == 1 ]] || fail "preflight accepted ENABLED=YES, which ufw treats as enabled"
-pass "preflight reads the ufw files as sh does: quotes, comments, the last line, command prefixes, and ENABLED=YES"
+printf 'ENABLED=yes\n' >/etc/ufw/ufw.conf
+printf 'MANAGE_BUILTINS=yes\nexit 0\n' >/etc/default/ufw
+status=0
+host/preflight >/dev/null 2>&1 || status=$?
+[[ $status == 1 ]] || fail "preflight went on when reading the ufw files stopped early"
+pass "preflight reads the ufw files as sh does: quotes, comments, the last line, command prefixes and ENABLED=YES, and refuses when sh stops early"
 rm -f /etc/ufw/ufw.conf /etc/default/ufw

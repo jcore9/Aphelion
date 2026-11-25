@@ -11,12 +11,12 @@ Each merge into `main` runs [`.github/workflows/release.yml`](https://github.com
 
 It updates itself after every merge. Leave it open until the milestone ends.
 
-GitHub doesn't start CI for a pull request that a workflow opened or updated, so its `lint`, `typecheck` and `test` checks wait at "Expected — Waiting for status to be reported". That's normal while the milestone runs.
+GitHub doesn't run CI by itself for a pull request that a workflow opened or updated. Its `lint`, `typecheck` and `test` checks wait, or GitHub asks someone to approve the run. That's normal while the milestone runs.
 
 ## At the end of a milestone
 
 1. Check the release pull request. The version should match the milestone's row in decision 0003. Each changelog line should say what changed in words a user follows, and breaking changes should be called out. To change a line, edit the description of the merged pull request it came from, and add the new title between two marker lines, `BEGIN_COMMIT_OVERRIDE` and `END_COMMIT_OVERRIDE`. release-please uses that title instead the next time it runs.
-2. Close the release pull request and reopen it. Reopening starts CI as you, so the required checks run on its latest commit.
+2. Start CI on its latest commit. If GitHub shows **Approve and run workflows** on the pull request, click it. Otherwise close the pull request and reopen it, which starts CI as you.
 3. Once they pass, approve and merge the release pull request. release-please then tags that commit, for example `v0.1.0-alpha.2`, and creates the GitHub release, marked as a pre-release.
 
 ## Versions that need an override
