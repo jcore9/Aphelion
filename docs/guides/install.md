@@ -444,7 +444,18 @@ sudo host/network-check 10.0.0.1:80 10.0.0.133:22 100.71.226.67:22 100.93.139.95
 
 The script first connects to each target from the host itself, and stops if one doesn't answer. Pick targets with an open port. The first five must then print `blocked`, which means the connection from the container timed out because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The script exits with code 1 if any check fails, and with code 2 if a target is malformed or the container isn't running.
 
-A firewall reload can remove Aphelion's rules while the server runs. The M0 exit test tried two `ufw` settings on Ubuntu 26.04 with Docker 29.10, with ufw turned on:
+Aphelion refuses to start when ufw is enabled and `MANAGE_BUILTINS=yes` is set in `/etc/default/ufw`. To fix this, set `MANAGE_BUILTINS=no` in that file, then run these commands.
+
+```sh
+sudo ufw reload
+sudo systemctl restart docker
+```
+
+Docker rebuilds its chains, and `aphelion.service` restarts with it and installs Aphelion's rules. Once Aphelion runs again, run the network check above.
+
+Avoid switching to `yes` and reloading ufw while Aphelion runs, because the reload removes Aphelion's rules until the next restart.
+
+The M0 exit test tried two `ufw` settings on Ubuntu 26.04 with Docker 29.10, with ufw turned on:
 
 - With ufw's default setting, `MANAGE_BUILTINS=no` in `/etc/default/ufw`, `sudo ufw reload` left Aphelion's rules in place, and the check still passed.
 - With `MANAGE_BUILTINS=yes`, `sudo ufw reload` removed the rules that send traffic into Aphelion's chains, and deleted Docker's own `DOCKER` chain. The check then showed the container connecting to the host's LAN, tailnet and bridge addresses, and failing to reach `1.1.1.1:443`. Restarting `aphelion` didn't help. `sudo journalctl -u aphelion` showed this line every 10 seconds:
@@ -452,14 +463,6 @@ A firewall reload can remove Aphelion's rules while the server runs. The M0 exit
   ```text
   failed to set up container networking: ... iptables failed: iptables --wait -t filter -I DOCKER ... iptables: No chain/target/match by that name.
   ```
-
-After a `ufw reload` with `MANAGE_BUILTINS=yes`, restart Docker, not only Aphelion. Docker rebuilds its chains, and `aphelion.service` restarts with it and installs Aphelion's rules again as it starts.
-
-```sh
-sudo systemctl restart docker
-```
-
-Once Aphelion runs again, run the network check above again.
 
 Reloading a file that contains `flush ruleset`, such as `/etc/nftables.conf`, can clear Docker's and Aphelion's rules too, when `iptables` uses the nftables backend. This wasn't tested. After such a reload, restart Docker the same way and run the check again.
 

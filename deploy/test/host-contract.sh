@@ -161,3 +161,35 @@ if ! grep -qx "compose --profile \* config" /tmp/docker-calls ||
   fail "preflight didn't pipe the rendered Compose file into config check as harness"
 fi
 pass "preflight waits for the tailnet address on tailscale0, installs the firewall and runs config check"
+
+export APHELION_TAILNET_ADDRESS=100.100.5.1
+mkdir -p /etc/ufw
+printf 'ENABLED=yes\n' >/etc/ufw/ufw.conf
+printf 'MANAGE_BUILTINS=yes\n' >/etc/default/ufw
+status=0
+error=$(host/preflight 2>&1 >/dev/null) || status=$?
+[[ $status == 1 && $error == *MANAGE_BUILTINS* ]] ||
+  fail "preflight didn't exit with status 1 and name MANAGE_BUILTINS on stderr"
+pass "preflight refuses enabled ufw with MANAGE_BUILTINS=yes and names the setting on stderr"
+
+printf 'MANAGE_BUILTINS=no\n' >/etc/default/ufw
+host/preflight >/dev/null || fail "preflight refused enabled ufw with MANAGE_BUILTINS=no"
+pass "preflight accepts enabled ufw with MANAGE_BUILTINS=no"
+
+printf 'ENABLED=no\n' >/etc/ufw/ufw.conf
+printf 'MANAGE_BUILTINS=yes\n' >/etc/default/ufw
+host/preflight >/dev/null || fail "preflight refused disabled ufw with MANAGE_BUILTINS=yes"
+pass "preflight accepts disabled ufw with MANAGE_BUILTINS=yes"
+
+rm -f /etc/ufw/ufw.conf /etc/default/ufw
+host/preflight >/dev/null || fail "preflight refused missing ufw config files"
+pass "preflight accepts missing ufw config files"
+
+printf 'ENABLED="yes"\n' >/etc/ufw/ufw.conf
+printf 'MANAGE_BUILTINS="yes"\n' >/etc/default/ufw
+status=0
+error=$(host/preflight 2>&1 >/dev/null) || status=$?
+[[ $status == 1 && $error == *MANAGE_BUILTINS* ]] ||
+  fail 'preflight accepted quoted "yes" or failed without naming MANAGE_BUILTINS'
+pass 'preflight refuses enabled ufw with quoted "yes" values'
+rm -f /etc/ufw/ufw.conf /etc/default/ufw
