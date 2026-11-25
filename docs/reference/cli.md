@@ -90,7 +90,7 @@ A run with problems prints each one, then the count on standard error, and exits
 
 ### Checking the Compose file
 
-With `--compose`, the check also runs [the Compose port rule](server.md#the-compose-port-rule) on the Compose file. Every port that any service publishes must be on a tailnet address, which is an address of the owner's private Tailscale network, in `100.64.0.0/10`.
+With `--compose`, the check also runs [the Compose port rule](server.md#the-compose-port-rule) on the Compose file. Every port that any service publishes must be on a tailnet address in `100.64.0.0/10`. A tailnet is the owner's private Tailscale network.
 
 It also checks that a published port can reach the server ([decision 0055](../decisions/0055-compose-check-server-listener.md)):
 
@@ -209,7 +209,7 @@ To save the token to a file, create a new file that only you can read. `umask 07
 (umask 077 && set -o noclobber && docker compose exec -T --user harness aphelion aphelion device add laptop > token.txt)
 ```
 
-If the token can't be printed, for example because the disk is full, the command revokes the new device at once. It then exits with code 1. This way no working token exists that nobody saw.
+If the token can't be printed, for example because the disk is full, the command revokes the new device at once. It then exits with code 1. So no working token exists that nobody saw.
 
 The name is 1 to 64 characters, with no control characters and no spaces at either end. Two devices may share a name.
 

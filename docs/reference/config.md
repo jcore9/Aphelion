@@ -35,7 +35,7 @@ Every file is at version 1, and no migrations exist yet.
 
 ## Owners and modes
 
-`checkConfigPermissions` refuses a config directory that bots could read or write. [`aphelion config check`](cli.md#aphelion-config-check) calls it, and `aphelion --headless` doesn't start when it fails. Both also check the state folder, `/var/lib/aphelion`, with `checkStatePermissions`. The state folder must be owned by the server's user and group, with a mode no looser than `0700`.
+`checkConfigPermissions` refuses a config directory that bots could read or write. [`aphelion config check`](cli.md#aphelion-config-check) calls it, and `aphelion --headless` doesn't start when it fails. Both also check the state folder, `/var/lib/aphelion`, with `checkStatePermissions`. `/var/lib/aphelion` must be a folder owned by the server's user and group, with a mode no looser than `0700`.
 
 | Path | Must be | Owner and group | Mode no looser than |
 | --- | --- | --- | --- |
@@ -75,7 +75,7 @@ Each error names the file, then the line and column where the parser found it, t
 
 ## JSON Schema for editors
 
-Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config). The files are [`bots.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/bots.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/server.schema.json). The schemas describe the current version. An editor that runs the YAML language server can then complete and check the file. To turn this on, add a first line that points at the schema:
+Each file has a generated JSON Schema (draft-07) in [`config/`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config). The files are [`bots.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/bots.schema.json), [`policy.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/policy.schema.json), [`routines.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/routines.schema.json), [`connectors.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/connectors.schema.json) and [`server.schema.json`](https://github.com/jcore9/Aphelion/blob/main/docs/reference/config/server.schema.json). The schemas describe the current version. An editor that runs the YAML language server can then complete and check the file. To turn on completion and checks, add a first line that points at the schema:
 
 ```yaml
 # yaml-language-server: $schema=../path/to/bots.schema.json

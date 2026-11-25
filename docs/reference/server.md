@@ -127,7 +127,7 @@ compose.yaml:5:9: services.aphelion.ports[0]: publishes the port on every host a
 
 ### What the check guarantees
 
-When the check passes, every port the file publishes is bound only to a tailnet address, on bridge networks in NAT (network address translation) mode. `aphelion config check --compose` adds a second check with the `server.yaml` values. Every port the `aphelion` service publishes must forward to the server's TCP port. The server must listen on `0.0.0.0` port 7400 ([checking the Compose file](cli.md#checking-the-compose-file)). It says nothing about the host itself. The host firewall from [decision 0022](../decisions/0022-bot-network-boundary.md) is the second layer, and it blocks the container from the LAN whatever the Compose file says.
+When the check passes, every port the file publishes is bound only to a tailnet address, on bridge networks in NAT (network address translation) mode. `aphelion config check --compose` adds a second check with the `server.yaml` values. Every port the `aphelion` service publishes must forward to the server's TCP port. The server must listen on `0.0.0.0` port 7400 ([checking the Compose file](cli.md#checking-the-compose-file)). The Compose check says nothing about the host itself. The host firewall from [decision 0022](../decisions/0022-bot-network-boundary.md) is the second layer, and it blocks the container from the LAN whatever the Compose file says.
 
 The check parses the YAML with the `yaml` package and checks its shape with Zod. The server's own validation uses Zod, not Effect's `Schema` module. The owner decided this on 2026-11-22 ([decision 0041](../decisions/0041-effect-in-server-and-cli.md#owner-decision-2026-11-22)).
 

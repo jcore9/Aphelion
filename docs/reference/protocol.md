@@ -55,7 +55,7 @@ A server that restarts with an in-memory log starts a new stream with a new id, 
 
 ## Command ids
 
-A client gives every command an `id` of 1 to 64 letters, digits, hyphens or underscores. A UUID, a random unique identifier, from `crypto.randomUUID()` fits. When a client gets no answer, it sends the same command again with the same `id`.
+A client gives every command an `id` of 1 to 64 letters, digits, hyphens or underscores. A UUID, which is a universally unique identifier, from `crypto.randomUUID()` fits. When a client gets no answer, it sends the same command again with the same `id`.
 
 `CommandLedger` applies each id once. A retry gets the first run's outcome, whether that was a result or a failure. A command that throws before it returns counts as a failure too. A retry that arrives while the first run is still going waits for that run.
 
