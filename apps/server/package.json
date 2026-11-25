@@ -1,0 +1,41 @@
+{
+  "name": "@aphelion/server",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config/index.ts",
+    "./devices": "./src/devices/index.ts",
+    "./http": "./src/http/index.ts",
+    "./log": "./src/log/index.ts",
+    "./plugins": "./src/plugins/index.ts",
+    "./secrets": "./src/secrets/index.ts"
+  },
+  "scripts": {
+    "build": "bun build --compile src/cli/main.ts --outfile dist/aphelion",
+    "build:broker": "bun build --compile src/secrets/broker-main.ts --outfile dist/aphelion-secrets",
+    "build:plugin-runner": "bun build --target=bun src/plugins/runner-main.ts --outfile dist/plugin-runner.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aphelion/plugin-sdk": "workspace:*",
+    "@aphelion/protocol": "workspace:*",
+    "@effect/platform-bun": "4.1.5",
+    "@sigstore/bundle": "5.0.1",
+    "@sigstore/protobuf-specs": "0.5.2",
+    "@sigstore/verify": "4.1.3",
+    "age-encryption": "0.3.1",
+    "effect": "4.1.5",
+    "semver": "7.8.6",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.1.5",
+    "@types/semver": "7.8.0"
+  },
+  "bin": {
+    "aphelion": "./src/cli/main.ts"
+  }
+}

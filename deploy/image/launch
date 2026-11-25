@@ -1,0 +1,131 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly bootstrap=/run/secrets/bootstrap
+readonly drop=(setpriv --init-groups --inh-caps=-all --reset-env)
+
+log() {
+  printf '{"time":"%s","level":"%s","msg":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" "$1" "$2" >&2
+}
+
+refuse() {
+  log error "$1, so the container stops"
+  exit 1
+}
+
+check_dir() {
+  local path=$1 owner=$2 widest=$3 actual mode
+  actual=$(stat -c '%U:%G' "$path")
+  mode=$(stat -c '%a' "$path")
+  [[ $actual == "$owner" ]] || refuse "$path is owned by $actual, not $owner"
+  (((8#$mode & ~8#$widest) == 0)) || refuse "$path has mode $mode, wider than $widest"
+}
+
+running() {
+  local state
+  state=$(sed -E 's/^.*\) (.).*$/\1/' "/proc/$1/stat" 2>/dev/null) && [[ $state != Z ]]
+}
+
+await_exit() {
+  local pid=$1 until=$((SECONDS + $2))
+  while running "$pid" && ((SECONDS < until)); do sleep 0.1; done
+  ! running "$pid"
+}
+
+stop() {
+  local pid=$1 grace=$2
+  running "$pid" || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  await_exit "$pid" "$grace" || kill -KILL "$pid" 2>/dev/null || true
+}
+
+close_pipes() {
+  exec {requests_in}<&- {requests_out}>&- {replies_in}<&- {replies_out}>&-
+}
+
+check_dir /etc/aphelion harness:harness 750
+check_dir /var/lib/aphelion harness:harness 700
+check_dir /var/lib/aphelion-bots aphelion-bot:aphelion-bot 750
+check_dir /var/lib/aphelion-secrets aphelion-secrets:aphelion-secrets 700
+check_dir /var/lib/aphelion-plugins aphelion-plugins:aphelion-plugins 700
+check_dir /opt/aphelion/plugins harness:harness 755
+check_dir /run/aphelion-secrets aphelion-secrets:harness 2710
+[[ $(stat -c '%a' /run/aphelion-secrets) == 2710 ]] ||
+  refuse "/run/aphelion-secrets must have mode 2710"
+
+[[ -e $bootstrap ]] ||
+  refuse "$bootstrap is missing. Start Aphelion with systemctl, which loads the bootstrap key"
+[[ -f $bootstrap && $(stat -L -c '%u' "$bootstrap") == 0 ]] ||
+  refuse "$bootstrap must be a regular file owned by root"
+(((8#$(stat -L -c '%a' "$bootstrap") & 8#077) == 0)) ||
+  refuse "$bootstrap must not be readable by group or others"
+
+stopping=0
+trap 'stopping=1' TERM INT
+
+pipes=$(mktemp -d /run/aphelion-launch.XXXXXX)
+mkfifo -m 0600 "$pipes/requests" "$pipes/replies"
+exec {hold_requests}<>"$pipes/requests" {hold_replies}<>"$pipes/replies"
+exec {requests_in}<"$pipes/requests" {requests_out}>"$pipes/requests"
+exec {replies_in}<"$pipes/replies" {replies_out}>"$pipes/replies"
+exec {hold_requests}<&- {hold_replies}<&-
+rm -r "$pipes"
+
+(
+  close_pipes
+  exec "${drop[@]}" --reuid=aphelion-secrets --regid=aphelion-secrets -- \
+    /usr/local/bin/aphelion-secrets <"$bootstrap"
+) &
+broker=$!
+
+(
+  exec <&"$requests_in" >&"$replies_out"
+  close_pipes
+  exec "${drop[@]}" --reuid=aphelion-plugins --regid=aphelion-plugins -- \
+    /usr/bin/env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 \
+    /usr/local/bin/bun /usr/local/lib/aphelion/plugin-runner.js \
+    --bun /usr/local/bin/bun --data /var/lib/aphelion-plugins
+) &
+runner=$!
+
+server_args=(--headless --plugin-runner-fds 3,4)
+if [[ -n ${APHELION_PLUGIN_DEV_FOLDER:-} ]]; then
+  server_args+=(--plugin-dev "$APHELION_PLUGIN_DEV_FOLDER")
+fi
+
+(
+  exec </dev/null 3<&"$replies_in" 4>&"$requests_out"
+  close_pipes
+  exec "${drop[@]}" --reuid=harness --regid=harness -- \
+    /usr/local/bin/aphelion "${server_args[@]}"
+) &
+server=$!
+
+close_pipes
+log info "the launcher started the secrets broker, the plugin runner and the server"
+
+status=0
+if ((stopping == 0)); then
+  wait -n -p exited "$broker" "$runner" "$server" || status=$?
+fi
+
+if ((stopping == 1)); then
+  log info "the launcher is stopping the server, the plugin runner and the secrets broker"
+  failed=0
+else
+  case ${exited:-} in
+    "$broker") name="secrets broker" ;;
+    "$runner") name="plugin runner" ;;
+    "$server") name="server" ;;
+    *) name="launcher's wait" ;;
+  esac
+  log error "the $name exited with status $status, so the container stops"
+  failed=1
+fi
+
+stop "$server" 20
+await_exit "$runner" 5 || stop "$runner" 5
+stop "$broker" 5
+wait || true
+exit "$failed"

@@ -1,0 +1,7 @@
+{
+  "id": "dev-probe",
+  "version": "1.0.0",
+  "api": "^0.2.0",
+  "server": { "entry": "server.mjs" },
+  "permissions": {}
+}

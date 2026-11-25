@@ -1,0 +1,38 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+readonly address=${APHELION_TAILNET_ADDRESS:-}
+readonly interface=${APHELION_TAILNET_INTERFACE:-tailscale0}
+readonly wait_seconds=${APHELION_TAILNET_WAIT:-120}
+
+if [[ ! $address =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+  echo "preflight: set APHELION_TAILNET_ADDRESS in deploy/.env to this host's tailnet IPv4 address, in 100.64.0.0/10" >&2
+  exit 1
+fi
+
+until ip -4 -o address show dev "$interface" 2>/dev/null | grep -qF " inet $address/"; do
+  if ((SECONDS >= wait_seconds)); then
+    echo "preflight: $address didn't appear on $interface within $wait_seconds seconds. Is Tailscale up?" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+# ufw's boot script loads both files in one sh, defaults first. Read them the same way.
+mapfile -t ufw < <(sh -c 'for f; do [ -r "$f" ] && . "$f"; done >/dev/null 2>&1
+  command printf "%s\n%s\nend\n" "${ENABLED-}" "${MANAGE_BUILTINS-}"' sh /etc/default/ufw /etc/ufw/ufw.conf)
+
+if [[ ${ufw[2]-} != end ]]; then
+  echo 'preflight: reading /etc/default/ufw and /etc/ufw/ufw.conf with sh stopped early, so the ufw settings are unknown. Fix those files so sh can load them.' >&2
+  exit 1
+fi
+if [[ ${ufw[0]} =~ ^(yes|YES)$ && ${ufw[1]} == yes ]]; then
+  echo 'preflight: ufw is enabled with MANAGE_BUILTINS=yes and can remove Docker and Aphelion firewall rules. Set MANAGE_BUILTINS=no in /etc/default/ufw, run sudo ufw reload, then run sudo systemctl restart docker.' >&2
+  exit 1
+fi
+
+host/firewall
+
+docker compose --profile '*' config |
+  docker compose run --rm -T --user harness aphelion aphelion config check --compose -

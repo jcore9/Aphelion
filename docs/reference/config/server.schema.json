@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1,
+      "description": "The file's format version. Aphelion migrates older ones."
+    },
+    "address": {
+      "type": "string",
+      "description": "The address the server listens on. In the container it must be 0.0.0.0, the container's own interface, and `aphelion config check --compose` refuses any other. The Compose file decides which host address the port is published on."
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "The TCP port the server listens on. In the container it must be 7400, the only port the host firewall lets in, and `aphelion config check --compose` refuses any other."
+    }
+  },
+  "required": [
+    "version",
+    "address",
+    "port"
+  ],
+  "additionalProperties": false,
+  "title": "server.yaml",
+  "description": "Where the server listens for HTTP and WebSocket connections (decisions 0016 and 0022)."
+}

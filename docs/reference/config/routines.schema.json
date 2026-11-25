@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1,
+      "description": "The file's format version. Aphelion migrates older ones."
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "additionalProperties": false,
+  "title": "routines.yaml",
+  "description": "Scheduled and on-demand routines. No fields yet: M6-02 adds routine definitions."
+}

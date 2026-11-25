@@ -1,0 +1,55 @@
+name: aphelion
+
+services:
+  aphelion:
+    image: aphelion:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, KILL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 1024
+    mem_limit: ${APHELION_MEMORY:-4g}
+    cpus: ${APHELION_CPUS:-2}
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+      - /run:size=16m,mode=0755
+      - /run/aphelion-secrets:size=1m,uid=10003,gid=10001,mode=2710
+    ports:
+      - "${APHELION_TAILNET_ADDRESS:?set APHELION_TAILNET_ADDRESS in .env}:7400:7400"
+    volumes:
+      - config:/etc/aphelion
+      - state:/var/lib/aphelion
+      - bots:/var/lib/aphelion-bots
+      - secrets:/var/lib/aphelion-secrets
+      - plugin-data:/var/lib/aphelion-plugins
+      - plugin-files:/opt/aphelion/plugins
+    secrets: [bootstrap]
+    networks: [aphelion]
+    stop_grace_period: 45s
+    restart: "no"
+
+networks:
+  aphelion:
+    name: aphelion
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: aphelion0
+    ipam:
+      config:
+        - subnet: ${APHELION_SUBNET:-172.30.73.0/24}
+
+secrets:
+  bootstrap:
+    file: ${CREDENTIALS_DIRECTORY:-/run/credentials/aphelion.service}/bootstrap
+
+volumes:
+  config:
+  state:
+  bots:
+  secrets:
+  plugin-data:
+  plugin-files:

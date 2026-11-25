@@ -1,0 +1,72 @@
+#!/bin/bash
+set -euo pipefail
+
+if (($# != 6)); then
+  cat >&2 <<'USAGE'
+usage: network-check LAN_GATEWAY:PORT HOST_LAN:PORT HOST_TAILNET:PORT TAILNET_PEER:PORT BRIDGE_GATEWAY:PORT INTERNET:PORT
+
+Connects to each target as aphelion-bot inside the running container.
+The first five must time out, because the firewall drops them.
+The last must connect.
+USAGE
+  exit 2
+fi
+
+for target in "$@"; do
+  [[ $target =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}$ ]] || {
+    echo "network-check: $target isn't an IPv4 address and port, such as 10.0.0.1:80" >&2
+    exit 2
+  }
+done
+
+for target in "$@"; do
+  timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "${target%:*}" "${target##*:}" 2>/dev/null || {
+    echo "network-check: the host itself can't connect to $target. Pick an address and an open port that the host reaches, so a timeout from the container means the firewall dropped it." >&2
+    exit 2
+  }
+done
+
+cd "$(dirname "$0")/.."
+in_container() {
+  docker compose exec -T --user aphelion-bot aphelion "$@"
+}
+in_container true || {
+  echo "network-check: the aphelion container isn't running. Start it with: sudo systemctl start aphelion" >&2
+  exit 2
+}
+
+probe() {
+  local status=0
+  in_container timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "${1%:*}" "${1##*:}" 2>/dev/null || status=$?
+  case $status in
+    0) echo connected ;;
+    124) echo "timed out" ;;
+    1) echo answered ;;
+    *) echo "failed with status $status" ;;
+  esac
+}
+
+failed=0
+for target in "${@:1:5}"; do
+  result=$(probe "$target")
+  if [[ $result == "timed out" ]]; then
+    echo "ok    $target is blocked"
+  else
+    echo "FAIL  $target $result, so the firewall didn't drop it"
+    failed=1
+  fi
+done
+result=$(probe "$6")
+if [[ $result == connected ]]; then
+  echo "ok    $6 is reachable"
+else
+  echo "FAIL  $6 $result, so the container has no internet"
+  failed=1
+fi
+if in_container getent hosts api.anthropic.com >/dev/null; then
+  echo "ok    names resolve inside the container"
+else
+  echo "FAIL  names don't resolve inside the container"
+  failed=1
+fi
+exit "$failed"

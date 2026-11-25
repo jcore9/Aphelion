@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1,
+      "description": "The file's format version. Aphelion migrates older ones."
+    },
+    "bots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "description": "Unique bot name. Also the name of the bot's folder (decision 0010)."
+          },
+          "provider": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "description": "The bot CLI that runs the bot."
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The model the provider runs."
+          },
+          "connectors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            },
+            "description": "Ids of the connectors the bot may use. Can be empty."
+          },
+          "policyProfile": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "description": "The approval profile the bot's actions pass."
+          },
+          "folder": {
+            "type": "string",
+            "pattern": "^\\/",
+            "description": "Absolute path of the bot's folder. Normally the bot's name under /var/lib/aphelion-bots."
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "model",
+          "connectors",
+          "policyProfile",
+          "folder"
+        ],
+        "additionalProperties": false
+      },
+      "description": "One entry per bot. Names must be unique."
+    }
+  },
+  "required": [
+    "version",
+    "bots"
+  ],
+  "additionalProperties": false,
+  "title": "bots.yaml",
+  "description": "What each bot is allowed to do. Instructions live in the bot's folder, not here (decision 0010)."
+}

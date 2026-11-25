@@ -1,0 +1,311 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "The manifest's JSON Schema, for editors. The host ignores it.",
+      "type": "string",
+      "maxLength": 2048
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$",
+      "description": "Unique plugin id."
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^(0|[1-9]\\d{0,14})\\.(0|[1-9]\\d{0,14})\\.(0|[1-9]\\d{0,14})(-(0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\\+[0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*)?$",
+      "description": "The plugin's own version."
+    },
+    "api": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "The plugin-API versions the plugin supports, as an npm semver range."
+    },
+    "repository": {
+      "description": "The GitHub repository, as owner/name, whose releases update the plugin.",
+      "type": "string",
+      "maxLength": 140,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/(?!\\.\\.?$)[A-Za-z0-9._-]{1,100}$"
+    },
+    "server": {
+      "description": "The part the plugin runner starts on the server, in its own process.",
+      "type": "object",
+      "properties": {
+        "entry": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^(\\.\\/)?((?!\\.\\.?\\/)[\\w.@+-]+\\/)*(?!\\.\\.?$)[\\w.@+-]+$",
+          "description": "The file the host loads, relative to the manifest."
+        }
+      },
+      "required": [
+        "entry"
+      ],
+      "additionalProperties": false
+    },
+    "client": {
+      "description": "The part every client loads from the server and runs in a sandbox.",
+      "type": "object",
+      "properties": {
+        "entry": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^(\\.\\/)?((?!\\.\\.?\\/)[\\w.@+-]+\\/)*(?!\\.\\.?$)[\\w.@+-]+$",
+          "description": "The file the host loads, relative to the manifest."
+        }
+      },
+      "required": [
+        "entry"
+      ],
+      "additionalProperties": false
+    },
+    "permissions": {
+      "description": "What the plugin needs. The host grants nothing else.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "events": {
+          "default": [],
+          "description": "Events the plugin receives.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
+          }
+        },
+        "secrets": {
+          "default": [],
+          "description": "Secret references the plugin may ask the host to use for it, such as in an HTTP call. The plugin never receives the values.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[a-z][a-z0-9+.-]*:\\/\\/[\\p{L}\\p{M}\\p{N}\\p{P}\\p{S} ]+$"
+          }
+        },
+        "network": {
+          "default": [],
+          "description": "Hostnames the plugin connects to.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
+          }
+        },
+        "uiSlots": {
+          "default": [],
+          "description": "UI slots the plugin shows content in. The owner grants each one, because content there can show what is in a chat.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+$"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "contributes": {
+      "description": "What the plugin adds to Aphelion.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "secretSchemes": {
+          "default": [],
+          "description": "Secret reference schemes the plugin resolves as a secret backend. The values it returns go only to the secrets broker.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[a-z][a-z0-9+.-]*$"
+          }
+        },
+        "screens": {
+          "default": [],
+          "description": "Full pages the plugin's client part draws, each with an entry in the app's menu. They appear when the plugin is installed, with no grant.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                "description": "The screen's id, unique within the plugin."
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^\\p{M}*[\\p{L}\\p{N}\\p{P}\\p{S}]([\\p{L}\\p{N}\\p{P}\\p{S}\\p{M} ]*[\\p{L}\\p{N}\\p{P}\\p{S}\\p{M}])?$",
+                "description": "The screen's name in the app's menu."
+              },
+              "icon": {
+                "description": "The icon next to the title, from the app's icon set.",
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              },
+              "menuOrder": {
+                "description": "Where the screen goes in the menu. Lower numbers come first, and screens without one come last.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "api"
+  ],
+  "additionalProperties": false,
+  "title": "aphelion-plugin.json",
+  "description": "An Aphelion plugin's manifest.",
+  "anyOf": [
+    {
+      "required": [
+        "server"
+      ]
+    },
+    {
+      "required": [
+        "client"
+      ]
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "permissions": {
+            "properties": {
+              "secrets": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "secrets"
+            ]
+          }
+        },
+        "required": [
+          "permissions"
+        ]
+      },
+      "then": {
+        "required": [
+          "server"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "permissions": {
+            "properties": {
+              "network": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "network"
+            ]
+          }
+        },
+        "required": [
+          "permissions"
+        ]
+      },
+      "then": {
+        "required": [
+          "server"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "permissions": {
+            "properties": {
+              "uiSlots": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "uiSlots"
+            ]
+          }
+        },
+        "required": [
+          "permissions"
+        ]
+      },
+      "then": {
+        "required": [
+          "client"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contributes": {
+            "properties": {
+              "secretSchemes": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "secretSchemes"
+            ]
+          }
+        },
+        "required": [
+          "contributes"
+        ]
+      },
+      "then": {
+        "required": [
+          "server"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contributes": {
+            "properties": {
+              "screens": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "screens"
+            ]
+          }
+        },
+        "required": [
+          "contributes"
+        ]
+      },
+      "then": {
+        "required": [
+          "client"
+        ]
+      }
+    }
+  ]
+}
