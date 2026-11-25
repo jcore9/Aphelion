@@ -9,7 +9,7 @@ Each merge into `main` runs [`.github/workflows/release.yml`](https://github.com
 - sets the version in `apps/server/package.json`, `apps/server/src/version.ts` and `.release-please-manifest.json`
 - writes the release notes in its own description, built from the `feat:`, `fix:`, `perf:`, `docs:` and `revert:` titles merged since the last tag
 
-Merging it copies those notes into the GitHub release. The repo has no `CHANGELOG.md`: the [releases page](https://github.com/jcore9/Aphelion/releases) is the changelog.
+Merging it copies those notes into the GitHub release. The repo has no `CHANGELOG.md`. The [releases page](https://github.com/jcore9/Aphelion/releases) is the changelog.
 
 It updates itself after every merge. Leave it open until the milestone ends.
 
@@ -17,13 +17,13 @@ GitHub doesn't run CI by itself for a pull request that a workflow opened or upd
 
 ## At the end of a milestone
 
-1. Check the release pull request. The version should match the milestone's row in decision 0003. Each line of the release notes should say what changed in words a user follows, and breaking changes should be called out. To change a line, edit the description of the merged pull request it came from, and add the new title between two marker lines, `BEGIN_COMMIT_OVERRIDE` and `END_COMMIT_OVERRIDE`. release-please uses that title instead the next time it runs.
+1. Check the release pull request. The version should match the milestone's row in decision 0003. Each line of the release notes should say what changed in words a user follows, and breaking changes should be called out. To change a line, edit the description of the merged pull request it came from. Add the new title between two marker lines, `BEGIN_COMMIT_OVERRIDE` and `END_COMMIT_OVERRIDE`. The next time release-please runs, it uses that title instead.
 2. Start CI on its latest commit. If GitHub shows **Approve and run workflows** on the pull request, click it. Otherwise close the pull request and reopen it, which starts CI as you.
 3. Once they pass, approve the release pull request and squash-merge it. The pull request needs your approval, because `.release-please-manifest.json` is an owner path. release-please then tags that commit, for example `v0.1.0-alpha.2`, and creates the GitHub release, marked as a pre-release.
 
 ## Versions that need an override
 
-release-please counts up the pre-release number: `0.1.0-alpha.2`, `alpha.3`, `alpha.4`. The other steps in decision 0003's table need a one-time override:
+release-please counts up the pre-release number, for example `0.1.0-alpha.2`, `alpha.3`, `alpha.4`. The other steps in decision 0003's table need a one-time override.
 
 | Milestone | Version | Set `release-as` to |
 | --- | --- | --- |
