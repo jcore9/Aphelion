@@ -6,7 +6,7 @@ This folder is an Aphelion plugin with a server part. The server part runs as it
 
 | File | What it is |
 | --- | --- |
-| `aphelion-plugin.json` | The manifest: the plugin's id, version, and the permissions it asks the owner for. |
+| `aphelion-plugin.json` | The manifest. It holds the plugin's id, version, and the permissions it asks the owner for. |
 | `src/plugin.ts` | The plugin itself. `start` runs once the server has started the plugin. |
 | `src/plugin.test.ts` | Tests that run the plugin against a fake server, `createTestHost`. |
 | `src/index.ts` | Connects the plugin to the server over its standard input and output. |

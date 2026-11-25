@@ -1,12 +1,12 @@
 # Contributing to Aphelion
 
-Most of the code here is written by coding agents. `jcore9-bot` merges most of it, and the owner reviews it. These rules apply to people and agents alike. The [Development workflow](docs/plan/aphelion-plan.md#development-workflow) section of the plan is the full version.
+Coding agents write most of the code in this repository. `jcore9-bot` merges most of it, and the owner reviews it. These rules apply to people and agents alike. The [Development workflow](docs/plan/aphelion-plan.md#development-workflow) section of the plan is the full version.
 
 ## Plan before code
 
-Nothing is built without a written plan.
+Nobody builds anything without a written plan.
 
-- Every milestone opens with a planning issue, M#-00. The milestone's other issues start after the owner approves that plan ([decision 0001](docs/decisions/0001-planning-issue-per-milestone.md)).
+- Every milestone opens with a planning issue named M#-00. The milestone's other issues start after the owner approves that plan ([decision 0001](docs/decisions/0001-planning-issue-per-milestone.md)).
 - Every significant design choice gets a decision record in [`docs/decisions/`](docs/decisions/) before the code that depends on it. A record lists the context, the options, the choice and the consequences. Copy the format of [0023](docs/decisions/0023-scaffold-toolchain.md), set its status to **Proposed**, and add its row to the table in [`docs/README.md`](docs/README.md).
 - The plan lives in the repo at [`docs/plan/`](docs/plan/) ([decision 0004](docs/decisions/0004-import-plan-with-m0-plan.md)). Link to it instead of copying from it.
 
@@ -14,7 +14,7 @@ Nothing is built without a written plan.
 
 1. Pick an issue whose milestone plan is approved and whose dependencies have merged.
 2. Create a branch from `main` for that issue alone. Name it `<type>/<issue-id>-<slug>`, for example `chore/M0-04-monorepo-scaffold` or `feat/M3-04-github-app`. The prefix is `feat/`, `fix/`, `docs/`, `spike/` or `chore/`.
-3. Open one small PR into `main`. Aim for under about 400 changed lines, not counting tests and generated files. A PR never mixes a refactor with a feature, or two features.
+3. Open one small PR into `main`. Aim for fewer than about 400 changed lines, not counting tests and generated files. A PR never mixes a refactor with a feature, and never mixes two features.
 4. Fill in the PR template. Write `Closes #<issue>` and add the labels that apply. GitHub closes the issue by itself when the PR merges.
 5. Give the PR a Conventional Commit title, such as `feat(server): ...` or `docs: ...`. The title becomes the squash commit on `main`.
 6. Wait for green checks and a review from another model family. Then `jcore9-bot` squash-merges the PR ([decision 0062](docs/decisions/0062-one-main-branch.md)). If the PR touches a path that [`.github/CODEOWNERS`](.github/CODEOWNERS) names, the bot waits for the owner's approval. The owner reviews everything else at the end of the milestone.
@@ -37,7 +37,7 @@ Write docs and PR descriptions for a reader who isn't a TypeScript or web develo
 
 ## Run the checks before you push
 
-Run the four checks below. All four must pass, and CI runs the same ones. `bun run docs` builds the docs site and checks every link in it.
+Run the four checks below. All four must pass. CI runs the same checks. `bun run docs` builds the docs site and checks every link in it.
 
 ```sh
 bun run lint
