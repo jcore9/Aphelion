@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-21
 - Decided by: project owner
+- Amended by: [0061](0061-release-please.md), which has release-please make each tag when the owner merges its release PR
 
 ## Context
 

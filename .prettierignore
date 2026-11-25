@@ -4,3 +4,4 @@ spikes/
 docs/reference/config/*.schema.json
 packages/plugin-sdk/plugin-manifest.schema.json
 packages/protocol/*-frame.schema.json
+.release-please-manifest.json

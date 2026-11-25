@@ -9,6 +9,8 @@
 /.github/workflows/ @jcore9
 /.github/actions/ @jcore9
 /.github/dependabot.yml @jcore9
+/release-please-config.json @jcore9
+/.release-please-manifest.json @jcore9
 package.json @jcore9
 /bun.lock @jcore9
 /bunfig.toml @jcore9

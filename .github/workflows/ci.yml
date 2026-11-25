@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [dev, main]
+  # The release workflow starts CI this way on the release PR's branch.
+  workflow_dispatch:
 
 permissions:
   contents: read
