@@ -1,6 +1,6 @@
 # 0059. A backup is one archive of the six volumes plus the key's recovery copy, and the M0 exit test restores it on a second VM
 
-- Status: Proposed
+- Status: Accepted (approved by merging #177 on 2026-11-24)
 - Date: 2026-11-23
 - Decided by: project owner
 - Proposed by: the M0-23 PR ([#168](https://github.com/jcore9/Aphelion/issues/168))

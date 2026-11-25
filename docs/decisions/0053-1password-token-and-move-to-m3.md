@@ -1,6 +1,6 @@
 # 0053. The 1Password token lives in the local store, and the 1Password plugin moves from M0 to M3
 
-- Status: Proposed
+- Status: Accepted (approved by merging #169 on 2026-11-23)
 - Date: 2026-11-23
 - Decided by: project owner
 - Proposed by: the orchestrator, in the PR that moves [#17](https://github.com/jcore9/Aphelion/issues/17) to M3

@@ -1,6 +1,6 @@
 # 0064. Two or more Aphelion servers can link up as equals, with groundwork in M1 and the build after v1.0
 
-- Status: Proposed
+- Status: Accepted (approved by merging #207 on 2026-11-25)
 - Date: 2026-11-25
 - Decided by: project owner
 - Proposed by: [#18](https://github.com/jcore9/Aphelion/issues/18), the M1 milestone plan
