@@ -64,7 +64,7 @@ The socket accepts HTTP `POST /v1/local` with a UTF-8 JSON body of at most 64 Ki
 
 An invalid request returns `400`. An unknown endpoint or missing entry returns `404`. A broker error returns `500` with an empty body. A request that exceeds the size limit closes the connection. Error logs contain fixed messages. The plaintext value crosses the socket only when the harness writes or reads it.
 
-The Linux contract test builds the executable, runs it as `aphelion-secrets` in Docker, and connects as each service account. It feeds the broker a key from `--new-key` on standard input, as the launcher does. It checks that `harness` reads a value after restart and that `aphelion-bot` and `aphelion-plugins` get a permission error from Linux. The store must hold `recipient.pub` and no `identity.agekey`. The broker must refuse an empty standard input and another key, each with its reason. The test also scans the broker logs and store files for the test value and for both keys.
+The Linux contract test builds the executable, runs it as `aphelion-secrets` in Docker, and connects as each service account. It feeds the broker a key from `--new-key` on standard input, as the launcher does. It checks that `harness` reads a value after restart and that `aphelion-bot` and `aphelion-plugins` get a permission error from Linux. It checks that the store holds `recipient.pub` and no `identity.agekey`. It checks that the broker refuses an empty standard input and another key, each with its reason. It also scans the broker logs and store files for the test value and for both keys.
 
 ## Code
 

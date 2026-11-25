@@ -13,7 +13,7 @@ The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/b
 
 ## For plugin authors
 
-You don't have to write JSON-RPC by hand. The software development kit (SDK), `@aphelion/plugin-sdk`, does it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them, and [the plugin API reference](plugin-api.md) lists every type and function in the SDK. The SDK has no typed settings or storage API yet, on either host. The deployed host gives each plugin a persistent data folder ([How your plugin is started](#how-your-plugin-is-started)). The container's `/tmp` is writable too, but it is a memory-backed tmpfs that is not kept. Don't store anything there that you need later. `createTestHost` has no data folder. The rest of this section says what the host does and expects. The SDK builds on this.
+You don't have to write JSON-RPC by hand. `@aphelion/plugin-sdk` is the plugin SDK, short for software development kit. The SDK writes it for you. A plugin is an object with a `start` function, typed `ServerPlugin`. `@aphelion/plugin-sdk/stdio` connects it to the host, and `@aphelion/plugin-sdk/testing` has a fake host for tests. [Write your first server plugin](../guides/write-your-first-server-plugin.md) walks through them, and [the plugin API reference](plugin-api.md) lists every type and function in the SDK. The SDK has no typed settings or storage API yet, on either host. The deployed host gives each plugin a persistent data folder ([How your plugin is started](#how-your-plugin-is-started)). The container's `/tmp` is writable too, but it is a memory-backed tmpfs that is not kept. Don't store anything there that you need later. `createTestHost` has no data folder. The rest of this section says what the host does and expects. The SDK builds on this.
 
 ### How your plugin is started
 
@@ -56,7 +56,7 @@ Keep reading your standard input. Messages for your plugin wait in a buffer of a
 - Writing one message to your plugin's standard input takes more than 5 seconds.
 - More than about 16 MiB of messages wait for your plugin.
 
-The host has a similar limit the other way. Either of two limits triggers it. One is more than about 16 MiB of waiting messages from your plugin. The other is more than 4096 waiting messages. The host then drops them and counts a crash. The host counts each waiting message as twice its length plus 256 bytes, to cover the memory it really takes. In both cases the host restarts your plugin as after any other crash.
+The host has a similar limit the other way. The host drops the waiting messages and counts a crash in two cases. One is more than about 16 MiB of waiting messages from your plugin. The other is more than 4096 waiting messages. The host counts each waiting message as twice its length plus 256 bytes, to cover the memory it really takes. In both cases the host restarts your plugin as after any other crash.
 
 ### Messages the host sends
 
