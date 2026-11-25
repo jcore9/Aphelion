@@ -10,7 +10,7 @@ Two kinds of file hold the rules:
 ## How a change reaches `main`
 
 1. The bot pushes a branch for one issue and opens a pull request into `main`.
-2. CI runs `lint`, `typecheck` and `test` from [`.github/workflows/ci.yml`](https://github.com/jcore9/Aphelion/blob/main/.github/workflows/ci.yml). All three must pass.
+2. CI runs `lint`, `typecheck`, `test`, `docs` and `container` from [`.github/workflows/ci.yml`](https://github.com/jcore9/Aphelion/blob/main/.github/workflows/ci.yml). All five must pass. `docs` builds the docs site and checks its links. `container` builds the Docker image and runs its contract tests.
 3. A model from another family than the author reviews the pull request, and the review is on record. The bot fixes or answers each finding.
 4. The bot squash-merges the pull request. A squash merge turns the pull request's commits into one commit. It takes the pull request's Conventional Commit title, which feeds the release notes.
 5. If the pull request changes a path that `CODEOWNERS` names, the bot waits for the owner's approval before it merges. GitHub also holds the pull request until then, as the test below showed.
@@ -36,7 +36,7 @@ The tag ruleset stops anyone from moving or deleting a `v*` tag, except a reposi
 | Approving reviews required | 0 | Not applicable |
 | A code owner must approve. | Yes | Not applicable |
 | A new push dismisses earlier approvals. | Yes | Not applicable |
-| Required checks, reported by GitHub Actions | `lint`, `typecheck`, `test` | Not applicable |
+| Required checks, reported by GitHub Actions | `lint`, `typecheck`, `test`, `docs`, `container` | Not applicable |
 | The branch must be up to date with its base. | No | Not applicable |
 | Merge method | Squash | Not applicable |
 | Bypass actors | None | Repository admins |
@@ -60,8 +60,6 @@ GitHub's documents don't say whether this rule still blocks a merge when 0 appro
 ### Why the checks must come from GitHub Actions
 
 Anyone with the Write role can set a commit status with any name through the API. Each required check names GitHub Actions (app ID `15368`) as its source, so a status named `lint` from any other source doesn't count.
-
-CI also runs a `docs` check, which builds the docs site and checks its links. The ruleset doesn't require it, but the bot waits for every CI check to pass before it merges.
 
 ### Why branches don't have to be up to date
 

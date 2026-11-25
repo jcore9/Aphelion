@@ -13,7 +13,7 @@ Merging it copies those notes into the GitHub release. The repo has no `CHANGELO
 
 It updates itself after every merge. Leave it open until the milestone ends.
 
-GitHub doesn't run CI by itself for a pull request that a workflow opened or updated. Its `lint`, `typecheck` and `test` checks wait, or GitHub asks someone to approve the run. That's normal while the milestone runs.
+GitHub doesn't run CI by itself for a pull request that a workflow opened or updated. Its five required checks wait, or GitHub asks someone to approve the run. That's normal while the milestone runs.
 
 ## At the end of a milestone
 
