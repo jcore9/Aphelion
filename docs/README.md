@@ -53,6 +53,7 @@ A spike is a research task. Each spike answers its questions in writing before a
 - [Plugin manifest](reference/plugin-manifest.md) covers the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
 - [Plugin API reference](reference/plugin-api.md) lists every type, function and constant in `@aphelion/plugin-sdk`, generated from the SDK's types and doc comments.
 - [Running plugins on the server](reference/plugins.md) covers how the plugin host and the plugin runner start, talk to, restart and stop a plugin's server part. It also covers the plugin's environment and data folder and the JSON-RPC messages.
+- [The Claude adapter](reference/claude-adapter.md) covers how bots that use Claude Code run a turn: the options every query gets, the environment allow list, how SDK messages become events, permissions, cancel and the record script.
 - [The container](reference/container.md) covers the image, the four users and the folders. It also covers how the launcher starts and stops the processes, the hardening, the network boundary and the contract tests.
 - [Secrets](reference/secrets.md) covers the `Secret` type, what it guarantees and what it doesn't, how to read a value, and the secret reference syntax.
 
