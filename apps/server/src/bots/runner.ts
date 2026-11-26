@@ -94,7 +94,7 @@ type LoopEvent =
     })
   | (Tag & { readonly type: "exited"; readonly exit: ProcessExit })
   | (Tag & { readonly type: "stuck" })
-  | (Tag & { readonly type: "deaf" })
+  | (Tag & { readonly type: "stdout-closed" })
   | (Tag & { readonly type: "ended" });
 
 const tagOf = (slot: Slot): Tag => ({
@@ -223,7 +223,7 @@ export const runBotRunner = (
             );
           }).pipe(
             Effect.andThen(
-              Queue.offer(events, { type: "deaf", ...tagOf(slot) }),
+              Queue.offer(events, { type: "stdout-closed", ...tagOf(slot) }),
             ),
           ),
         );
@@ -486,7 +486,7 @@ export const runBotRunner = (
           if (slot?.process === undefined) return;
           return yield* onLine(slot, event.piece);
         }
-        case "deaf": {
+        case "stdout-closed": {
           const slot = current(event);
           if (slot === undefined) return;
           yield* abandon(slot);

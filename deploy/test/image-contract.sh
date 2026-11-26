@@ -281,9 +281,9 @@ tar -C "$scratch" -cf - bot-test | docker exec -i --user aphelion-bot "$containe
 driven=$(docker exec --user aphelion-bot "$container" /usr/local/bin/bun /tmp/bot-test/drive.mjs 2>&1) ||
   fail "the bot runner check failed: $driven"
 docker exec --user aphelion-bot "$container" rm -rf /tmp/bot-test /var/lib/aphelion-bots/contract-bot
-wait_for_log "\"msg\":\"the bot runner started the bot's process\",\"bot\":\"chief-of-staff\""
+wait_for_log "\"msg\":\"the bot runner couldn't start the bot\",\"bot\":\"chief-of-staff\",\"adapter\":\"/usr/local/lib/aphelion/adapters/claude/adapter.js\""
 wait_for_log "no adapter in this image runs the bot's provider, so the bot won't start\",\"bot\":\"triage\""
-pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner"
+pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner, and its log names a missing adapter bundle"
 
 probe aphelion-plugins '[
   ["list", "/etc/aphelion", "EACCES"],
