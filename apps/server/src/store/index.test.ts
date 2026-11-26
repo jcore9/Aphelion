@@ -177,3 +177,41 @@ test("migration 8 keeps a turn's end time and reason together, a saved event val
     { turn: "t1", format: 1, kind: "text.delta" },
   ]);
 });
+
+test("migration 9 keys a command by device and id, and keeps a result with its state", () => {
+  const store = openStore(tempDatabasePath());
+  onTestFinished(() => {
+    store.close();
+  });
+  const insert = (
+    device: string,
+    state: string,
+    result: string | null,
+    id = "c1",
+  ) => {
+    store.run(
+      "INSERT INTO commands (device, id, name, state, result, created_at) VALUES (?, ?, 'bot.prompt', ?, ?, 0)",
+      [device, id, state, result],
+    );
+  };
+
+  insert("d1", "running", null);
+  insert("d2", "running", null);
+  expect(() => {
+    insert("d1", "running", null);
+  }).toThrow("UNIQUE");
+  expect(() => {
+    insert("d1", "paused", null, "c2");
+  }).toThrow("CHECK");
+  expect(() => {
+    insert("d1", "running", "{}", "c2");
+  }).toThrow("CHECK");
+  expect(() => {
+    insert("d1", "done", null, "c2");
+  }).toThrow("CHECK");
+  insert("d1", "done", '{"turn":"t1"}', "c2");
+  insert("d1", "failed", "interrupted", "c3");
+  expect(
+    store.all("SELECT name FROM pragma_index_list('events') ORDER BY name"),
+  ).toContainEqual({ name: "events_bot" });
+});
