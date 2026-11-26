@@ -367,14 +367,14 @@ test("an install that died after the move but before the switch is finished by t
   ).toBe("hello from the tool\n");
 });
 
-test("tool install refuses while another install holds the lock", async () => {
+test("tool install refuses with the shared message while another change holds the lock", async () => {
   await writeList(binary);
   const lock = lockFile(join(stateDir, filesLockFile));
   const result = await install();
   if (lock.kind === "locked") lock.release();
   expect(result.code).toBe(1);
-  expect(result.err[0]).toContain(
-    "Another AI tool install or remove is running",
+  expect(result.err[0]).toBe(
+    "Another plugin or AI tool change is running. Try again when it finishes.",
   );
   expect((await install()).code).toBe(0);
 });
