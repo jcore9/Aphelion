@@ -14,6 +14,8 @@ It is not the server's [`aphelion` command](cli.md). That one runs inside the co
 | `sudo aphelion device revoke ID` | Stops a device's token at once |
 | `sudo aphelion tool list` | Lists the AI tools Aphelion can install and whether each is installed |
 | `sudo aphelion tool install NAME` | Downloads an AI tool from the list, checks it and installs it |
+| `sudo aphelion tool update [NAME]` | Moves an installed AI tool, or every installed one, to the version the list pins |
+| `sudo aphelion tool check` | Asks each AI tool's vendor for its newest version |
 | `sudo aphelion tool remove NAME` | Removes an installed AI tool |
 | `sudo aphelion check` | Runs every check the host can run alone |
 | `aphelion --help` | Prints the commands. Works without `sudo`. |
@@ -36,7 +38,7 @@ A `device` or `tool` command exits with the code of the server's own `aphelion d
 service: enabled, running
 container: running
 health: ok
-claude: signed in
+claude: signed in (update available: 2.1.330 -> 2.1.332)
 codex: not signed in, or the check failed
 grok: installed, sign-in state unknown
 ```
@@ -44,7 +46,7 @@ grok: installed, sign-in state unknown
 - `service` comes from `systemctl is-enabled aphelion` and `systemctl is-active aphelion`.
 - `container` comes from `docker compose ps`.
 - `health` asks `http://ADDRESS:7400/health` from the host. `ADDRESS` is `APHELION_TAILNET_ADDRESS` in `/opt/aphelion/deploy/.env`.
-- The AI tool lines come from [`aphelion tool list`](cli.md#aphelion-tool-list). They list only tools with the state `installed`. With none installed, the line is `AI tools: none installed`. With the container stopped, it is `AI tools: unknown, the container isn't running`.
+- The AI tool lines come from [`aphelion tool list`](cli.md#aphelion-tool-list). They list only tools with the state `installed` or `update available`. A tool with an update ends with `(update available: INSTALLED -> PINNED)`, the installed version and the version the list pins. [`tool update`](cli.md#aphelion-tool-update-name) applies it. With none installed, the line is `AI tools: none installed`. With the container stopped, it is `AI tools: unknown, the container isn't running`.
 
 For each installed tool that has a status command, Aphelion runs that command as `aphelion-bot` and keeps only whether it exited with 0 ([decision 0019](../decisions/0019-cli-subscription-use.md)). It never prints the command's output. A tool whose status command is `-` shows `<name>: installed, sign-in state unknown`.
 

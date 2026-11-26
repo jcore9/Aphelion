@@ -490,7 +490,7 @@ The container image has no AI tool in it. Aphelion keeps a list of four tools, C
 
 Tools live in the `ai-tools` volume, which the container sees at `/opt/aphelion/tools`. Bots can run what is in it, but can't change it. The volume survives an image rebuild. Run these steps while the service runs.
 
-1. See the list. `STATE` is `installed`, `not installed`, or `unavailable` when the tool has no build for this processor.
+1. See the list. `VERSION` is the version the list pins, and `INSTALLED` is the version in the volume, or `-` when there is none. `STATE` is `installed`, `update available`, `not installed`, or `unavailable` when the tool has no build for this processor.
 
    ```sh
    sudo aphelion tool list
@@ -520,11 +520,61 @@ The tools' own auto-update is off. Claude Code and Codex are switched off in the
 
 ## Update an AI tool
 
-An update is a new entry in the list. When the list in a new Aphelion version names a newer version of a tool, install it again.
+A tool's version changes only when the list changes. You see whether a newer version exists, you approve it, and then you apply it. Each step is its own command.
 
-1. Upgrade Aphelion, so that the image carries the new list ([Upgrade](#upgrade)).
-2. Run `sudo aphelion tool list`. A tool whose installed version differs from the list shows `not installed`.
-3. Run `sudo aphelion tool install <name>`. The command downloads the new version, switches to it in one step, and deletes the old version's files. A bot that is running the old version keeps running it until it restarts.
+1. Ask the vendors what their newest version is.
+
+   ```sh
+   sudo aphelion tool check
+   ```
+
+   The command asks each vendor for the name of its newest release and downloads no program. It prints one line per tool:
+
+   ```text
+   NAME      PINNED    LATEST    STATE
+   claude    2.1.330   2.1.332   newer version available
+   codex     0.172.0   0.172.0   current
+   grok      1.0.92    1.0.92    current
+   opencode  2.4.1     2.4.1     current
+   ```
+
+   `PINNED` is the version in the list. `STATE` is `current`, `newer version available`, or `unknown` when the vendor didn't answer within 10 seconds or its answer wasn't a version number. The reason for an `unknown` goes to standard error. The command exits with 0 when it ran, even when a newer version exists, and with 1 only when no vendor answered. It needs no tool to be installed.
+
+   Claude Code and Grok Build publish a small file with their newest version (Claude Code's `latest` file, Grok Build's `stable` file). Codex and OpenCode publish releases on GitHub, and Aphelion reads the newest release that is not a prerelease. For OpenCode that is the highest plain version among its ten newest releases, because the release GitHub marks as its latest is an old one.
+
+2. Approve the new version. A newer version reaches your server only through a new entry in the list, [`deploy/ai-tools.json`](https://github.com/jcore9/Aphelion/blob/main/deploy/ai-tools.json). Whoever proposes the entry runs [`scripts/verify-ai-tools.ts`](https://github.com/jcore9/Aphelion/blob/main/scripts/verify-ai-tools.ts), which checks the new download address, size and SHA-256 against the vendor's own pages. The change lands only when the owner approves it ([decision 0063](https://github.com/jcore9/Aphelion/blob/main/docs/decisions/0063-m1-planning-answers.md)). The list is part of the image, so upgrade Aphelion after it lands ([Upgrade](#upgrade)).
+
+3. See what changed. A tool installed at a different version than the list pins now shows `update available`, with both versions.
+
+   ```sh
+   sudo aphelion tool list
+   ```
+
+   ```text
+   NAME    VERSION  INSTALLED  STATE             STATUS-COMMAND
+   claude  2.1.332  2.1.330    update available  claude auth status --text
+   ```
+
+   `sudo aphelion status` adds `(update available: 2.1.330 -> 2.1.332)` to the tool's line.
+
+4. Apply the update. Name one tool, or leave the name out to update every installed tool.
+
+   ```sh
+   sudo aphelion tool update claude
+   ```
+
+   The command makes the same checks as `tool install`. It prints one line per tool:
+
+   | Line | Meaning |
+   | --- | --- |
+   | `updated claude 2.1.330 -> 2.1.332` | The new version is installed and the old version's files are deleted. |
+   | `claude is up to date (2.1.332)` | The installed version is the list's version. Nothing changed. |
+   | `claude isn't installed` | The command updates only tools that are installed. Use `tool install` for the first install. |
+   | `claude has no build for this processor` | The list has no download for this processor. |
+
+   A bot that is running the old version keeps running it until it restarts. Running the command again changes nothing. If a download fails a check, the old version stays installed and keeps working, and the command exits with 1.
+
+**Why the tools' own updaters stay off.** Claude Code and Codex can replace their own program. Aphelion switches that off. The updater would put in a file that Aphelion never checked against a SHA-256, and the tools' folder is read-only to the bots, so the updater couldn't write there anyway. Going through the list means every program that runs on your server is one you approved and Aphelion verified. [Install an AI tool](#install-an-ai-tool) says how each tool is switched off.
 
 ## Remove an AI tool
 
