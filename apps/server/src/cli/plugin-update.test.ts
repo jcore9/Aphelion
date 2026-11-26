@@ -451,3 +451,113 @@ test("plugin restart prints the server's answer", async () => {
     },
   ]);
 });
+
+const switchedOff = `${plugin} is switched off. Switch it on first: aphelion plugin enable ${plugin}`;
+
+test("after a restore, update, rollback and restart refuse a switched-off plugin", async () => {
+  await installFolder();
+  const finished = await run(["restore", "finish", "--state-dir", stateDir]);
+  expect(finished.out).toContain(
+    `Plugin ${plugin} is switched off. Switch it on: aphelion plugin enable ${plugin}`,
+  );
+  const refused = { code: 1, out: [], err: [switchedOff] };
+
+  expect(await run(["plugin", "update", plugin, ...dirs()])).toEqual(refused);
+  expect(
+    await run([
+      "plugin",
+      "update",
+      plugin,
+      ...dirs(),
+      "--approve",
+      "0".repeat(64),
+    ]),
+  ).toEqual(refused);
+  expect(await run(["plugin", "rollback", plugin, ...dirs()])).toEqual(refused);
+  expect(
+    await run(["plugin", "restart", plugin, "--state-dir", stateDir]),
+  ).toEqual(refused);
+});
+
+test("plugin enable previews the recorded permissions, needs the matching digest, and is safe to repeat", async () => {
+  await installFolder();
+  await run(["restore", "finish", "--state-dir", stateDir]);
+  const enable = ["plugin", "enable", plugin, "--state-dir", stateDir];
+
+  const preview = await run(enable);
+  expect(preview.code).toBe(0);
+  expect(preview.out[0]).toContain(`Plugin ${plugin} 1.0.0`);
+  expect(preview.out.at(-1)).toMatch(/--approve [0-9a-f]{64}$/);
+  const token = approval(preview.out);
+
+  const wrong = await run([...enable, "--approve", "0".repeat(64)]);
+  expect(wrong.code).toBe(1);
+  expect(wrong.err[0]).toContain("does not match");
+  expect(
+    (await run(["plugin", "restart", plugin, "--state-dir", stateDir])).code,
+  ).toBe(1);
+
+  expect(await run([...enable, "--approve", token])).toEqual({
+    code: 0,
+    out: [
+      `Switched on ${plugin}. The server isn't running, so ${plugin} starts when the server starts.`,
+    ],
+    err: [],
+  });
+  const again = {
+    code: 0,
+    out: [`${plugin} is already switched on. Nothing changed.`],
+    err: [],
+  };
+  expect(await run(enable)).toEqual(again);
+  expect(await run([...enable, "--approve", token])).toEqual(again);
+  expect(
+    (await run(["plugin", "restart", plugin, "--state-dir", stateDir])).err,
+  ).toEqual([]);
+});
+
+test("plugin enable restarts the plugin through the running server", async () => {
+  await installFolder();
+  await run(["restore", "finish", "--state-dir", stateDir]);
+  const enable = ["plugin", "enable", plugin, "--state-dir", stateDir];
+  const token = approval((await run(enable)).out);
+  let result: Awaited<ReturnType<typeof run>> | undefined;
+
+  const requests = await withServer(
+    [{ type: "restarted", plugin, state: "running" }],
+    async () => {
+      result = await run([...enable, "--approve", token]);
+    },
+  );
+
+  expect(requests).toEqual([{ type: "restart", plugin }]);
+  expect(result).toEqual({
+    code: 0,
+    out: [`Switched on ${plugin}. It runs.`],
+    err: [],
+  });
+});
+
+test("plugin enable refuses files that changed since they were approved, and an unknown plugin", async () => {
+  const folder = await installFolder();
+  await run(["restore", "finish", "--state-dir", stateDir]);
+  await writeFile(join(folder, "index.js"), "edited");
+
+  const changed = await run([
+    "plugin",
+    "enable",
+    plugin,
+    "--state-dir",
+    stateDir,
+  ]);
+  expect(changed).toEqual({
+    code: 1,
+    out: [],
+    err: [
+      `The files in ${folder} changed since they were approved. Review them and run: aphelion plugin install ${folder}`,
+    ],
+  });
+  expect(
+    await run(["plugin", "enable", "nothing", "--state-dir", stateDir]),
+  ).toEqual({ code: 1, out: [], err: ["nothing isn't installed."] });
+});

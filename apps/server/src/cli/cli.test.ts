@@ -89,6 +89,7 @@ test("--help and no arguments print the commands", async () => {
       "aphelion device add NAME",
       "aphelion device list",
       "aphelion device revoke ID",
+      "aphelion restore finish",
       "aphelion --version",
     ]) {
       expect(out.join("\n")).toContain(command);
@@ -362,6 +363,39 @@ test("device list shows each device's status, and revoke stops a token", async (
   expect(again.err[0]).toContain("No active device has the id");
 });
 
+test("restore finish revokes every device, lists the plugins it switched off, and refuses a missing database", async () => {
+  const state = ["--state-dir", stateDir];
+  const missing = await run(["restore", "finish", ...state]);
+  expect(missing.code).toBe(1);
+  expect(missing.err[0]).toContain("There is no database at");
+  expect(await readdir(stateDir)).toEqual([]);
+
+  await run(["device", "add", "laptop", ...state]);
+  const first = await run(["restore", "finish", ...state]);
+  expect(first).toEqual({
+    code: 0,
+    out: [
+      "Restore finished. Every device token is revoked.",
+      "Enroll a device: aphelion device add NAME",
+    ],
+    err: [],
+  });
+  const listed = await run(["device", "list", ...state]);
+  expect(listed.out.slice(1).map((line) => line.split("\t")[1])).toEqual([
+    "revoked",
+  ]);
+  expect(await run(["restore", "finish", ...state])).toEqual(first);
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await run(["device", "add", "phone", ...state]);
+  expect(await run(["restore", "finish", ...state])).toEqual(first);
+  const relisted = await run(["device", "list", ...state]);
+  expect(relisted.out.slice(1).map((line) => line.split("\t")[1])).toEqual([
+    "revoked",
+    "revoked",
+  ]);
+});
+
 test("an unexpected error prints its message and exits 1", async () => {
   const { code, err } = await run([
     "device",
@@ -470,6 +504,7 @@ test("plugin install approves every file, and an upgrade needs a token that name
   };
   expect(installed()).toEqual({
     plugin: "weather",
+    enabled: true,
     current: first,
     previous: undefined,
   });
@@ -486,6 +521,7 @@ test("plugin install approves every file, and an upgrade needs a token that name
   expect((await run([...command, "--approve", next])).code).toBe(0);
   expect(installed()).toEqual({
     plugin: "weather",
+    enabled: true,
     current: { ...first, version: "1.1.0", filesDigest: files(upgraded) },
     previous: first,
   });

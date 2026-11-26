@@ -2,7 +2,7 @@ import { satisfies, valid, validRange } from "semver";
 import { z } from "zod";
 
 /** The plugin API version that this SDK and the host run. A manifest's `api` range must include it. */
-export const pluginApiVersion = "0.2.2";
+export const pluginApiVersion = "0.2.3";
 
 /** The name of the manifest file in a plugin's folder. */
 export const pluginManifestFile = "aphelion-plugin.json";
@@ -134,6 +134,17 @@ const contributions = {
   ),
 };
 
+const botAdapter = z
+  .strictObject({
+    provider: id.describe(
+      "The provider the adapter serves. A bot whose `provider` has this name uses the adapter.",
+    ),
+  })
+  .optional()
+  .describe(
+    "Makes the package a bot adapter, which the bot runner loads into each bot of that provider. It needs a server part, and no client part, other contributions or permissions. The plugin runner doesn't start such a package.",
+  );
+
 /** The names of the lists in a manifest's `permissions`. */
 export type PermissionKind = keyof typeof permissions;
 /** The names of the lists in a manifest's `contributes`. */
@@ -218,7 +229,7 @@ export const pluginManifestSchema = z
       .prefault({})
       .describe("What the plugin needs. The host grants nothing else."),
     contributes: z
-      .strictObject(contributions)
+      .strictObject({ ...contributions, botAdapter })
       .prefault({})
       .describe("What the plugin adds to Aphelion."),
   })
@@ -235,14 +246,46 @@ export const pluginManifestSchema = z
       return;
     }
     for (const { group, kind, side } of oneSideRules) {
-      const lists: Record<string, readonly unknown[]> = manifest[group];
-      if (lists[kind]?.length && !present.includes(side)) {
+      const lists: Record<string, unknown> = manifest[group];
+      const items = lists[kind];
+      if (Array.isArray(items) && items.length && !present.includes(side)) {
         context.issues.push({
           code: "custom",
           path: [group, kind],
           message: `needs a ${side} part`,
-          input: lists[kind],
+          input: items,
         });
+      }
+    }
+    if (manifest.contributes.botAdapter) {
+      if (!present.includes("server")) {
+        context.issues.push({
+          code: "custom",
+          path: ["contributes", "botAdapter"],
+          message: "needs a server part",
+          input: manifest.contributes.botAdapter,
+        });
+      }
+      if (present.includes("client")) {
+        context.issues.push({
+          code: "custom",
+          path: ["client"],
+          message: "isn't allowed with contributes.botAdapter",
+          input: manifest.client,
+        });
+      }
+      for (const group of ["permissions", "contributes"] as const) {
+        const lists: Record<string, unknown> = manifest[group];
+        for (const [kind, value] of Object.entries(lists)) {
+          if (Array.isArray(value) && value.length > 0) {
+            context.issues.push({
+              code: "custom",
+              path: [group, kind],
+              message: "must be empty with contributes.botAdapter",
+              input: value,
+            });
+          }
+        }
       }
     }
     const seen = new Set<string>();
@@ -262,18 +305,45 @@ export const pluginManifestSchema = z
     title: pluginManifestFile,
     description: "An Aphelion plugin's manifest.",
     anyOf: pluginSides.map((side) => ({ required: [side] })),
-    allOf: oneSideRules.map(({ group, kind, side }) => ({
-      if: {
-        properties: {
-          [group]: {
-            properties: { [kind]: { minItems: 1 } },
-            required: [kind],
+    allOf: [
+      {
+        if: {
+          properties: { contributes: { required: ["botAdapter"] } },
+          required: ["contributes"],
+        },
+        then: {
+          required: ["server"],
+          not: { required: ["client"] },
+          properties: {
+            permissions: {
+              properties: Object.fromEntries(
+                Object.keys(permissions).map((kind) => [kind, { maxItems: 0 }]),
+              ),
+            },
+            contributes: {
+              properties: Object.fromEntries(
+                Object.keys(contributions).map((kind) => [
+                  kind,
+                  { maxItems: 0 },
+                ]),
+              ),
+            },
           },
         },
-        required: [group],
       },
-      then: { required: [side] },
-    })),
+      ...oneSideRules.map(({ group, kind, side }) => ({
+        if: {
+          properties: {
+            [group]: {
+              properties: { [kind]: { minItems: 1 } },
+              required: [kind],
+            },
+          },
+          required: [group],
+        },
+        then: { required: [side] },
+      })),
+    ],
   });
 
 type PluginPart = { readonly entry: string };
@@ -304,7 +374,9 @@ type ManifestWith<Present extends PluginSide> = Readonly<
     [Side in Exclude<PluginSide, Present>]?: never;
   } & {
     permissions: ListsFor<"permissions", Present>;
-    contributes: ListsFor<"contributes", Present>;
+    contributes: ListsFor<"contributes", Present> & {
+      readonly botAdapter?: Readonly<{ provider: string }>;
+    };
   }
 >;
 

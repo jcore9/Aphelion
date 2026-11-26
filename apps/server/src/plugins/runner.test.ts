@@ -7,6 +7,7 @@ import {
   Exit,
   Fiber,
   Layer,
+  Option,
   Queue,
   Scope,
   Stream,
@@ -160,15 +161,18 @@ const gatedProcesses = Effect.sync(() => {
   };
   const layer = Layer.succeed(PluginProcesses, {
     sweep: Effect.succeed({ survivors: 0 }),
-    spawn: (spec) =>
+    spawn: (spec, interruptibly) =>
       Effect.gen(function* () {
         const count = (spawned.get(spec.plugin) ?? 0) + 1;
         spawned.set(spec.plugin, count);
         const id = `${spec.plugin}#${String(count)}`;
+        trace.push(`checking ${id}`);
+        yield* interruptibly(pass(`check ${id}`));
         trace.push(`spawning ${id}`);
         yield* pass(`spawn ${id}`);
         alive.add(id);
         trace.push(`spawned ${id}`);
+        yield* pass(`hand-off ${id}`);
         const exit = yield* Deferred.make<ProcessExit>();
         return {
           write: () => Effect.void,
@@ -323,17 +327,57 @@ describe("the plugin runner's command order", () => {
           Effect.provideService(Scope.Scope, runnerScope),
           Effect.forkIn(runnerScope),
         );
-        yield* gated.hold("spawn sampler#1");
-        yield* Effect.addFinalizer(() => gated.release("spawn sampler#1"));
+        yield* gated.hold("hand-off sampler#1");
+        yield* Effect.addFinalizer(() => gated.release("hand-off sampler#1"));
         yield* a.send(request("start", "sampler"));
-        yield* eventually(() => gated.trace.includes("spawning sampler#1"));
+        yield* eventually(() => gated.alive.has("sampler#1"));
         const closing = yield* Scope.close(runnerScope, Exit.void).pipe(
           Effect.forkChild,
         );
         yield* settle;
-        yield* gated.release("spawn sampler#1");
+        yield* gated.release("hand-off sampler#1");
         yield* Fiber.join(closing).pipe(Effect.timeout("5 seconds"));
         yield* settle;
+        expect([...gated.alive]).toEqual([]);
+      }).pipe(Effect.scoped),
+    10_000,
+  );
+
+  it.live(
+    "closes the runner without waiting for a launch that is stuck in its checks",
+    () =>
+      Effect.gen(function* () {
+        const gated = yield* gatedProcesses;
+        const { a, b } = yield* memoryLinkPair<RunnerReply, RunnerRequest>(
+          framing(runnerReplySchema),
+          framing(runnerRequestSchema),
+        );
+        const runnerScope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(runnerScope, Exit.void));
+        yield* runRunner(b, quietOptions).pipe(
+          Effect.provide(gated.layer),
+          Effect.provideService(Scope.Scope, runnerScope),
+          Effect.forkIn(runnerScope),
+        );
+        yield* gated.hold("check sampler#1");
+        yield* Effect.addFinalizer(() => gated.release("check sampler#1"));
+        yield* a.send(request("start", "sampler"));
+        yield* eventually(() => gated.trace.includes("checking sampler#1"));
+        const closing = yield* Scope.close(runnerScope, Exit.void).pipe(
+          Effect.forkChild,
+        );
+        yield* Effect.addFinalizer(() =>
+          gated
+            .release("check sampler#1")
+            .pipe(Effect.andThen(Fiber.await(closing))),
+        );
+        const closed = yield* Fiber.join(closing).pipe(
+          Effect.timeoutOption("2 seconds"),
+        );
+        expect(Option.isSome(closed)).toBe(true);
+        yield* gated.release("check sampler#1");
+        yield* settle;
+        expect(gated.trace).not.toContain("spawning sampler#1");
         expect([...gated.alive]).toEqual([]);
       }).pipe(Effect.scoped),
     10_000,
