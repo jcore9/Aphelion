@@ -9,8 +9,9 @@ export interface RpcError {
 }
 
 /**
- * The errors that the host replies with, by name.
+ * The errors that the host and the adapter runtime reply with, by name.
  * [The plugin reference](https://github.com/jcore9/Aphelion/blob/main/docs/reference/plugins.md#errors) says when the host sends each one.
+ * `busy` and `turnEnded` also answer a bot adapter's `turn.start`, as [the bot adapter reference](https://github.com/jcore9/Aphelion/blob/main/docs/reference/bot-adapters.md#what-the-runtime-does) says.
  */
 export const rpcErrors = {
   parse: { code: -32700, message: "Parse error" },
@@ -24,6 +25,7 @@ export const rpcErrors = {
   },
   operationFailed: { code: -32003, message: "Operation failed" },
   busy: { code: -32004, message: "Operation in progress" },
+  turnEnded: { code: -32005, message: "Turn already ended" },
 } as const satisfies Record<string, RpcError>;
 
 /** The most UTF-8 bytes one JSON line may hold, not counting the newline. The limit is 1 MiB. */
