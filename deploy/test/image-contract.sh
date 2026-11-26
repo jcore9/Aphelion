@@ -228,15 +228,15 @@ docker exec --privileged "$container" bash -euo pipefail -c '
     [[ $(readlink "$fd") != /run/secrets/bootstrap ]] || { echo "the broker still holds the bootstrap file"; exit 1; }
   done
   ! compgen -G "/run/aphelion-launch.*" >/dev/null || { echo "the pipe folder is still there"; exit 1; }
-  pipe() { stat -L -c %i "/proc/$1/fd/$2"; }
+  pipe() { stat -L -c %d:%i "/proc/$1/fd/$2"; }
   requests=$(pipe "${pid_of[server]}" 4)
   replies=$(pipe "${pid_of[server]}" 3)
   [[ $(pipe "${pid_of[runner]}" 0) == "$requests" && $(pipe "${pid_of[runner]}" 1) == "$replies" ]] || { echo "the server and runner hold different pipes"; exit 1; }
   for fd in /proc/[0-9]*/fd/*; do
-    inode=$(stat -L -c %i "$fd" 2>/dev/null) || continue
+    inode=$(stat -L -c %d:%i "$fd" 2>/dev/null) || continue
     if [[ $inode == "$requests" || $inode == "$replies" ]]; then
       pid=${fd#/proc/}; pid=${pid%%/*}
-      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[runner]}" ]] || { echo "process $pid holds the runner pipe"; exit 1; }
+      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[runner]}" ]] || { echo "process $pid ($(tr "\0" " " <"/proc/$pid/cmdline")) holds the runner pipe through $fd"; exit 1; }
     fi
   done
 ' || fail "a process runs with the wrong user, privileges or pipes"
