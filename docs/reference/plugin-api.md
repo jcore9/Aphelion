@@ -199,14 +199,27 @@ type ContributionKind = "secretSchemes" | "screens";
 
 ### `Decider`
 
-Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends.
+Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends, and the bot's folder.
 
 ```ts
 type Decider = (
   request: PermissionRequest,
   signal: AbortSignal,
+  context: DeciderContext,
 ) => MaybePromise<PermissionDecision>;
 ```
+
+### `DeciderContext`
+
+What a decider knows about the bot it answers for.
+
+```ts
+interface DeciderContext {
+  readonly folder: string;
+}
+```
+
+- `folder`: The absolute path of the bot's folder, as the bot runner sent it in `initialize`.
 
 ### `HostError`
 
@@ -535,6 +548,15 @@ A full page that a plugin's client part declares in `contributes.screens`. The a
 
 ```ts
 type PluginScreen = PluginManifest["contributes"]["screens"][number];
+```
+
+### `RealPath`
+
+Resolves every link in an absolute path that holds no `.` or `..` part.
+It resolves to `undefined` when nothing exists at the path, not even a broken link, and rejects on any other failure.
+
+```ts
+type RealPath = (path: string) => Promise<string | undefined>;
 ```
 
 ### `RpcError`
@@ -934,6 +956,18 @@ const failure: (
   id: RpcId | null,
   error: RpcError,
 ) => { jsonrpc: string; id: RpcId | null; error: RpcError };
+```
+
+### `folderRule`
+
+The fixed rule for a bot before approvals exist. It allows file tools only inside the bot's folder, allows shell commands, and denies web and every other tool.
+A path is resolved against the folder, `..` is applied, and every link is followed with `realpath`, so a link inside the folder that points out of it counts as outside.
+A path that doesn't exist yet is judged by the nearest folder above it that does.
+A pattern such as `src/*.ts` is judged by its fixed part before the first wildcard. A pattern with `..` after a wildcard is denied.
+Each answer covers one request.
+
+```ts
+function folderRule(realpath: RealPath): Decider;
 ```
 
 ### `initializeParams`

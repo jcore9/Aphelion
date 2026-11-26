@@ -179,9 +179,9 @@ describe("a turn with a tool call", () => {
     const asked: PermissionRequest[] = [];
     const { adapter, scripted } = setup([toolTurn]);
     const run = await runTurn(adapter, {
-      decider: (request, signal) => {
+      decider: (request, signal, context) => {
         asked.push(request);
-        return allow(request, signal);
+        return allow(request, signal, context);
       },
     });
 

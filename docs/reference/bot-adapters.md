@@ -89,10 +89,10 @@ The adapter builds a `PermissionRequest` and passes it to the turn's `decide`. I
 
 `decide` always resolves with a `PermissionDecision`: `{ decision, by, reason }`. A grant covers that one request only. There is no "allow for the rest of the session" ([decision 0034](../decisions/0034-vendor-protocol-per-cli.md)).
 
-A **decider** is the function that answers. You give one to `runAdapter` in its options.
+A **decider** is the function that answers. You give one to `runAdapter` in its options. It gets the request, the turn's signal, and `{ folder }`, the bot's folder from `initialize`.
 
 - `denyAll` is the default. It denies every request, with `by: "default"` and reason `no-decider`.
-- M1 adds a fixed rule ([#20](https://github.com/jcore9/Aphelion/issues/20) and [decision 0063](../decisions/0063-m1-planning-answers.md)). It reads `kind` and `paths`, so it works for every tool.
+- `folderRule(realpath)` is M1's fixed rule ([#214](https://github.com/jcore9/Aphelion/issues/214) and [decision 0063](../decisions/0063-m1-planning-answers.md)). It reads `kind` and `paths`, so it works for every vendor. The [Claude adapter](claude-adapter.md#what-the-first-bot-may-do) says what it allows. `realpath` is the function that follows links on disk. It resolves to `undefined` when nothing exists at the path, not even a broken link. The plugin SDK leaves it to the adapter, because the SDK uses only web-standard APIs.
 - M2 replaces it with a decider that asks the policy engine over the wire. The adapter code stays the same.
 
 ## Rules a stream follows

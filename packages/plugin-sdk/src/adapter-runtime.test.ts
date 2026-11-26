@@ -428,17 +428,19 @@ describe("permission requests", () => {
     expect(checkStream(run.events)).toEqual([]);
   });
 
-  test("a decider's allow reaches the adapter and the stream", async () => {
+  test("a decider gets the bot's folder, and its allow reaches the adapter and the stream", async () => {
     const seen: string[] = [];
-    const decider: Decider = (asked) => {
+    const decider: Decider = (asked, _signal, { folder }) => {
       seen.push(
-        `${asked.kind} ${asked.paths.join(",")} ${asked.command ?? ""}`,
+        `${folder}: ${asked.kind} ${asked.paths.join(",")} ${asked.command ?? ""}`,
       );
       return allow;
     };
     const adapter = fakeAdapter([[ask("r1"), done()]]);
     const run = await runTurn(adapter, { decider });
-    expect(seen).toEqual(["shell /work/secret-path.txt rm -rf secret-command"]);
+    expect(seen).toEqual([
+      "/work: shell /work/secret-path.txt rm -rf secret-command",
+    ]);
     expect(adapter.answers).toEqual([allow]);
     expect(
       run.events.find(({ event }) => event.type === "permission.decision")
