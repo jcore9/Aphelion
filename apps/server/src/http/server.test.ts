@@ -13,6 +13,7 @@ import { openEventStore } from "../history";
 import { createLogger } from "../log";
 import { openStore, readServerId } from "../store";
 import { serveHttp } from "./index";
+import { idleCommands } from "./test-client";
 
 const live = { excludeTestServices: true };
 const day = 24 * 60 * 60 * 1000;
@@ -155,7 +156,7 @@ const paths = [
 const resume = encodeFrame({ v: 1, type: "resume", cursor: null });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, {
+  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, idleCommands, {
     recheckEvery: Duration.millis(20),
   }),
   live,
@@ -335,7 +336,7 @@ layer(
 });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, {
+  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, idleCommands, {
     recheckEvery: Duration.millis(20),
   }),
   live,

@@ -1,4 +1,10 @@
-import { parseClientFrame, encodeFrame, type Cursor } from "@aphelion/protocol";
+import {
+  encodeFrame,
+  parseClientFrame,
+  type CommandFrame,
+  type Cursor,
+  type ServerFrame,
+} from "@aphelion/protocol";
 import { Cause, Deferred, Duration, Effect, Fiber, type Scope } from "effect";
 import { Socket } from "effect/socket";
 import { follow, LiveBufferFullError, type EventLog } from "../history";
@@ -15,7 +21,9 @@ type Resume = (
   cursor: Cursor | null,
 ) => Effect.Effect<void, never, Scope.Scope>;
 
-const readFrames = (reader: Socket.Reader, resume: Resume) =>
+type Command = (frame: CommandFrame) => Effect.Effect<void, never, Scope.Scope>;
+
+const readFrames = (reader: Socket.Reader, resume: Resume, command: Command) =>
   Effect.gen(function* () {
     for (;;) {
       for (const message of yield* reader.pull) {
@@ -23,6 +31,7 @@ const readFrames = (reader: Socket.Reader, resume: Resume) =>
         const parsed = parseClientFrame(message);
         if (!parsed.ok) return closeReasons[parsed.error.code];
         if (parsed.frame.type === "resume") yield* resume(parsed.frame.cursor);
+        else yield* command(parsed.frame);
       }
     }
   });
@@ -41,6 +50,7 @@ export const serveSocket = (
   stillValid: Effect.Effect<boolean>,
   recheckEvery: Duration.Duration,
   log: EventLog,
+  run: (frame: CommandFrame) => Effect.Effect<ServerFrame>,
   liveLimit?: number,
 ) =>
   Effect.gen(function* () {
@@ -77,9 +87,17 @@ export const serveSocket = (
         );
       });
 
+    const command: Command = (frame) =>
+      run(frame).pipe(
+        Effect.flatMap((answer) => write(encodeFrame(answer))),
+        Effect.ignore,
+        Effect.forkScoped,
+        Effect.asVoid,
+      );
+
     const close = yield* Effect.raceFirst(
       Effect.raceFirst(
-        readFrames(reader, resume),
+        readFrames(reader, resume, command),
         watchToken(stillValid, recheckEvery),
       ),
       Deferred.await(broken),

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { botEventPayload, botName, turnId } from "./bot-events.ts";
 
-export const maxHistoryLimit = 500;
-export const maxPromptLength = 256 * 1024;
+const maxHistoryLimit = 500;
+const maxPromptLength = 256 * 1024;
 
 export const commands = {
   ping: {
@@ -73,7 +73,9 @@ export const commands = {
         ),
       more: z
         .boolean()
-        .describe("Whether the server holds saved events after `next`."),
+        .describe(
+          "Whether the server holds more saved events of this bot after `next`.",
+        ),
     }),
   },
 } satisfies Record<string, { payload: z.ZodType; result: z.ZodType }>;

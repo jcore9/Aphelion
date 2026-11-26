@@ -3,6 +3,7 @@ import { Context, Effect, Layer } from "effect";
 import type { BotDefinition } from "../bots/manager";
 import { botRunnerPipeLink } from "../bots/runner-pipe";
 import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
+import { openCommandLedger } from "../commands";
 import { formatIssue } from "../config";
 import {
   closeDanglingTurns,
@@ -78,7 +79,7 @@ const startBots = (
         sqliteSessionRefs(db, history.serverId),
       ),
     );
-    yield* runBots({ bots, logger }, history).pipe(
+    return yield* runBots({ bots, logger }, history).pipe(
       Effect.provideContext(links),
     );
   });
@@ -121,7 +122,20 @@ export const headless = (
             },
           );
         }
-        yield* Layer.build(serveHttp({ address, port }, db, history));
+        const ledger = yield* openCommandLedger(db, logger);
+        const bots =
+          options.botRunnerFds === undefined
+            ? undefined
+            : yield* startBots(
+                checked.config.bots.bots,
+                options.botRunnerFds,
+                logger,
+                db,
+                history,
+              );
+        yield* Layer.build(
+          serveHttp({ address, port }, db, history, { bots, ledger, logger }),
+        );
         logger.info("server started", { version, address, port });
         if (fds === undefined) {
           logger.info("plugins are off: no plugin runner pipe was given");
@@ -136,16 +150,8 @@ export const headless = (
             logger,
           );
         }
-        if (options.botRunnerFds === undefined) {
+        if (bots === undefined) {
           logger.info("bots are off: no bot runner pipe was given");
-        } else {
-          yield* startBots(
-            checked.config.bots.bots,
-            options.botRunnerFds,
-            logger,
-            db,
-            history,
-          );
         }
         return yield* Effect.never;
       }).pipe(

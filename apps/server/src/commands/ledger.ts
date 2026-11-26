@@ -27,8 +27,7 @@ export interface CommandLedger {
   ) => Effect.Effect<Outcome>;
 }
 
-export const ledgerWindow = Duration.hours(24);
-const windowMs = Duration.toMillis(ledgerWindow);
+const windowMs = Duration.toMillis(Duration.hours(24));
 const purgeEvery = Duration.hours(1);
 
 const failure = z.enum(commandFailures).catch("interrupted");

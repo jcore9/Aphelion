@@ -429,6 +429,37 @@ describe("the event store", () => {
   );
 });
 
+describe("reading one bot's events", () => {
+  it.effect(
+    "returns only that bot's events after a position, in order, up to the limit",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const store = yield* open(db);
+        yield* store.openTurn("scout", "t2");
+        const scout = (text: string): NewEvent => ({
+          ...delta(text, "t2"),
+          bot: "scout",
+        });
+        for (const event of [delta("a"), scout("x"), delta("b"), scout("y")]) {
+          yield* store.record(event);
+        }
+        yield* store.record(delta("c"));
+        yield* TestClock.adjust("50 millis");
+
+        const texts = (rows: ReturnType<typeof store.readBot>) =>
+          rows.map(({ event }) => (event as { text: string }).text);
+        expect(texts(store.readBot("chief", 0, 10))).toEqual(["a", "b", "c"]);
+        expect(
+          store.readBot("chief", 1, 10).map((row) => row.position),
+        ).toEqual([3, 5]);
+        expect(texts(store.readBot("chief", 0, 2))).toEqual(["a", "b"]);
+        expect(texts(store.readBot("scout", 0, 10))).toEqual(["x", "y"]);
+        expect(store.readBot("nobody", 0, 10)).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+});
+
 describe("reading a saved event", () => {
   const row = (overrides: Record<string, unknown> = {}) => ({
     id: "0192f0a0-0000-7000-8000-000000000001",

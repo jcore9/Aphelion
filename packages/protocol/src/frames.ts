@@ -45,11 +45,10 @@ export const commandFailures = [
 ] as const;
 export type CommandFailure = (typeof commandFailures)[number];
 
-export const errorCodes = [
-  "malformed",
-  "unsupported-version",
-  ...commandFailures,
-] as const;
+export const parseFailures = ["malformed", "unsupported-version"] as const;
+export type ParseFailure = (typeof parseFailures)[number];
+
+export const errorCodes = [...parseFailures, ...commandFailures] as const;
 export type ErrorCode = (typeof errorCodes)[number];
 
 type Commands = typeof commands;
@@ -163,8 +162,9 @@ export const serverFrame = z.discriminatedUnion("type", [
   }),
 ]) as unknown as z.ZodType<ServerFrame>;
 
+export type ParseError = FrameError & { code: ParseFailure };
 export type Parsed<Frame> =
-  { ok: true; frame: Frame } | { ok: false; error: FrameError };
+  { ok: true; frame: Frame } | { ok: false; error: ParseError };
 
 export const parseClientFrame = (text: string) => parseFrame(clientFrame, text);
 export const parseServerFrame = (text: string) => parseFrame(serverFrame, text);
@@ -214,9 +214,9 @@ function parseFrame<Frame>(
 }
 
 function failure(
-  code: ErrorCode,
+  code: ParseFailure,
   message: string,
   id?: CommandId,
-): { ok: false; error: FrameError } {
+): { ok: false; error: ParseError } {
   return { ok: false, error: id ? { code, message, id } : { code, message } };
 }

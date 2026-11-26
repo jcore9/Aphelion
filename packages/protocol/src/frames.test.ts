@@ -85,9 +85,13 @@ const serverFrames: ServerFrame[] = [
       more: true,
     },
   },
-  ...commandFailures.map(
-    (code): ServerFrame => ({ v: 1, type: "error", code, message: "no", id }),
-  ),
+  ...commandFailures.map((code): ServerFrame => ({
+    v: 1,
+    type: "error",
+    code,
+    message: "no",
+    id,
+  })),
 ];
 
 describe("parsing frames", () => {

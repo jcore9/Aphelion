@@ -16,22 +16,29 @@ export class LiveBufferFullError extends Data.TaggedError(
   "LiveBufferFullError",
 ) {}
 
-export const eventFrame = ({
+export const clientEvent = ({
   position,
   bot,
   turn,
   format,
   event,
-}: SavedEvent): EventFrame | undefined =>
+}: SavedEvent) =>
   event.type === "session"
+    ? undefined
+    : { seq: position, payload: { bot, turn, format, event } };
+
+export const eventFrame = (saved: SavedEvent): EventFrame | undefined => {
+  const visible = clientEvent(saved);
+  return visible === undefined
     ? undefined
     : {
         v: version,
         type: "event",
-        seq: position,
+        seq: visible.seq,
         name: "bot.event",
-        payload: { bot, turn, format, event },
+        payload: visible.payload,
       };
+};
 
 export const follow = <E>(
   log: EventLog,
