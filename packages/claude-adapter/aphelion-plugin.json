@@ -1,0 +1,7 @@
+{
+  "id": "claude-adapter",
+  "version": "0.1.0",
+  "api": "^0.2.3",
+  "server": { "entry": "adapter.js" },
+  "contributes": { "botAdapter": { "provider": "claude" } }
+}
