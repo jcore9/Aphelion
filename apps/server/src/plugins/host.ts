@@ -74,7 +74,8 @@ export interface PluginEvent {
 
 export type StartOutcome =
   | { readonly kind: "starting"; readonly id: string }
-  | { readonly kind: "client only"; readonly id: string };
+  | { readonly kind: "client only"; readonly id: string }
+  | { readonly kind: "bot adapter"; readonly id: string };
 
 export class PluginHost extends Context.Service<
   PluginHost,
@@ -663,6 +664,9 @@ export const pluginHostLayer = (options: HostOptions) =>
               folder: path,
               issues: [{ message: refused }],
             });
+          }
+          if (manifest.contributes.botAdapter) {
+            return { kind: "bot adapter", id: manifest.id } as const;
           }
           if (manifest.server === undefined) {
             return { kind: "client only", id: manifest.id } as const;

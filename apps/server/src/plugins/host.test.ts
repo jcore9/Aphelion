@@ -471,6 +471,28 @@ describe("the plugin host", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.live("starts nothing for a bot adapter package", () => {
+    const { layer, record } = harness({});
+    return Effect.gen(function* () {
+      const host = yield* PluginHost;
+      const folder = yield* Effect.promise(() =>
+        pluginFolder({
+          id: "claude-adapter",
+          version: "1.0.0",
+          api: "^0.2.3",
+          server: { entry: "adapter.js" },
+          contributes: { botAdapter: { provider: "claude" } },
+        }),
+      );
+      expect(yield* startFixture(host, folder)).toEqual({
+        kind: "bot adapter",
+        id: "claude-adapter",
+      });
+      expect(yield* host.status("claude-adapter")).toBeUndefined();
+      expect(record.spawned).toEqual([]);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.live("restarts a plugin that crashed, after a delay", () => {
     let runs = 0;
     const { layer, record, logs } = harness({
