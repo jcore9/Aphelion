@@ -134,7 +134,7 @@ Migration 9 adds the `commands` table, which is `STRICT`. It holds one row for e
 
 The server inserts the row with state `running` before it runs the command, and updates it when the command ends. When the update fails, the server tries again up to three times. If it still fails, the row stays `running`, and the caller gets `storage-failed`. The next start turns that row into `interrupted`. The row holds the outcome, never the prompt. For `bot.prompt` the result is the turn's id, which is how a repeat after a restart returns the same turn.
 
-At each start the server turns every `running` row into `failed` with `interrupted`, because only a crash or a stop leaves one. It then deletes the rows that are 24 hours old or older. It repeats the delete once an hour, and it deletes a `running` row too once that row is 24 hours old. A lookup ignores a row that is 24 hours old, so a late delete can't bring an old result back.
+At each start the server turns every `running` row into `failed` with `interrupted`, because only a crash or a stop leaves one. It then deletes the rows that are 24 hours old or older. It repeats the delete once an hour, and it deletes a `running` row too once that row is 24 hours old. If a delete fails, the server logs `deleting old commands failed` and tries again an hour later. A lookup ignores a row that is 24 hours old, so a late delete can't bring an old result back.
 
 ## Rules
 

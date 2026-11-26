@@ -177,6 +177,59 @@ describe("the command ledger", () => {
       }),
   );
 
+  it.effect(
+    "runs and settles a command whose caller is interrupted as the claim commits",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const target: { fiber?: Fiber.Fiber<unknown> } = {};
+        const interrupting: Database = {
+          exec: (sql) => {
+            db.exec(sql);
+          },
+          run: (sql, params) => {
+            db.run(sql, params);
+            if (sql.startsWith("INSERT INTO commands")) {
+              target.fiber?.interruptUnsafe();
+            }
+          },
+          all: (sql, params) => db.all(sql, params),
+          transaction: (fn) => db.transaction(fn),
+          close: () => {
+            db.close();
+          },
+        };
+        const ledger = yield* openCommandLedger(interrupting, logs().logger);
+        const gate = yield* Deferred.make<undefined>();
+        const ran = { count: 0 };
+        const slow: Effect.Effect<Outcome> = Deferred.await(gate).pipe(
+          Effect.map(() => {
+            ran.count += 1;
+            return { ok: true, result: { turn: "t1" } } as const;
+          }),
+        );
+
+        const caller = yield* Effect.forkChild(
+          Effect.withFiber((fiber) => {
+            target.fiber = fiber;
+            return ledger.run(entry("c1"), slow);
+          }),
+        );
+        const exit = yield* Fiber.await(caller);
+        yield* Deferred.succeed(gate, undefined);
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        expect(yield* ledger.run(entry("c1"), slow)).toEqual({
+          ok: true,
+          result: { turn: "t1" },
+        });
+        expect(ran.count).toBe(1);
+        expect(db.all("SELECT state FROM commands")).toEqual([
+          { state: "done" },
+        ]);
+      }),
+  );
+
   it.effect("keeps two devices that use the same command id apart", () =>
     Effect.gen(function* () {
       const { db } = tempStore();
@@ -439,6 +492,31 @@ describe("the command ledger and the 24-hour limit", () => {
       yield* open(db);
 
       expect(db.all("SELECT id FROM commands")).toEqual([{ id: "recent" }]);
+    }),
+  );
+
+  it.effect("logs a failed hourly delete and deletes at the next one", () =>
+    Effect.gen(function* () {
+      const { db } = tempStore();
+      const { lines, logger } = logs();
+      const { wrapped, left } = failingWrites(
+        db,
+        "DELETE FROM commands WHERE created_at",
+        0,
+      );
+      const ledger = yield* openCommandLedger(wrapped, logger);
+      yield* ledger.run(entry("old"), counting().apply);
+      left.count = 1;
+
+      yield* TestClock.adjust(Duration.hours(2));
+      expect(left.count).toBe(0);
+      expect(
+        lines.filter((line) => line["msg"] === "deleting old commands failed"),
+      ).toHaveLength(1);
+      expect(db.all("SELECT id FROM commands")).toEqual([{ id: "old" }]);
+
+      yield* TestClock.adjust(day);
+      expect(db.all("SELECT id FROM commands")).toEqual([]);
     }),
   );
 

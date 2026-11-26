@@ -86,8 +86,15 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
     });
 
     yield* settleLeftovers.pipe(Effect.andThen(purge));
+    const purgeOrLog = purge.pipe(
+      Effect.catchCause(() =>
+        Effect.sync(() => {
+          logger.error("deleting old commands failed");
+        }),
+      ),
+    );
     yield* Effect.sleep(purgeEvery).pipe(
-      Effect.andThen(purge),
+      Effect.andThen(purgeOrLog),
       Effect.forever,
       Effect.forkIn(scope),
     );
