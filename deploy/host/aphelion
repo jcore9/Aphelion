@@ -16,6 +16,8 @@ usage:
   aphelion device revoke ID            stop a device from signing in
   aphelion tool list                   list the AI tools Aphelion can install, and which are installed
   aphelion tool install NAME           download an AI tool from the list, check it and install it
+  aphelion tool update [NAME]          move an installed AI tool to the version the list pins
+  aphelion tool check                  ask each vendor for its newest version
   aphelion tool remove NAME            remove an installed AI tool
   aphelion check                       run every check the host can run alone
   aphelion --help                      show this text
@@ -136,12 +138,14 @@ check_cpu() {
 }
 
 report_ai_tools() {
-  local rows name state status line lines=""
+  local rows name pinned installed state status line suffix lines=""
   local -a words
   rows=$(in_container harness aphelion tool list 2>/dev/null </dev/null) ||
     { echo "AI tools: unknown, aphelion tool list failed"; return 0; }
-  while IFS=$'\t' read -r name _ state status; do
-    [[ $state == installed ]] || continue
+  while IFS=$'\t' read -r name pinned installed state status; do
+    [[ $state == installed || $state == "update available" ]] || continue
+    suffix=""
+    [[ $state == installed ]] || suffix=" (update available: $installed -> $pinned)"
     if [[ $status == - ]]; then
       line="$name: installed, sign-in state unknown"
     else
@@ -152,7 +156,7 @@ report_ai_tools() {
         line="$name: not signed in, or the check failed"
       fi
     fi
-    lines+=${lines:+$'\n'}$line
+    lines+=${lines:+$'\n'}$line$suffix
   done < <(tail -n +2 <<<"$rows")
   echo "${lines:-AI tools: none installed}"
 }
@@ -243,7 +247,7 @@ case ${1:-} in
     ;;
   tool)
     case ${2:-}:$# in
-      list:2 | install:3 | remove:3) cmd_tool "${@:2}" ;;
+      list:2 | check:2 | update:[23] | install:3 | remove:3) cmd_tool "${@:2}" ;;
       *) usage_error ;;
     esac
     ;;
