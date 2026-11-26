@@ -21,6 +21,7 @@ export interface FakeRun {
   readonly received: { readonly method?: string; readonly params?: unknown }[];
   readonly alive: () => boolean;
   readonly crash: () => void;
+  readonly closeStdout: () => void;
   readonly say: (line: string) => void;
 }
 
@@ -62,13 +63,19 @@ function pipe() {
       controller = opened;
     },
   });
+  let open = true;
   return {
     stream: Stream.fromReadableStream({
       evaluate: () => readable,
       onError: (error) => error,
     }).pipe(Stream.orDie),
-    line: (text: string) => controller?.enqueue(encoder.encode(`${text}\n`)),
-    close: () => controller?.close(),
+    line: (text: string) => {
+      if (open) controller?.enqueue(encoder.encode(`${text}\n`));
+    },
+    close: () => {
+      if (open) controller?.close();
+      open = false;
+    },
   };
 }
 
@@ -153,6 +160,9 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
       alive: () => alive,
       crash: () => {
         end({ code: null, signal: "SIGKILL" });
+      },
+      closeStdout: () => {
+        stdout.close();
       },
       say: (line) => {
         if (alive) stdout.line(line);

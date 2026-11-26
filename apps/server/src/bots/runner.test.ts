@@ -471,4 +471,47 @@ describe("the bot runner", () => {
         yield* until(turnEnded("alpha"));
       }).pipe(Effect.scoped),
   );
+
+  it.live(
+    "treats an adapter that closes its output as gone: repairs the turn, refuses a waiting turn and kills it",
+    () =>
+      Effect.gen(function* () {
+        const alpha = scripted([
+          [{ emit: { type: "text.delta", text: "working" } }, { hang: true }],
+        ]);
+        const { fake, frames, until, send } = yield* runner({
+          alpha: alpha.bot,
+        });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        const turn = (id: string) =>
+          send({
+            type: "turn.start",
+            bot: "alpha",
+            run: 1,
+            turn: id,
+            text: "hi",
+          });
+        yield* turn("t1");
+        yield* until(
+          (frame) =>
+            frame.type === "event" &&
+            frame.envelope.event.type === "text.delta",
+        );
+        fake.latest("alpha")?.closeStdout();
+        yield* turn("t2");
+        const refusedT2 = (frame: RunnerReply) =>
+          frame.type === "turn.refused" &&
+          frame.turn === "t2" &&
+          frame.reason === "not-running";
+        yield* until(() => frames.some(is("exited")) && frames.some(refusedT2));
+        expect(fake.stopAllCalls).toEqual(["alpha"]);
+        const events = envelopesOf(frames, "alpha");
+        expect(events.slice(-2).map(({ event }) => event)).toEqual([
+          { type: "error", code: "cli-exited" },
+          { type: "turn.end", reason: "error" },
+        ]);
+        expect(checkStream(events)).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
 });

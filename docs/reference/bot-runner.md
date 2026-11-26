@@ -88,6 +88,8 @@ The saved session lives in the server's memory, so a restart of the container fo
 
 If an adapter process ends in the middle of a turn, the adapter can't finish its stream. The bot runner finishes it, as [the adapter wire](bot-adapters.md#the-wire) says. It adds an `error` with code `cli-exited`, a `deny` for each permission request that has no answer, a `tool.end` with outcome `cancelled` for each call still open, and a `turn.end` with reason `error`. Then it sends `exited`. The bot runner never sends the prompt again, because a second run could repeat what a tool already did.
 
+An adapter that closes its standard output counts as gone, even if its process keeps running, because the bot runner can no longer hear it. The bot runner finishes the stream at once, as above. It refuses with `not-running` any prompt still waiting for the adapter's answer, and any new one. Then it kills the adapter and sends `exited`, so the server restarts the bot.
+
 The bot runner also kills an adapter that stops reading its input for 5 seconds, and logs `the adapter stopped reading its input, and the runner killed it`.
 
 ## How a bot stops

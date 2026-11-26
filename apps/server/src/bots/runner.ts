@@ -64,7 +64,7 @@ type Pending =
 
 interface Slot {
   readonly start: StartRequest;
-  phase: "launching" | "initializing" | "live" | "stopping";
+  phase: "launching" | "initializing" | "live" | "lost" | "stopping";
   process: BotProcess | undefined;
   readonly inbox: Queue.Queue<string>;
   readonly stream: StreamTracker;
@@ -94,6 +94,7 @@ type LoopEvent =
     })
   | (Tag & { readonly type: "exited"; readonly exit: ProcessExit })
   | (Tag & { readonly type: "stuck" })
+  | (Tag & { readonly type: "deaf" })
   | (Tag & { readonly type: "ended" });
 
 const tagOf = (slot: Slot): Tag => ({
@@ -220,7 +221,11 @@ export const runBotRunner = (
                 }),
               ),
             );
-          }),
+          }).pipe(
+            Effect.andThen(
+              Queue.offer(events, { type: "deaf", ...tagOf(slot) }),
+            ),
+          ),
         );
         const errors = yield* FiberSet.run(
           work,
@@ -417,6 +422,22 @@ export const runBotRunner = (
       });
     });
 
+    const abandon = Effect.fnUntraced(function* (slot: Slot) {
+      for (const envelope of slot.stream.repair()) {
+        yield* link.send({ type: "event", ...tagOf(slot), envelope });
+      }
+      for (const pending of slot.pending.values()) {
+        if (pending.kind !== "turn") continue;
+        yield* link.send({
+          type: "turn.refused",
+          ...tagOf(slot),
+          turn: pending.turn,
+          reason: "not-running",
+        });
+      }
+      slot.pending.clear();
+    });
+
     const handle = Effect.fnUntraced(function* (event: LoopEvent) {
       switch (event.type) {
         case "start":
@@ -465,22 +486,19 @@ export const runBotRunner = (
           if (slot?.process === undefined) return;
           return yield* onLine(slot, event.piece);
         }
+        case "deaf": {
+          const slot = current(event);
+          if (slot === undefined) return;
+          yield* abandon(slot);
+          if (slot.phase === "stopping" || slot.phase === "lost") return;
+          slot.phase = "lost";
+          yield* FiberSet.run(work, stopAll(event.bot));
+          return;
+        }
         case "exited": {
           const slot = current(event);
           if (slot === undefined) return;
-          for (const envelope of slot.stream.repair()) {
-            yield* link.send({ type: "event", ...tagOf(slot), envelope });
-          }
-          for (const pending of slot.pending.values()) {
-            if (pending.kind !== "turn") continue;
-            yield* link.send({
-              type: "turn.refused",
-              ...tagOf(slot),
-              turn: pending.turn,
-              reason: "not-running",
-            });
-          }
-          slot.pending.clear();
+          yield* abandon(slot);
           yield* Queue.shutdown(slot.inbox);
           if (slot.phase === "stopping") return;
           slots.delete(event.bot);
@@ -492,7 +510,9 @@ export const runBotRunner = (
         }
         case "stuck": {
           const slot = current(event);
-          if (slot === undefined || slot.phase === "stopping") return;
+          if (slot === undefined) return;
+          if (slot.phase === "stopping" || slot.phase === "lost") return;
+          slot.phase = "lost";
           yield* notice(slot, stoppedReading);
           yield* FiberSet.run(work, stopAll(event.bot));
           return;
