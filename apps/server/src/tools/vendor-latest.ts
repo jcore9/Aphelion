@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { toolVersion, type ToolName } from "./list";
+import { toolVersion, type toolNames } from "./list";
 import type { Parsed } from "./vendor-checksums";
 
 export const claudeBase = "https://downloads.claude.ai/claude-code-releases";
@@ -8,13 +8,9 @@ export const grokHosts = [
   "https://storage.googleapis.com/grok-build-public-artifacts/cli",
 ] as const;
 
-export type Fetcher = (
-  url: string,
-  init: {
-    readonly signal: AbortSignal;
-    readonly headers: Record<string, string>;
-  },
-) => Promise<Response>;
+type VendorName = (typeof toolNames)[number];
+
+export type Fetcher = typeof fetch;
 
 export type CheckState = "current" | "newer version available" | "unknown";
 
@@ -92,7 +88,7 @@ interface Source {
   readonly parse: (text: string) => Parsed<string>;
 }
 
-function sourceFor(name: ToolName): Source {
+function sourceFor(name: VendorName): Source {
   switch (name) {
     case "claude":
       return {
@@ -127,21 +123,25 @@ function sourceFor(name: ToolName): Source {
   }
 }
 
+class AnswerTooLarge extends Error {}
+
 async function readCapped(response: Response): Promise<string | undefined> {
   if (response.body === null) return "";
-  const reader: ReadableStreamDefaultReader<Uint8Array> =
-    response.body.getReader();
   const chunks: Uint8Array[] = [];
   let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > maxAnswerBytes) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
+  try {
+    await response.body.pipeTo(
+      new WritableStream<Uint8Array>({
+        write(chunk) {
+          received += chunk.byteLength;
+          if (received > maxAnswerBytes) throw new AnswerTooLarge();
+          chunks.push(chunk);
+        },
+      }),
+    );
+  } catch (error) {
+    if (error instanceof AnswerTooLarge) return undefined;
+    throw error;
   }
   const joined = new Uint8Array(received);
   let offset = 0;
@@ -190,18 +190,19 @@ async function ask(
 }
 
 export async function lookupLatest(
-  name: ToolName,
+  name: VendorName,
   fetcher: Fetcher,
   options: { readonly timeoutMs?: number } = {},
 ): Promise<Parsed<string>> {
   const source = sourceFor(name);
   const timeoutMs = options.timeoutMs ?? defaultLookupTimeoutMs;
-  let last = fail("the vendor has no address to ask");
+  const failures: string[] = [];
   for (const url of source.urls) {
-    last = await ask(url, source, fetcher, timeoutMs);
-    if (last.ok) return last;
+    const found = await ask(url, source, fetcher, timeoutMs);
+    if (found.ok) return found;
+    failures.push(found.message);
   }
-  return last;
+  return fail(failures.join("; "));
 }
 
 export function compareVersions(a: string, b: string): number {

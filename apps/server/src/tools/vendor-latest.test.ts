@@ -12,8 +12,12 @@ type Answers = Record<string, Response | Error>;
 
 function fakeFetch(answers: Answers) {
   const asked: { url: string; headers: Record<string, string> }[] = [];
-  const fetcher: Fetcher = (url, init) => {
-    asked.push({ url, headers: init.headers });
+  const fetcher = ((input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    asked.push({
+      url,
+      headers: Object.fromEntries(new Headers(init?.headers).entries()),
+    });
     const answer = answers[url];
     if (answer === undefined) {
       return Promise.resolve(new Response("not found", { status: 404 }));
@@ -21,7 +25,7 @@ function fakeFetch(answers: Answers) {
     return answer instanceof Error
       ? Promise.reject(answer)
       : Promise.resolve(answer.clone());
-  };
+  }) as Fetcher;
   return { fetcher, asked };
 }
 
@@ -86,10 +90,10 @@ describe("lookupLatest for Claude Code", () => {
 
   it("gives each lookup a timeout", async () => {
     let signal: AbortSignal | undefined;
-    const fetcher: Fetcher = (_url, init) => {
-      signal = init.signal;
+    const fetcher = ((_input: string | URL, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
       return new Promise<Response>(() => undefined);
-    };
+    }) as Fetcher;
     const pending = lookupLatest("claude", fetcher, { timeoutMs: 20 });
     await expect(pending).resolves.toMatchObject({ ok: false });
     expect(signal?.aborted).toBe(true);
@@ -127,7 +131,10 @@ describe("lookupLatest for Grok Build", () => {
 
   it("reports the failure when neither host answers", async () => {
     const { fetcher } = fakeFetch({});
-    expect((await lookupLatest("grok", fetcher)).ok).toBe(false);
+    expect(await lookupLatest("grok", fetcher)).toEqual({
+      ok: false,
+      message: `${primary}/stable answered 404; ${mirror}/stable answered 404`,
+    });
   });
 });
 

@@ -144,6 +144,19 @@ describe("accepted command lines", () => {
       },
     ],
     [
+      ["tool", "update"],
+      {
+        kind: "tool update",
+        stateDir: defaultStateDir,
+        toolsDir: defaultToolsDir,
+      },
+    ],
+    [
+      ["tool", "update", "codex", "--tools-dir", "/t", "--state-dir", "/s"],
+      { kind: "tool update", stateDir: "/s", toolsDir: "/t", name: "codex" },
+    ],
+    [["tool", "check"], { kind: "tool check" }],
+    [
       ["plugin", "dev", "/opt/aphelion/dev-plugin"],
       {
         kind: "plugin dev",
@@ -309,6 +322,23 @@ describe("refused command lines", () => {
     [
       ["tool", "list", "--state-dir", "/s"],
       '--state-dir isn\'t an option of "tool list"',
+    ],
+    [
+      ["tool", "update", "gemini"],
+      "the tool name must be claude, codex, grok or opencode",
+    ],
+    [
+      ["tool", "update", ""],
+      "the tool name must be claude, codex, grok or opencode",
+    ],
+    [
+      ["tool", "update", "claude", "codex"],
+      '"tool update" takes no more than one tool name, but got 2',
+    ],
+    [["tool", "check", "claude"], '"tool check" takes no arguments, but got 1'],
+    [
+      ["tool", "check", "--tools-dir", "/t"],
+      '--tools-dir isn\'t an option of "tool check"',
     ],
     [
       ["tool", "remove", "claude", "--tools-dir", "tools"],

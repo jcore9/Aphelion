@@ -91,6 +91,13 @@ export type Command =
       readonly toolsDir: string;
       readonly name: ToolName;
     }
+  | {
+      readonly kind: "tool update";
+      readonly stateDir: string;
+      readonly toolsDir: string;
+      readonly name?: ToolName;
+    }
+  | { readonly kind: "tool check" }
   | { readonly kind: "restore finish"; readonly stateDir: string }
   | { readonly kind: "device list"; readonly stateDir: string }
   | {
@@ -111,6 +118,7 @@ const grammar: Record<
   {
     readonly words: number;
     readonly operand?: string;
+    readonly optional?: true;
     readonly flags: Option[];
   }
 > = {
@@ -164,6 +172,13 @@ const grammar: Record<
     operand: "tool name",
     flags: ["state-dir", "tools-dir"],
   },
+  "tool update": {
+    words: 2,
+    operand: "tool name",
+    optional: true,
+    flags: ["state-dir", "tools-dir"],
+  },
+  "tool check": { words: 2, flags: [] },
   "restore finish": { words: 2, flags: ["state-dir"] },
   "device list": { words: 2, flags: ["state-dir"] },
   "device revoke": { words: 2, operand: "id", flags: ["state-dir"] },
@@ -293,12 +308,18 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
     );
   }
   const operands = positionals.slice(rule.words);
-  const expected = rule.operand === undefined ? 0 : 1;
-  if (operands.length !== expected) {
+  const most = rule.operand === undefined ? 0 : 1;
+  const fewest = rule.optional === true ? 0 : most;
+  if (operands.length < fewest) {
+    return fail(`"${kind}" needs a ${rule.operand ?? "value"}`);
+  }
+  if (operands.length > most) {
+    const allowed =
+      rule.operand === undefined
+        ? "no arguments"
+        : `${rule.optional === true ? "no more than " : ""}one ${rule.operand}`;
     return fail(
-      rule.operand !== undefined && operands.length === 0
-        ? `"${kind}" needs a ${rule.operand}`
-        : `"${kind}" takes ${rule.operand === undefined ? "no arguments" : `one ${rule.operand}`}, but got ${String(operands.length)}`,
+      `"${kind}" takes ${allowed}, but got ${String(operands.length)}`,
     );
   }
 
@@ -410,6 +431,23 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
         command: { kind, stateDir, toolsDir: toolsDir.value, name: name.value },
       };
     }
+    case "tool update": {
+      if (!toolsDir.ok) return toolsDir;
+      if (operands.length === 0) {
+        return {
+          ok: true,
+          command: { kind, stateDir, toolsDir: toolsDir.value },
+        };
+      }
+      const name = check("the tool name", toolNameText, operand);
+      if (!name.ok) return name;
+      return {
+        ok: true,
+        command: { kind, stateDir, toolsDir: toolsDir.value, name: name.value },
+      };
+    }
+    case "tool check":
+      return { ok: true, command: { kind } };
     case "restore finish":
     case "device list":
       return { ok: true, command: { kind, stateDir } };
