@@ -4,12 +4,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Duration, Effect } from "effect";
+import { Duration, Effect, Exit, Scope } from "effect";
 import { HttpServer } from "effect/http";
 import { afterAll } from "vitest";
 import { addDevice, revokeDevice } from "../devices";
 import { finishRestore } from "../restore";
-import { openStore } from "../store";
+import { openEventStore } from "../history";
+import { createLogger } from "../log";
+import { openStore, readServerId } from "../store";
 import { serveHttp } from "./index";
 
 const live = { excludeTestServices: true };
@@ -17,7 +19,14 @@ const day = 24 * 60 * 60 * 1000;
 
 const dir = mkdtempSync(join(tmpdir(), "aphelion-http-"));
 const db = openStore(join(dir, "aphelion.db"));
+const historyScope = Effect.runSync(Scope.make());
+const history = Effect.runSync(
+  openEventStore(db, readServerId(db), {
+    logger: createLogger({ write: () => undefined }),
+  }).pipe(Scope.provide(historyScope)),
+);
 afterAll(() => {
+  Effect.runSync(Scope.close(historyScope, Exit.void));
   db.close();
   rmSync(dir, { recursive: true });
 });
@@ -146,7 +155,7 @@ const paths = [
 const resume = encodeFrame({ v: 1, type: "resume", cursor: null });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, db, {
+  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, {
     recheckEvery: Duration.millis(20),
   }),
   live,
@@ -326,7 +335,7 @@ layer(
 });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, db, {
+  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, {
     recheckEvery: Duration.millis(20),
   }),
   live,

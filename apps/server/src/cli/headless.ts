@@ -1,13 +1,15 @@
 import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
-import {
-  BotManager,
-  botManagerLayer,
-  type BotDefinition,
-} from "../bots/manager";
+import type { BotDefinition } from "../bots/manager";
 import { botRunnerPipeLink } from "../bots/runner-pipe";
-import { memorySessionRefs } from "../bots/session-refs";
+import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
 import { formatIssue } from "../config";
+import {
+  closeDanglingTurns,
+  openEventStore,
+  runBots,
+  type EventStore,
+} from "../history";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
 import { installedPlugins, readInstall } from "../plugins/approvals";
@@ -19,7 +21,7 @@ import {
 import { sqlitePluginGrants } from "../plugins/grants";
 import { PluginHost, pluginHostLayer } from "../plugins/host";
 import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
-import type { Database } from "../store";
+import { readServerId, type Database } from "../store";
 import { version } from "../version";
 import { checkDirs, migratedNote } from "./checks";
 import { withStore } from "./device";
@@ -66,17 +68,19 @@ const startBots = (
   bots: readonly BotDefinition[],
   fds: RunnerPipeFds,
   logger: Logger,
+  db: Database,
+  history: EventStore,
 ) =>
   Effect.gen(function* () {
-    const services = yield* Layer.build(
-      botManagerLayer({ bots, logger }).pipe(
-        Layer.provide(
-          Layer.mergeAll(botRunnerPipeLink(fds, logger), memorySessionRefs),
-        ),
+    const links = yield* Layer.build(
+      Layer.mergeAll(
+        botRunnerPipeLink(fds, logger),
+        sqliteSessionRefs(db, history.serverId),
       ),
     );
-    const manager = Context.get(services, BotManager);
-    for (const bot of bots) yield* manager.start(bot.name);
+    yield* runBots({ bots, logger }, history).pipe(
+      Effect.provideContext(links),
+    );
   });
 
 export const headless = (
@@ -106,7 +110,18 @@ export const headless = (
     const fds = options.pluginRunnerFds;
     return yield* withStore(options.stateDir, (db) =>
       Effect.gen(function* () {
-        yield* Layer.build(serveHttp({ address, port }, db));
+        const history = yield* openEventStore(db, readServerId(db), { logger });
+        const closed = yield* closeDanglingTurns(db, history, logger);
+        if (closed.turns > 0 || closed.calls > 0) {
+          logger.warn(
+            "closed turns and tool calls that the last run left open",
+            {
+              turns: closed.turns,
+              calls: closed.calls,
+            },
+          );
+        }
+        yield* Layer.build(serveHttp({ address, port }, db, history));
         logger.info("server started", { version, address, port });
         if (fds === undefined) {
           logger.info("plugins are off: no plugin runner pipe was given");
@@ -128,6 +143,8 @@ export const headless = (
             checked.config.bots.bots,
             options.botRunnerFds,
             logger,
+            db,
+            history,
           );
         }
         return yield* Effect.never;

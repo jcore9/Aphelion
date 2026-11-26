@@ -1,6 +1,7 @@
 import { Context, Data, Duration, Effect } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { Device } from "../devices";
+import type { EventLog } from "../history";
 import { serveSocket } from "./socket";
 
 export class Unauthenticated extends Data.TaggedError("Unauthenticated") {}
@@ -16,6 +17,10 @@ export class Authenticator extends Context.Service<
   }
 >()("aphelion/http/Authenticator") {}
 
+export class History extends Context.Service<History, EventLog>()(
+  "aphelion/http/History",
+) {}
+
 const healthy = HttpServerResponse.text('{"status":"ok"}', {
   contentType: "application/json",
 });
@@ -29,12 +34,13 @@ export const app = Effect.gen(function* () {
   if (request.method === "GET" && request.url === "/health") return healthy;
 
   const auth = yield* Authenticator;
+  const history = yield* History;
   const device = yield* auth.authenticate(request);
   if (request.method !== "GET" || request.url !== "/ws") return notFound;
 
   return yield* request.upgrade.pipe(
     Effect.flatMap((socket) =>
-      serveSocket(socket, auth.stillValid(device), auth.recheckEvery),
+      serveSocket(socket, auth.stillValid(device), auth.recheckEvery, history),
     ),
     Effect.as(closed),
     Effect.catchTag("HttpServerError", () => Effect.succeed(badRequest)),

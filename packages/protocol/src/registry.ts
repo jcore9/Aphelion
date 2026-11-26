@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { botEventPayload } from "./bot-events.ts";
 
 export const commands = {
   ping: {
@@ -13,4 +14,5 @@ export const events = {
       message: z.string().describe("Text for a person to read."),
     })
     .describe("A message for every client to show."),
+  "bot.event": botEventPayload,
 } satisfies Record<string, z.ZodType>;
