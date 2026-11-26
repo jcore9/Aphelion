@@ -122,7 +122,6 @@ export const toolInstall = (
       const outcome = yield* withFilesLock(
         options.stateDir,
         installTool(options.toolsDir, tool, found.build),
-        "Another AI tool install or remove is running, so try again when it finishes.",
       );
       yield* io.out(
         outcome === "installed"
@@ -144,7 +143,6 @@ export const toolRemove = (options: {
       const outcome = yield* withFilesLock(
         options.stateDir,
         removeTool(options.toolsDir, options.name),
-        "Another AI tool install or remove is running, so try again when it finishes.",
       );
       yield* io.out(
         outcome === "removed"

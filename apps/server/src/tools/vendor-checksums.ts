@@ -151,3 +151,37 @@ export const opencodeAssetFor = (processor: Processor) =>
 
 export const codexAssetFor = (processor: Processor) =>
   `codex-${processor}-unknown-linux-musl.tar.gz`;
+
+export type GpgRun = (args: readonly string[]) => {
+  readonly found: boolean;
+  readonly status: number | null;
+  readonly stdout: string;
+};
+
+export function verifyManifestSignature(
+  gpg: GpgRun,
+  files: {
+    readonly key: string;
+    readonly signature: string;
+    readonly manifest: string;
+  },
+  fingerprint: string,
+): Parsed<string> {
+  const imported = gpg(["--import", files.key]);
+  if (!imported.found) {
+    return {
+      ok: false,
+      message:
+        "gpg isn't installed, so the manifest's signature wasn't checked",
+    };
+  }
+  const verified = gpg(["--verify", files.signature, files.manifest]);
+  const good = new RegExp(`^\\[GNUPG:\\] VALIDSIG \\S+ .*${fingerprint}$`, "m");
+  return verified.status === 0 && good.test(verified.stdout)
+    ? { ok: true, value: fingerprint }
+    : {
+        ok: false,
+        message:
+          "gpg doesn't accept the manifest's signature from Anthropic's key",
+      };
+}

@@ -5,10 +5,12 @@ import { UpdateRefused } from "./refused";
 
 export const filesLockFile = "plugin-files.lock";
 
+export const filesBusy =
+  "Another plugin or AI tool change is running. Try again when it finishes.";
+
 export const withFilesLock = <A, E, R>(
   stateDir: string,
   use: Effect.Effect<A, E, R>,
-  busy = "Another plugin install, update or rollback is running, so try again when it finishes.",
 ) =>
   Effect.acquireUseRelease(
     Effect.try({
@@ -20,7 +22,7 @@ export const withFilesLock = <A, E, R>(
         lock.kind === "held"
           ? Effect.fail(
               new UpdateRefused({
-                reason: busy,
+                reason: filesBusy,
               }),
             )
           : Effect.succeed(lock),

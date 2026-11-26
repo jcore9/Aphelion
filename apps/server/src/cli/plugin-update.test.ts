@@ -209,7 +209,7 @@ test("a second plugin install, update or rollback waits its turn through the loc
     code: 1,
     out: [],
     err: [
-      "Another plugin install, update or rollback is running, so try again when it finishes.",
+      "Another plugin or AI tool change is running. Try again when it finishes.",
     ],
   };
   expect(await run(["plugin", "update", plugin, ...dirs()])).toEqual(busy);

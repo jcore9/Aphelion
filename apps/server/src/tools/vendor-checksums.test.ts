@@ -8,6 +8,8 @@ import {
   parseClaudeManifest,
   parseGithubAsset,
   parseSha256Sums,
+  verifyManifestSignature,
+  type GpgRun,
 } from "./vendor-checksums";
 
 const sum = (letter: string) => sha256.parse(letter.repeat(64));
@@ -146,5 +148,47 @@ describe("asset names", () => {
     expect(codexAssetFor("x86_64")).toBe(
       "codex-x86_64-unknown-linux-musl.tar.gz",
     );
+  });
+});
+
+describe("verifyManifestSignature", () => {
+  const fingerprint = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE";
+  const files = { key: "key.asc", signature: "m.sig", manifest: "m.json" };
+  const answering =
+    (verify: { status: number; stdout: string }): GpgRun =>
+    (args) =>
+      args[0] === "--verify"
+        ? { found: true, ...verify }
+        : { found: true, status: 0, stdout: "" };
+
+  it("names the key when gpg accepts the signature from it", () => {
+    const run = answering({
+      status: 0,
+      stdout: `[GNUPG:] VALIDSIG ${fingerprint} 2026-01-01 1 0 4 0 1 10 00 ${fingerprint}\n`,
+    });
+    expect(verifyManifestSignature(run, files, fingerprint)).toEqual({
+      ok: true,
+      value: fingerprint,
+    });
+  });
+
+  it("refuses a signature from another key", () => {
+    const run = answering({
+      status: 0,
+      stdout: `[GNUPG:] VALIDSIG ${"A".repeat(40)} 2026-01-01 1 0 4 0 1 10 00 ${"A".repeat(40)}\n`,
+    });
+    expect(verifyManifestSignature(run, files, fingerprint).ok).toBe(false);
+  });
+
+  it("refuses a signature gpg rejects", () => {
+    const run = answering({ status: 1, stdout: "" });
+    expect(verifyManifestSignature(run, files, fingerprint).ok).toBe(false);
+  });
+
+  it("fails, and does not skip, when gpg isn't installed", () => {
+    const run: GpgRun = () => ({ found: false, status: null, stdout: "" });
+    const result = verifyManifestSignature(run, files, fingerprint);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain("gpg isn't installed");
   });
 });

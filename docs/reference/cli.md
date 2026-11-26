@@ -253,7 +253,7 @@ Installs the tool `NAME` from the list: `claude`, `codex`, `grok` or `opencode`.
 3. Checks the SHA-256 against the list before it unpacks anything. A gzip archive is unpacked with `tar` only if every member is a plain file or folder inside the archive's own folder.
 4. Moves the result to `<tools folder>/<name>/<version>/`, sets mode `0755` on the program, and points `<tools folder>/<name>/current` at that folder with one atomic rename. It then deletes the tool's other version folders.
 
-Installing the version that is installed changes nothing. A run that stopped half way leaves only the staging folder or an unused link, and the next run clears them. The command holds the same lock as `plugin install`, and exits with code 1 when another install holds it. It exits with code 1 for every refusal, and prints the reason on standard error.
+Installing the version that is installed changes nothing. A run that stopped half way leaves only the staging folder or an unused link, and the next run clears them. The command holds the same lock as `plugin install`, and exits with code 1 and says `Another plugin or AI tool change is running. Try again when it finishes.` when another install, update, rollback, tool install or tool remove holds it. It exits with code 1 for every refusal, and prints the reason on standard error.
 
 The image links `/usr/local/bin/<name>` to the program in `current`, so a bot runs the tool by its name.
 
