@@ -66,14 +66,16 @@ const build = z
   });
 export type Build = z.infer<typeof build>;
 
+export const toolVersion = z.string().regex(/^\d{1,6}\.\d{1,6}\.\d{1,6}$/, {
+  error: "must be three numbers, such as 2.1.330",
+});
+
 const argv = z.array(z.string().min(1)).nonempty();
 
 const tool = z
   .strictObject({
     name: toolName,
-    version: z.string().regex(/^\d{1,6}\.\d{1,6}\.\d{1,6}$/, {
-      error: "must be three numbers, such as 2.1.330",
-    }),
+    version: toolVersion,
     builds: z.strictObject({
       x86_64: build.optional(),
       aarch64: build.optional(),
