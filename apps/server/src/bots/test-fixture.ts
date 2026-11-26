@@ -34,6 +34,7 @@ export interface FakeRun {
   readonly crash: () => void;
   readonly closeStdout: () => void;
   readonly say: (line: string) => void;
+  readonly writeStderr: (line: string) => void;
 }
 
 function inbox() {
@@ -177,6 +178,9 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
       },
       say: (line) => {
         if (alive) stdout.line(line);
+      },
+      writeStderr: (line) => {
+        if (alive) stderr.line(line);
       },
     };
     runs.push(run);

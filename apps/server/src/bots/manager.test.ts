@@ -202,6 +202,32 @@ describe("the bot manager", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "logs how many lines a bot wrote to stderr, never the lines themselves",
+    () =>
+      Effect.gen(function* () {
+        const { fake, logs, manager, reach } = yield* system({
+          adapter: () => fakeAdapter([]),
+        });
+        yield* manager.start("chief");
+        yield* reach("running");
+        const run = fake.latest("chief");
+        run?.writeStderr("the user asked: where is my secret plan?");
+        run?.writeStderr("and then: more of the conversation");
+        yield* Effect.sleep("50 millis");
+
+        const notes = logs.filter(
+          (log) => log["msg"] === "bot wrote to stderr",
+        );
+        expect(notes.map((log) => [log["bot"], log["lines"]])).toEqual([
+          ["chief", 1],
+          ["chief", 2],
+        ]);
+        expect(JSON.stringify(logs)).not.toContain("secret plan");
+        expect(JSON.stringify(logs)).not.toContain("conversation");
+      }).pipe(Effect.scoped),
+  );
+
   it.live("gives up on a bot that keeps crashing, and logs it", () =>
     Effect.gen(function* () {
       const { fake, logs, manager, reach } = yield* system({

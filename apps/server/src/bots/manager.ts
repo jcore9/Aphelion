@@ -125,6 +125,7 @@ interface Slot {
   state: LifecycleState;
   turn: TurnId | undefined;
   resume: SessionRef | null;
+  stderrLines: number;
   readonly turns: Map<TurnId, Deferred.Deferred<TurnOutcome>[]>;
   readonly waiters: Set<Waiter>;
 }
@@ -288,6 +289,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const bot = slot.bot.name;
           switch (reply.type) {
             case "spawned":
+              slot.stderrLines = 0;
               logger.info("the bot runner started the bot's process", {
                 bot,
                 run: reply.run,
@@ -351,7 +353,11 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               return;
             }
             case "log":
-              logger.info("bot wrote to stderr", { bot, line: reply.line });
+              slot.stderrLines += 1;
+              logger.info("bot wrote to stderr", {
+                bot,
+                lines: slot.stderrLines,
+              });
               return;
             case "exited":
               logger.warn("a bot process exited", {
@@ -439,6 +445,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             state: installed,
             turn: undefined,
             resume: null,
+            stderrLines: 0,
             turns: new Map(),
             waiters: new Set(),
           };
