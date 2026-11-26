@@ -142,6 +142,7 @@ export const rootCommand = (handler: Handler<Parameters<typeof headless>[0]>) =>
     {
       headless: Flag.Boolean(options.headless).pipe(
         Flag.withDefault(false),
+        Flag.withoutNegation,
         Flag.withDescription("Start the server. The container runs this"),
       ),
       configDir: configDirFlag,

@@ -14,7 +14,7 @@ import {
 import { CliFailure, failed, usage } from "./failure";
 import { headless, rootCommand } from "./headless";
 import { CliIo } from "./io";
-import { presenter } from "./output";
+import { hint, presenter } from "./output";
 import { pluginInstall, pluginInstallCommand } from "./plugin";
 import { pluginDev, pluginDevCommand } from "./plugin-dev";
 import {
@@ -73,6 +73,12 @@ const handlers: Handlers = {
   toolInstall: (options) => toolInstall(options, toolListFile()),
   toolRemove,
 };
+
+const shortCluster = /^-[^-]/;
+const shortFlags: ReadonlySet<string> = new Set(["-h", "-v"]);
+
+const hasShortCluster = (argv: readonly string[]) =>
+  argv.some((arg) => shortCluster.test(arg) && !shortFlags.has(arg));
 
 const describe = (cause: Cause.Cause<unknown>) => {
   const error = Cause.squash(cause);
@@ -141,6 +147,12 @@ export const makeCli = (handle: Handlers) => {
   return (argv: readonly string[]) =>
     Effect.gen(function* () {
       const io = yield* CliIo;
+      if (hasShortCluster(argv)) {
+        yield* Effect.ignore(
+          Effect.andThen(io.err("aphelion: unknown option"), io.err(hint)),
+        );
+        return yield* Effect.fail(usage);
+      }
       return yield* parse(argv).pipe(
         Effect.catchCause((cause) => {
           const error = Cause.squash(cause);

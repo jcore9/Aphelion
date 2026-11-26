@@ -9,6 +9,7 @@ const optionFlags: ReadonlySet<string> = new Set(
 const plainOption = /^--?[a-z-]+$/;
 const plainWords = /^[a-z -]+$/;
 const repeated = /^\d+ occurrences$/;
+export const hint = "Run aphelion --help to see the commands.";
 const fallback = "the command line can't be read";
 
 const commandOf = (path: readonly string[]) => path.slice(1).join(" ");
@@ -80,7 +81,7 @@ export const presenter = Layer.effect(CliOutput.Presenter)(
                 io.err(
                   `aphelion: ${first === undefined ? fallback : usageMessage(first, event.commandPath)}`,
                 ),
-                io.err("Run aphelion --help to see the commands."),
+                io.err(hint),
               ),
             );
           }

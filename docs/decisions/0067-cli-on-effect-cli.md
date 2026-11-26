@@ -30,8 +30,8 @@ The code for those five rules is `flags.ts` and `output.ts`, about 210 lines. Ea
 ## Decision
 
 - **`effect/cli` reads the command line.** `cli/index.ts` builds the command tree from a `makeCli(handlers)` function. Each command is defined in the file of its handler. A test passes recording handlers and checks the parsed values.
-- **Zod checks every value.** `flags.ts` runs a Zod schema inside the mapping hooks and turns a Zod failure into the sentence the old parser printed. The Zod schemas in `devices/` and `tools/` don't change. Effect Schema stays out.
-- **The usage rules of 0048 hold, with the same sentences.** A usage error exits 2, prints two lines on standard error, and never repeats what you typed. An empty value, an option the command doesn't use and an option given twice are errors.
+- **Zod checks every flag value.** Plugin ids and folders are passed through as today. `flags.ts` runs a Zod schema inside the mapping hooks and turns a Zod failure into the sentence the old parser printed. The Zod schemas in `devices/` and `tools/` don't change. Effect Schema stays out.
+- **The usage rules of 0048 hold, with the same sentences.** A usage error exits 2, prints two lines on standard error, and never repeats a value you typed. It may name an option or command Aphelion knows, or a plain lowercase word such as `--nope`. `--no-headless` and any argument that starts with a single dash, other than `-h` and `-v`, are usage errors, because `effect/cli` would read `-abc` as three short flags. An empty value, an option the command doesn't use and an option given twice are errors.
 - **A test pins those rules.** `cli/usage-contract.test.ts` checks exit code 2, that a canary token typed into every kind of error never appears in the output, that empty values are refused, the `--version` text, and that `device add` prints only the token. It runs on every pull request. A pull request that bumps `effect` fails there if `effect/cli` changed any of it.
 - **Bun-only imports stay in `adapters/`.** `adapters/run-main.ts` exports the Bun services layer that `effect/cli` needs.
 
