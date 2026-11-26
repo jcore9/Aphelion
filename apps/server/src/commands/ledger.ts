@@ -152,31 +152,41 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
       apply.pipe(
         Effect.catchCause(() => Effect.succeed(failed("internal"))),
         Effect.flatMap((outcome) => settle(entry, done, outcome)),
+        Effect.interruptible,
         Effect.forkIn(scope),
-        Effect.andThen(Deferred.await(done)),
+        Effect.as(Deferred.await(done)),
       );
 
+    const begin = (
+      entry: CommandEntry,
+      apply: Effect.Effect<Outcome>,
+      at: number,
+    ): Effect.Effect<Effect.Effect<Outcome>> => {
+      let claimed: Claim;
+      try {
+        claimed = claim(entry, at);
+      } catch (error) {
+        logger.error("saving a command's id failed, so it didn't run", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+        return Effect.succeed(Effect.succeed(failed("internal")));
+      }
+      switch (claimed.type) {
+        case "known":
+          return Effect.succeed(Effect.succeed(claimed.outcome));
+        case "running":
+          return Effect.succeed(Deferred.await(claimed.done));
+        case "new":
+          return execute(entry, claimed.done, apply);
+      }
+    };
+
     const run = (entry: CommandEntry, apply: Effect.Effect<Outcome>) =>
-      Effect.flatMap(Clock.currentTimeMillis, (at) =>
-        Effect.suspend(() => {
-          let claimed: Claim;
-          try {
-            claimed = claim(entry, at);
-          } catch (error) {
-            logger.error("saving a command's id failed, so it didn't run", {
-              error: error instanceof Error ? error.name : "unknown",
-            });
-            return Effect.succeed(failed("internal"));
-          }
-          switch (claimed.type) {
-            case "known":
-              return Effect.succeed(claimed.outcome);
-            case "running":
-              return Deferred.await(claimed.done);
-            case "new":
-              return execute(entry, claimed.done, apply);
-          }
-        }),
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((at) =>
+          Effect.uninterruptible(Effect.suspend(() => begin(entry, apply, at))),
+        ),
+        Effect.flatten,
       );
 
     return { run } satisfies CommandLedger;

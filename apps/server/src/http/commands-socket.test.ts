@@ -27,7 +27,10 @@ import { openStore, readServerId, readStreamId } from "../store";
 import { serveHttp } from "./index";
 import { connectClient } from "./test-client";
 
-const logger = createLogger({ write: () => undefined });
+const lines: Record<string, unknown>[] = [];
+const logger = createLogger({
+  write: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
+});
 
 const finishes: FakeScript[number] = [
   { emit: { type: "session", ref: sessionRef.parse("vendor-secret-ref") } },
