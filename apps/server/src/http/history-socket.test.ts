@@ -51,6 +51,7 @@ const say = (target: EventStore, text: string) =>
   Effect.andThen(
     target.record({
       bot: "chief",
+      run: 1,
       turn: "t1",
       event: { type: "text.delta", text },
     }),

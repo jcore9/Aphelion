@@ -25,6 +25,7 @@ export const messageHistory: Migration = {
     position INTEGER NOT NULL UNIQUE CHECK (position >= 1),
     bot TEXT NOT NULL,
     turn TEXT,
+    run INTEGER NOT NULL CHECK (run >= 1),
     format INTEGER NOT NULL CHECK (format >= 1),
     kind TEXT NOT NULL,
     payload TEXT NOT NULL CHECK (json_valid(payload)),
@@ -32,6 +33,7 @@ export const messageHistory: Migration = {
     FOREIGN KEY (turn, bot) REFERENCES turns (id, bot)
   ) STRICT;
   CREATE INDEX events_turn ON events (turn, position) WHERE turn IS NOT NULL;
+  CREATE INDEX events_calls ON events (position) WHERE kind IN ('tool.start', 'tool.end');
   CREATE TABLE bot_sessions (
     server_id TEXT NOT NULL CHECK (length(server_id) = 36),
     bot TEXT NOT NULL,

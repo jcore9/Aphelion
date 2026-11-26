@@ -142,10 +142,14 @@ test("migration 8 keeps a turn's end time and reason together, a saved event val
     store.close();
   });
   const id = "0192f0a0-0000-7000-8000-000000000001";
-  const insertEvent = (turn: string | null, payload: string) => {
+  const insertEvent = (
+    turn: string | null,
+    payload: string,
+    bot = "triage",
+  ) => {
     store.run(
-      "INSERT INTO events (id, server_id, position, bot, turn, format, kind, payload, at) VALUES (?, ?, 1, 'triage', ?, 1, 'text.delta', ?, 0)",
-      [id, id, turn, payload],
+      "INSERT INTO events (id, server_id, position, bot, turn, run, format, kind, payload, at) VALUES (?, ?, 1, ?, ?, 1, 1, 'text.delta', ?, 0)",
+      [id, id, bot, turn, payload],
     );
   };
 
@@ -164,6 +168,9 @@ test("migration 8 keeps a turn's end time and reason together, a saved event val
   }).toThrow("CHECK");
   expect(() => {
     insertEvent("missing", "{}");
+  }).toThrow("FOREIGN KEY");
+  expect(() => {
+    insertEvent("t1", "{}", "other");
   }).toThrow("FOREIGN KEY");
   insertEvent("t1", '{"text":"hi"}');
   expect(store.all("SELECT turn, format, kind FROM events")).toEqual([

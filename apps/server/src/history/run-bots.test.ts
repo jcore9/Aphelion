@@ -120,7 +120,7 @@ it.live(
       yield* history.flush;
 
       expect(done.turn).not.toBe(open.turn);
-      expect(yield* closeDanglingTurns(db, history)).toBe(1);
+      expect((yield* closeDanglingTurns(db, history)).turns).toBe(1);
       expect(
         db.all("SELECT id, bot, end_reason FROM turns ORDER BY bot"),
       ).toEqual([

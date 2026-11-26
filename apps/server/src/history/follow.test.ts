@@ -45,6 +45,7 @@ const openAt = (path: string) =>
 const say = (store: EventStore, text: string) =>
   store.record({
     bot: "chief",
+    run: 1,
     turn: "t1",
     event: { type: "text.delta", text },
   });

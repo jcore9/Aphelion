@@ -9,6 +9,7 @@ export interface SavedEvent {
   readonly position: number;
   readonly bot: string;
   readonly turn: string | null;
+  readonly run: number;
   readonly format: number;
   readonly event: StreamEvent;
   readonly at: number;
@@ -30,6 +31,7 @@ const eventRow = z.object({
   position: z.int().positive(),
   bot: z.string(),
   turn: z.string().nullable(),
+  run: z.int().positive(),
   format: z.int().positive(),
   kind: z.string(),
   payload: z.string(),

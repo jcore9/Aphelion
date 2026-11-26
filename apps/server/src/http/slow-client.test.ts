@@ -82,6 +82,7 @@ it.effect(
       yield* store.appendNow(
         Array.from({ length: limit + 3 }, (_, i) => ({
           bot: "chief",
+          run: 1,
           turn: "t1",
           event: { type: "text.delta" as const, text: `m${String(i)}` },
         })),

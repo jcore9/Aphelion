@@ -112,10 +112,14 @@ export const headless = (
       Effect.gen(function* () {
         const history = yield* openEventStore(db, readServerId(db), { logger });
         const closed = yield* closeDanglingTurns(db, history);
-        if (closed > 0) {
-          logger.warn("closed turns that the last shutdown left open", {
-            count: closed,
-          });
+        if (closed.turns > 0 || closed.calls > 0) {
+          logger.warn(
+            "closed turns and tool calls that the last run left open",
+            {
+              turns: closed.turns,
+              calls: closed.calls,
+            },
+          );
         }
         yield* Layer.build(serveHttp({ address, port }, db, history));
         logger.info("server started", { version, address, port });

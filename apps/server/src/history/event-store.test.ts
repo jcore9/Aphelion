@@ -34,12 +34,14 @@ const logs = () => {
 
 const delta = (text: string, turn: string | null = "t1"): NewEvent => ({
   bot: "chief",
+  run: 1,
   turn,
   event: { type: "text.delta", text },
 });
 
 const end = (reason: "completed" | "error", turn = "t1"): NewEvent => ({
   bot: "chief",
+  run: 1,
   turn,
   event: { type: "turn.end", reason },
 });
@@ -171,6 +173,7 @@ describe("the event store", () => {
         const store = yield* openEventStore(db, readServerId(db), { logger });
         const scout = (event: NewEvent["event"], turn: string): NewEvent => ({
           bot: "scout",
+          run: 1,
           turn,
           event,
         });
@@ -208,6 +211,7 @@ describe("the event store", () => {
       const store = yield* open(db);
       yield* store.record({
         bot: "chief",
+        run: 1,
         turn: null,
         event: { type: "error", code: "cli-exited" },
       });
@@ -302,6 +306,7 @@ describe("reading a saved event", () => {
     id: "0192f0a0-0000-7000-8000-000000000001",
     position: 7,
     bot: "chief",
+    run: 1,
     turn: "t1",
     format: 1,
     kind: "tool.end",
@@ -320,6 +325,7 @@ describe("reading a saved event", () => {
       id: "0192f0a0-0000-7000-8000-000000000001",
       position: 7,
       bot: "chief",
+      run: 1,
       turn: "t1",
       format: 1,
       event,

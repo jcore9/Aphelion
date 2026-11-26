@@ -58,11 +58,13 @@ const streamOf = (store: EventStore, bot: string): AdapterEnvelope[] =>
 const midTurn: NewEvent[] = [
   {
     bot: "chief",
+    run: 1,
     turn: null,
     event: streamEvent.parse({ type: "session", ref: "s-1" }),
   },
   {
     bot: "chief",
+    run: 1,
     turn: "t1",
     event: streamEvent.parse({
       type: "tool.start",
@@ -73,6 +75,7 @@ const midTurn: NewEvent[] = [
   },
   {
     bot: "chief",
+    run: 1,
     turn: "t1",
     event: streamEvent.parse({
       type: "permission.request",
@@ -86,6 +89,7 @@ const midTurn: NewEvent[] = [
   },
   {
     bot: "chief",
+    run: 1,
     turn: "t1",
     event: { type: "text.delta", text: "working" },
   },
@@ -103,7 +107,7 @@ it.effect(
       }).pipe(Effect.scoped);
 
       const { db, store } = yield* boot(path);
-      expect(yield* closeDanglingTurns(db, store)).toBe(1);
+      expect((yield* closeDanglingTurns(db, store)).turns).toBe(1);
 
       expect(checkStream(streamOf(store, "chief"))).toEqual([]);
       expect(
@@ -137,21 +141,25 @@ it.effect(
         yield* save(store, [
           {
             bot: "chief",
+            run: 1,
             turn: "t1",
             event: { type: "text.delta", text: "a" },
           },
           {
             bot: "chief",
+            run: 1,
             turn: "t1",
             event: { type: "turn.end", reason: "completed" },
           },
           {
             bot: "chief",
+            run: 1,
             turn: "t2",
             event: { type: "text.delta", text: "b" },
           },
           {
             bot: "scout",
+            run: 1,
             turn: "t3",
             event: { type: "text.delta", text: "c" },
           },
@@ -160,7 +168,7 @@ it.effect(
 
       const { db, store } = yield* boot(path);
       const before = store.head();
-      expect(yield* closeDanglingTurns(db, store)).toBe(2);
+      expect((yield* closeDanglingTurns(db, store)).turns).toBe(2);
 
       expect(
         store
@@ -193,12 +201,12 @@ it.effect(
 
       const { db, store } = yield* boot(path);
       const live = yield* store.subscribe;
-      expect(yield* closeDanglingTurns(db, store)).toBe(1);
+      expect((yield* closeDanglingTurns(db, store)).turns).toBe(1);
       const head = store.head();
       const delivered = yield* PubSub.takeUpTo(live, 20);
 
       expect(delivered.map(({ position }) => position)).toEqual([5, 6, 7, 8]);
-      expect(yield* closeDanglingTurns(db, store)).toBe(0);
+      expect((yield* closeDanglingTurns(db, store)).turns).toBe(0);
       expect(store.head()).toBe(head);
     }).pipe(Effect.scoped),
 );
@@ -207,7 +215,132 @@ it.effect("adds nothing to a database with no open turn", () =>
   Effect.gen(function* () {
     const { db, store } = yield* boot(tempPath());
 
-    expect(yield* closeDanglingTurns(db, store)).toBe(0);
+    expect((yield* closeDanglingTurns(db, store)).turns).toBe(0);
     expect(store.head()).toBe(0);
   }).pipe(Effect.scoped),
+);
+
+const backgroundCall = (run: number, call: string, turn: string): NewEvent => ({
+  bot: "chief",
+  run,
+  turn,
+  event: streamEvent.parse({
+    type: "tool.start",
+    call,
+    tool: "Bash",
+    kind: "shell",
+  }),
+});
+
+const streamOfRun = (store: EventStore, run: number): AdapterEnvelope[] =>
+  store
+    .read(0, 1000)
+    .filter((saved) => saved.bot === "chief" && saved.run === run)
+    .map((saved, index) =>
+      adapterEnvelope.parse({
+        seq: index + 1,
+        turn: saved.turn,
+        event: saved.event,
+      }),
+    );
+
+it.effect(
+  "closes a call that outlived its finished turn when its process is gone, and the stream passes checkStream",
+  () =>
+    Effect.gen(function* () {
+      const path = tempPath();
+      yield* Effect.gen(function* () {
+        const { store } = yield* boot(path);
+        yield* save(store, [
+          backgroundCall(1, "c1", "t1"),
+          {
+            bot: "chief",
+            run: 1,
+            turn: "t1",
+            event: { type: "turn.end", reason: "completed" },
+          },
+          {
+            bot: "chief",
+            run: 1,
+            turn: "t2",
+            event: { type: "text.delta", text: "next" },
+          },
+        ]);
+        expect(checkStream(streamOfRun(store, 1))).not.toEqual([]);
+      }).pipe(Effect.scoped);
+
+      const { db, store } = yield* boot(path);
+      const before = store.head();
+      expect(yield* closeDanglingTurns(db, store)).toEqual({
+        turns: 1,
+        calls: 1,
+      });
+
+      expect(
+        store
+          .read(before, 100)
+          .map(({ run, turn, event }) => [run, turn, event.type]),
+      ).toEqual([
+        [1, "t2", "error"],
+        [1, "t2", "turn.end"],
+        [1, "t1", "tool.end"],
+      ]);
+      expect(checkStream(streamOfRun(store, 1))).toEqual([]);
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "closes a background call when no turn is open, and tells runs with the same call id apart",
+  () =>
+    Effect.gen(function* () {
+      const path = tempPath();
+      yield* Effect.gen(function* () {
+        const { store } = yield* boot(path);
+        yield* save(store, [
+          backgroundCall(1, "c1", "t1"),
+          {
+            bot: "chief",
+            run: 1,
+            turn: "t1",
+            event: { type: "turn.end", reason: "completed" },
+          },
+          backgroundCall(2, "c1", "t2"),
+          {
+            bot: "chief",
+            run: 2,
+            turn: "t2",
+            event: streamEvent.parse({
+              type: "tool.end",
+              call: "c1",
+              outcome: "ok",
+            }),
+          },
+          {
+            bot: "chief",
+            run: 2,
+            turn: "t2",
+            event: { type: "turn.end", reason: "completed" },
+          },
+        ]);
+      }).pipe(Effect.scoped);
+
+      const { db, store } = yield* boot(path);
+      const before = store.head();
+      expect(yield* closeDanglingTurns(db, store)).toEqual({
+        turns: 0,
+        calls: 1,
+      });
+
+      expect(
+        store
+          .read(before, 100)
+          .map(({ run, turn, event }) => [run, turn, event.type]),
+      ).toEqual([[1, "t1", "tool.end"]]);
+      expect(checkStream(streamOfRun(store, 1))).toEqual([]);
+      expect(checkStream(streamOfRun(store, 2))).toEqual([]);
+      expect(yield* closeDanglingTurns(db, store)).toEqual({
+        turns: 0,
+        calls: 0,
+      });
+    }).pipe(Effect.scoped),
 );

@@ -12,6 +12,7 @@ import {
 
 export interface NewEvent {
   readonly bot: string;
+  readonly run: number;
   readonly turn: string | null;
   readonly event: StreamEvent;
 }
@@ -47,7 +48,7 @@ interface Pending extends NewEvent {
   readonly at: number;
 }
 
-const columns = "id, position, bot, turn, format, kind, payload, at";
+const columns = "id, position, bot, turn, run, format, kind, payload, at";
 
 export const openEventStore = (
   db: Database,
@@ -112,13 +113,14 @@ export const openEventStore = (
           const id = randomUUIDv7();
           const position = first + index;
           db.run(
-            `INSERT INTO events (id, position, bot, turn, format, kind, payload, at, server_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO events (id, position, bot, turn, run, format, kind, payload, at, server_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               id,
               position,
               entry.bot,
               entry.turn,
+              entry.run,
               eventFormat,
               entry.event.type,
               encodePayload(entry.event),
@@ -137,6 +139,7 @@ export const openEventStore = (
             position,
             bot: entry.bot,
             turn: entry.turn,
+            run: entry.run,
             format: eventFormat,
             event: entry.event,
             at: entry.at,

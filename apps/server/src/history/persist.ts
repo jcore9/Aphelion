@@ -8,8 +8,8 @@ export const persistBotEvents = (
 ) =>
   Effect.gen(function* () {
     const subscription = yield* subscribe;
-    const save = ({ bot, envelope }: BotEvent) =>
-      store.record({ bot, turn: envelope.turn, event: envelope.event });
+    const save = ({ bot, run, envelope }: BotEvent) =>
+      store.record({ bot, run, turn: envelope.turn, event: envelope.event });
     const worker = yield* Effect.uninterruptibleMask((restore) =>
       restore(PubSub.take(subscription)).pipe(
         Effect.flatMap(save),
