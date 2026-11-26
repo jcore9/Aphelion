@@ -4,6 +4,7 @@ import { Context, type Effect } from "effect";
 export interface SavedSession {
   readonly ref: SessionRef;
   readonly folder: string;
+  readonly provider: string;
 }
 
 export class SessionRefs extends Context.Service<

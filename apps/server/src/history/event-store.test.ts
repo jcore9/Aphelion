@@ -162,6 +162,46 @@ describe("the event store", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect(
+    "refuses an event for another bot's turn, logs it, and saves the rest without a gap",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const { lines, logger } = logs();
+        const store = yield* openEventStore(db, readServerId(db), { logger });
+        const scout = (event: NewEvent["event"], turn: string): NewEvent => ({
+          bot: "scout",
+          turn,
+          event,
+        });
+        yield* store.record(delta("a"));
+        yield* store.record(end("completed"));
+        yield* store.record(scout({ type: "text.delta", text: "x" }, "t1"));
+        yield* store.record(scout({ type: "turn.end", reason: "error" }, "t1"));
+        yield* store.record(scout({ type: "text.delta", text: "b" }, "t2"));
+        yield* store.flush;
+
+        expect(saved(db)).toEqual([
+          { position: 1, kind: "text.delta", turn: "t1" },
+          { position: 2, kind: "turn.end", turn: "t1" },
+          { position: 3, kind: "text.delta", turn: "t2" },
+        ]);
+        expect(
+          db.all("SELECT id, bot, end_reason FROM turns ORDER BY id"),
+        ).toEqual([
+          { id: "t1", bot: "chief", end_reason: "completed" },
+          { id: "t2", bot: "scout", end_reason: null },
+        ]);
+        expect(store.head()).toBe(3);
+        expect(lines).toContainEqual(
+          expect.objectContaining({
+            msg: "bot events for another bot's turn were not saved",
+            count: 2,
+          }),
+        );
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("saves an event with no turn", () =>
     Effect.gen(function* () {
       const { db } = tempStore();

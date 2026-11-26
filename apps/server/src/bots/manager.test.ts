@@ -1,6 +1,5 @@
 import {
   sessionRef,
-  turnId,
   type AdapterContext,
   type BotAdapter,
 } from "@aphelion/plugin-sdk";
@@ -106,7 +105,8 @@ const sessionTurn: FakeScript[number] = [
   { emit: { type: "turn.end", reason: "completed" } },
 ];
 
-const t = (id: string) => turnId.parse(id);
+const uuidV7 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 describe("the bot manager", () => {
   it.live(
@@ -117,9 +117,9 @@ describe("the bot manager", () => {
         const { manager, refs, seen, reach } = yield* system(chief.bot);
         expect(yield* manager.start("chief")).toBe("starting");
         yield* reach("running");
-        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe(
-          "accepted",
-        );
+        const started = yield* manager.startTurn("chief", "hi");
+        expect(started.outcome).toBe("accepted");
+        expect(started.turn).toMatch(uuidV7);
         yield* reach("running");
         expect(
           seen.map(({ bot, envelope }) => [bot, envelope.event.type]),
@@ -128,7 +128,16 @@ describe("the bot manager", () => {
           ["chief", "text.delta"],
           ["chief", "turn.end"],
         ]);
-        expect(yield* refs.get("chief")).toEqual({ ref: "s-1", folder });
+        expect(
+          seen
+            .filter(({ envelope }) => envelope.turn !== null)
+            .map(({ envelope }) => envelope.turn),
+        ).toEqual([started.turn, started.turn]);
+        expect(yield* refs.get("chief")).toEqual({
+          ref: "s-1",
+          folder,
+          provider: "fake",
+        });
         yield* manager.stop("chief");
         expect(yield* manager.status("chief")).toEqual({ state: "stopped" });
       }).pipe(Effect.scoped),
@@ -140,30 +149,23 @@ describe("the bot manager", () => {
       Effect.gen(function* () {
         const chief = recording([[{ waitForAbort: true }]]);
         const { manager, reach } = yield* system(chief.bot);
-        expect(yield* manager.startTurn("chief", t("t0"), "hi")).toBe(
+        expect((yield* manager.startTurn("chief", "hi")).outcome).toBe(
           "not-running",
         );
         yield* manager.start("chief");
         yield* reach("running");
-        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe(
-          "accepted",
-        );
+        const first = yield* manager.startTurn("chief", "hi");
+        expect(first.outcome).toBe("accepted");
         expect(yield* manager.status("chief")).toEqual({
           state: "in turn",
-          turn: "t1",
+          turn: first.turn,
         });
-        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe(
-          "accepted",
-        );
-        expect(yield* manager.startTurn("chief", t("t2"), "hi")).toBe("busy");
+        expect((yield* manager.startTurn("chief", "hi")).outcome).toBe("busy");
         expect(
-          yield* manager.startTurn(
-            "chief",
-            t("t3"),
-            "a".repeat(256 * 1024 + 1),
-          ),
+          (yield* manager.startTurn("chief", "a".repeat(256 * 1024 + 1)))
+            .outcome,
         ).toBe("too-long");
-        yield* manager.cancelTurn("chief", t("t1"));
+        yield* manager.cancelTurn("chief", first.turn);
         yield* reach("running");
       }).pipe(Effect.scoped),
   );
@@ -181,7 +183,7 @@ describe("the bot manager", () => {
         const { fake, manager, seen, reach } = yield* system(chief.bot);
         yield* manager.start("chief");
         yield* reach("running");
-        yield* manager.startTurn("chief", t("t1"), "work");
+        yield* manager.startTurn("chief", "work");
         yield* reach("in turn");
         fake.latest("chief")?.crash();
         yield* reach("crashed");
@@ -238,7 +240,11 @@ describe("the bot manager", () => {
         const { logs, manager, refs, reach } = yield* system(
           { adapter: () => picky },
           (saved) =>
-            saved.set("chief", { ref: sessionRef.parse("s-old"), folder }),
+            saved.set("chief", {
+              ref: sessionRef.parse("s-old"),
+              folder,
+              provider: "fake",
+            }),
         );
         yield* manager.start("chief");
         yield* reach("running");
@@ -273,7 +279,7 @@ describe("the bot manager", () => {
         );
         yield* one.manager.start("chief");
         yield* one.reach("running");
-        yield* one.manager.startTurn("chief", t("t1"), "hi");
+        yield* one.manager.startTurn("chief", "hi");
         yield* one.reach("running");
         yield* one.manager.stop("chief");
         expect(firstChief.made[0]?.contexts[0]?.resume).toBeNull();
@@ -301,6 +307,23 @@ describe("the bot manager", () => {
         saved.set("chief", {
           ref: sessionRef.parse("s-1"),
           folder: "/var/lib/aphelion-bots/old-name",
+          provider: "fake",
+        }),
+      );
+      yield* manager.start("chief");
+      yield* reach("running");
+      expect(chief.made[0]?.contexts[0]?.resume).toBeNull();
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("doesn't resume a session saved for another provider", () =>
+    Effect.gen(function* () {
+      const chief = recording([]);
+      const { manager, reach } = yield* system(chief.bot, (saved) =>
+        saved.set("chief", {
+          ref: sessionRef.parse("s-1"),
+          folder,
+          provider: "codex",
         }),
       );
       yield* manager.start("chief");
@@ -351,47 +374,25 @@ describe("the bot manager", () => {
   );
 
   it.live(
-    "reports a replayed finished turn as ended, keeps the bot idle, and accepts a repeat of the running turn",
+    "gives every turn its own server-made ID and sends it to the adapter",
     () =>
       Effect.gen(function* () {
-        const chief = recording([sessionTurn, [{ waitForAbort: true }]]);
-        const { fake, manager, reach, seen } = yield* system(chief.bot);
+        const chief = recording([sessionTurn, sessionTurn]);
+        const { fake, manager, reach } = yield* system(chief.bot);
         yield* manager.start("chief");
         yield* reach("running");
-        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe(
-          "accepted",
-        );
-        yield* Effect.gen(function* () {
-          while (
-            !seen.some(
-              ({ envelope }) =>
-                envelope.turn === "t1" && envelope.event.type === "turn.end",
-            )
-          ) {
-            yield* Effect.sleep("5 millis");
-          }
-        }).pipe(Effect.timeout("5 seconds"), Effect.orDie);
+        const one = yield* manager.startTurn("chief", "hi");
         yield* reach("running");
-        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe("ended");
-        expect(yield* manager.status("chief")).toEqual({ state: "running" });
-        expect(yield* manager.startTurn("chief", t("t2"), "hi")).toBe(
-          "accepted",
-        );
-        expect(yield* manager.startTurn("chief", t("t2"), "hi")).toBe(
-          "accepted",
-        );
-        expect(yield* manager.status("chief")).toEqual({
-          state: "in turn",
-          turn: "t2",
-        });
+        const two = yield* manager.startTurn("chief", "again");
+        yield* reach("running");
+
+        expect(one.turn).not.toBe(two.turn);
         expect(
           fake
             .latest("chief")
             ?.received.filter((line) => line.method === "turn.start")
             .map((line) => (line.params as { turn: string }).turn),
-        ).toEqual(["t1", "t1", "t2"]);
-        yield* manager.cancelTurn("chief", t("t2"));
-        yield* reach("running");
+        ).toEqual([one.turn, two.turn]);
       }).pipe(Effect.scoped),
   );
 });

@@ -10,32 +10,39 @@ export const sqliteSessionRefs = (db: Database, serverId: string) =>
       get: (bot) =>
         Effect.sync(() => {
           const row = db.all(
-            "SELECT ref, folder FROM bot_sessions WHERE bot = ?",
-            [bot],
+            "SELECT ref, folder, provider FROM bot_sessions WHERE server_id = ? AND bot = ?",
+            [serverId, bot],
           )[0];
           const ref = sessionRef.safeParse(row?.["ref"]);
           const folder = row?.["folder"];
-          return ref.success && typeof folder === "string"
-            ? { ref: ref.data, folder }
+          const provider = row?.["provider"];
+          return ref.success &&
+            typeof folder === "string" &&
+            typeof provider === "string"
+            ? { ref: ref.data, folder, provider }
             : undefined;
         }),
-      set: (bot, { ref, folder }) =>
+      set: (bot, { ref, folder, provider }) =>
         Effect.flatMap(Clock.currentTimeMillis, (now) =>
           Effect.sync(() => {
             db.run(
-              `INSERT INTO bot_sessions (bot, folder, ref, server_id, updated_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT (bot) DO UPDATE SET
+              `INSERT INTO bot_sessions (server_id, bot, folder, provider, ref, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT (server_id, bot) DO UPDATE SET
                  folder = excluded.folder,
+                 provider = excluded.provider,
                  ref = excluded.ref,
                  updated_at = excluded.updated_at`,
-              [bot, folder, ref, serverId, now],
+              [serverId, bot, folder, provider, ref, now],
             );
           }),
         ),
       clear: (bot) =>
         Effect.sync(() => {
-          db.run("DELETE FROM bot_sessions WHERE bot = ?", [bot]);
+          db.run("DELETE FROM bot_sessions WHERE server_id = ? AND bot = ?", [
+            serverId,
+            bot,
+          ]);
         }),
     }),
   );

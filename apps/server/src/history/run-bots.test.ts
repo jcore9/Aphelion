@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sessionRef, turnId } from "@aphelion/plugin-sdk";
+import { sessionRef } from "@aphelion/plugin-sdk";
 import { fakeAdapter, type FakeScript } from "@aphelion/plugin-sdk/testing";
 import { expect, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Scope } from "effect";
@@ -15,6 +15,7 @@ import {
 import { createLogger } from "../log";
 import { openStore, readServerId } from "../store";
 import { openEventStore } from "./event-store";
+import { closeDanglingTurns } from "./repair";
 import { runBots } from "./run-bots";
 
 const logger = createLogger({ write: () => undefined });
@@ -41,9 +42,9 @@ const startServer = (dbPath: string, scripts: Record<string, FakeScript>) =>
     const services = yield* Layer.build(
       Layer.mergeAll(Layer.succeed(BotRunnerLink, link), memorySessionRefs),
     );
-    const manager = yield* Effect.gen(function* () {
+    const { history, manager } = yield* Effect.gen(function* () {
       const history = yield* openEventStore(db, readServerId(db), { logger });
-      return yield* runBots(
+      const manager = yield* runBots(
         {
           bots: Object.keys(scripts).map((name) => ({
             name,
@@ -56,9 +57,11 @@ const startServer = (dbPath: string, scripts: Record<string, FakeScript>) =>
         },
         history,
       ).pipe(Effect.provideContext(services));
+      return { history, manager };
     }).pipe(Scope.provide(app));
     return {
       db,
+      history,
       manager,
       stop: Scope.close(app, Exit.void),
     };
@@ -78,7 +81,7 @@ it.live("saves the events a stopping bot emits as the server shuts down", () =>
       chief: [sessionThenHang],
     });
     yield* manager.waitFor("chief", (state) => state.state === "running");
-    yield* manager.startTurn("chief", turnId.parse("t1"), "hi");
+    yield* manager.startTurn("chief", "hi");
     yield* manager.waitFor("chief", (state) => state.state === "in turn");
     yield* Effect.sleep("20 millis");
 
@@ -90,4 +93,41 @@ it.live("saves the events a stopping bot emits as the server shuts down", () =>
     expect(kinds).toEqual(["session", "text.delta", "turn.end"]);
     db.close();
   }).pipe(Effect.scoped),
+);
+
+const finishes: FakeScript[number] = [
+  { emit: { type: "text.delta", text: "done" } },
+  { emit: { type: "turn.end", reason: "completed" } },
+];
+
+it.live(
+  "gives two bots their own turns, so boot repair finds only the one still open",
+  () =>
+    Effect.gen(function* () {
+      const { db, manager, history, stop } = yield* startServer(tempDb(), {
+        chief: [finishes],
+        scout: [
+          [{ emit: { type: "text.delta", text: "busy" } }, { hang: true }],
+        ],
+      });
+      yield* manager.waitFor("chief", (state) => state.state === "running");
+      yield* manager.waitFor("scout", (state) => state.state === "running");
+      const done = yield* manager.startTurn("chief", "hi");
+      yield* manager.waitFor("chief", (state) => state.state === "running");
+      const open = yield* manager.startTurn("scout", "hi");
+      yield* history.flush;
+      yield* Effect.sleep("50 millis");
+      yield* history.flush;
+
+      expect(done.turn).not.toBe(open.turn);
+      expect(yield* closeDanglingTurns(db, history)).toBe(1);
+      expect(
+        db.all("SELECT id, bot, end_reason FROM turns ORDER BY bot"),
+      ).toEqual([
+        { id: done.turn, bot: "chief", end_reason: "completed" },
+        { id: open.turn, bot: "scout", end_reason: "error" },
+      ]);
+      yield* stop;
+      db.close();
+    }).pipe(Effect.scoped),
 );

@@ -1,4 +1,6 @@
+import { randomUUIDv7 } from "node:crypto";
 import {
+  turnId,
   turnStartParams,
   type AdapterEnvelope,
   type SessionRef,
@@ -94,6 +96,11 @@ export interface BotEvent {
 export type StartOutcome = "starting" | "unknown bot" | "unknown provider";
 export type TurnOutcome = "accepted" | TurnRefusal;
 
+export interface StartedTurn {
+  readonly turn: TurnId;
+  readonly outcome: TurnOutcome;
+}
+
 interface Waiter {
   readonly until: (state: BotState) => boolean;
   readonly done: Deferred.Deferred<BotState>;
@@ -129,9 +136,8 @@ export class BotManager extends Context.Service<
     readonly stop: (bot: string) => Effect.Effect<void>;
     readonly startTurn: (
       bot: string,
-      turn: TurnId,
       text: string,
-    ) => Effect.Effect<TurnOutcome>;
+    ) => Effect.Effect<StartedTurn>;
     readonly cancelTurn: (bot: string, turn: TurnId) => Effect.Effect<void>;
     readonly status: (bot: string) => Effect.Effect<BotState | undefined>;
     readonly waitFor: (
@@ -216,7 +222,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             case "spawn": {
               const saved = yield* refs.get(slot.bot.name);
               slot.resume =
-                saved?.folder === slot.bot.folder ? saved.ref : null;
+                saved?.folder === slot.bot.folder &&
+                saved.provider === slot.bot.provider
+                  ? saved.ref
+                  : null;
               return yield* sendStart(slot, command.run);
             }
             case "initialize":
@@ -325,6 +334,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 yield* refs.set(bot, {
                   ref: envelope.event.ref,
                   folder: slot.bot.folder,
+                  provider: slot.bot.provider,
                 });
               }
               if (
@@ -371,16 +381,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               if (slot.state.state !== "running") {
                 return yield* Deferred.succeed(input.done, "not-running");
               }
-              if (slot.turn === input.turn) {
-                return yield* Deferred.succeed(input.done, "accepted");
-              }
               if (slot.turn !== undefined) {
                 return yield* Deferred.succeed(input.done, "busy");
-              }
-              const waiting = slot.turns.get(input.turn);
-              if (waiting !== undefined) {
-                waiting.push(input.done);
-                return;
               }
               slot.turns.set(input.turn, [input.done]);
               return yield* link.send({
@@ -483,16 +485,18 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           yield* waitFor(name, (state) => stoppedStates.has(state.state));
         });
 
-      const startTurn = (name: string, turn: TurnId, text: string) =>
+      const startTurn = (name: string, text: string) =>
         Effect.gen(function* () {
+          const turn = turnId.parse(randomUUIDv7());
           const slot = slots.get(name);
-          if (slot === undefined) return "not-running" as const;
+          if (slot === undefined)
+            return { turn, outcome: "not-running" as const };
           if (!turnStartParams.safeParse({ turn, text }).success) {
-            return "too-long" as const;
+            return { turn, outcome: "too-long" as const };
           }
           const done = yield* Deferred.make<TurnOutcome>();
           yield* Queue.offer(slot.mailbox, { type: "turn", turn, text, done });
-          return yield* Deferred.await(done);
+          return { turn, outcome: yield* Deferred.await(done) };
         });
 
       yield* Effect.addFinalizer(() =>

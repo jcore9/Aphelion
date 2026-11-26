@@ -79,24 +79,38 @@ export const openEventStore = (
       return typeof first === "number" ? first : head() + 1;
     };
 
+    const claimTurn = (entry: Pending) => {
+      if (entry.turn === null) return true;
+      db.run(
+        "INSERT INTO turns (id, server_id, bot, started_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+        [entry.turn, serverId, entry.bot, entry.at],
+      );
+      return (
+        db.all("SELECT bot FROM turns WHERE id = ?", [entry.turn])[0]?.[
+          "bot"
+        ] === entry.bot
+      );
+    };
+
     const write = (batch: readonly Pending[]): SavedEvent[] =>
       db.transaction(() => {
+        const accepted = batch.filter(claimTurn);
+        if (accepted.length < batch.length) {
+          logger.error("bot events for another bot's turn were not saved", {
+            count: batch.length - accepted.length,
+          });
+        }
+        if (accepted.length === 0) return [];
         const next = Number(
           db.all(
             "UPDATE server_meta SET value = CAST(value AS INTEGER) + ? WHERE key = 'next_position' RETURNING CAST(value AS INTEGER) AS next",
-            [batch.length],
+            [accepted.length],
           )[0]?.["next"],
         );
-        const first = next - batch.length;
-        return batch.map((entry, index) => {
+        const first = next - accepted.length;
+        return accepted.map((entry, index) => {
           const id = randomUUIDv7();
           const position = first + index;
-          if (entry.turn !== null) {
-            db.run(
-              "INSERT INTO turns (id, server_id, bot, started_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
-              [entry.turn, serverId, entry.bot, entry.at],
-            );
-          }
           db.run(
             `INSERT INTO events (id, position, bot, turn, format, kind, payload, at, server_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -114,8 +128,8 @@ export const openEventStore = (
           );
           if (entry.turn !== null && entry.event.type === "turn.end") {
             db.run(
-              "UPDATE turns SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL",
-              [entry.at, entry.event.reason, entry.turn],
+              "UPDATE turns SET ended_at = ?, end_reason = ? WHERE id = ? AND bot = ? AND ended_at IS NULL",
+              [entry.at, entry.event.reason, entry.turn, entry.bot],
             );
           }
           return {
