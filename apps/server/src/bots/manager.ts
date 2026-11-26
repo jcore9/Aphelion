@@ -272,6 +272,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const bot = slot.bot.name;
           switch (reply.type) {
             case "spawned":
+              logger.info("the bot runner started the bot's process", {
+                bot,
+                run: reply.run,
+              });
               return yield* apply(slot, { type: "spawned", run: reply.run });
             case "started":
               return yield* apply(slot, {

@@ -5,7 +5,8 @@ RUN bun install --frozen-lockfile --filter @aphelion/server \
  && cd apps/server \
  && bun run build \
  && bun run build:broker \
- && bun run build:plugin-runner
+ && bun run build:plugin-runner \
+ && bun build --target=bun src/bots/runner-main.ts --outfile dist/bot-runner.js
 
 FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
 RUN apt-get update \
@@ -30,7 +31,7 @@ RUN apt-get update \
  && find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
 COPY --from=build --chmod=0755 /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=build --chmod=0755 /src/apps/server/dist/aphelion /src/apps/server/dist/aphelion-secrets /usr/local/bin/
-COPY --from=build --chmod=0644 /src/apps/server/dist/plugin-runner.js /usr/local/lib/aphelion/
+COPY --from=build --chmod=0644 /src/apps/server/dist/plugin-runner.js /src/apps/server/dist/bot-runner.js /usr/local/lib/aphelion/
 COPY --chown=harness:harness --chmod=0640 docs/reference/config/example/*.yaml /etc/aphelion/
 COPY --chmod=0755 deploy/image/launch /usr/local/lib/aphelion/launch
 EXPOSE 7400
