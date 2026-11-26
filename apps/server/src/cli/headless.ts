@@ -2,7 +2,16 @@ import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
 import { z } from "zod";
+import type { BotDefinition } from "../bots/manager";
+import { botRunnerPipeLink } from "../bots/runner-pipe";
+import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
 import { formatIssue } from "../config";
+import {
+  closeDanglingTurns,
+  openEventStore,
+  runBots,
+  type EventStore,
+} from "../history";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
 import { installedPlugins, readInstall } from "../plugins/approvals";
@@ -14,11 +23,11 @@ import {
 import { sqlitePluginGrants } from "../plugins/grants";
 import { PluginHost, pluginHostLayer } from "../plugins/host";
 import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
-import type { Database } from "../store";
+import { readServerId, type Database } from "../store";
 import { version } from "../version";
 import { checkDirs, migratedNote } from "./checks";
 import { withStore } from "./device";
-import { failed } from "./failure";
+import { failed, usage } from "./failure";
 import {
   absolutePath,
   checkedFlag,
@@ -28,6 +37,8 @@ import {
   stateDirFlag,
   type Handler,
 } from "./flags";
+import { CliIo } from "./io";
+import { hint } from "./output";
 
 interface PluginOptions {
   readonly fds: RunnerPipeFds;
@@ -66,11 +77,31 @@ const startPlugins = (
     }
   });
 
+const startBots = (
+  bots: readonly BotDefinition[],
+  fds: RunnerPipeFds,
+  logger: Logger,
+  db: Database,
+  history: EventStore,
+) =>
+  Effect.gen(function* () {
+    const links = yield* Layer.build(
+      Layer.mergeAll(
+        botRunnerPipeLink(fds, logger),
+        sqliteSessionRefs(db, history.serverId),
+      ),
+    );
+    yield* runBots({ bots, logger }, history).pipe(
+      Effect.provideContext(links),
+    );
+  });
+
 export const headless = (
   options: {
     readonly configDir: string;
     readonly stateDir: string;
     readonly pluginRunnerFds: RunnerPipeFds | undefined;
+    readonly botRunnerFds: RunnerPipeFds | undefined;
     readonly pluginDev: string | undefined;
   },
   logger: Logger,
@@ -92,7 +123,18 @@ export const headless = (
     const fds = options.pluginRunnerFds;
     return yield* withStore(options.stateDir, (db) =>
       Effect.gen(function* () {
-        yield* Layer.build(serveHttp({ address, port }, db));
+        const history = yield* openEventStore(db, readServerId(db), { logger });
+        const closed = yield* closeDanglingTurns(db, history, logger);
+        if (closed.turns > 0 || closed.calls > 0) {
+          logger.warn(
+            "closed turns and tool calls that the last run left open",
+            {
+              turns: closed.turns,
+              calls: closed.calls,
+            },
+          );
+        }
+        yield* Layer.build(serveHttp({ address, port }, db, history));
         logger.info("server started", { version, address, port });
         if (fds === undefined) {
           logger.info("plugins are off: no plugin runner pipe was given");
@@ -107,6 +149,17 @@ export const headless = (
             logger,
           );
         }
+        if (options.botRunnerFds === undefined) {
+          logger.info("bots are off: no bot runner pipe was given");
+        } else {
+          yield* startBots(
+            checked.config.bots.bots,
+            options.botRunnerFds,
+            logger,
+            db,
+            history,
+          );
+        }
         return yield* Effect.never;
       }).pipe(
         Effect.scoped,
@@ -119,7 +172,7 @@ export const headless = (
     );
   });
 
-const pluginRunnerFds = z
+const runnerFds = z
   .string()
   .regex(/^\d{1,4},\d{1,4}$/, {
     error: "must be two file descriptor numbers, such as 3,4",
@@ -136,6 +189,21 @@ const pluginRunnerFds = z
     error: "must name two different descriptors",
   });
 
+const shareDescriptors = (config: {
+  readonly pluginRunnerFds: RunnerPipeFds | undefined;
+  readonly botRunnerFds: RunnerPipeFds | undefined;
+}) => {
+  const plugin = config.pluginRunnerFds;
+  const bot = config.botRunnerFds;
+  return (
+    plugin !== undefined &&
+    bot !== undefined &&
+    [bot.replies, bot.requests].some(
+      (fd) => fd === plugin.replies || fd === plugin.requests,
+    )
+  );
+};
+
 export const rootCommand = (handler: Handler<Parameters<typeof headless>[0]>) =>
   Command.make(
     "aphelion",
@@ -148,9 +216,16 @@ export const rootCommand = (handler: Handler<Parameters<typeof headless>[0]>) =>
       configDir: configDirFlag,
       stateDir: stateDirFlag,
       pluginRunnerFds: optionalFlag(
-        checkedFlag(options.pluginRunnerFds, pluginRunnerFds).pipe(
+        checkedFlag(options.pluginRunnerFds, runnerFds).pipe(
           Flag.withDescription(
             "Descriptors REPLIES,REQUESTS of the plugin runner's pipes. The server starts every installed plugin",
+          ),
+        ),
+      ),
+      botRunnerFds: optionalFlag(
+        checkedFlag(options.botRunnerFds, runnerFds).pipe(
+          Flag.withDescription(
+            "Descriptors REPLIES,REQUESTS of the bot runner's pipes. The server starts every bot in bots.yaml",
           ),
         ),
       ),
@@ -164,7 +239,20 @@ export const rootCommand = (handler: Handler<Parameters<typeof headless>[0]>) =>
     },
     ({ headless: serve, ...config }) =>
       serve
-        ? handler(config)
+        ? shareDescriptors(config)
+          ? Effect.gen(function* () {
+              const io = yield* CliIo;
+              yield* Effect.ignore(
+                Effect.andThen(
+                  io.err(
+                    "aphelion: --bot-runner-fds must name other descriptors than --plugin-runner-fds",
+                  ),
+                  io.err(hint),
+                ),
+              );
+              return yield* Effect.fail(usage);
+            })
+          : handler(config)
         : Effect.fail(
             new CliError.ShowHelp({ commandPath: ["aphelion"], errors: [] }),
           ),

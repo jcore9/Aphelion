@@ -58,6 +58,8 @@ const usageErrors: readonly (readonly string[])[] = [
   ["tool", "check", canary],
   ["tool", "list", "--tools-dir", canary],
   ["--headless", "--plugin-runner-fds", canary],
+  ["--headless", "--bot-runner-fds", canary],
+  ["--headless", "--plugin-runner-fds", "3,4", "--bot-runner-fds", "4,5"],
   ["--headless", "--plugin-dev", canary],
   ["--headless", "--days", canary],
   ["--headless", "--state-dir", ""],

@@ -19,6 +19,7 @@ export const options = {
   days: "days",
   approve: "approve",
   pluginRunnerFds: "plugin-runner-fds",
+  botRunnerFds: "bot-runner-fds",
   pluginDev: "plugin-dev",
 } as const;
 

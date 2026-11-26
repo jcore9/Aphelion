@@ -10,7 +10,7 @@ The server and every client, such as the web app or the desktop app, talk over o
 | --- | --- |
 | `packages/protocol/src/registry.ts` | The commands and events. Add new ones here. |
 | `packages/protocol/src/frames.ts` | The frame schemas and types, `parseClientFrame`, `parseServerFrame` and `encodeFrame` |
-| `packages/protocol/src/event-log.ts` | `EventLog`, which numbers events and answers a reconnect |
+| `packages/protocol/src/bot-events.ts` | The schemas of the `bot.event` payload. They copy the adapter events so the package needs no `plugin-sdk`. |
 | `packages/protocol/src/command-ledger.ts` | `CommandLedger`, which applies each command id once |
 | `packages/protocol/src/spec.ts` | `renderSpec` and `schemaFiles`, which turn the schemas into the protocol spec and the JSON Schema files |
 
@@ -36,22 +36,57 @@ An error `message` is fixed text. For bad JSON it is `frame is not valid JSON`, 
 
 ## Sequence numbers and replay
 
-The server keeps one event stream. A stream has an id, and `EventLog` numbers its events 1, 2, 3 and so on. A cursor names a stream and the last sequence number a client has seen:
+The server keeps one event stream. Its id is the stream ID, a UUID that the server makes on its first start and keeps in its database, so a restart keeps the stream. It is not the server ID. A restore gives the server a new stream ID. The server saves every event in the database before it sends it to a client, and it gives each one a position: 1, 2, 3 and so on. The position is the `seq` of the event frame. A cursor names a stream and the position of the last event a client has seen:
 
 ```json
-{ "stream": "a1b2c3", "seq": 41 }
+{ "stream": "0192f0a0-7c1e-7a3b-8d2f-5e4c3b2a1d09", "seq": 41 }
 ```
 
-The server keeps the last `capacity` events. When a client reconnects, it sends `resume` with its cursor. The server answers with one of these:
+A client sends `resume` with its cursor after it connects and after it reconnects. The server answers with one of these:
 
-- The events after the cursor, in order, when the server still has all of them. A client that is up to date gets no events.
-- One `resync` frame with the server's current cursor. The server sends it when the cursor is `null`, names another stream, or is ahead of the server. It also sends it when the cursor is more than one behind the oldest event the server kept. The server never replays part of the history.
+- The events after the cursor, in order, and then every new event as the server saves it. A client that is up to date gets no replay. A client can send `resume` again on the same connection. The server then stops the earlier replay and starts over from the new cursor.
+- One `resync` frame with the server's current cursor, and nothing more until the client sends `resume` again. The server sends it when the cursor is `null`, names another stream, or is ahead of the server. It also sends it when the cursor is more than one behind the oldest retained event. A cursor at the position just before the oldest retained event is accepted. The server never replays part of the history.
 
-For example, when the server keeps events 2 and 3, a cursor at 1 gets events 2 and 3. A cursor at 0 gets `resync`.
+For example, when the server has events 2 and 3, a cursor at 1 gets events 2 and 3. A cursor at 0 gets `resync`. A client that has no cursor sends `resume` with `null`, takes the cursor from the `resync` frame, and sends `resume` again with it.
 
-`append` checks the event against its schema before it gives the event a number. An event that doesn't match is rejected with an error, and the log doesn't change, so sequence numbers never have a gap. Kept events can't be changed. `EventLog` stores a frozen copy of the checked event. Neither the caller of `append` nor the receiver of a replayed frame can alter the history.
+The server subscribes to new events before it reads the saved ones, sends the saved ones in pages, and then sends the new ones that have a higher position than the last one it sent. A client with a cursor the server accepts gets every client-visible saved event after that cursor, in order, with no gap and no repeat, even when the bot writes while the replay runs. The server saves only events whose turn it started, so a client never sees an event the server refused ([how events are written](store.md#how-events-are-written)).
 
-A server that restarts with an in-memory log starts a new stream with a new id, so a cursor from before the restart gets `resync`.
+The server sends an event only after the database has committed it, so a client never sees an event that a restart would lose. The server writes events in batches of up to 200, or whatever arrived in a 50-millisecond window. That is the normal batching window, so a client normally sees an event about 50 milliseconds after the bot sent it. It is not a delivery deadline: while a write is failing and the server retries it, events wait longer.
+
+A crash or a power loss keeps every event the database committed. It can lose the events that were still waiting, which is normally the last 50 milliseconds. While a write is failing and the server retries it, more events wait, and a crash then loses all of them. No client ever received a lost event, because clients only get saved events. At the next boot the server closes every turn it had started and not ended, so the saved history stays valid. An orderly shutdown saves every waiting event, unless its final write fails ([how events are written](store.md#how-events-are-written)).
+
+A restore from a backup brings back the positions that the backup had. So that no client takes a new event for one it already saw, `aphelion restore finish` gives the server a new stream ID in the same transaction as its other steps. The server ID stays the same. Every cursor saved before the restore names the old stream, so the server answers it with `resync`. Positions keep counting from the restored value. A client that gets `resync` takes the new cursor and loads the history again.
+
+The server keeps a buffer of new events for each client. It fills while the server replays saved events to that client, and while the server's own sending queue for that client is behind. The buffer holds at most 5,000 events. When a client's buffer would go past that, the server closes that client's connection with code 1013 and the reason `client too slow, reconnect`. Other clients are not affected, and the server's memory stays bounded.
+
+That limit covers only Aphelion's buffer. Below it, Bun has its own send buffer for each connection. When a client reads so slowly that Bun's buffer fills, Bun drops the connection without the 1013 code. The client sees the connection end, reconnects, and sends `resume` with its cursor. Either way, a client that reconnects with a cursor the server accepts gets every client-visible saved event after it and loses none. A cursor more than one behind the oldest retained event gets `resync` instead.
+
+If the server can't read a saved event, it closes the connection with code 1011 and the reason `history could not be read`. The server never skips an event.
+
+### The `bot.event` frame
+
+One `bot.event` frame carries one event of one bot. Its payload has the bot's name, the turn's id, the format version and the event:
+
+```json
+{
+	"v": 1,
+	"type": "event",
+	"seq": 42,
+	"name": "bot.event",
+	"payload": {
+		"bot": "chief",
+		"turn": "0192f0a1-3b7d-7c5e-9a21-0d4e6f8a1b23",
+		"format": 1,
+		"event": { "type": "text.delta", "text": "Hello" }
+	}
+}
+```
+
+`turn` is `null` for an `error` outside a turn. `event` is one of the kinds in [the bot adapter contract](bot-adapters.md), and [the protocol spec](protocol-spec.md#botevent) lists their fields. The frame has no vendor session id. The server keeps that id, and a client has no use for it. The server never sends a `session` event, live or in a replay, so a client may see `seq` jump over the position of one.
+
+`format` is the version of the saved event's shape. It is 1 today. A change to an event's shape raises it, and the server keeps reading the older rows. A client that sees a `format` it doesn't know should show the event as unreadable and go on.
+
+The frame carries the text of the conversation. The server never writes it to a log line.
 
 ## Command ids
 
