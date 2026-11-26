@@ -19,6 +19,8 @@ export const maxControlLineBytes = 64 * 1024;
 export const devModeOff = "dev mode is off";
 export const noServerPart = (plugin: string) =>
   `${plugin} has no server part to run`;
+export const botAdapterNotRun = (plugin: string) =>
+  `${plugin} is a bot adapter, which the bot runner loads, so the plugin runner doesn't run it`;
 export const restartWatch: Duration.Input = "10 seconds";
 
 export const controlRequestSchema = z.discriminatedUnion("type", [
@@ -132,6 +134,9 @@ export const pluginControl = (options: ControlOptions) =>
         }
         if (started.success.kind === "client only") {
           return refused(noServerPart(id));
+        }
+        if (started.success.kind === "bot adapter") {
+          return refused(botAdapterNotRun(id));
         }
         const settled = yield* host
           .waitFor(
