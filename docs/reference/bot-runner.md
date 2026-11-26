@@ -78,6 +78,8 @@ The server, not the bot runner, decides when a bot starts again. It runs each bo
 | Crashed | The process ended by itself. The server waits, then starts it again. |
 | Given up | The bot crashed too often and stays stopped |
 
+A prompt sent again with the id of a turn that is running, or one that already ended, is accepted and not run a second time. The adapter does the same. The server remembers the ids of the last 1,024 turns that ended in the bot's current process, so a repeat doesn't leave the bot showing "in turn" and refusing the next prompt as busy.
+
 After a crash the server waits 1 second, then 2, 4, 8 and 16. The sixth crash in a row gives up, and the server logs `the bot crashed too often, so it stays stopped`. A bot that ran for 60 seconds before it crashed starts the count again.
 
 The adapter reports the AI tool's own session id in a `session` event. The server keeps the latest one for each bot, with the bot's folder, and hands it to the adapter as `resume` on every start. A session saved for another folder isn't resumed. If the adapter refuses `initialize` while it resumes, the server forgets the saved session, logs `the saved session could not be resumed, so the bot started a new one`, and starts the bot again at once without it. That retry doesn't count as a crash.

@@ -119,7 +119,18 @@ interface Slot {
   turn: TurnId | undefined;
   resume: SessionRef | null;
   readonly turns: Map<TurnId, Deferred.Deferred<TurnOutcome>[]>;
+  readonly finished: Set<TurnId>;
   readonly waiters: Set<Waiter>;
+}
+
+const maxFinishedTurns = 1024;
+
+function remember(finished: Set<TurnId>, turn: TurnId) {
+  finished.add(turn);
+  const [oldest] = finished;
+  if (finished.size > maxFinishedTurns && oldest !== undefined) {
+    finished.delete(oldest);
+  }
 }
 
 export class BotManager extends Context.Service<
@@ -193,14 +204,17 @@ export const botManagerLayer = (options: BotManagerOptions) =>
         });
 
       const sendStart = (slot: Slot, run: number) =>
-        link.send({
-          type: "start",
-          bot: slot.bot.name,
-          run,
-          provider: slot.bot.provider,
-          adapter: slot.adapter,
-          folder: slot.bot.folder,
-          resume: slot.resume,
+        Effect.suspend(() => {
+          slot.finished.clear();
+          return link.send({
+            type: "start",
+            bot: slot.bot.name,
+            run,
+            provider: slot.bot.provider,
+            adapter: slot.adapter,
+            folder: slot.bot.folder,
+            resume: slot.resume,
+          });
         });
 
       const run = (slot: Slot, command: LifecycleCommand) =>
@@ -306,7 +320,12 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 run: reply.run,
               });
             case "turn.accepted":
-              if (reply.run === slot.state.run) slot.turn = reply.turn;
+              if (
+                reply.run === slot.state.run &&
+                !slot.finished.has(reply.turn)
+              ) {
+                slot.turn = reply.turn;
+              }
               yield* settleTurn(slot, reply.turn, "accepted");
               return yield* settleWaiters(slot);
             case "turn.refused":
@@ -321,9 +340,14 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 });
               }
               if (
-                envelope.event.type === "turn.end" &&
-                envelope.turn === slot.turn
+                envelope.event.type !== "turn.end" ||
+                envelope.turn === null ||
+                reply.run !== slot.state.run
               ) {
+                return;
+              }
+              remember(slot.finished, envelope.turn);
+              if (envelope.turn === slot.turn) {
                 slot.turn = undefined;
                 yield* settleWaiters(slot);
               }
@@ -360,13 +384,18 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               if (slot.state.state !== "running") {
                 return yield* Deferred.succeed(input.done, "not-running");
               }
-              if (slot.turn !== undefined && slot.turn !== input.turn) {
+              if (slot.turn === input.turn) {
+                return yield* Deferred.succeed(input.done, "accepted");
+              }
+              if (slot.turn !== undefined) {
                 return yield* Deferred.succeed(input.done, "busy");
               }
-              slot.turns.set(input.turn, [
-                ...(slot.turns.get(input.turn) ?? []),
-                input.done,
-              ]);
+              const waiting = slot.turns.get(input.turn);
+              if (waiting !== undefined) {
+                waiting.push(input.done);
+                return;
+              }
+              slot.turns.set(input.turn, [input.done]);
               return yield* link.send({
                 type: "turn.start",
                 bot: slot.bot.name,
@@ -422,6 +451,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             turn: undefined,
             resume: null,
             turns: new Map(),
+            finished: new Set(),
             waiters: new Set(),
           };
           slots.set(definition.name, slot);

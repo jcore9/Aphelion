@@ -326,4 +326,41 @@ describe("the bot manager", () => {
       );
     }).pipe(Effect.scoped),
   );
+
+  it.live(
+    "accepts a replayed turn without marking the bot busy, and doesn't send a running turn twice",
+    () =>
+      Effect.gen(function* () {
+        const chief = recording([sessionTurn, [{ waitForAbort: true }]]);
+        const { fake, manager, reach } = yield* system(chief.bot);
+        yield* manager.start("chief");
+        yield* reach("running");
+        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe(
+          "accepted",
+        );
+        yield* reach("running");
+        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe(
+          "accepted",
+        );
+        expect(yield* manager.status("chief")).toEqual({ state: "running" });
+        expect(yield* manager.startTurn("chief", t("t2"), "hi")).toBe(
+          "accepted",
+        );
+        expect(yield* manager.startTurn("chief", t("t2"), "hi")).toBe(
+          "accepted",
+        );
+        expect(yield* manager.status("chief")).toEqual({
+          state: "in turn",
+          turn: "t2",
+        });
+        expect(
+          fake
+            .latest("chief")
+            ?.received.filter((line) => line.method === "turn.start")
+            .map((line) => (line.params as { turn: string }).turn),
+        ).toEqual(["t1", "t1", "t2"]);
+        yield* manager.cancelTurn("chief", t("t2"));
+        yield* reach("running");
+      }).pipe(Effect.scoped),
+  );
 });
