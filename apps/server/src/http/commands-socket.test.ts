@@ -302,3 +302,63 @@ it.live("cancels a turn that a client asked to cancel", () =>
     yield* server.stop;
   }),
 );
+
+const promptOfBytes = (bytes: number) => "a".repeat(bytes);
+
+it.live("accepts a prompt of exactly 256 KiB", () =>
+  Effect.gen(function* () {
+    const path = tempDb();
+    const token = deviceToken(path);
+    const server = yield* startServer(path, [finishes]);
+    const client = yield* connectClient(server.url, token);
+
+    client.send(prompt("c1", promptOfBytes(256 * 1024)));
+    const [answer] = yield* client.until(1);
+    client.close();
+
+    expect(answer).toMatchObject({ type: "result", name: "bot.prompt" });
+    expect(server.turnsStarted()).toBe(1);
+    yield* server.stop;
+  }),
+);
+
+it.live(
+  "answers prompt-too-long, and keeps the socket, for a prompt a few bytes over 256 KiB",
+  () =>
+    Effect.gen(function* () {
+      const path = tempDb();
+      const token = deviceToken(path);
+      const server = yield* startServer(path, [finishes]);
+      const client = yield* connectClient(server.url, token);
+
+      client.send(prompt("c1", "€".repeat(87_382)));
+      const [answer] = yield* client.until(1);
+      client.send(prompt("c2"));
+      const [, next] = yield* client.until(2);
+      client.close();
+
+      expect(answer).toMatchObject({
+        type: "error",
+        id: "c1",
+        code: "prompt-too-long",
+      });
+      expect(next).toMatchObject({ type: "result", id: "c2" });
+      expect(server.turnsStarted()).toBe(1);
+      yield* server.stop;
+    }),
+);
+
+it.live("closes the socket with 1009 for a message over 1 MiB", () =>
+  Effect.gen(function* () {
+    const path = tempDb();
+    const token = deviceToken(path);
+    const server = yield* startServer(path, [finishes]);
+    const client = yield* connectClient(server.url, token);
+
+    client.send(prompt("c1", "\u0001".repeat(256 * 1024)));
+
+    expect(yield* client.closeCode).toBe(1009);
+    expect(server.turnsStarted()).toBe(0);
+    yield* server.stop;
+  }),
+);

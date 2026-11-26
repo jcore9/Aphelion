@@ -298,10 +298,10 @@ layer(
     }),
   );
 
-  it.effect("closes a WebSocket whose message is over 64 KiB", () =>
+  it.effect("closes a WebSocket whose message is over 1 MiB", () =>
     Effect.gen(function* () {
       const socket = yield* openLive(bearer(valid));
-      socket.socket.send("x".repeat(64 * 1024 + 1));
+      socket.socket.send("x".repeat(1024 * 1024 + 1));
       expect((yield* closedBy(socket)).code).toBe(1009);
     }),
   );

@@ -4,8 +4,8 @@ import type { Config } from "../config";
 export type Listen = Pick<Config["server"], "address" | "port">;
 
 export const webSocketLimits = {
-  maxPayloadLength: 64 * 1024,
-  highWaterMark: 256 * 1024,
+  maxPayloadLength: 1024 * 1024,
+  highWaterMark: 2 * 1024 * 1024,
   backpressureLimit: 1024 * 1024,
   closeOnBackpressureLimit: true,
   idleTimeout: 60,

@@ -17,6 +17,7 @@ export interface Client {
   readonly frames: ServerFrame[];
   readonly send: (frame: Parameters<typeof encodeFrame>[0]) => void;
   readonly close: () => void;
+  readonly closeCode: Effect.Effect<number>;
   readonly until: (count: number) => Effect.Effect<readonly ServerFrame[]>;
 }
 
@@ -29,11 +30,15 @@ export const connectClient = (url: string, bearer: string) =>
         });
         const frames: ServerFrame[] = [];
         let wake: (() => void) | undefined;
+        const closed = Promise.withResolvers<number>();
         socket.addEventListener("message", ({ data }) => {
           const parsed = parseServerFrame(String(data));
           if (!parsed.ok) throw new Error(parsed.error.message);
           frames.push(parsed.frame);
           wake?.();
+        });
+        socket.addEventListener("close", ({ code }) => {
+          closed.resolve(code);
         });
         socket.addEventListener("error", () => {
           reject(new Error("the socket failed to open"));
@@ -47,6 +52,10 @@ export const connectClient = (url: string, bearer: string) =>
             close: () => {
               socket.close();
             },
+            closeCode: Effect.promise(() => closed.promise).pipe(
+              Effect.timeout("5 seconds"),
+              Effect.orDie,
+            ),
             until: (count) =>
               Effect.promise(
                 () =>
