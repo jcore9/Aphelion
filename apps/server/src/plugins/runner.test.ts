@@ -7,6 +7,7 @@ import {
   Exit,
   Fiber,
   Layer,
+  Option,
   Queue,
   Scope,
   Stream,
@@ -171,6 +172,7 @@ const gatedProcesses = Effect.sync(() => {
         yield* pass(`spawn ${id}`);
         alive.add(id);
         trace.push(`spawned ${id}`);
+        yield* pass(`hand-off ${id}`);
         const exit = yield* Deferred.make<ProcessExit>();
         return {
           write: () => Effect.void,
@@ -325,15 +327,15 @@ describe("the plugin runner's command order", () => {
           Effect.provideService(Scope.Scope, runnerScope),
           Effect.forkIn(runnerScope),
         );
-        yield* gated.hold("spawn sampler#1");
-        yield* Effect.addFinalizer(() => gated.release("spawn sampler#1"));
+        yield* gated.hold("hand-off sampler#1");
+        yield* Effect.addFinalizer(() => gated.release("hand-off sampler#1"));
         yield* a.send(request("start", "sampler"));
-        yield* eventually(() => gated.trace.includes("spawning sampler#1"));
+        yield* eventually(() => gated.alive.has("sampler#1"));
         const closing = yield* Scope.close(runnerScope, Exit.void).pipe(
           Effect.forkChild,
         );
         yield* settle;
-        yield* gated.release("spawn sampler#1");
+        yield* gated.release("hand-off sampler#1");
         yield* Fiber.join(closing).pipe(Effect.timeout("5 seconds"));
         yield* settle;
         expect([...gated.alive]).toEqual([]);
@@ -361,9 +363,18 @@ describe("the plugin runner's command order", () => {
         yield* Effect.addFinalizer(() => gated.release("check sampler#1"));
         yield* a.send(request("start", "sampler"));
         yield* eventually(() => gated.trace.includes("checking sampler#1"));
-        yield* Scope.close(runnerScope, Exit.void).pipe(
-          Effect.timeout("2 seconds"),
+        const closing = yield* Scope.close(runnerScope, Exit.void).pipe(
+          Effect.forkChild,
         );
+        yield* Effect.addFinalizer(() =>
+          gated
+            .release("check sampler#1")
+            .pipe(Effect.andThen(Fiber.await(closing))),
+        );
+        const closed = yield* Fiber.join(closing).pipe(
+          Effect.timeoutOption("2 seconds"),
+        );
+        expect(Option.isSome(closed)).toBe(true);
         yield* gated.release("check sampler#1");
         yield* settle;
         expect(gated.trace).not.toContain("spawning sampler#1");
