@@ -7,7 +7,7 @@ A plugin's server part runs on the server as its own process. Two pieces run it:
 
 The host and the runner talk over a pipe that the container's init creates before it drops privileges ([decision 0022](../decisions/0022-bot-network-boundary.md)). The server never signals a plugin process or reads `/proc` itself. It asks the runner.
 
-A plugin with only a client part has no process. The host starts nothing for it ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)).
+A plugin with only a client part has no process. The host starts nothing for it ([decision 0042](../decisions/0042-plugin-server-and-client-parts.md)). A package with `contributes.botAdapter` has no plugin process either. It holds a [bot adapter](bot-adapters.md), which the bot runner loads into each bot, so the host starts nothing for it ([decision 0065](../decisions/0065-bot-adapter-runs-inside-the-bot.md)).
 
 The code is in [`apps/server/src/plugins/`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/plugins/). The runner's process handling is in [`apps/server/src/adapters/plugin-processes.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/adapters/plugin-processes.ts).
 

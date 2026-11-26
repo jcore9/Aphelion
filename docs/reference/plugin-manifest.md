@@ -50,6 +50,8 @@ This manifest is for a made-up plugin that posts weather alerts. Its server part
 | `permissions.uiSlots` | list of strings | no | UI slots the plugin shows content in. Each is words joined by dots, such as `bot.sidebar`, at most 128 characters. Needs a client part. |
 | `contributes.secretSchemes` | list of strings | no | Secret reference schemes the plugin resolves as a secret backend, such as `op`, at most 32 characters. The values it returns go only to the secrets broker. Needs a server part. See [Secret backends](#secret-backends). |
 | `contributes.screens` | list of objects | no | Full pages the plugin declares for the app, each with an entry in the app's menu. The app doesn't show them yet. Needs a client part. See [Screens](#screens). |
+| `contributes.botAdapter` | object | no | Makes the package a bot adapter ([bot adapters](bot-adapters.md)). Needs a server part. The package can't have a client part, other contributions or permissions. The plugin runner doesn't start it, because the bot runner loads it. |
+| `contributes.botAdapter.provider` | string | yes, in `botAdapter` | The provider the adapter serves, with the same rules as the plugin `id`. A bot whose `provider` has this name uses the adapter. |
 | `contributes.screens[].id` | string | yes, in a screen | The screen's id, with the same rules as the plugin `id`. Two screens in one plugin can't share an id. |
 | `contributes.screens[].title` | string | yes, in a screen | The screen's name in the menu, such as `Issues and PRs`, at most 64 characters. Visible text only, with the same characters as a secret reference, and no space at the start or end. It needs at least one letter, digit, punctuation mark or symbol, so a title made only of combining marks, such as `U+FE0F`, is refused. |
 | `contributes.screens[].icon` | string | no | The icon next to the title, from the app's icon set, such as `git-pull-request`, at most 64 characters. Lowercase letters and digits in words joined by single hyphens, starting with a letter. |
@@ -115,7 +117,7 @@ This check reads the text only. When the server loads or serves a part, it must 
 
 ## The API range
 
-The plugin API has its own [semver](https://semver.org/) version, `pluginApiVersion` in `@aphelion/plugin-sdk`. It is `0.2.2` today. [Changes](#changes) lists what changed in each version. The version changes like this:
+The plugin API has its own [semver](https://semver.org/) version, `pluginApiVersion` in `@aphelion/plugin-sdk`. It is `0.2.3` today. [Changes](#changes) lists what changed in each version. The version changes like this:
 
 - A change that could break a plugin raises the major version. Before 1.0.0, it raises the minor version instead, so 0.1.x to 0.2.0 is a breaking change.
 - A change that adds to the API raises the minor version, or the patch version before 1.0.0.
@@ -125,7 +127,7 @@ A plugin's `api` field says which versions it supports, using the range syntax f
 When the host loads a plugin, it checks its own `pluginApiVersion` against the plugin's `api` range:
 
 - If the range includes the host's version, the plugin loads. The range `*` includes every version. It skips the compatibility check, so a plugin that uses it may break without warning when Aphelion upgrades the plugin API. Prefer a range such as `^0.2.2`.
-- If it doesn't, the host refuses the plugin with `api: doesn't include plugin API 0.2.2, which this host runs`.
+- If it doesn't, the host refuses the plugin with `api: doesn't include plugin API 0.2.3, which this host runs`.
 - If the range is longer than 256 characters, the manifest is invalid, with `api: must be at most 256 characters`. The parser checks the length first, and never hands a longer range to `semver`.
 - If the range isn't valid semver range syntax, the manifest is invalid, with `api: must be an npm semver range, such as ^0.2.0`. A range that is blank, or has a blank part between `||` signs, counts as invalid, because npm would read the blank as "any version".
 
@@ -170,9 +172,17 @@ The parser checks a value already read from JSON. The plugin runner (M0-13b) own
 | A field of the wrong type | `permissions.events` | `has the wrong type` |
 | A bad value | `permissions.network[0]` | `must be a lowercase hostname, such as api.github.com` |
 | A value that is too long | `server.entry` | `must be at most 1024 characters` |
-| An out-of-range plugin | `api` | `doesn't include plugin API 0.2.2, which this host runs` |
+| A bot adapter with a client part | `client` | `isn't allowed with contributes.botAdapter` |
+| A bot adapter with a permission or another contribution | `permissions.network` | `must be empty with contributes.botAdapter` |
+| An out-of-range plugin | `api` | `doesn't include plugin API 0.2.3, which this host runs` |
 
 ## Changes
+
+### 0.2.3
+
+Adds the optional `contributes.botAdapter` field ([bot adapters](bot-adapters.md)). The field is optional, so it adds to the API, and the patch version goes up. A 0.2.2 manifest is still valid and means the same. `@aphelion/plugin-sdk` also exports the bot adapter contract and its test tools.
+
+- A package with `contributes.botAdapter` should set `api` to `^0.2.3`. A 0.2.2 host refuses it with `contributes: has an unknown field`.
 
 ### 0.2.2
 
