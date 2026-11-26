@@ -387,7 +387,7 @@ status=0
 out=$(FAKE_TOOL_EXIT=4 as_root_aphelion tool remove claude 2>&1) || status=$?
 [[ $status == 4 && $out == "ran tool remove claude" ]] || fail "tool remove changed the exit code or output ($status, $out)"
 rows=$(FAKE_TOOLS=grok as_root_aphelion tool list) || fail "tool list failed"
-grep -qP "^grok\t1\.0\.92\tinstalled\t-$" <<<"$rows" || fail "tool list didn't pass the server's table through: $rows"
+grep -qP "^grok\t1\.0\.92\t1\.0\.92\tinstalled\t-$" <<<"$rows" || fail "tool list didn't pass the server's table through: $rows"
 pass "tool list, install and remove run the server's command as harness and pass its output and exit code through"
 
 out=$(as_root_aphelion tool update) || fail "tool update with no name failed"
