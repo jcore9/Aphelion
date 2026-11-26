@@ -240,7 +240,7 @@ const statusCode = (status: number | null): ErrorCode => {
 };
 
 export type ResultOutcome =
-  | { readonly reason: Exclude<TurnEndReason, "error"> }
+  | { readonly reason: Exclude<TurnEndReason, "error" | "denied"> }
   | { readonly reason: "error"; readonly code: ErrorCode };
 
 export function resultOutcome(
