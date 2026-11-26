@@ -63,7 +63,7 @@ const latestRelease =
     if (!parsed.success) return fail("the answer isn't a GitHub release");
     const version = releaseVersion(parsed.data, tagPattern);
     return version === undefined
-      ? fail(`the latest release ${parsed.data.tag_name} isn't a plain version`)
+      ? fail("the latest release isn't a plain version")
       : { ok: true, value: version };
   };
 
