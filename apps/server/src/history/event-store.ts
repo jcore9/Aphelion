@@ -31,6 +31,7 @@ export interface EventLog {
 
 export interface EventStore extends EventLog {
   readonly record: (entry: NewEvent) => Effect.Effect<void>;
+  readonly appendNow: (entries: readonly NewEvent[]) => Effect.Effect<void>;
   readonly flush: Effect.Effect<void>;
 }
 
@@ -215,6 +216,15 @@ export const openEventStore = (
         }),
       );
 
+    const appendNow = (entries: readonly NewEvent[]) =>
+      Effect.flatMap(Clock.currentTimeMillis, (at) =>
+        Effect.suspend(() => {
+          if (entries.length === 0) return Effect.void;
+          const saved = write(entries.map((entry) => ({ ...entry, at })));
+          return Effect.asVoid(PubSub.publishAll(live, saved));
+        }),
+      );
+
     const read = (after: number, limit: number) =>
       db
         .all(
@@ -238,6 +248,7 @@ export const openEventStore = (
       turnEvents,
       subscribe: PubSub.subscribe(live),
       record,
+      appendNow,
       flush: cancelTimer.pipe(Effect.andThen(flush)),
     };
     return store;

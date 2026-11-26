@@ -8,7 +8,12 @@ import {
 import { botRunnerPipeLink } from "../bots/runner-pipe";
 import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
 import { formatIssue } from "../config";
-import { openEventStore, persistBotEvents, type EventStore } from "../history";
+import {
+  closeDanglingTurns,
+  openEventStore,
+  persistBotEvents,
+  type EventStore,
+} from "../history";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
 import { installedPlugins, readInstall } from "../plugins/approvals";
@@ -114,6 +119,12 @@ export const headless = (
     return yield* withStore(options.stateDir, (db) =>
       Effect.gen(function* () {
         const history = yield* openEventStore(db, readServerId(db), { logger });
+        const closed = yield* closeDanglingTurns(db, history);
+        if (closed > 0) {
+          logger.warn("closed turns that the last shutdown left open", {
+            count: closed,
+          });
+        }
         yield* Layer.build(serveHttp({ address, port }, db, history));
         logger.info("server started", { version, address, port });
         if (fds === undefined) {

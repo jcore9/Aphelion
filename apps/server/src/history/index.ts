@@ -7,6 +7,7 @@ export {
 } from "./event-store";
 export { eventFrame, follow, replayPage } from "./follow";
 export { persistBotEvents } from "./persist";
+export { closeDanglingTurns } from "./repair";
 export {
   decodeEvent,
   eventFormat,

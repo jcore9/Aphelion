@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { StreamEvent } from "@aphelion/plugin-sdk";
+import { streamEvent } from "@aphelion/plugin-sdk";
 import { expect, it } from "@effect/vitest";
 import { Effect, Exit, PubSub, Scope } from "effect";
 import { TestClock } from "effect/testing";
@@ -271,11 +271,11 @@ describe("reading a saved event", () => {
   });
 
   it("turns a format 1 row back into the event", () => {
-    const event: StreamEvent = {
+    const event = streamEvent.parse({
       type: "tool.end",
-      call: "c1" as never,
+      call: "c1",
       outcome: "ok",
-    };
+    });
     expect(decodeEvent(row())).toEqual({
       id: "0192f0a0-0000-7000-8000-000000000001",
       position: 7,
@@ -284,7 +284,7 @@ describe("reading a saved event", () => {
       format: 1,
       event,
       at: 5,
-    } as never);
+    });
   });
 
   it("refuses a format this server doesn't know and a payload that doesn't match its format", () => {
