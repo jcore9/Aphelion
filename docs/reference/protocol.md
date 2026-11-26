@@ -32,7 +32,7 @@ The test fails in CI until the regenerated files are committed.
 
 Two error codes cover a frame the server can't read. `malformed` covers text that isn't JSON, an unknown frame type, an unknown command or event name, and a payload that doesn't match its schema. `unsupported-version` means that `v` isn't 1. When a rejected frame has a valid command `id`, the error carries it, so the client knows which command failed.
 
-Seven more codes answer a command that the server read and then couldn't finish. Each error frame carries the command's `id`:
+These codes answer a command that the server read and then couldn't finish. Each error frame carries the command's `id`:
 
 | Code | Meaning |
 | --- | --- |
@@ -40,7 +40,8 @@ Seven more codes answer a command that the server read and then couldn't finish.
 | `bot-busy` | The bot is still in another turn. |
 | `prompt-too-long` | The prompt is over 256 KiB of UTF-8. |
 | `prompt-refused` | The bot refused the turn, the turn had already ended, or the server couldn't save it. |
-| `interrupted` | The server stopped while it ran this command, so it can't say whether the command took effect. It doesn't run the command again. Send it with a new `id` ([command ids](#command-ids)). |
+| `interrupted` | The server stopped while it ran this command, so it can't say whether the command took effect. It doesn't run the command again. Check the bot's history before you send the command with a new `id` ([command ids](#command-ids)). |
+| `storage-failed` | The server ran the command but couldn't save its result, even after it tried again. The command did take effect. A repeat of the `id` gets `interrupted`. Check the bot's history before you send the command with a new `id`. |
 | `id-reused` | The `id` already ran a different command. |
 | `internal` | The server failed in a way it didn't expect. |
 
@@ -139,11 +140,11 @@ A client gives every command an `id` of 1 to 64 letters, digits, hyphens or unde
 
 The server saves the `id` and the outcome of `bot.prompt` and `bot.cancel` in its database for 24 hours, so a repeat never runs twice, also after a restart. `ping` and `history.read` change nothing, so the server doesn't save them.
 
-- The server saves the `id` before it runs the command, and the result when the command ends. The key is the device and the `id`, so two devices can use the same `id` without meeting.
+- The server saves the `id` before it runs the command, and the result when the command ends. When saving the result fails, the server tries again up to three times, after 0.1, 0.5 and 2 seconds, without running the command again. It sends the result only after it has saved it. The key is the device and the `id`, so two devices can use the same `id` without meeting.
 - A repeat within 24 hours gets the saved outcome, whether that was a result or an error. A repeat that arrives while the first run is still going waits for that run. A client that disconnects after it sends a command doesn't stop it. The client reconnects, sends the same `id`, and gets the outcome.
 - The server doesn't know what happened to a command that was still running when the server stopped. The prompt may have reached the bot. A repeat gets the error `interrupted`, and the command doesn't run again. The client sends it with a new `id` if it still wants it, after it checks the bot's history.
 - A repeat that names a different command than the first run of that `id` gets `id-reused`. The server doesn't compare the payloads, so a client must not give two commands with one name the same `id`.
-- A repeat after 24 hours counts as a new command. The server deletes its saved rows when it starts and then once an hour. It never deletes a row for a command that is still running. It measures the time with its own clock, so a clock set back keeps a row longer.
+- A repeat after 24 hours counts as a new command. The server deletes its saved rows when it starts and then once an hour. It deletes a row that is still `running` once it is 24 hours old. It measures the time with its own clock, so a clock set back keeps a row longer.
 
 A client that wants a command to run twice sends two ids.
 

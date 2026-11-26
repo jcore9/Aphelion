@@ -34,8 +34,13 @@ export const failureMessages = {
   "bot-busy": "the bot is busy with another turn",
   "prompt-too-long": "the prompt is longer than 256 KiB",
   "prompt-refused": "the bot refused the prompt",
+  "bot-not-responding": "the bot didn't answer in time",
   interrupted:
-    "the server stopped before it finished this command, so it didn't run again; send it again with a new id",
+    "the server stopped before it finished this command, so it didn't run again; check the history to see whether it took effect before you send a new command",
+  "storage-failed":
+    "the server ran this command but could not save its result; check the history to see whether it took effect before you send a new command",
+  "device-revoked": "this device's token is no longer valid",
+  "rate-limited": "this device sent too many commands; wait and try again",
   "id-reused": "this command id already ran a different command",
   internal: "the server could not run the command",
 } as const satisfies Record<CommandFailure, string>;

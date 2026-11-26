@@ -69,7 +69,7 @@ Rejects a frame.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `code` | `"malformed"` or `"unsupported-version"` or `"bot-not-running"` or `"bot-busy"` or `"prompt-too-long"` or `"prompt-refused"` or `"interrupted"` or `"id-reused"` or `"internal"` | yes | Why the frame was rejected. |
+| `code` | `"malformed"` or `"unsupported-version"` or `"bot-not-running"` or `"bot-busy"` or `"prompt-too-long"` or `"prompt-refused"` or `"bot-not-responding"` or `"interrupted"` or `"storage-failed"` or `"device-revoked"` or `"rate-limited"` or `"id-reused"` or `"internal"` | yes | Why the frame was rejected. |
 | `message` | string | yes | Fixed text that is safe to log. |
 | `id` | [`CommandId`](#commandid) | no | The rejected command's id, when it had a valid one. |
 
@@ -280,7 +280,11 @@ An `error` frame's `code` is one of these. [The client protocol](protocol.md#err
 - `bot-busy`
 - `prompt-too-long`
 - `prompt-refused`
+- `bot-not-responding`
 - `interrupted`
+- `storage-failed`
+- `device-revoked`
+- `rate-limited`
 - `id-reused`
 - `internal`
 

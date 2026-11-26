@@ -132,9 +132,9 @@ Migration 9 adds the `commands` table, which is `STRICT`. It holds one row for e
 | `result` | `NULL` while the state is `running`, which the database enforces. For `done`, the result as JSON. For `failed`, the error code, such as `bot-busy` or `interrupted`. |
 | `created_at` | When the server saved the row, in milliseconds, from the server's clock. |
 
-The server inserts the row with state `running` before it runs the command, and updates it when the command ends. The row holds the outcome, never the prompt. For `bot.prompt` the result is the turn's id, which is how a repeat after a restart returns the same turn.
+The server inserts the row with state `running` before it runs the command, and updates it when the command ends. When the update fails, the server tries again up to three times. If it still fails, the row stays `running`, and the caller gets `storage-failed`. The next start turns that row into `interrupted`. The row holds the outcome, never the prompt. For `bot.prompt` the result is the turn's id, which is how a repeat after a restart returns the same turn.
 
-At each start the server turns every `running` row into `failed` with `interrupted`, because only a crash or a stop leaves one. It then deletes the rows that are 24 hours old or older. It repeats the delete once an hour and never deletes a `running` row. A lookup ignores a row that is 24 hours old, so a late delete can't bring an old result back.
+At each start the server turns every `running` row into `failed` with `interrupted`, because only a crash or a stop leaves one. It then deletes the rows that are 24 hours old or older. It repeats the delete once an hour, and it deletes a `running` row too once that row is 24 hours old. A lookup ignores a row that is 24 hours old, so a late delete can't bring an old result back.
 
 ## Rules
 

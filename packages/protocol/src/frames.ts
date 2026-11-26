@@ -39,7 +39,11 @@ export const commandFailures = [
   "bot-busy",
   "prompt-too-long",
   "prompt-refused",
+  "bot-not-responding",
   "interrupted",
+  "storage-failed",
+  "device-revoked",
+  "rate-limited",
   "id-reused",
   "internal",
 ] as const;

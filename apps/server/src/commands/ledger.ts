@@ -29,6 +29,11 @@ export interface CommandLedger {
 
 const windowMs = Duration.toMillis(Duration.hours(24));
 const purgeEvery = Duration.hours(1);
+export const resultWriteBackoff = [
+  Duration.millis(100),
+  Duration.millis(500),
+  Duration.seconds(2),
+] as const;
 
 const failure = z.enum(commandFailures).catch("interrupted");
 
@@ -59,10 +64,7 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
 
     const purge = Effect.flatMap(Clock.currentTimeMillis, (at) =>
       Effect.sync(() => {
-        db.run(
-          "DELETE FROM commands WHERE created_at <= ? AND state <> 'running'",
-          [at - windowMs],
-        );
+        db.run("DELETE FROM commands WHERE created_at <= ?", [at - windowMs]);
       }),
     );
 
@@ -120,13 +122,9 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
       });
     };
 
-    const settle = (
-      entry: CommandEntry,
-      done: Deferred.Deferred<Outcome>,
-      outcome: Outcome,
-    ) =>
-      Effect.sync(() => {
-        try {
+    const saveResult = (entry: CommandEntry, outcome: Outcome) =>
+      Effect.try({
+        try: () => {
           db.run(
             "UPDATE commands SET state = ?, result = ? WHERE device = ? AND id = ?",
             [
@@ -136,13 +134,37 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
               entry.id,
             ],
           );
-        } catch (error) {
+        },
+        catch: (error) => (error instanceof Error ? error.name : "unknown"),
+      });
+
+    const saveWithRetries = (entry: CommandEntry, outcome: Outcome) =>
+      Effect.gen(function* () {
+        for (const wait of [Duration.zero, ...resultWriteBackoff]) {
+          yield* Effect.sleep(wait);
+          const saved = yield* Effect.result(saveResult(entry, outcome));
+          if (saved._tag === "Success") return true;
           logger.error("saving a command's result failed", {
-            error: error instanceof Error ? error.name : "unknown",
+            error: saved.failure,
           });
         }
-        running.delete(`${entry.device}:${entry.id}`);
-      }).pipe(Effect.andThen(Deferred.succeed(done, outcome)));
+        return false;
+      });
+
+    const settle = (
+      entry: CommandEntry,
+      done: Deferred.Deferred<Outcome>,
+      outcome: Outcome,
+    ) =>
+      saveWithRetries(entry, outcome).pipe(
+        Effect.map((saved) => (saved ? outcome : failed("storage-failed"))),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            running.delete(`${entry.device}:${entry.id}`);
+          }),
+        ),
+        Effect.flatMap((answer) => Deferred.succeed(done, answer)),
+      );
 
     const execute = (
       entry: CommandEntry,

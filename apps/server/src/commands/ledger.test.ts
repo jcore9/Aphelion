@@ -7,12 +7,12 @@ import {
   type CommandName,
 } from "@aphelion/protocol";
 import { expect, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
+import { Deferred, Duration, Effect, Exit, Fiber, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, onTestFinished } from "vitest";
 import { deviceId } from "../devices";
 import { createLogger } from "../log";
-import { openStore } from "../store";
+import { openStore, type Database } from "../store";
 import { openCommandLedger, type Outcome } from "./ledger";
 
 const day = 24 * 60 * 60 * 1000;
@@ -36,6 +36,28 @@ const logs = () => {
     write: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
   });
   return { lines, logger };
+};
+
+const failingWrites = (db: Database, matching: string, failures: number) => {
+  const left = { count: failures };
+  const wrapped: Database = {
+    exec: (sql) => {
+      db.exec(sql);
+    },
+    run: (sql, params) => {
+      if (sql.includes(matching) && left.count > 0) {
+        left.count -= 1;
+        throw new Error("database is locked");
+      }
+      db.run(sql, params);
+    },
+    all: (sql, params) => db.all(sql, params),
+    transaction: (fn) => db.transaction(fn),
+    close: () => {
+      db.close();
+    },
+  };
+  return { wrapped, left };
 };
 
 const laptop = deviceId.parse("0123456789abcdef");
@@ -233,6 +255,104 @@ describe("the command ledger", () => {
   );
 });
 
+describe("the command ledger when saving a result fails", () => {
+  it.effect(
+    "tries again without running the command again, and answers once the result is saved",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const { wrapped } = failingWrites(db, "SET state = ?", 2);
+        const ledger = yield* openCommandLedger(wrapped, logs().logger);
+        const { ran, apply } = counting();
+
+        const caller = yield* Effect.forkChild(ledger.run(entry("c1"), apply));
+        yield* TestClock.adjust("50 millis");
+        expect(caller.pollUnsafe()).toBeUndefined();
+        expect(db.all("SELECT state FROM commands")).toEqual([
+          { state: "running" },
+        ]);
+        yield* TestClock.adjust("10 seconds");
+
+        expect(yield* Fiber.join(caller)).toEqual({
+          ok: true,
+          result: { turn: "t1" },
+        });
+        expect(ran.count).toBe(1);
+        expect(db.all("SELECT state, result FROM commands")).toEqual([
+          { state: "done", result: '{"turn":"t1"}' },
+        ]);
+        expect(yield* ledger.run(entry("c1"), apply)).toEqual({
+          ok: true,
+          result: { turn: "t1" },
+        });
+        expect(ran.count).toBe(1);
+      }),
+  );
+
+  it.effect(
+    "answers storage-failed when the result never saves, and leaves the row for the restart",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const { lines, logger } = logs();
+        const { wrapped } = failingWrites(db, "SET state = ?", Infinity);
+        const before = yield* Scope.make();
+        const ledger = yield* openCommandLedger(wrapped, logger).pipe(
+          Scope.provide(before),
+        );
+        const { ran, apply } = counting({ turn: "launch codes" });
+
+        const caller = yield* Effect.forkChild(ledger.run(entry("c1"), apply));
+        yield* TestClock.adjust("10 seconds");
+
+        expect(yield* Fiber.join(caller)).toEqual({
+          ok: false,
+          code: "storage-failed",
+        });
+        expect(ran.count).toBe(1);
+        expect(db.all("SELECT state, result FROM commands")).toEqual([
+          { state: "running", result: null },
+        ]);
+        expect(JSON.stringify(lines)).not.toContain("launch codes");
+        expect(yield* ledger.run(entry("c1"), apply)).toEqual({
+          ok: false,
+          code: "interrupted",
+        });
+        yield* Scope.close(before, Exit.void);
+
+        const restarted = yield* open(db);
+        expect(yield* restarted.run(entry("c1"), apply)).toEqual({
+          ok: false,
+          code: "interrupted",
+        });
+        expect(ran.count).toBe(1);
+      }),
+  );
+
+  it.effect("tells a repeat that waits for the command the same answer", () =>
+    Effect.gen(function* () {
+      const { db } = tempStore();
+      const { wrapped } = failingWrites(db, "SET state = ?", Infinity);
+      const ledger = yield* openCommandLedger(wrapped, logs().logger);
+      const { ran, apply } = counting();
+
+      const first = yield* Effect.forkChild(ledger.run(entry("c1"), apply));
+      const second = yield* Effect.forkChild(ledger.run(entry("c1"), apply));
+      yield* TestClock.adjust("10 seconds");
+
+      expect(yield* Fiber.join(first)).toEqual({
+        ok: false,
+        code: "storage-failed",
+      });
+      expect(yield* Fiber.join(second)).toEqual({
+        ok: false,
+        code: "storage-failed",
+      });
+      expect(ran.count).toBe(1);
+    }),
+  );
+});
+
 describe("the command ledger after a restart", () => {
   it.effect(
     "answers a repeat with the saved result and doesn't run it again",
@@ -276,23 +396,6 @@ describe("the command ledger after a restart", () => {
         expect(ran.count).toBe(0);
         expect(db.all("SELECT state, result FROM commands")).toEqual([
           { state: "failed", result: "interrupted" },
-        ]);
-      }),
-  );
-
-  it.effect(
-    "keeps a command that really is running, because its row has no result yet",
-    () =>
-      Effect.gen(function* () {
-        const { db } = tempStore();
-        const ledger = yield* open(db);
-        yield* Effect.forkChild(ledger.run(entry("c1"), Effect.never));
-        yield* Effect.yieldNow;
-
-        yield* TestClock.adjust(2 * day);
-
-        expect(db.all("SELECT state FROM commands")).toEqual([
-          { state: "running" },
         ]);
       }),
   );
@@ -340,7 +443,7 @@ describe("the command ledger and the 24-hour limit", () => {
   );
 
   it.effect(
-    "deletes old rows every hour while the server runs, but never a running one",
+    "deletes old rows every hour while the server runs, and keeps a running row until it is 24 hours old",
     () =>
       Effect.gen(function* () {
         const { db } = tempStore();
@@ -349,10 +452,14 @@ describe("the command ledger and the 24-hour limit", () => {
         yield* ledger.run(entry("done"), counting().apply);
         yield* Effect.yieldNow;
 
-        yield* TestClock.adjust(day);
+        yield* TestClock.adjust(day - Duration.toMillis(Duration.hours(1)));
         expect(db.all("SELECT id FROM commands ORDER BY id")).toEqual([
+          { id: "done" },
           { id: "slow" },
         ]);
+
+        yield* TestClock.adjust(Duration.hours(1));
+        expect(db.all("SELECT id FROM commands ORDER BY id")).toEqual([]);
       }),
   );
 });
