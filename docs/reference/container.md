@@ -16,6 +16,7 @@ The image is built on Ubuntu 26.04 LTS. The Ubuntu and Bun base images are pinne
 | `/usr/local/lib/aphelion/launch` | The launcher script that starts the processes |
 | `/usr/bin/tini` | The init process, process 1 in the container |
 | `/etc/aphelion/*.yaml` | The default config files, copied from [`docs/reference/config/example`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config/example) |
+| `/etc/claude-code/managed-settings.json` | Claude Code's managed settings, owned by root with mode `0644`. They turn off the `bypassPermissions` and `auto` permission modes. See [the Claude adapter](claude-adapter.md#decision-0034s-open-points). |
 
 The image also has `git` and `ca-certificates`. It has no AI tool such as Claude Code, Codex, Grok Build or OpenCode ([decision 0049](../decisions/0049-ai-tools-installed-from-a-list.md)). Issue [#155](https://github.com/jcore9/Aphelion/issues/155) adds a list to install them from.
 
