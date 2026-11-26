@@ -437,10 +437,11 @@ describe("permission requests", () => {
       return allow;
     };
     const adapter = fakeAdapter([[ask("r1"), done()]]);
-    const run = await runTurn(adapter, { decider });
+    const run = await runTurn(adapter, { decider, folder: "/bots/one" });
     expect(seen).toEqual([
-      "/work: shell /work/secret-path.txt rm -rf secret-command",
+      "/bots/one: shell /work/secret-path.txt rm -rf secret-command",
     ]);
+    expect(adapter.contexts[0]?.folder).toBe("/bots/one");
     expect(adapter.answers).toEqual([allow]);
     expect(
       run.events.find(({ event }) => event.type === "permission.decision")

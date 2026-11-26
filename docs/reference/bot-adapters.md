@@ -158,7 +158,7 @@ A package that holds an adapter says so in `aphelion-plugin.json`:
 `@aphelion/plugin-sdk/testing` has what an adapter's tests need.
 
 - `fakeAdapter(script)` is an adapter that runs a script. Each turn is a list of steps: yield an event, call `decide`, wait for a promise or for the cancel, hang, or throw.
-- `runTurn(adapter, options)` plays the bot runner for one turn. It sends `initialize`, `turn.start` and `shutdown`, and returns every event. Pass `decider`, `decisionDeadlineMs` or `cancelGraceMs` to change the runtime.
+- `runTurn(adapter, options)` plays the bot runner for one turn. It sends `initialize`, `turn.start` and `shutdown`, and returns every event. Pass `decider`, `decisionDeadlineMs` or `cancelGraceMs` to change the runtime, and `folder` to send another folder than `/work`.
 - `startAdapter(adapter, options)` gives the same fake bot runner step by step, with `startTurn`, `cancel`, `shutdown` and `untilEvent`, for tests that cancel or start a second turn.
 - `checkStream(events)` checks a stream against [the rules](#rules-a-stream-follows).
 

@@ -1484,7 +1484,7 @@ interface AdapterHarness {
 - `logs`: The messages that the runtime logged.
 - `problems`: Lines the runtime sent that the harness couldn't read, such as an event that fails its schema. A good test leaves this empty.
 - `done`: Settles when the runtime stops: it resolves after `shutdown` and rejects when the runtime fails.
-- `initialize`: Sends `initialize` for a bot called `bot-1` in the folder `/work`, with no session to resume unless `resume` says otherwise.
+- `initialize`: Sends `initialize` for a bot called `bot-1` in the folder from the options, with no session to resume unless `resume` says otherwise.
 - `startTurn`: Sends `turn.start`. The reply comes when the runtime accepts the turn, not when the turn ends.
 - `cancel`: Sends `turn.cancel`.
 - `shutdown`: Sends `shutdown` and waits for the reply.
@@ -1608,6 +1608,18 @@ interface Grant {
 - `kind`: The manifest list in `permissions` that the permission is in.
 - `name`: The event name, hostname or secret reference.
 
+### `HarnessOptions`
+
+What `startAdapter` and `runTurn` can be told: the runtime's options and the bot's folder.
+
+```ts
+interface HarnessOptions extends RunAdapterOptions {
+  readonly folder?: string;
+}
+```
+
+- `folder`: The folder that `initialize` sends. The default is `/work`.
+
 ### `HostCall`
 
 One request that the plugin sent to the test host.
@@ -1720,7 +1732,7 @@ Runs one turn the way the bot runner does: `initialize`, `turn.start`, waiting f
 ```ts
 function runTurn(
   adapter: BotAdapter,
-  options?: RunAdapterOptions & { turn?: string; text?: string },
+  options?: HarnessOptions & { turn?: string; text?: string },
 ): Promise<TurnRun>;
 ```
 
@@ -1731,7 +1743,7 @@ Starts the adapter's runtime with a fake bot runner on the other end of its line
 ```ts
 function startAdapter(
   adapter: BotAdapter,
-  options?: RunAdapterOptions,
+  options?: HarnessOptions,
 ): AdapterHarness;
 ```
 
