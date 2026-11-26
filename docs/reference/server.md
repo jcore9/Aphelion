@@ -61,7 +61,7 @@ Two replies come from the listener, `@effect/platform-bun`, before Aphelion's ow
 
 ## WebSockets
 
-A client with a valid token opens a WebSocket on `/ws` and sends [protocol frames](protocol.md), one JSON text message each. The server reads each one with `parseClientFrame`. It answers a `resume` frame with the saved bot events the client missed and then every new one, or with a `resync` ([replay](protocol.md#sequence-numbers-and-replay)). It reads a `command` frame and sends nothing back, because no command exists yet that changes state.
+A client with a valid token opens a WebSocket on `/ws` and sends [protocol frames](protocol.md), one JSON text message each. The server reads each one with `parseClientFrame`. It answers a `resume` frame with the saved bot events the client missed and then every new one, or with a `resync` ([replay](protocol.md#sequence-numbers-and-replay)). It answers a `command` frame with a `result` or an `error` frame, without waiting for earlier commands ([commands](protocol.md#commands)).
 
 The server closes the WebSocket in these cases. The close code and reason are fixed text.
 
