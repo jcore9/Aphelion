@@ -44,6 +44,7 @@ These codes answer a command that the server read and then couldn't finish. Each
 | `interrupted` | The server stopped while it ran this command, so it can't say whether the command took effect. It doesn't run the command again. Check the bot's history before you send the command with a new `id` ([command ids](#command-ids)). |
 | `storage-failed` | The server ran the command but couldn't save its result, even after it tried again. The command did take effect. A repeat of the `id` gets `interrupted`. Check the bot's history before you send the command with a new `id`. |
 | `device-revoked` | The device's token was revoked or expired since the connection opened. The server checks before it runs each `bot.prompt` or `bot.cancel`, sends this error, and closes the socket with code 1008. It runs nothing and saves no `id`. |
+| `rate-limited` | The device has 8 commands running, or it sent more than 60 `bot.prompt` and `bot.cancel` commands in the last minute. Both limits count all of the device's connections together. The server runs nothing and saves no `id`, so the client can wait and send the same command again. `ping` is not counted. |
 | `id-reused` | The `id` already ran a different command. |
 | `internal` | The server failed in a way it didn't expect. |
 
@@ -136,7 +137,7 @@ The payload is `{ "bot": "chief", "after": 7, "limit": 100 }`. `after` is a posi
 
 The result holds up to `limit` events of that bot, in order, each as `{ "seq": 8, "payload": { ... } }`. The `payload` is the payload of the matching `bot.event` frame. The server shows the same events that a replay shows and leaves out the same ones, so a client never gets the vendor's session reference. An event has the same `seq` in a page and in a replay, so a client that uses both can drop a repeat by `seq`.
 
-`next` is the position to send as `after` for the next page. It can be higher than the last event in the page, because the server counts the events it skips. `more` is `true` when the server holds more saved events of this bot after `next`. A page can hold fewer than `limit` events, or none, while `more` is `true`, so a client reads until `more` is `false`.
+`next` is the position to send as `after` for the next page. It can be higher than the last event in the page, because the server counts the events it skips. `more` is `true` when the server holds more saved events of this bot after `next`. A page holds at most 256 KiB of encoded events. The server stops the page before the event that would pass that size, except that a page always holds the first event that a client may see. A page can hold fewer than `limit` events, or none, while `more` is `true`, so a client reads until `more` is `false`.
 
 The command only reads. The server doesn't save its `id`, and a repeat reads the history again, so it sees events saved since. The command fails with `internal` when the server can't read a saved event ([store](store.md#the-server-id-turns-and-events)).
 

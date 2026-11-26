@@ -7,11 +7,12 @@ import {
   type ServerFrame,
 } from "@aphelion/protocol";
 import { turnId, type TurnId } from "@aphelion/plugin-sdk";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import type { StartedTurn, TurnOutcome } from "../bots/manager";
 import type { DeviceId } from "../devices";
 import { clientEvent, type EventLog } from "../history";
 import type { Logger } from "../log";
+import type { Admission } from "./admission";
 import type { CommandLedger, Outcome } from "./ledger";
 
 export interface BotCommands {
@@ -22,12 +23,15 @@ export interface BotCommands {
 export interface CommandServices {
   readonly bots: BotCommands | undefined;
   readonly ledger: CommandLedger;
+  readonly admission: Admission;
   readonly logger: Logger;
 }
 
 export interface CommandContext extends CommandServices {
   readonly history: EventLog;
 }
+
+export const historyPageBytes = 256 * 1024;
 
 export const failureMessages = {
   "bot-not-running": "the bot isn't running, so it can't take a prompt",
@@ -126,13 +130,24 @@ const execute = (
       const { bot, after = 0, limit } = frame.payload;
       return Effect.try(() => {
         const rows = history.readBot(bot, after, limit + 1);
-        const shown = rows.slice(0, limit);
+        const events: NonNullable<ReturnType<typeof clientEvent>>[] = [];
+        let bytes = 0;
+        let taken = 0;
+        for (const saved of rows.slice(0, limit)) {
+          const event = clientEvent(saved);
+          const size =
+            event === undefined ? 0 : Buffer.byteLength(JSON.stringify(event));
+          if (events.length > 0 && bytes + size > historyPageBytes) break;
+          bytes += size;
+          taken += 1;
+          if (event !== undefined) events.push(event);
+        }
         return {
           ok: true,
           result: {
-            events: shown.flatMap((saved) => clientEvent(saved) ?? []),
-            next: shown.at(-1)?.position ?? after,
-            more: rows.length > limit,
+            events,
+            next: rows[taken - 1]?.position ?? after,
+            more: rows.length > taken,
           },
         } satisfies Outcome;
       }).pipe(
@@ -151,12 +166,28 @@ const execute = (
   }
 };
 
+const admitted = (
+  { admission }: CommandContext,
+  device: DeviceId,
+  frame: CommandFrame,
+  run: Effect.Effect<ServerFrame>,
+): Effect.Effect<ServerFrame> =>
+  frame.name === "ping"
+    ? run
+    : admission
+        .guard(device, changesState(frame) ? "mutation" : "read", run)
+        .pipe(
+          Effect.map(Option.getOrElse(() => refusal(frame, "rate-limited"))),
+        );
+
 export const dispatch = (
   context: CommandContext,
   device: DeviceId,
   frame: CommandFrame,
 ): Effect.Effect<ServerFrame> =>
-  Effect.suspend(() => execute(context, device, frame)).pipe(
+  Effect.suspend(() =>
+    admitted(context, device, frame, execute(context, device, frame)),
+  ).pipe(
     Effect.catchCause(() =>
       Effect.sync(() => {
         context.logger.error(

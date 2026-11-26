@@ -63,7 +63,7 @@ export const commands = {
           }),
         )
         .describe(
-          "The events the client may see, in order. A page can hold fewer than `limit`, or none, while `more` is `true`.",
+          "The events the client may see, in order. A page holds at most 256 KiB of encoded events. It can hold fewer than `limit`, or none, while `more` is `true`.",
         ),
       next: z
         .int()

@@ -9,11 +9,12 @@ import {
 } from "@aphelion/protocol";
 import { sessionRef } from "@aphelion/plugin-sdk";
 import { expect, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, onTestFinished } from "vitest";
 import type { BotCommands } from "./dispatch";
 import { dispatch, failureMessages } from "./dispatch";
+import { createAdmission, type Admission } from "./admission";
 import { openCommandLedger } from "./ledger";
 import { deviceId } from "../devices";
 import { eventFrame, openEventStore, type NewEvent } from "../history";
@@ -32,7 +33,16 @@ const logs = () => {
   return { lines, logger };
 };
 
-const setup = (outcome: TurnOutcome = "accepted", withBots = true) =>
+interface SetupOptions {
+  readonly admission?: Admission;
+  readonly hold?: Effect.Effect<void>;
+}
+
+const setup = (
+  outcome: TurnOutcome = "accepted",
+  withBots = true,
+  options: SetupOptions = {},
+) =>
   Effect.gen(function* () {
     const dir = mkdtempSync(join(tmpdir(), "aphelion-dispatch-"));
     onTestFinished(() => {
@@ -53,8 +63,10 @@ const setup = (outcome: TurnOutcome = "accepted", withBots = true) =>
       startTurn: (bot, text) =>
         Effect.sync(() => {
           calls.prompts.push({ bot, text });
-          return { turn, outcome } as StartedTurn;
-        }),
+        }).pipe(
+          Effect.andThen(options.hold ?? Effect.void),
+          Effect.as({ turn, outcome } as StartedTurn),
+        ),
       cancelTurn: (bot, id) =>
         Effect.sync(() => {
           calls.cancels.push({ bot, turn: id });
@@ -63,6 +75,7 @@ const setup = (outcome: TurnOutcome = "accepted", withBots = true) =>
     const context = {
       bots: withBots ? bots : undefined,
       ledger,
+      admission: options.admission ?? createAdmission(),
       history,
       logger,
     };
@@ -399,6 +412,156 @@ describe("history.read", () => {
           message: failureMessages.internal,
         });
         expect(JSON.stringify(env.lines)).not.toContain("private words");
+      }),
+  );
+});
+
+describe("command admission in dispatch", () => {
+  it.effect(
+    "refuses a command past the in-flight limit with rate-limited and claims no ledger row",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<undefined>();
+        const env = yield* setup("accepted", true, {
+          admission: createAdmission({ maxInFlight: 2 }),
+          hold: Deferred.await(gate),
+        });
+        const held = [
+          yield* Effect.forkChild(
+            env.send("bot.prompt", { bot: "chief", text: "a" }, "a"),
+          ),
+          yield* Effect.forkChild(
+            env.send("bot.prompt", { bot: "chief", text: "b" }, "b"),
+          ),
+        ];
+        yield* TestClock.adjust("10 millis");
+
+        const refused = yield* env.send(
+          "bot.prompt",
+          { bot: "chief", text: "c" },
+          "c",
+        );
+        const read = yield* env.send(
+          "history.read",
+          { bot: "chief", limit: 1 },
+          "r",
+        );
+
+        expect(refused).toEqual({
+          v: 1,
+          type: "error",
+          id: "c",
+          code: "rate-limited",
+          message: failureMessages["rate-limited"],
+        });
+        expect(read).toMatchObject({ type: "error", code: "rate-limited" });
+        expect(env.db.all("SELECT id FROM commands ORDER BY id")).toEqual([
+          { id: "a" },
+          { id: "b" },
+        ]);
+        expect(env.calls.prompts).toHaveLength(2);
+        yield* Deferred.succeed(gate, undefined);
+        yield* Fiber.joinAll(held);
+      }),
+  );
+
+  it.effect(
+    "refuses the 61st mutation of a minute with rate-limited and claims no ledger row, but still reads",
+    () =>
+      Effect.gen(function* () {
+        const env = yield* setup();
+        for (let sent = 0; sent < 60; sent += 1) {
+          const answer = yield* env.send(
+            "bot.prompt",
+            { bot: "chief", text: "hi" },
+            `c${String(sent)}`,
+          );
+          expect(answer.type).toBe("result");
+        }
+
+        const refused = yield* env.send(
+          "bot.cancel",
+          { bot: "chief", turn },
+          "x1",
+        );
+        const read = yield* env.send(
+          "history.read",
+          { bot: "chief", limit: 1 },
+          "r1",
+        );
+
+        expect(refused).toMatchObject({
+          type: "error",
+          id: "x1",
+          code: "rate-limited",
+        });
+        expect(read.type).toBe("result");
+        expect(env.db.all("SELECT COUNT(*) AS rows FROM commands")).toEqual([
+          { rows: 60 },
+        ]);
+        expect(env.calls.cancels).toEqual([]);
+
+        yield* TestClock.adjust("1 minute");
+        expect(
+          (yield* env.send("bot.cancel", { bot: "chief", turn }, "x2")).type,
+        ).toBe("result");
+      }),
+  );
+
+  it.effect("answers ping without counting it", () =>
+    Effect.gen(function* () {
+      const env = yield* setup("accepted", true, {
+        admission: createAdmission({ maxInFlight: 1, perMinute: 1 }),
+      });
+      for (let sent = 0; sent < 5; sent += 1) {
+        expect((yield* env.send("ping", {}, `p${String(sent)}`)).type).toBe(
+          "result",
+        );
+      }
+    }),
+  );
+});
+
+describe("history.read page size", () => {
+  const bigDelta = (index: number): NewEvent =>
+    delta(`${String(index).padStart(2, "0")}${"x".repeat(16 * 1024 - 2)}`);
+
+  it.effect(
+    "stops a page at 256 KiB of encoded events and pages on from next",
+    () =>
+      Effect.gen(function* () {
+        const env = yield* setup();
+        yield* env.history.openTurn("chief", "t1");
+        for (let index = 0; index < 40; index += 1) {
+          yield* env.history.record(bigDelta(index));
+        }
+        yield* TestClock.adjust("50 millis");
+        yield* env.history.flush;
+
+        const seen: number[] = [];
+        let after = 0;
+        let pages = 0;
+        for (;;) {
+          const result = page(
+            yield* env.send(
+              "history.read",
+              { bot: "chief", after, limit: 500 },
+              `r${String(pages)}`,
+            ),
+          );
+          expect(
+            Buffer.byteLength(JSON.stringify(result.events)),
+          ).toBeLessThanOrEqual(256 * 1024);
+          expect(result.events.length).toBeGreaterThan(0);
+          seen.push(...result.events.map(({ seq }) => seq));
+          pages += 1;
+          if (!result.more) break;
+          expect(result.next).toBe(result.events.at(-1)?.seq);
+          after = result.next;
+        }
+
+        expect(pages).toBeGreaterThan(1);
+        expect(seen).toEqual(Array.from({ length: 40 }, (_, i) => i + 1));
       }),
   );
 });

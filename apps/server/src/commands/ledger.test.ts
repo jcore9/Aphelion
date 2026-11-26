@@ -182,7 +182,7 @@ describe("the command ledger", () => {
     () =>
       Effect.gen(function* () {
         const { db } = tempStore();
-        const target: { fiber?: Fiber.Fiber<unknown> } = {};
+        const target: { fiber?: Fiber.Fiber<unknown, unknown> } = {};
         const interrupting: Database = {
           exec: (sql) => {
             db.exec(sql);

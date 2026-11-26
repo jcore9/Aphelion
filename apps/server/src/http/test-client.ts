@@ -4,12 +4,13 @@ import {
   type ServerFrame,
 } from "@aphelion/protocol";
 import { Effect } from "effect";
-import type { CommandServices } from "../commands";
+import { createAdmission, type CommandServices } from "../commands";
 import { createLogger } from "../log";
 
 export const idleCommands: CommandServices = {
   bots: undefined,
   ledger: { run: (_entry, apply) => apply },
+  admission: createAdmission(),
   logger: createLogger({ write: () => undefined }),
 };
 

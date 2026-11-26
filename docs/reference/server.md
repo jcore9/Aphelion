@@ -87,6 +87,8 @@ These limits are set in [`apps/server/src/adapters/http-server.ts`](https://gith
 
 Compression stays off, so a small compressed message can't expand into a large one.
 
+The server also limits the work of each device, across all of the device's connections. A device can have 8 commands running at once, and it can send 60 `bot.prompt` and `bot.cancel` commands a minute. A command over either limit gets `rate-limited` before the server saves anything ([errors](protocol.md#errors)). A `history.read` page holds at most 256 KiB of encoded events.
+
 ## The Compose port rule
 
 The Compose file must publish the server's port only on the host's tailnet address. The tailnet is the private network that Tailscale builds between the owner's devices. Its IPv4 addresses are in the range `100.64.0.0/10`, which runs from `100.64.0.0` to `100.127.255.255`.

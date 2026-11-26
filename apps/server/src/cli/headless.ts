@@ -3,7 +3,7 @@ import { Context, Effect, Layer } from "effect";
 import type { BotDefinition } from "../bots/manager";
 import { botRunnerPipeLink } from "../bots/runner-pipe";
 import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
-import { openCommandLedger } from "../commands";
+import { createAdmission, openCommandLedger } from "../commands";
 import { formatIssue } from "../config";
 import {
   closeDanglingTurns,
@@ -134,7 +134,12 @@ export const headless = (
                 history,
               );
         yield* Layer.build(
-          serveHttp({ address, port }, db, history, { bots, ledger, logger }),
+          serveHttp({ address, port }, db, history, {
+            bots,
+            ledger,
+            admission: createAdmission(),
+            logger,
+          }),
         );
         logger.info("server started", { version, address, port });
         if (fds === undefined) {

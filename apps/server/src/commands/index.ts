@@ -1,4 +1,11 @@
 export {
+  createAdmission,
+  maxInFlightPerDevice,
+  mutationsPerMinute,
+  type Admission,
+  type AdmissionLimits,
+} from "./admission";
+export {
   changesState,
   dispatch,
   refusal,

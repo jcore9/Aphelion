@@ -19,7 +19,11 @@ import {
   fakeRunnerLink,
   memorySessionRefs,
 } from "../bots/test-fixture";
-import { failureMessages, openCommandLedger } from "../commands";
+import {
+  createAdmission,
+  failureMessages,
+  openCommandLedger,
+} from "../commands";
 import { addDevice, revokeDevice } from "../devices";
 import { openEventStore, runBots } from "../history";
 import { createLogger } from "../log";
@@ -77,7 +81,7 @@ const startServer = (dbPath: string, script: FakeScript) =>
           { address: "127.0.0.1", port: 0 },
           db,
           history,
-          { bots: manager, ledger, logger },
+          { bots: manager, ledger, admission: createAdmission(), logger },
           { recheckEvery: Duration.seconds(30) },
         ),
         scope,
@@ -423,4 +427,34 @@ it.live("refuses a cancel from a revoked device", () =>
     expect(server.db.all("SELECT id FROM commands")).toEqual([{ id: "c1" }]);
     yield* server.stop;
   }),
+);
+
+it.live(
+  "counts one device's mutations across its connections, and claims no ledger row for a refusal",
+  () =>
+    Effect.gen(function* () {
+      const path = tempDb();
+      const token = deviceToken(path);
+      const server = yield* startServer(path, [finishes]);
+      const first = yield* connectClient(server.url, token);
+      const second = yield* connectClient(server.url, token);
+
+      for (let sent = 0; sent < 40; sent += 1) {
+        first.send(prompt(`a${String(sent)}`));
+        yield* first.until(sent + 1);
+        second.send(prompt(`b${String(sent)}`));
+        yield* second.until(sent + 1);
+      }
+      first.close();
+      second.close();
+
+      const refused = [...first.frames, ...second.frames].filter(
+        (frame) => frame.type === "error" && frame.code === "rate-limited",
+      );
+      expect(refused).toHaveLength(20);
+      expect(server.db.all("SELECT COUNT(*) AS rows FROM commands")).toEqual([
+        { rows: 60 },
+      ]);
+      yield* server.stop;
+    }),
 );

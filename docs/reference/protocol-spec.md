@@ -123,7 +123,7 @@ A `command` frame carries a command's `payload`, and the `result` frame that ans
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `events` | list of object | yes | The events the client may see, in order. A page can hold fewer than `limit`, or none, while `more` is `true`. |
+| `events` | list of object | yes | The events the client may see, in order. A page holds at most 256 KiB of encoded events. It can hold fewer than `limit`, or none, while `more` is `true`. |
 | `next` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | The position to send as `after` to read the next page. It can be higher than the last event, because the server skips events a client never sees. |
 | `more` | boolean | yes | Whether the server holds more saved events of this bot after `next`. |
 
