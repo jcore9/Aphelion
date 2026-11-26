@@ -54,7 +54,7 @@ jobs:
           file: deploy/Dockerfile
           platforms: linux/amd64
           provenance: false
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ inputs.push }}
+          outputs: ${{ inputs.push && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
 
   build-arm64:
     name: build arm64
@@ -83,7 +83,7 @@ jobs:
           file: deploy/Dockerfile
           platforms: linux/arm64
           provenance: false
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ inputs.push }}
+          outputs: ${{ inputs.push && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
 
   publish:
     name: publish one image
