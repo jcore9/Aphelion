@@ -124,6 +124,7 @@ const recordOf = (path: string) =>
   readManifest(path).pipe(
     Effect.map(({ manifest, folder }): InstallRecord => ({
       plugin: manifest.id,
+      enabled: true,
       current: {
         plugin: manifest.id,
         version: manifest.version,
@@ -400,6 +401,7 @@ const installed = (folder: string) =>
     const { manifest, folder: canonicalFolder } = yield* readManifest(folder);
     return {
       plugin: manifest.id,
+      enabled: true,
       current: {
         plugin: manifest.id,
         version: manifest.version,
@@ -569,6 +571,43 @@ describe("booting the plugins", () => {
           expect(folders).toEqual([fresh.current.folder, fresh.current.folder]);
         }),
       ),
+  );
+});
+
+describe("a switched-off plugin", () => {
+  it.live("boot leaves it stopped, and restart refuses until it is on", () =>
+    withHost((starts) =>
+      Effect.gen(function* () {
+        const { folder } = yield* setup;
+        let record = { ...(yield* installed(folder)), enabled: false };
+        const control = yield* pluginControl({
+          devFolder: undefined,
+          installs: () => [record],
+          install: () => record,
+          restartWatch: "20 millis",
+        });
+        const restart = control
+          .handle(JSON.stringify({ type: "restart", plugin: "weather" }))
+          .pipe(Effect.map((result) => result.reply));
+
+        yield* control.boot(logger);
+        expect(starts).toEqual([]);
+        expect(yield* restart).toEqual({
+          type: "refused",
+          reason:
+            "weather is switched off. Switch it on first: aphelion plugin enable weather",
+        });
+        expect(starts).toEqual([]);
+
+        record = { ...record, enabled: true };
+        expect(yield* restart).toEqual({
+          type: "restarted",
+          plugin: "weather",
+          state: "running",
+        });
+        expect(starts).toEqual([1]);
+      }),
+    ),
   );
 });
 

@@ -92,6 +92,19 @@ export function revokeDevice(
   });
 }
 
+export function revokeAllDevices(
+  db: Database,
+  now: Date = new Date(),
+): DeviceId[] {
+  return db
+    .all(
+      `UPDATE devices SET revoked_at = ?
+        WHERE revoked_at IS NULL RETURNING id`,
+      [now.toISOString()],
+    )
+    .map((row) => deviceId.parse(row["id"]));
+}
+
 export interface ListedDevice {
   readonly id: DeviceId;
   readonly name: string;

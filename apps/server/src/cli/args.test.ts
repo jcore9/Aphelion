@@ -165,6 +165,32 @@ describe("accepted command lines", () => {
     ],
     [["device", "list"], { kind: "device list", stateDir: defaultStateDir }],
     [
+      ["plugin", "enable", "weather"],
+      {
+        kind: "plugin enable",
+        stateDir: defaultStateDir,
+        plugin: "weather",
+        approve: undefined,
+      },
+    ],
+    [
+      ["plugin", "enable", "weather", "--approve", "abc"],
+      {
+        kind: "plugin enable",
+        stateDir: defaultStateDir,
+        plugin: "weather",
+        approve: "abc",
+      },
+    ],
+    [
+      ["restore", "finish"],
+      { kind: "restore finish", stateDir: defaultStateDir },
+    ],
+    [
+      ["restore", "finish", "--state-dir", "/data"],
+      { kind: "restore finish", stateDir: "/data" },
+    ],
+    [
       ["device", "revoke", "0123456789abcdef"],
       {
         kind: "device revoke",

@@ -148,6 +148,17 @@ Each plugin with a server part is in one of these states. The host's `status` ca
 
 Each start gets a new run number. Every message between the host and the runner carries that number. So a late message from a killed process can't change the state of the new run. When a run is stopped while its process is running, the runner waits until its kill of the old process has finished. Only then does it start the next run of that plugin. It answers each stop request once, at that point. If the kill reports processes that survived, the runner logs them and still starts the next run. Each timer also has a purpose. The purposes are the launch deadline, the `initialize` deadline, the shutdown grace time and the restart wait. A timer counts only in the state that set it. For example, the `initialize` deadline can't cut the shutdown grace time short.
 
+### The on and off switch
+
+Each installed plugin has a switch, which is on unless a restore switched it off. [`aphelion restore finish`](cli.md#aphelion-restore-finish) switches every plugin off after you restore a backup. The plugin keeps its files, approvals and data. While the switch is off, the plugin has no approval and no grants:
+
+- The server doesn't start it at boot. It logs `a switched-off plugin was not started` and goes on.
+- A start that a restart or reload asks for is refused. The reason reads `switched off after a restore; run aphelion plugin enable ID`.
+- A plugin that is already running gets every secret, network and event request refused.
+- `plugin update`, `plugin rollback` and `plugin restart` refuse, and tell you to run `plugin enable`.
+
+[`aphelion plugin enable ID`](cli.md#aphelion-plugin-enable-id) switches it on again. The switch belongs to the plugin, not to a version, so an update or a rollback can't switch a plugin on. Dev mode follows the same rule.
+
 ### Permissions
 
 A plugin gets an event only if both are true:

@@ -8,6 +8,8 @@
 | --- | --- |
 | `aphelion --headless` | Checks the config, then starts the server. The container runs this. |
 | `aphelion config check` | Checks the config files, the modes of the config and state folders and, with `--compose`, the ports a Docker Compose file publishes |
+| `aphelion restore finish` | Run once after restoring a backup, before the server starts. Revokes every device token and switches every plugin off. |
+| `aphelion plugin enable ID` | Switches plugin `ID` back on after a restore switched it off, and with `--approve` restarts it |
 | `aphelion plugin update ID` | Previews the latest GitHub release of plugin `ID`, and with `--approve` installs it and restarts the plugin on it |
 | `aphelion plugin rollback ID` | Goes back to the version of plugin `ID` before the current one, and restarts the plugin on it |
 | `aphelion plugin restart ID` | Asks the running server to restart plugin `ID` on its approved version |
@@ -23,9 +25,9 @@
 | Option | Used by | Default | Meaning |
 | --- | --- | --- | --- |
 | `--config-dir DIR` | `--headless`, `config check` | `/etc/aphelion` | The folder with the [config files](config.md) |
-| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
+| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device`, `restore` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
 | `--plugins-dir DIR` | `plugin install`, `plugin update`, `plugin rollback` | `/opt/aphelion/plugins` | An absolute path. The folder where updates put each release, as `<id>@<version>`. `plugin install` refuses a folder there that updates manage. |
-| `--approve DIGEST` | `plugin install`, `plugin update` | none | The value the preview printed. It approves exactly what the preview showed. |
+| `--approve DIGEST` | `plugin install`, `plugin update`, `plugin enable` | none | The value the preview printed. It approves exactly what the preview showed. |
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
 | `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
@@ -143,11 +145,50 @@ The command connects to the [control socket](plugins.md#control-socket), `plugin
 
 The command exits with code 1 and a message if it can't reach the control socket, or if the server runs without `--plugin-dev`. If the server closes the connection, for example when it restarts, the command prints `aphelion: the server closed the control connection` and exits with code 1. Otherwise it runs until you press Ctrl-C. [Dev mode](plugins.md#dev-mode) lists what the server refuses.
 
+## `aphelion restore finish`
+
+```sh
+aphelion restore finish [--state-dir DIR]
+```
+
+Run it once after the files of a backup are back and before the server starts ([restore on the new host](../guides/install.md#restore-on-the-new-host)). It changes the restored database in one step, so it either does all of it or none:
+
+- It revokes every device token that was still active. `device list` shows those devices as `revoked`, so you know which ones to enroll again. Until you enroll a device, the server answers nothing but `GET /health` ([device tokens](devices.md#after-a-restore)).
+- It switches every plugin off. The files, approvals and settings stay. A plugin stays off until you run [`plugin enable`](#aphelion-plugin-enable-id).
+- It writes one `restore.finish` row in the [audit log](logging.md#the-audit-log), with the ids of the devices and plugins it changed.
+
+It prints one line for each switched-off plugin, with the command that switches it on, and then the command that enrolls a device:
+
+```text
+Restore finished. Every device token is revoked.
+Plugin weather is switched off. Switch it on: aphelion plugin enable weather
+Enroll a device: aphelion device add NAME
+```
+
+Running it again gives the same result. It revokes every active device again, including one enrolled after the first run, because it can't tell a second run from the restore of a newer backup. Revoking is the safe side: a device that should work only needs enrolling again. It exits with code 1 and changes nothing when there is no database in the state folder.
+
+## `aphelion plugin enable ID`
+
+```sh
+aphelion plugin enable ID [--approve DIGEST] [--state-dir DIR]
+```
+
+Switches plugin `ID` back on after [`restore finish`](#aphelion-restore-finish) switched it off. It works in two steps, as `plugin update` does. Without `--approve`, it prints the permissions the plugin already has and a digest that covers them and the plugin's files. Repeat the command with `--approve` and that digest to switch the plugin on. It then restarts the plugin through the [control socket](plugins.md#control-socket) and prints the same lines as [`plugin restart`](#aphelion-plugin-restart-id), with `Switched on ID` in place of `Restarted ID`. When the server isn't running, the plugin starts when the server does.
+
+| Output | Meaning |
+| --- | --- |
+| `ID is already switched on. Nothing changed.` | The plugin was on. Nothing is restarted. Exit code 0. |
+| `The files in FOLDER changed since they were approved. Review them and run: aphelion plugin install FOLDER` | The files differ from the approved ones. The plugin stays off. Exit code 1. |
+| `The approval does not match this plugin's files or permissions. Preview the plugin again.` | The `--approve` value is wrong or the approval changed. Exit code 1. |
+| `ID isn't installed.` | No plugin has that id. Exit code 1. |
+
 ## `aphelion plugin update ID`
 
 ```sh
 aphelion plugin update ID [--approve DIGEST] [--state-dir DIR] [--plugins-dir DIR]
 ```
+
+A plugin that a restore switched off can't update. The command prints `ID is switched off. Switch it on first: aphelion plugin enable ID` on standard error and exits with code 1.
 
 Updates plugin `ID` from the GitHub repository its manifest names. Without `--approve`, the command downloads and checks the latest release, then prints a preview. The preview can clear abandoned staging files and release folders, and leaves installed versions and approvals in place. With the value the preview printed, the command does the same checks again and installs the release. Then it asks the server to restart the plugin through the [control socket](plugins.md#control-socket). [Updates](plugins.md#updates) lists what the command checks and its limits.
 
@@ -168,7 +209,7 @@ The command reads `APHELION_GITHUB_API` for tests only ([testing with a local Gi
 aphelion plugin rollback ID [--state-dir DIR] [--plugins-dir DIR]
 ```
 
-Makes the version before the current one current again, restarts the plugin on it, and deletes the version it left. It prints `Went back from ID CURRENT to EARLIER.` and then a line that says how `EARLIER` runs, as `plugin update` does. If the earlier version fails to start or stops during the 10-second watch, Aphelion restores the version it left and keeps both approvals. It prints `ID EARLIER didn't start (REASON), so Aphelion stayed on CURRENT.` followed by the state of `CURRENT` on standard error and exits with code 1. When there is no earlier version, it prints `ID has no earlier version to go back to.` on standard error and exits with code 1.
+Refuses a switched-off plugin, as `plugin update` does. Makes the version before the current one current again, restarts the plugin on it, and deletes the version it left. It prints `Went back from ID CURRENT to EARLIER.` and then a line that says how `EARLIER` runs, as `plugin update` does. If the earlier version fails to start or stops during the 10-second watch, Aphelion restores the version it left and keeps both approvals. It prints `ID EARLIER didn't start (REASON), so Aphelion stayed on CURRENT.` followed by the state of `CURRENT` on standard error and exits with code 1. When there is no earlier version, it prints `ID has no earlier version to go back to.` on standard error and exits with code 1.
 
 ## `aphelion plugin restart ID`
 
@@ -176,7 +217,7 @@ Makes the version before the current one current again, restarts the plugin on i
 aphelion plugin restart ID [--state-dir DIR]
 ```
 
-Asks the running server, through the [control socket](plugins.md#control-socket), to restart plugin `ID` on the version that is approved now. Use it when `plugin update` says the plugin is already on the latest release but the server still runs an older one. The server watches the new run for 10 seconds before it answers, as for an update.
+Asks the running server, through the [control socket](plugins.md#control-socket), to restart plugin `ID` on the version that is approved now. A plugin that a restore switched off isn't restarted: the command prints `ID is switched off. Switch it on first: aphelion plugin enable ID` on standard error and exits with code 1. Use it when `plugin update` says the plugin is already on the latest release but the server still runs an older one. The server watches the new run for 10 seconds before it answers, as for an update.
 
 | Output | Meaning |
 | --- | --- |

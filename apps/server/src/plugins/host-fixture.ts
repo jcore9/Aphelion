@@ -4,6 +4,7 @@ import type { PluginHost } from "./host";
 import { readManifest } from "./manifest-file";
 
 export const fixtureGrants = Layer.succeed(PluginGrants, {
+  isSwitchedOff: () => Effect.succeed(false),
   hasApproval: () => Effect.succeed(true),
   allows: () => Effect.succeed(false),
 });
