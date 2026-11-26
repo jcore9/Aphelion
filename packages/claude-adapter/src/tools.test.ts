@@ -55,8 +55,18 @@ describe("permissionRequestFor", () => {
     expect(
       ask("Glob", { pattern: "../**/*.key", path: "/work" })?.paths,
     ).toEqual(["/work", "../**/*.key"]);
-    expect(ask("Grep", { pattern: "/etc/.*" })?.paths).toEqual(["/etc/.*"]);
     expect(ask("Read", { file_path: 42 })?.paths).toEqual([]);
+  });
+
+  it("gives a search with no path the folder, and leaves out Grep's regex", () => {
+    expect(ask("Glob", { pattern: "**/*.md" })?.paths).toEqual([
+      ".",
+      "**/*.md",
+    ]);
+    expect(ask("Grep", { pattern: "/etc/.*" })?.paths).toEqual(["."]);
+    expect(
+      ask("Grep", { pattern: "x", path: "/work/src", glob: "*.ts" })?.paths,
+    ).toEqual(["/work/src", "*.ts"]);
   });
 
   it("gives the decider a shell tool's command and no command for other tools", () => {

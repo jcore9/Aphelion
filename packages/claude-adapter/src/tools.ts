@@ -19,18 +19,21 @@ const kinds = new Map<string, ToolKind>([
 
 export const toolKind = (tool: string): ToolKind => kinds.get(tool) ?? "other";
 
-const pathFields = ["file_path", "notebook_path", "path"] as const;
-
-const patternTools = new Set(["Glob", "Grep"]);
+const pathFields = new Map<string, readonly string[]>([
+  ["Glob", ["path", "pattern"]],
+  ["Grep", ["path", "glob"]],
+]);
 
 const maxBytes = 4096;
 
 const pathsOf = (tool: string, input: Readonly<Record<string, unknown>>) => {
-  const fields: string[] = [...pathFields];
-  if (patternTools.has(tool)) fields.push("pattern");
-  return fields
+  const fields = pathFields.get(tool) ?? ["file_path", "notebook_path", "path"];
+  const paths = fields
     .map((field) => input[field])
     .filter((value): value is string => typeof value === "string");
+  return pathFields.has(tool) && typeof input["path"] !== "string"
+    ? [".", ...paths]
+    : paths;
 };
 
 export interface ToolAsk {

@@ -1,4 +1,8 @@
-import type { CanUseTool, Options } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  CanUseTool,
+  HookCallback,
+  Options,
+} from "@anthropic-ai/claude-agent-sdk";
 import type { SessionRef } from "@aphelion/plugin-sdk";
 
 export const claudeExecutable = "/usr/local/bin/claude";
@@ -13,7 +17,6 @@ export const enabledTools = [
   "Glob",
   "Grep",
   "Bash",
-  "TodoWrite",
 ] as const;
 
 export const disabledTools = ["WebFetch", "WebSearch", "Agent"] as const;
@@ -57,7 +60,7 @@ export interface QueryOptionsInput {
   readonly canUseTool: CanUseTool;
   readonly stderr: (data: string) => void;
   readonly abortController: AbortController;
-  readonly hooks?: Options["hooks"];
+  readonly preToolUse: HookCallback;
 }
 
 export function queryOptions(input: QueryOptionsInput): Options {
@@ -75,7 +78,9 @@ export function queryOptions(input: QueryOptionsInput): Options {
     env: { ...input.env },
     stderr: input.stderr,
     abortController: input.abortController,
+    hooks: {
+      PreToolUse: [{ hooks: [input.preToolUse], onFailure: "block" }],
+    },
     ...(input.resume === null ? {} : { resume: input.resume }),
-    ...(input.hooks === undefined ? {} : { hooks: input.hooks }),
   };
 }

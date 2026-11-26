@@ -1,4 +1,5 @@
 import {
+  denyAll,
   permissionRequestId,
   toolCallId,
   turnId,
@@ -31,6 +32,7 @@ const setup = (
   const adapter = claudeAdapter({
     query: scripted.query,
     env,
+    rule: denyAll,
     interruptWaitMs: 50,
     closeWaitMs: 100,
   });
@@ -751,6 +753,7 @@ describe("keys stay out of events and logs", () => {
         return scripted.query(params);
       },
       env: { HOME: "/var/lib/aphelion-bots", ANTHROPIC_API_KEY: fakeKey },
+      rule: denyAll,
       interruptWaitMs: 50,
       closeWaitMs: 100,
     });
