@@ -169,6 +169,42 @@ const cases = (): readonly Case[] => [
     expected: "deny",
   },
   {
+    name: "a Grep whose file filter is *..*.ts",
+    tool: "Grep",
+    input: { pattern: "text", glob: "*..*.ts" },
+    expected: "allow",
+  },
+  {
+    name: "a Grep whose file filter is **/*.ts",
+    tool: "Grep",
+    input: { pattern: "text", glob: "**/*.ts" },
+    expected: "allow",
+  },
+  {
+    name: "a Grep whose file filter is ../*.ts",
+    tool: "Grep",
+    input: { pattern: "text", glob: "../*.ts" },
+    expected: "deny",
+  },
+  {
+    name: "a Grep whose file filter is /etc/*",
+    tool: "Grep",
+    input: { pattern: "text", glob: "/etc/*" },
+    expected: "deny",
+  },
+  {
+    name: "a Grep whose file filter is {a,../b}/*",
+    tool: "Grep",
+    input: { pattern: "text", glob: "{a,../b}/*" },
+    expected: "deny",
+  },
+  {
+    name: "a Grep whose file filter is @(a|/etc)/*",
+    tool: "Grep",
+    input: { pattern: "text", glob: "@(a|/etc)/*" },
+    expected: "deny",
+  },
+  {
     name: "a web fetch",
     tool: "WebFetch",
     input: { url: "https://example.com", prompt: "x" },

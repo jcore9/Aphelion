@@ -247,6 +247,9 @@ describe("folderRule for patterns", () => {
   it("denies a pattern with an alternative that starts at the root or home", async () => {
     expect(await answer("file.read", ["{/etc,src}/*"])).toEqual(outside);
     expect(await answer("file.read", ["{src,~/.ssh}/*"])).toEqual(outside);
+    expect(await answer("file.read", ["@(src|/etc)/*"])).toEqual(outside);
+    expect(await answer("file.read", ["+(/etc)/*"])).toEqual(outside);
+    expect(await answer("file.read", ["@(src|lib)/*"])).toEqual(allowed);
   });
 
   it("denies a pattern whose escapes or groups could hide a ..", async () => {

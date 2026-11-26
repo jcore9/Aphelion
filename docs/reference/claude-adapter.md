@@ -124,7 +124,7 @@ How "inside" is judged:
 - A relative path counts from the bot's folder. `..` is applied, so `../other/x` is outside.
 - Every link is followed. A link inside the folder that points outside counts as outside, and so does a broken link, because writing to it would create its target.
 - A file that doesn't exist yet is judged by the nearest folder above it that does.
-- A search pattern such as `src/**/*.ts` is judged by its part before the first wildcard. `/etc/*` and `../*` are outside. A pattern with `..` after a wildcard, a `\`, or a `{` choice that starts with `/` or `~` is denied.
+- A search pattern such as `src/**/*.ts` is judged by its part before the first wildcard. `/etc/*` and `../*` are outside. A pattern with `..` after a wildcard, a `\`, or a choice in `{…}` or `@(…|…)` that starts with `/` or `~` is denied.
 - A path that starts with `~` is denied, because Claude Code reads it as the home folder.
 - Every path in the request must be inside. A request with no path, or with a path that was cut at 4096 bytes, is denied.
 - A path the disk can't resolve, for example one the bot may not read, is denied.
@@ -133,14 +133,15 @@ Each answer covers that one call. The adapter never hands back the session-wide 
 
 **The limit, stated plainly.** Aphelion can't read what a shell command does. Only the file permissions of the `aphelion-bot` account and the container hold a shell command. A command can read other bots' folders and reach the internet, so `cat /etc/passwd` or `curl` in `Bash` runs even though a `Read` of the same file or a `WebFetch` is denied. The container still keeps it from Aphelion's secrets and config. Only one bot exists in M1, and M1 uses test data only. M2 puts each command behind the owner's yes or no. A bot can also read its own sign-in token or API key, so a tricked bot could leak it.
 
-A search can still match through a link that already sits inside the folder, because the rule judges the pattern, not each file it finds. A shell command can read the same files anyway.
+**A guard rail, not a wall.** The file-tool rule keeps the model's file tools in the bot's folder. It doesn't stop a bot that means to leave. Shell commands are allowed ([decision 0063](../decisions/0063-m1-planning-answers.md)), so a bot can read outside its folder with a shell command. It can also change a file in the moment between Aphelion's check and Claude Code opening the file, or plant a link that a search then follows, because the rule judges the search pattern, not each file the search finds. Each of those needs a shell command, and that command could read the outside file directly. A wall needs the operating system, such as a separate account for each bot, which later milestones bring.
 
 ## Permissions
 
 Claude Code calls the SDK's `canUseTool` callback before it runs a tool that needs a permission. The adapter builds a `PermissionRequest` and passes it to the turn's `decide`. In a real bot the runtime answers with the fixed rule:
 
 - `call` is the tool call's id, and `request` is the SDK's request id.
-- `paths` holds the strings in the input fields `file_path`, `notebook_path` and `path`. For `Glob` it holds `path` and `pattern`, and for `Grep` it holds `path` and the file filter `glob`. A search with no `path` adds `.`, the bot's folder. `Grep`'s `pattern` is a regular expression for the file contents, not a path, so the rule doesn't judge it.
+- `paths` holds the strings in the input fields `file_path`, `notebook_path` and `path`. For `Glob` it holds `path` and `pattern`, and for `Grep` it holds `path`. A search with no `path` adds `.`, the bot's folder. `Grep`'s `pattern` is a regular expression for the file contents, not a path, so the rule doesn't judge it.
+- `Grep`'s `glob` is a filter on file names under the search folder, such as `*.ts`, not a path. It goes into `paths`, and so gets judged, only when it could name a place outside that folder: it starts with `/` or `~`, has a part that is exactly `..` (such as `../*.ts`), or has a choice in `{…}` or `@(…|…)` that does. So `*..*.ts` and `**/*.ts` are allowed, and `../*.ts`, `/etc/*` and `{a,../b}/*` are denied.
 - `command` is the command of a `shell` tool.
 - A path or a command longer than 4096 bytes is cut, and `truncated` is `true`.
 

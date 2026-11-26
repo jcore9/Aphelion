@@ -18,7 +18,7 @@ const decide = (
 
 const wildcard = /[*?[{(]/;
 
-const alternativeAtRoot = /[{,]\s*[/~]/;
+const alternativeAtRoot = /[{,|(]\s*[/~]/;
 
 const segmentsOf = (path: string) =>
   path.split("/").filter((segment) => segment !== "" && segment !== ".");
