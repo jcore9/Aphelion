@@ -314,6 +314,7 @@ export {
   type FakeAdapter,
   type FakeScript,
   type FakeStep,
+  type HarnessOptions,
   type TurnRun,
 } from "./adapter-testing.ts";
 export { checkStream, type StreamViolation } from "./adapter-check.ts";

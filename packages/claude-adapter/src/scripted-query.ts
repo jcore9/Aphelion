@@ -1,6 +1,7 @@
 import type {
   Options,
   PermissionResult,
+  PermissionUpdate,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeQuery, QueryFunction } from "./adapter.ts";
@@ -13,6 +14,7 @@ export type ScriptStep =
         readonly input: Record<string, unknown>;
         readonly toolUseID: string;
         readonly requestId: string;
+        readonly suggestions?: PermissionUpdate[];
       };
     }
   | { readonly waitForInterrupt: true }
@@ -74,13 +76,20 @@ export function scriptedQuery(
             if (signal.aborted) throw abortedError();
             yield step.send;
           } else if ("ask" in step) {
-            const { tool, input: toolInput, toolUseID, requestId } = step.ask;
+            const {
+              tool,
+              input: toolInput,
+              toolUseID,
+              requestId,
+              suggestions,
+            } = step.ask;
             if (!options.canUseTool) throw new Error("no canUseTool");
             answers.push(
               await options.canUseTool(tool, toolInput, {
                 signal,
                 toolUseID,
                 requestId,
+                ...(suggestions ? { suggestions } : {}),
               }),
             );
           } else if ("waitForInterrupt" in step) {

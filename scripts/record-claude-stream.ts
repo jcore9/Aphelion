@@ -1,10 +1,11 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { claudeAdapter } from "../packages/claude-adapter/src/adapter.ts";
+import { realpathOrMissing } from "../packages/claude-adapter/src/files.ts";
 import { recordingClaude } from "../packages/claude-adapter/src/record.ts";
-import type { Decider } from "../packages/plugin-sdk/src/adapter.ts";
+import { folderRule } from "../packages/plugin-sdk/src/folder-rule.ts";
 import { checkStream, runTurn } from "../packages/plugin-sdk/src/testing.ts";
 
 const usage = `usage: bun scripts/record-claude-stream.ts [--name tool-turn] [--prompt "..."]
@@ -33,14 +34,7 @@ if (values.help || !/^[a-z0-9-]{1,64}$/.test(values.name)) {
 const folder = await realpath(
   await mkdtemp(join(tmpdir(), "aphelion-claude-")),
 );
-const inside = (path: string) => resolve(folder, path).startsWith(folder + sep);
-
-const decider: Decider = (request) =>
-  (request.kind === "file.read" || request.kind === "file.write") &&
-  request.paths.length > 0 &&
-  request.paths.every(inside)
-    ? { decision: "allow", by: "owner", reason: "inside-folder" }
-    : { decision: "deny", by: "owner", reason: "outside-folder" };
+const rule = folderRule(realpathOrMissing);
 
 const messages: unknown[] = [];
 const adapter = claudeAdapter({
@@ -48,9 +42,14 @@ const adapter = claudeAdapter({
     messages.push(message);
   }),
   env: process.env,
+  rule,
 });
 
-const run = await runTurn(adapter, { decider, text: values.prompt });
+const run = await runTurn(adapter, {
+  decider: rule,
+  folder,
+  text: values.prompt,
+});
 await rm(folder, { recursive: true, force: true });
 
 for (const { event } of run.events) console.log(JSON.stringify(event));

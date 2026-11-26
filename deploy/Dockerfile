@@ -32,12 +32,14 @@ RUN apt-get update \
  && install -d -o harness -g harness -m 0755 /opt/aphelion/plugins \
  && install -d -m 0755 /usr/local/lib/aphelion \
  && install -d -m 0755 /usr/local/lib/aphelion/adapters/claude \
+ && install -d -m 0755 /etc/claude-code \
  && find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
 COPY --from=build --chmod=0711 /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=build --chmod=0755 /src/apps/server/dist/aphelion /src/apps/server/dist/aphelion-secrets /usr/local/bin/
 COPY --from=build --chmod=0644 /src/apps/server/dist/plugin-runner.js /src/apps/server/dist/bot-runner.js /src/apps/server/dist/adapter-launcher.js /usr/local/lib/aphelion/
 COPY --from=build --chmod=0644 /src/packages/claude-adapter/dist/adapter.js /src/packages/claude-adapter/dist/aphelion-plugin.json /usr/local/lib/aphelion/adapters/claude/
 COPY --chown=harness:harness --chmod=0640 docs/reference/config/example/*.yaml /etc/aphelion/
+COPY --chmod=0644 deploy/image/claude-managed-settings.json /etc/claude-code/managed-settings.json
 COPY --chmod=0755 deploy/image/launch /usr/local/lib/aphelion/launch
 EXPOSE 7400
 ENTRYPOINT ["/usr/bin/tini", "--"]

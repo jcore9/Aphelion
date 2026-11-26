@@ -2,7 +2,7 @@
 
 The Claude adapter is the [bot adapter](bot-adapters.md) for bots whose provider is `claude`. It drives Claude Code, the `claude` command, through the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`), the library that Anthropic publishes to run Claude Code from a program. It turns what Claude Code does into the events that every adapter emits.
 
-The adapter is part a of [#20](https://github.com/jcore9/Aphelion/issues/20). Part b, [#214](https://github.com/jcore9/Aphelion/issues/214), adds the fixed permission rule. Until then the runtime's default decider denies every tool call.
+The adapter is [#20](https://github.com/jcore9/Aphelion/issues/20). Part a, [#213](https://github.com/jcore9/Aphelion/issues/213), streams a turn. Part b, [#214](https://github.com/jcore9/Aphelion/issues/214), adds the fixed permission rule that [What the first bot may do](#what-the-first-bot-may-do) describes.
 
 ## Where it lives
 
@@ -41,9 +41,10 @@ A **query** is one running Claude Code process that the SDK talks to. The adapte
 | `cwd` | The bot's folder |
 | `permissionMode` | `default`. The adapter stops a turn whose Claude Code reports another mode. |
 | `canUseTool` | Asks the turn's `decide` about each tool call. See [Permissions](#permissions). |
-| `tools` | `Read`, `Write`, `Edit`, `NotebookEdit`, `Glob`, `Grep`, `Bash` and `TodoWrite`. The model sees no other tool. |
+| `tools` | `Read`, `Write`, `Edit`, `NotebookEdit`, `Glob`, `Grep` and `Bash`. The model sees no other tool. `TodoWrite` is left out because the rule would deny it. |
 | `disallowedTools` | `WebFetch`, `WebSearch` and `Agent` |
 | `allowedTools` | Never set. A tool on that list runs without asking `canUseTool`. |
+| `hooks` | One `PreToolUse` hook that applies the fixed rule to every tool call, with `onFailure: "block"`. See [The hook](#the-hook). |
 | `settingSources` | `[]`, so Claude Code reads no user or project settings files |
 | `verbatimPrompts` | `true`, so each prompt reaches Claude Code exactly as typed. See [Prompts are passed as typed](#prompts-are-passed-as-typed). |
 | `includePartialMessages` | `true`, so text arrives in small pieces |
@@ -105,18 +106,58 @@ The adapter drops a message from a sub-agent, which has a `parent_tool_use_id`, 
 | `WebFetch`, `WebSearch` | `web` |
 | Any other tool | `other` |
 
+## What the first bot may do
+
+Until M2 adds the owner's yes or no, every Claude bot gets the same fixed answer to each tool call ([decision 0063](../decisions/0063-m1-planning-answers.md)). The code is `folderRule` in the plugin SDK. It never learns and never widens.
+
+| The bot asks to | Answer | Reason code |
+| --- | --- | --- |
+| Read or search files inside its folder (`Read`, `Glob`, `Grep`) | Allowed | `inside-folder` |
+| Change files inside its folder (`Write`, `Edit`, `NotebookEdit`) | Allowed | `inside-folder` |
+| Read, search or change a file outside its folder | Denied | `outside-folder` |
+| Fetch a web page or search the web (`WebFetch`, `WebSearch`) | Denied | `web` |
+| Run a shell command (`Bash`) | Allowed, whatever the command says | `shell` |
+| Use any other tool | Denied | `unknown-tool` |
+
+How "inside" is judged:
+
+- A relative path counts from the bot's folder. `..` is applied, so `../other/x` is outside.
+- Every link is followed. A link inside the folder that points outside counts as outside, and so does a broken link, because writing to it would create its target.
+- A file that doesn't exist yet is judged by the nearest folder above it that does.
+- A search pattern such as `src/**/*.ts` is judged by its part before the first wildcard. `/etc/*` and `../*` are outside. A pattern with `..` after a wildcard, a `\`, or a choice in `{…}` or `@(…|…)` that starts with `/` or `~` is denied.
+- A path that starts with `~` is denied, because Claude Code reads it as the home folder.
+- Every path in the request must be inside. A request with no path, or with a path that was cut at 4096 bytes, is denied.
+- A path the disk can't resolve, for example one the bot may not read, is denied.
+
+Each answer covers that one call. The adapter never hands back the session-wide rule or mode change that Claude Code suggests.
+
+**The limit, stated plainly.** Aphelion can't read what a shell command does. Only the file permissions of the `aphelion-bot` account and the container hold a shell command. A command can read other bots' folders and reach the internet, so `cat /etc/passwd` or `curl` in `Bash` runs even though a `Read` of the same file or a `WebFetch` is denied. The container still keeps it from Aphelion's secrets and config. Only one bot exists in M1, and M1 uses test data only. M2 puts each command behind the owner's yes or no. A bot can also read its own sign-in token or API key, so a tricked bot could leak it.
+
+**A guard rail, not a wall.** The file-tool rule keeps the model's file tools in the bot's folder. It doesn't stop a bot that means to leave. Shell commands are allowed ([decision 0063](../decisions/0063-m1-planning-answers.md)), so a bot can read outside its folder with a shell command. It can also change a file in the moment between Aphelion's check and Claude Code opening the file, or plant a link that a search then follows, because the rule judges the search pattern, not each file the search finds. Each of those needs a shell command, and that command could read the outside file directly. One case needs no shell command: a link that is already in the bot's folder and points outside it. A search such as `**/*.ts` can follow it, so don't put such a link in a bot's folder. A wall needs the operating system, such as a separate account for each bot, which later milestones bring.
+
 ## Permissions
 
-Claude Code calls the SDK's `canUseTool` hook before it runs a tool that needs a permission. The adapter builds a `PermissionRequest` and passes it to the turn's `decide`:
+Claude Code calls the SDK's `canUseTool` callback before it runs a tool that needs a permission. The adapter builds a `PermissionRequest` and passes it to the turn's `decide`. In a real bot the runtime answers with the fixed rule:
 
 - `call` is the tool call's id, and `request` is the SDK's request id.
-- `paths` holds the strings in the input fields `file_path`, `notebook_path` and `path`, and also `pattern` for `Glob` and `Grep`. A pattern can be an absolute path or hold `..`, so the rule in #214 checks it too.
+- `paths` holds the strings in the input fields `file_path`, `notebook_path` and `path`. For `Glob` it holds `path` and `pattern`, and for `Grep` it holds `path`. A search with no `path` adds `.`, the bot's folder. `Grep`'s `pattern` is a regular expression for the file contents, not a path, so the rule doesn't judge it.
+- `Grep`'s `glob` is a filter on file names under the search folder, such as `*.ts`, not a path. It goes into `paths`, and so gets judged, only when it could name a place outside that folder: it starts with `/` or `~`, has a part that is exactly `..` (such as `../*.ts`), or has a choice in `{…}` or `@(…|…)` that does. So `*..*.ts` and `**/*.ts` are allowed, and `../*.ts`, `/etc/*` and `{a,../b}/*` are denied.
 - `command` is the command of a `shell` tool.
 - A path or a command longer than 4096 bytes is cut, and `truncated` is `true`.
 
 The hook allows the call only when `decide` answers `allow`. It answers `allow` with nothing else, so no rule outlives the call. Every other path returns a deny with the fixed message `Aphelion denied this tool call.`: a `deny` answer, a request whose ids don't fit the contract, a hook call outside a turn, a cancel, and an error in `decide`. The hook never returns `null`, which would leave the tool waiting with no deadline.
 
 Claude Code carries on after a deny, so a turn never ends with `denied`. A tool that Claude Code refuses by itself, such as a disallowed tool, ends with `error`, because no decision exists for it.
+
+### The hook
+
+Claude Code may run a read-only tool, such as a `Read` inside its working folder, without asking `canUseTool`. So the adapter also registers a `PreToolUse` hook, which Claude Code runs before every tool call. The hook builds the same `PermissionRequest` and asks the same rule.
+
+- When the rule denies, the hook answers `permissionDecision: "deny"` with the same fixed message, and the tool doesn't run.
+- When the rule allows, the hook answers nothing, so Claude Code goes on to ask `canUseTool` when it would. The hook never answers `allow`, because that would skip `canUseTool`.
+- An input the hook can't read, or a failure in the rule, is a deny. The matcher also sets `onFailure: "block"`, so a hook that throws blocks the call.
+
+The hook sends no event. A call it stops ends with `error`. A call that also reaches `canUseTool` gets its `permission.request` and `permission.decision` events from there.
 
 ## Cancel
 
@@ -142,14 +183,15 @@ The adapter writes these lines to the log:
 bun scripts/record-claude-stream.ts --name tool-turn
 ```
 
-The script makes an empty folder in the system's temporary folder and sends a prompt that writes and reads one file there. Its decider allows file tools inside that folder and denies everything else. It prints each event, then writes `packages/claude-adapter/fixtures/tool-turn.jsonl` with one SDK message per line. The folder's path becomes `/work` and the home folder becomes `/home/bot`. It writes no file when the turn doesn't complete or when `checkStream` finds a broken rule. Pass `--prompt` to send another prompt. Read the file before you commit it, because it holds the model's reply and the tool output.
+The script makes an empty folder in the system's temporary folder and sends a prompt that writes and reads one file there. It sends that folder in `initialize` and answers with the fixed rule. It prints each event, then writes `packages/claude-adapter/fixtures/tool-turn.jsonl` with one SDK message per line. The folder's path becomes `/work` and the home folder becomes `/home/bot`. It writes no file when the turn doesn't complete or when `checkStream` finds a broken rule. Pass `--prompt` to send another prompt. Read the file before you commit it, because it holds the model's reply and the tool output.
 
-## Checked only by a live run
+## Decision 0034's open points
 
-These points from [decision 0034](../decisions/0034-vendor-protocol-per-cli.md) need a signed-in Claude Code, so CI can't check them:
+[Decision 0034](../decisions/0034-vendor-protocol-per-cli.md) left these points open. The code and the SDK's types settle part of each. The rest needs a signed-in Claude Code, so CI can't check it.
 
-1. Whether a read inside the bot's folder asks `canUseTool`.
-2. Whether `settingSources: []` still loads root-owned managed settings.
-3. How Claude Code behaves after a deny.
-4. Whether `resume` works after a restart inside the container.
-5. Whether `bun install` leaves out the optional packages. The image build uses `--omit=optional`, and the bundle runs with no `node_modules`, which the image contract checks.
+1. **Does a read inside the bot's folder ask `canUseTool`?** The code doesn't depend on the answer. The `PreToolUse` hook applies the rule to every call, whether it asks or not. A live run should still record whether it asks.
+2. **What does the SDK do with no `permissionMode`?** The SDK's types say Claude Code then picks the mode from the settings it loads, else `auto` where that mode exists. The adapter never leaves it out: it always passes `default`, and stops a turn whose `init` reports another mode.
+3. **Does `settingSources: []` still load root-owned managed settings?** The image ships Claude Code's managed settings file at `/etc/claude-code/managed-settings.json`, owned by root with mode `0644`, so `aphelion-bot` can read it but not change it. It sets `permissions.disableBypassPermissionsMode` and `permissions.disableAutoMode` to `"disable"`, which turn off the `bypassPermissions` and `auto` modes. The SDK's types say `settingSources: []` skips only the user, project and local files and still reads the managed file from disk. Whether Claude Code 2.1.330 really does is a live check for the owner. The adapter doesn't depend on it: it always passes `default`, and stops Claude Code if an `init` reports any other mode.
+4. **How do deny answers behave?** The adapter's deny carries only the fixed message, with no `interrupt`, so Claude Code should carry on with the turn. The hook's deny uses the SDK's `permissionDecision: "deny"`. A live run should check that Claude Code carries on after each, and what its `tool_result` looks like.
+5. **Does `resume` work after a restart inside the container?** Not settled. It needs a live run as `aphelion-bot`.
+6. **Does `bun install` leave out the optional packages?** The image build uses `--omit=optional`, and the bundle runs with no `node_modules`, which the image contract checks.
