@@ -17,6 +17,7 @@ import { CliIo } from "./io";
 import { hint, presenter } from "./output";
 import { pluginInstall, pluginInstallCommand } from "./plugin";
 import { pluginDev, pluginDevCommand } from "./plugin-dev";
+import { pluginEnable, pluginEnableCommand } from "./plugin-enable";
 import {
   pluginRestart,
   pluginRestartCommand,
@@ -25,6 +26,7 @@ import {
   pluginUpdate,
   pluginUpdateCommand,
 } from "./plugin-update";
+import { restoreFinish, restoreFinishCommand } from "./restore";
 import {
   defaultToolListFile,
   toolInstall,
@@ -46,12 +48,14 @@ export interface Handlers {
   readonly deviceRevoke: Parameters<typeof deviceRevokeCommand>[0];
   readonly pluginInstall: Parameters<typeof pluginInstallCommand>[0];
   readonly pluginUpdate: Parameters<typeof pluginUpdateCommand>[0];
+  readonly pluginEnable: Parameters<typeof pluginEnableCommand>[0];
   readonly pluginRollback: Parameters<typeof pluginRollbackCommand>[0];
   readonly pluginRestart: Parameters<typeof pluginRestartCommand>[0];
   readonly pluginDev: Parameters<typeof pluginDevCommand>[0];
   readonly toolList: Parameters<typeof toolListCommand>[0];
   readonly toolInstall: Parameters<typeof toolInstallCommand>[0];
   readonly toolRemove: Parameters<typeof toolRemoveCommand>[0];
+  readonly restoreFinish: Parameters<typeof restoreFinishCommand>[0];
 }
 
 const toolListFile = () =>
@@ -66,12 +70,14 @@ const handlers: Handlers = {
   pluginInstall,
   pluginUpdate: (options) =>
     pluginUpdate(options, process.env["APHELION_GITHUB_API"]),
+  pluginEnable,
   pluginRollback,
   pluginRestart,
   pluginDev,
   toolList: (options) => toolList(options, toolListFile()),
   toolInstall: (options) => toolInstall(options, toolListFile()),
   toolRemove,
+  restoreFinish,
 };
 
 const shortCluster = /^-[^-]/;
@@ -123,10 +129,11 @@ export const makeCli = (handle: Handlers) => {
       ]),
       group(
         "plugin",
-        "Install, update, roll back, restart and develop plugins.",
+        "Install, update, switch on, roll back, restart and develop plugins.",
         [
           pluginInstallCommand(handle.pluginInstall),
           pluginUpdateCommand(handle.pluginUpdate),
+          pluginEnableCommand(handle.pluginEnable),
           pluginRollbackCommand(handle.pluginRollback),
           pluginRestartCommand(handle.pluginRestart),
           pluginDevCommand(handle.pluginDev),
@@ -136,6 +143,9 @@ export const makeCli = (handle: Handlers) => {
         toolListCommand(handle.toolList),
         toolInstallCommand(handle.toolInstall),
         toolRemoveCommand(handle.toolRemove),
+      ]),
+      group("restore", "Finish a restore from a backup.", [
+        restoreFinishCommand(handle.restoreFinish),
       ]),
     ]),
   );

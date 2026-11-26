@@ -15,6 +15,7 @@ export interface ApprovedVersion {
 
 export interface InstallRecord {
   readonly plugin: string;
+  readonly enabled: boolean;
   readonly current: ApprovedVersion;
   readonly previous: ApprovedVersion | undefined;
 }
@@ -27,7 +28,7 @@ export interface Approval {
 }
 
 export const approvalFor = (
-  record: InstallRecord,
+  record: Pick<InstallRecord, "plugin" | "current">,
   devFolder: string | undefined,
 ): Approval => ({
   id: record.plugin,
@@ -69,6 +70,9 @@ export const approvalToken = (input: {
     )
     .digest("hex");
 
+export const switchedOffMessage = (plugin: string) =>
+  `${plugin} is switched off. Switch it on first: aphelion plugin enable ${plugin}`;
+
 const approvedParts = (approved: ApprovedVersion) => [
   approved.version,
   approved.folder,
@@ -84,6 +88,17 @@ export const updateToken = (from: ApprovedVersion, next: ApprovedVersion) =>
         next.plugin,
         approvedParts(from),
         approvedParts(next),
+      ]),
+    )
+    .digest("hex");
+
+export const enableToken = (current: ApprovedVersion) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify([
+        "aphelion-enable-v1",
+        current.plugin,
+        approvedParts(current),
       ]),
     )
     .digest("hex");
@@ -170,13 +185,14 @@ export function readInstall(
 ): InstallRecord | undefined {
   return db.transaction(() => {
     const [row] = db.all(
-      "SELECT version, previous FROM plugin_installs WHERE plugin = ?",
+      "SELECT version, previous, enabled FROM plugin_installs WHERE plugin = ?",
       [plugin],
     );
     if (row === undefined) return undefined;
     const previous = row["previous"];
     return {
       plugin,
+      enabled: row["enabled"] === 1,
       current: readVersion(db, plugin, String(row["version"])),
       previous:
         previous === null
@@ -190,4 +206,27 @@ export function installedPlugins(db: Database): InstallRecord[] {
   return db
     .all("SELECT plugin FROM plugin_installs ORDER BY plugin")
     .flatMap((row) => readInstall(db, String(row["plugin"])) ?? []);
+}
+
+export function switchOffPlugins(db: Database): string[] {
+  return db
+    .all(
+      "UPDATE plugin_installs SET enabled = 0 WHERE enabled = 1 RETURNING plugin",
+    )
+    .map((row) => String(row["plugin"]));
+}
+
+export function switchedOffPlugins(db: Database): string[] {
+  return db
+    .all("SELECT plugin FROM plugin_installs WHERE enabled = 0 ORDER BY plugin")
+    .map((row) => String(row["plugin"]));
+}
+
+export function switchOnPlugin(db: Database, plugin: string): boolean {
+  return (
+    db.all(
+      "UPDATE plugin_installs SET enabled = 1 WHERE plugin = ? AND enabled = 0 RETURNING plugin",
+      [plugin],
+    ).length === 1
+  );
 }

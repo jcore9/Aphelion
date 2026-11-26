@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { Command } from "effect/cli";
+import { readInstall, switchedOffMessage } from "../plugins/approvals";
 import { restartPlugin } from "../plugins/control-client";
 import type { Permission } from "../plugins/grants";
 import { withFilesLock } from "../plugins/updates/files-lock";
@@ -12,7 +15,7 @@ import {
   type SwitchOutcome,
   type Updates,
 } from "../plugins/updates/updater";
-import { withStore } from "./device";
+import { databaseFile, withStore } from "./device";
 import { failed } from "./failure";
 import {
   approveFlag,
@@ -161,6 +164,15 @@ export const pluginRestart = (options: {
   Effect.gen(function* () {
     const io = yield* CliIo;
     const { plugin } = options;
+    if (
+      existsSync(join(options.stateDir, databaseFile)) &&
+      (yield* withStore(options.stateDir, (db) =>
+        Effect.sync(() => readInstall(db, plugin)?.enabled === false),
+      ))
+    ) {
+      yield* io.err(switchedOffMessage(plugin));
+      return yield* failed;
+    }
     const outcome = yield* restartPlugin(options.stateDir, plugin);
     switch (outcome.kind) {
       case "server not running":

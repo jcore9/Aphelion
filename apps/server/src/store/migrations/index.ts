@@ -5,6 +5,7 @@ import { auditBotId } from "./0003-audit-bot-id";
 import { pluginGrants } from "./0004-plugin-grants";
 import { pluginInstalls } from "./0005-plugin-installs";
 import { pluginVersions } from "./0006-plugin-versions";
+import { pluginEnabled } from "./0007-plugin-enabled";
 
 export const migrations: readonly Migration[] = [
   auditLog,
@@ -13,4 +14,5 @@ export const migrations: readonly Migration[] = [
   pluginGrants,
   pluginInstalls,
   pluginVersions,
+  pluginEnabled,
 ];

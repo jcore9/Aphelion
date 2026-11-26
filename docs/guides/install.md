@@ -281,15 +281,38 @@ Start from a host that has the bootstrap key in `/etc/credstore.encrypted/apheli
      tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data
    ```
 
-6. Start the service.
+6. Finish the restore. This revokes every device token in the restored database and switches every plugin off, so the server starts with nobody enrolled and no plugin running. A backup can be old, and a device you removed since then comes back with it. The command runs in a throwaway container, like step 5, and doesn't need the bootstrap key.
+
+   ```sh
+   sudo docker run --rm --pull never --network none --entrypoint "" --user harness \
+     -v aphelion_state:/var/lib/aphelion \
+     aphelion:local \
+     aphelion restore finish
+   ```
+
+   It prints one line for each plugin, with the command that switches it on, and then the command that enrolls a device. For the test data you should see:
+
+   ```text
+   Restore finished. Every device token is revoked.
+   Plugin aphelion-test-plugin is switched off. Switch it on: aphelion plugin enable aphelion-test-plugin
+   Enroll a device: aphelion device add NAME
+   ```
+
+   Running it again prints the same lines and revokes every device again, including any you enrolled in between. Enroll that device again afterwards.
+
+   Don't start the service until this step prints `Restore finished`. If it fails, the restored tokens and plugins are still live, so fix the cause and run it again first.
+
+7. Start the service.
 
    ```sh
    sudo systemctl start aphelion
    ```
 
+Then enroll a device and switch each plugin back on with the commands from step 6 ([Check the restore](#check-the-restore) shows them).
+
 If the key doesn't match the restored `secrets` volume, the container exits and systemd tries again every 10 seconds. `sudo journalctl -u aphelion` shows `The bootstrap key does not match this secrets store`. The key and the archive came from different installs. Stop the service with `sudo systemctl stop aphelion`, put the right key in place with [Restore on new hardware](#restore-on-new-hardware) steps 2 to 4, and start it again. The volumes stay as they are.
 
-A plugin can come back in two ways. Restoring `plugin-files` brings its files back as they were. You can also install it again and skip `plugin-files`. The approval is in the database and records the plugin's folder, and a digest of its files. The digest is a fingerprint made from each file's path inside the plugin folder and its contents, and [the plugin reference](../reference/plugins.md#permissions) describes it. A plugin that you install again must go in the same folder, with the same files, byte for byte. A file that differs in one byte stops the plugin from starting, and you approve it again with [Install a plugin](#install-a-plugin). The `plugin-data` volume holds data that a plugin stores, and a new install doesn't recreate it, so restore that volume either way.
+A plugin can come back in two ways. Restoring `plugin-files` brings its files back as they were. You can also install it again and skip `plugin-files`. Either way, the plugin starts switched off, because `restore finish` switches it off in step 6. Its approval stays in the database and records the plugin's folder, and a digest of its files. `aphelion plugin enable` shows the permissions it already has and, when you approve, switches it on. The digest is a fingerprint made from each file's path inside the plugin folder and its contents, and [the plugin reference](../reference/plugins.md#permissions) describes it. A plugin that you install again must go in the same folder, with the same files, byte for byte. A file that differs in one byte stops `plugin enable`, and you approve the plugin again with [Install a plugin](#install-a-plugin). The `plugin-data` volume holds data that a plugin stores, and a new install doesn't recreate it, so restore that volume either way.
 
 ### Check the restore
 
@@ -301,16 +324,26 @@ Run three checks from `/opt/aphelion/deploy` once the service has started. They 
    sudo docker compose exec -T --user harness aphelion bun -e 'const r = await fetch("http://broker/v1/local", {unix: "/run/aphelion-secrets/broker.sock", method: "POST", body: JSON.stringify({op: "read", ref: "local://drill/test"})}); console.log(r.status, r.ok && (await r.json()) === "drill-value-not-a-real-secret")'
    ```
 
-2. A plugin keeps its approval. The server starts a plugin only when its approval and its files match. You should see `plugin host started` with `"installed":1`, the plugin go from `starting` to `running`, and the line `aphelion-test-plugin 1.0.0 started`. You should not see `won't start`.
+2. A plugin comes back switched off, and you switch it on. First check that it didn't start. You should see `plugin host started` with `"installed":1`, the line `a switched-off plugin was not started`, and no `aphelion-test-plugin 1.0.0 started`.
 
    ```sh
-   sudo docker compose logs --no-color | grep -E 'plugin host started|aphelion-test-plugin|won.t start'
+   sudo docker compose logs --no-color | grep -E 'plugin host started|switched-off|aphelion-test-plugin'
    ```
 
-3. The database history is there. You should see the device `drill-laptop` with the same ID that `device add` printed on the old host.
+   Preview the plugin, then repeat the command with the `--approve` value it printed. You should see `Switched on aphelion-test-plugin. It runs.`
+
+   ```sh
+   sudo docker compose exec -T --user harness aphelion aphelion plugin enable aphelion-test-plugin
+   ```
+
+3. The device history is there, and every token is revoked. You should see the device `drill-laptop` with the same ID that `device add` printed on the old host, and the status `revoked`. Then enroll a device. Its token works, and the old one gets a 401.
 
    ```sh
    sudo aphelion device list
+   ```
+
+   ```sh
+   sudo aphelion device add drill-laptop
    ```
 
 If a check doesn't show what it should, write down the command and its output.

@@ -161,6 +161,21 @@
             ],
             "additionalProperties": false
           }
+        },
+        "botAdapter": {
+          "description": "Makes the package a bot adapter, which the bot runner loads into each bot of that provider. It needs a server part, and no client part, other contributions or permissions. The plugin runner doesn't start such a package.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$",
+              "description": "The provider the adapter serves. A bot whose `provider` has this name uses the adapter."
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -187,6 +202,58 @@
     }
   ],
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "contributes": {
+            "required": [
+              "botAdapter"
+            ]
+          }
+        },
+        "required": [
+          "contributes"
+        ]
+      },
+      "then": {
+        "required": [
+          "server"
+        ],
+        "not": {
+          "required": [
+            "client"
+          ]
+        },
+        "properties": {
+          "permissions": {
+            "properties": {
+              "events": {
+                "maxItems": 0
+              },
+              "secrets": {
+                "maxItems": 0
+              },
+              "network": {
+                "maxItems": 0
+              },
+              "uiSlots": {
+                "maxItems": 0
+              }
+            }
+          },
+          "contributes": {
+            "properties": {
+              "secretSchemes": {
+                "maxItems": 0
+              },
+              "screens": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {

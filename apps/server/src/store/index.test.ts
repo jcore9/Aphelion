@@ -110,3 +110,28 @@ test("migration 6 drops the old plugin approvals, and a version needs its row be
     store.all("SELECT plugin, version, previous FROM plugin_installs"),
   ).toEqual([{ plugin: "weather", version: "1.0.0", previous: null }]);
 });
+
+test("migration 7 leaves every plugin that was installed switched on", () => {
+  const path = tempDatabasePath();
+  const old = openSqlite(path);
+  migrate(old, migrations.slice(0, 6));
+  old.run(
+    "INSERT INTO plugin_versions (plugin, version, source, folder, files_digest) VALUES ('weather', '1.0.0', 'folder', '/opt/aphelion/plugins/weather', 'def456')",
+  );
+  old.run(
+    "INSERT INTO plugin_installs (plugin, version) VALUES ('weather', '1.0.0')",
+  );
+  old.close();
+
+  const store = openStore(path);
+  onTestFinished(() => {
+    store.close();
+  });
+
+  expect(store.all("SELECT plugin, enabled FROM plugin_installs")).toEqual([
+    { plugin: "weather", enabled: 1 },
+  ]);
+  expect(() => {
+    store.run("UPDATE plugin_installs SET enabled = 2");
+  }).toThrow("CHECK");
+});

@@ -25,6 +25,10 @@ export interface PluginProcess {
   readonly kill: Effect.Effect<Cleanup>;
 }
 
+export type Interruptibly = <A, E>(
+  effect: Effect.Effect<A, E>,
+) => Effect.Effect<A, E>;
+
 export class SpawnFailed extends Data.TaggedError("SpawnFailed")<{
   readonly reason: string;
 }> {}
@@ -34,6 +38,7 @@ export class PluginProcesses extends Context.Service<
   {
     readonly spawn: (
       spec: SpawnSpec,
+      interruptibly: Interruptibly,
     ) => Effect.Effect<PluginProcess, SpawnFailed>;
     readonly sweep: Effect.Effect<Cleanup>;
   }

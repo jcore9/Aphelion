@@ -141,6 +141,7 @@ export const runRunner = (
       });
 
     const work = yield* FiberSet.make();
+    const launches = yield* FiberSet.make();
 
     const reap = (plugin: string, process: PluginProcess) =>
       process.kill.pipe(Effect.flatMap(report(plugin)));
@@ -156,6 +157,7 @@ export const runRunner = (
               : reap(plugin, slot.process),
           { discard: true },
         );
+        yield* FiberSet.clear(launches);
         yield* FiberSet.awaitEmpty(work);
         const unplaced = yield* Queue.clear(events);
         yield* Effect.forEach(
@@ -236,38 +238,42 @@ export const runRunner = (
     const launch = (request: StartRequest) => {
       const { plugin, run } = request;
       const dataFolder = join(options.dataRoot, plugin);
-      return processes
-        .spawn({
-          plugin,
-          folder: request.folder,
-          entry: request.entry,
-          dataFolder,
-          env: pluginEnvironment(plugin, dataFolder),
-        })
-        .pipe(
-          Effect.matchEffect({
-            onSuccess: (process) =>
-              Queue.offer(events, {
-                type: "launched",
-                plugin,
-                run,
-                process,
-              }).pipe(
-                Effect.flatMap((handedOver) =>
-                  handedOver ? Effect.void : reap(plugin, process),
+      return Effect.uninterruptibleMask((restore) =>
+        processes
+          .spawn(
+            {
+              plugin,
+              folder: request.folder,
+              entry: request.entry,
+              dataFolder,
+              env: pluginEnvironment(plugin, dataFolder),
+            },
+            restore,
+          )
+          .pipe(
+            Effect.matchEffect({
+              onSuccess: (process) =>
+                Queue.offer(events, {
+                  type: "launched",
+                  plugin,
+                  run,
+                  process,
+                }).pipe(
+                  Effect.flatMap((handedOver) =>
+                    handedOver ? Effect.void : reap(plugin, process),
+                  ),
                 ),
-              ),
-            onFailure: (failure) =>
-              Queue.offer(events, {
-                type: "launch-failed",
-                plugin,
-                run,
-                reason: failure.reason,
-              }),
-          }),
-          Effect.asVoid,
-          Effect.uninterruptible,
-        );
+              onFailure: (failure) =>
+                Queue.offer(events, {
+                  type: "launch-failed",
+                  plugin,
+                  run,
+                  reason: failure.reason,
+                }),
+            }),
+            Effect.asVoid,
+          ),
+      );
     };
 
     const start = Effect.fnUntraced(function* (request: StartRequest) {
@@ -291,7 +297,7 @@ export const runRunner = (
         inbox: yield* Queue.unbounded<string>(),
         pendingBytes: 0,
       });
-      yield* FiberSet.run(work, launch(request));
+      yield* FiberSet.run(launches, launch(request));
     });
 
     const goLive = Effect.fnUntraced(function* (

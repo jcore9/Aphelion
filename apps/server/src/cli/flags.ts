@@ -29,12 +29,14 @@ export const operands = {
   "device revoke": "id",
   "plugin install": "folder",
   "plugin update": "plugin id",
+  "plugin enable": "plugin id",
   "plugin rollback": "plugin id",
   "plugin restart": "plugin id",
   "plugin dev": "folder",
   "tool list": undefined,
   "tool install": "tool name",
   "tool remove": "tool name",
+  "restore finish": undefined,
 } as const;
 
 export const ownText = "usage:";

@@ -22,12 +22,14 @@ const parsed = async (argv: string[]) => {
     deviceRevoke: record("deviceRevoke"),
     pluginInstall: record("pluginInstall"),
     pluginUpdate: record("pluginUpdate"),
+    pluginEnable: record("pluginEnable"),
     pluginRollback: record("pluginRollback"),
     pluginRestart: record("pluginRestart"),
     pluginDev: record("pluginDev"),
     toolList: record("toolList"),
     toolInstall: record("toolInstall"),
     toolRemove: record("toolRemove"),
+    restoreFinish: record("restoreFinish"),
   };
   const result = await capture(makeCli(handlers)(argv));
   return { ...result, calls };
@@ -221,6 +223,32 @@ describe("accepted command lines", () => {
     ],
     [["device", "list"], { kind: "device list", stateDir: defaultStateDir }],
     [
+      ["plugin", "enable", "weather"],
+      {
+        kind: "plugin enable",
+        stateDir: defaultStateDir,
+        plugin: "weather",
+        approve: undefined,
+      },
+    ],
+    [
+      ["plugin", "enable", "weather", "--approve", "abc"],
+      {
+        kind: "plugin enable",
+        stateDir: defaultStateDir,
+        plugin: "weather",
+        approve: "abc",
+      },
+    ],
+    [
+      ["restore", "finish"],
+      { kind: "restore finish", stateDir: defaultStateDir },
+    ],
+    [
+      ["restore", "finish", "--state-dir", "/data"],
+      { kind: "restore finish", stateDir: "/data" },
+    ],
+    [
       ["device", "revoke", "0123456789abcdef"],
       {
         kind: "device revoke",
@@ -333,6 +361,19 @@ describe("refused command lines", () => {
       "--tools-dir must be an absolute path",
     ],
     [["plugin", "rollback"], '"plugin rollback" needs a plugin id'],
+    [["plugin", "enable"], '"plugin enable" needs a plugin id'],
+    [
+      ["plugin", "enable", "weather", "--plugins-dir", "/p"],
+      '--plugins-dir isn\'t an option of "plugin enable"',
+    ],
+    [
+      ["restore", "finish", "extra"],
+      '"restore finish" takes no arguments, but got 1',
+    ],
+    [
+      ["restore", "finish", "--approve", "abc"],
+      '--approve isn\'t an option of "restore finish"',
+    ],
     [
       ["plugin", "rollback", "weather", "--approve", "abc"],
       '--approve isn\'t an option of "plugin rollback"',
