@@ -124,7 +124,11 @@ test("a client that reconnects with its last sequence number gets what it missed
       const parsed = parseServerFrame(JSON.stringify(frame));
       if (!parsed.ok) throw new Error(parsed.error.message);
       if (parsed.frame.type === "resync") client.cursor = parsed.frame.cursor;
-      if (parsed.frame.type === "event" && client.cursor) {
+      if (
+        parsed.frame.type === "event" &&
+        parsed.frame.name === "notice" &&
+        client.cursor
+      ) {
         client.messages.push(parsed.frame.payload.message);
         client.cursor = { ...client.cursor, seq: parsed.frame.seq };
       }

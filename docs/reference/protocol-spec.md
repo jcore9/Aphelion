@@ -52,7 +52,7 @@ Tells every client that something happened.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `seq` | integer from 1 to 9,007,199,254,740,991 (the largest safe integer) | yes | The event's number in the stream. |
-| `name` | `"notice"` | yes | The kind of event. |
+| `name` | `"notice"` or `"bot.event"` | yes | The kind of event. |
 | `payload` | object | yes | What happened. |
 
 ### `resync` frame
@@ -97,6 +97,19 @@ A message for every client to show.
 | --- | --- | --- | --- |
 | `message` | string | yes | Text for a person to read. |
 
+### `bot.event` event
+
+One event of one bot, in the order the server saved it.
+
+`payload` has these fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `bot` | string matching `^[a-z][a-z0-9-]{0,62}$` | yes | The bot the event belongs to. |
+| `turn` | string matching `^[A-Za-z0-9_-]{1,64}$` or `null` | yes | The turn the event belongs to. It is `null` for a `session` event and for an `error` outside a turn. |
+| `format` | integer from 1 to 9,007,199,254,740,991 (the largest safe integer) | yes | The format version of the saved event. It is 1 today, and a change to an event's shape raises it. |
+| `event` | [`BotEvent`](#botevent) | yes | What happened. |
+
 ## Shared types
 
 ### `CommandId`
@@ -119,6 +132,108 @@ A position in an event stream.
 Names one event stream. A server that restarts starts a new stream.
 
 It is a string matching `^[A-Za-z0-9_-]{1,64}$`.
+
+### `BotSession`
+
+The bot's session started or resumed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"session"` | yes | The kind of event. |
+| `ref` | string matching `^[\x21-\x2e\x30-\x7e]{1,256}$` | yes | The vendor's id for the bot's session. |
+
+### `BotTextDelta`
+
+A piece of the bot's reply.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"text.delta"` | yes | The kind of event. |
+| `text` | string | yes | The next piece of the bot's reply. It is 1 byte to 16 KiB of UTF-8. |
+
+### `BotToolStart`
+
+The bot started to use a tool.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"tool.start"` | yes | The kind of event. |
+| `call` | string matching `^[A-Za-z0-9_.:-]{1,128}$` | yes | The id of the tool call, for the matching `tool.end`. |
+| `tool` | string matching `^[A-Za-z0-9_.:-]{1,128}$` | yes | The tool's name. |
+| `kind` | `"file.read"` or `"file.write"` or `"shell"` or `"web"` or `"other"` | yes | What the tool does, in terms that don't depend on the vendor. |
+
+### `BotToolEnd`
+
+A tool call ended.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"tool.end"` | yes | The kind of event. |
+| `call` | string matching `^[A-Za-z0-9_.:-]{1,128}$` | yes | The id of the tool call that ended. |
+| `outcome` | `"ok"` or `"error"` or `"denied"` or `"cancelled"` | yes | How the call ended. |
+
+### `BotUsage`
+
+What a turn used.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"usage"` | yes | The kind of event. |
+| `inputTokens` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | Tokens the bot read. |
+| `outputTokens` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | Tokens the bot wrote. |
+| `cacheReadTokens` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | Tokens read from the vendor's cache. |
+| `cacheWriteTokens` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | Tokens written to the vendor's cache. |
+| `costUsd` | number or `null` | yes | The cost in US dollars, or `null` when the vendor has none. |
+
+### `BotError`
+
+Something went wrong with the bot.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"error"` | yes | The kind of event. |
+| `code` | `"cli-not-found"` or `"cli-exited"` or `"signed-out"` or `"rate-limited"` or `"vendor"` or `"adapter"` | yes | What went wrong, as a fixed code. |
+
+### `BotTurnEnd`
+
+A turn ended.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"turn.end"` | yes | The kind of event. |
+| `reason` | `"completed"` or `"cancelled"` or `"denied"` or `"limit"` or `"refused"` or `"error"` | yes | Why the turn ended. |
+
+### `BotPermissionRequest`
+
+The bot asked whether a tool may run.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"permission.request"` | yes | The kind of event. |
+| `request` | string matching `^[A-Za-z0-9_.:-]{1,128}$` | yes | The id of the request, for the matching decision. |
+| `call` | string matching `^[A-Za-z0-9_.:-]{1,128}$` or `null` | yes | The tool call the request is for, or `null`. |
+| `tool` | string matching `^[A-Za-z0-9_.:-]{1,128}$` | yes | The tool's name. |
+| `kind` | `"file.read"` or `"file.write"` or `"shell"` or `"web"` or `"other"` | yes | What the tool does, in terms that don't depend on the vendor. |
+| `pathCount` | integer from 0 to 32 | yes | How many paths the tool wants. The paths are never sent. |
+| `hasCommand` | boolean | yes | Whether the tool wants to run a command. It is never sent. |
+
+### `BotPermissionDecision`
+
+A permission request was allowed or denied.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | `"permission.decision"` | yes | The kind of event. |
+| `request` | string matching `^[A-Za-z0-9_.:-]{1,128}$` | yes | The id of the request this decision answers. |
+| `decision` | `"allow"` or `"deny"` | yes | The answer. |
+| `by` | `"rule"` or `"policy"` or `"owner"` or `"default"` | yes | Who decided. |
+| `reason` | `"inside-folder"` or `"outside-folder"` or `"web"` or `"shell"` or `"unknown-tool"` or `"cancelled"` or `"turn-ended"` or `"timeout"` or `"shutdown"` or `"no-decider"` or `"invalid-request"` or `"duplicate-request"` or `"invalid-decision"` or `"decider-failed"` | yes | Why, as a fixed code. |
+
+### `BotEvent`
+
+One thing a bot did.
+
+It is a [`BotSession`](#botsession) or [`BotTextDelta`](#bottextdelta) or [`BotToolStart`](#bottoolstart) or [`BotToolEnd`](#bottoolend) or [`BotUsage`](#botusage) or [`BotError`](#boterror) or [`BotTurnEnd`](#botturnend) or [`BotPermissionRequest`](#botpermissionrequest) or [`BotPermissionDecision`](#botpermissiondecision).
 
 ## Error codes
 
