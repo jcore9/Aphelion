@@ -33,10 +33,12 @@ ghcr.io/jcore9/aphelion@sha256:<64 letters and digits>
 
 The installer downloads the image by that line and refuses any image whose fingerprint differs ([decision 0063](../decisions/0063-m1-planning-answers.md)).
 
+**After the first release only:** GitHub creates the `aphelion` package as private, and the workflow can't change that. Until you make it public, the installer can't download the image and `imagetools inspect` below fails. Open the package from the **Packages** list on your GitHub profile, go to **Package settings**, and set the visibility to **Public**. GitHub doesn't let you make a public package private again.
+
 To check it yourself:
 
 1. Open the release on the [releases page](https://github.com/jcore9/Aphelion/releases) and look at the `aphelion-image.sha256` file under **Assets**. The summary of the `Release` run in the Actions tab prints the same line.
-2. Run `docker buildx imagetools inspect ghcr.io/jcore9/aphelion:<version>` on a computer with Docker. The `Digest:` line it prints must match the line in the file.
+2. Run `docker buildx imagetools inspect ghcr.io/jcore9/aphelion:<version>` on a computer with Docker. Compare the `sha256:` value on its `Digest:` line with the `sha256:` value in the file. They must be the same. The file's line also has `ghcr.io/jcore9/aphelion@` in front, which the `Digest:` line doesn't.
 
 The same workflow also runs on any pull request that changes `deploy/Dockerfile` or the workflow itself. There it builds both images and stops. It publishes nothing, so a pull request can't change a released image.
 
