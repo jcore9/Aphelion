@@ -19,7 +19,6 @@ interface AdapterContext {
   };
   readonly folder: string;
   readonly resume: SessionRef | null;
-  decide(request: PermissionRequest): Promise<PermissionDecision>;
   log(message: string): void;
 }
 ```
@@ -27,8 +26,6 @@ interface AdapterContext {
 - `bot`: The bot the adapter runs for.
 - `folder`: The absolute path of the folder the vendor's CLI works in.
 - `resume`: The vendor session to resume, or `null` to start a new one.
-- `decide`: Asks whether a tool may run. The runtime puts `permission.request` and `permission.decision` on the stream, so the adapter reports nothing itself.
-  It always resolves. A request that is invalid, comes after the turn ended or after a cancel, or isn't answered in time resolves as `deny`.
 - `log`: Writes a message to the server's log. Never pass event payloads.
 
 ### `AdapterEnvelope`
@@ -90,7 +87,21 @@ type AdapterEnvelope = {
         request: string & import("zod").$brand<"PermissionRequestId">;
         decision: "allow" | "deny";
         by: "rule" | "policy" | "owner" | "default";
-        reason: string;
+        reason:
+          | "shell"
+          | "web"
+          | "cancelled"
+          | "inside-folder"
+          | "outside-folder"
+          | "unknown-tool"
+          | "turn-ended"
+          | "timeout"
+          | "shutdown"
+          | "no-decider"
+          | "invalid-request"
+          | "duplicate-request"
+          | "invalid-decision"
+          | "decider-failed";
       };
 };
 ```
@@ -271,7 +282,21 @@ The answer to one permission request. It covers that request only, never a whole
 type PermissionDecision = {
   decision: "allow" | "deny";
   by: "rule" | "policy" | "owner" | "default";
-  reason: string;
+  reason:
+    | "shell"
+    | "web"
+    | "cancelled"
+    | "inside-folder"
+    | "outside-folder"
+    | "unknown-tool"
+    | "turn-ended"
+    | "timeout"
+    | "shutdown"
+    | "no-decider"
+    | "invalid-request"
+    | "duplicate-request"
+    | "invalid-decision"
+    | "decider-failed";
 };
 ```
 
@@ -564,7 +589,7 @@ interface RunAdapterOptions {
 
 - `decider`: Answers permission requests. The default is `denyAll`.
 - `cancelGraceMs`: How long a cancelled turn has to end by itself before the runtime ends it with `cancelled`, in milliseconds. The default is 5000.
-- `decisionDeadlineMs`: How long the decider has to answer, in milliseconds. After that the request is denied with reason `deadline`. The default is no deadline.
+- `decisionDeadlineMs`: How long the decider has to answer, in milliseconds. After that the request is denied with reason `timeout`. The default is no deadline.
 
 ### `SecretBackend`
 
@@ -664,7 +689,21 @@ type StreamEvent =
       request: string & import("zod").$brand<"PermissionRequestId">;
       decision: "allow" | "deny";
       by: "rule" | "policy" | "owner" | "default";
-      reason: string;
+      reason:
+        | "shell"
+        | "web"
+        | "cancelled"
+        | "inside-folder"
+        | "outside-folder"
+        | "unknown-tool"
+        | "turn-ended"
+        | "timeout"
+        | "shutdown"
+        | "no-decider"
+        | "invalid-request"
+        | "duplicate-request"
+        | "invalid-decision"
+        | "decider-failed";
     };
 ```
 
@@ -700,11 +739,14 @@ The prompt the bot runner sends for one turn.
 interface TurnInput {
   readonly turn: TurnId;
   readonly text: string;
+  readonly decide: (request: PermissionRequest) => Promise<PermissionDecision>;
 }
 ```
 
 - `turn`: The turn's id.
 - `text`: The prompt, at most 256 KiB.
+- `decide`: Asks whether a tool may run in this turn. The runtime puts `permission.request` and `permission.decision` on the stream, so the adapter reports nothing itself.
+  It always resolves. A request that is invalid, comes after this turn ended, after a cancel or after shutdown began, or isn't answered in time resolves as `deny`. The ones that can't be asked send no event.
 
 ### `adapterApiVersion`
 
@@ -774,7 +816,21 @@ const adapterEnvelope: z.ZodType<{
         request: string & import("zod").$brand<"PermissionRequestId">;
         decision: "allow" | "deny";
         by: "rule" | "policy" | "owner" | "default";
-        reason: string;
+        reason:
+          | "shell"
+          | "web"
+          | "cancelled"
+          | "inside-folder"
+          | "outside-folder"
+          | "unknown-tool"
+          | "turn-ended"
+          | "timeout"
+          | "shutdown"
+          | "no-decider"
+          | "invalid-request"
+          | "duplicate-request"
+          | "invalid-decision"
+          | "decider-failed";
       };
 }>;
 ```
@@ -950,13 +1006,27 @@ function parsePluginManifest(data: unknown): ManifestResult;
 
 ### `permissionDecision`
 
-The Zod schema for the answer to a permission request. `reason` is a short code, such as `outside-folder`, never text.
+The Zod schema for the answer to a permission request. `reason` is one of a fixed list of codes, such as `outside-folder`, never text.
 
 ```ts
 const permissionDecision: z.ZodType<{
   decision: "allow" | "deny";
   by: "rule" | "policy" | "owner" | "default";
-  reason: string;
+  reason:
+    | "shell"
+    | "web"
+    | "cancelled"
+    | "inside-folder"
+    | "outside-folder"
+    | "unknown-tool"
+    | "turn-ended"
+    | "timeout"
+    | "shutdown"
+    | "no-decider"
+    | "invalid-request"
+    | "duplicate-request"
+    | "invalid-decision"
+    | "decider-failed";
 }>;
 ```
 
@@ -1160,7 +1230,7 @@ const secretsUseParams: z.ZodType<{ operation: string; reference: string }>;
 
 ### `sessionRef`
 
-The Zod schema for the vendor's session id. The id is opaque: 1 to 256 printable ASCII characters.
+The Zod schema for the vendor's session id. The id is opaque: 1 to 256 printable ASCII characters, with no space and no `/`, so it can't be a path or a command with arguments. Vendor session ids are UUID-like.
 
 ```ts
 const sessionRef: z.ZodType<string & import("zod").$brand<"SessionRef">>;
@@ -1222,7 +1292,21 @@ const streamEvent: z.ZodType<
       request: string & import("zod").$brand<"PermissionRequestId">;
       decision: "allow" | "deny";
       by: "rule" | "policy" | "owner" | "default";
-      reason: string;
+      reason:
+        | "shell"
+        | "web"
+        | "cancelled"
+        | "inside-folder"
+        | "outside-folder"
+        | "unknown-tool"
+        | "turn-ended"
+        | "timeout"
+        | "shutdown"
+        | "no-decider"
+        | "invalid-request"
+        | "duplicate-request"
+        | "invalid-decision"
+        | "decider-failed";
     }
 >;
 ```
@@ -1320,7 +1404,7 @@ interface RunAdapterOptions {
 
 - `decider`: Answers permission requests. The default is `denyAll`.
 - `cancelGraceMs`: How long a cancelled turn has to end by itself before the runtime ends it with `cancelled`, in milliseconds. The default is 5000.
-- `decisionDeadlineMs`: How long the decider has to answer, in milliseconds. After that the request is denied with reason `deadline`. The default is no deadline.
+- `decisionDeadlineMs`: How long the decider has to answer, in milliseconds. After that the request is denied with reason `timeout`. The default is no deadline.
 
 ### `main`
 
@@ -1517,7 +1601,7 @@ interface StreamViolation {
 }
 ```
 
-- `rule`: The rule's number, from 1 to 7, as [the bot adapter reference](bot-adapters.md#rules-a-stream-follows) numbers them.
+- `rule`: The rule's number, from 1 to 7, or 0 for an event that isn't valid. The rules are numbered as [the bot adapter reference](bot-adapters.md#rules-a-stream-follows) numbers them.
 - `message`: What broke the rule. It names ids and numbers only, never text from the stream.
 
 ### `TestHost`
@@ -1571,10 +1655,11 @@ interface TurnRun {
 ### `checkStream`
 
 Checks the events of one bot process against the seven rules of [the bot adapter reference](bot-adapters.md#rules-a-stream-follows).
+It checks each event with the same Zod schema the runtime uses, so a caller needn't validate first. An event that fails it is reported as rule 0 and skipped by the other rules.
 It returns the broken rules, and an empty list when the stream is good. Pass a stream that has finished: a turn without a `turn.end` breaks rule 3.
 
 ```ts
-function checkStream(events: readonly AdapterEnvelope[]): StreamViolation[];
+function checkStream(events: readonly unknown[]): StreamViolation[];
 ```
 
 ### `createTestHost`

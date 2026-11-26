@@ -1,8 +1,8 @@
-import type { AdapterEnvelope } from "./adapter.ts";
+import { adapterEnvelope, type AdapterEnvelope } from "./adapter.ts";
 
 /** One rule that a stream broke. */
 export interface StreamViolation {
-  /** The rule's number, from 1 to 7, as [the bot adapter reference](https://github.com/jcore9/Aphelion/blob/main/docs/reference/bot-adapters.md#rules-a-stream-follows) numbers them. */
+  /** The rule's number, from 1 to 7, or 0 for an event that isn't valid. The rules are numbered as [the bot adapter reference](https://github.com/jcore9/Aphelion/blob/main/docs/reference/bot-adapters.md#rules-a-stream-follows) numbers them. */
   readonly rule: number;
   /** What broke the rule. It names ids and numbers only, never text from the stream. */
   readonly message: string;
@@ -23,11 +23,10 @@ const askKey = (turn: string, request: string) => `${turn}\u0000${request}`;
 
 /**
  * Checks the events of one bot process against the seven rules of [the bot adapter reference](https://github.com/jcore9/Aphelion/blob/main/docs/reference/bot-adapters.md#rules-a-stream-follows).
+ * It checks each event with the same Zod schema the runtime uses, so a caller needn't validate first. An event that fails it is reported as rule 0 and skipped by the other rules.
  * It returns the broken rules, and an empty list when the stream is good. Pass a stream that has finished: a turn without a `turn.end` breaks rule 3.
  */
-export function checkStream(
-  events: readonly AdapterEnvelope[],
-): StreamViolation[] {
+export function checkStream(events: readonly unknown[]): StreamViolation[] {
   const violations: StreamViolation[] = [];
   const broke = (rule: number, message: string) => {
     violations.push({ rule, message });
@@ -42,7 +41,16 @@ export function checkStream(
   let open: string | undefined;
   let expectedSeq = 1;
 
-  for (const { seq, turn, event } of events) {
+  const checked: AdapterEnvelope[] = [];
+  for (const [index, raw] of events.entries()) {
+    const parsed = adapterEnvelope.safeParse(raw);
+    if (!parsed.success) {
+      broke(0, `event ${String(index + 1)} isn't a valid event`);
+      expectedSeq += 1;
+      continue;
+    }
+    checked.push(parsed.data);
+    const { seq, turn, event } = parsed.data;
     if (seq !== expectedSeq) {
       broke(1, `seq ${String(seq)} comes where ${String(expectedSeq)} belongs`);
     }
@@ -76,6 +84,10 @@ export function checkStream(
         break;
       }
       case "tool.start":
+        if (calls.has(event.call)) {
+          broke(4, `call ${event.call} has more than one tool.start`);
+          break;
+        }
         calls.set(event.call, { turn, ended: false });
         break;
       case "tool.end": {
@@ -155,7 +167,7 @@ export function checkStream(
 
   const turnEndIndex = new Map<string, number>();
   const decisionIndex = new Map<string, number>();
-  events.forEach(({ turn, event }, index) => {
+  checked.forEach(({ turn, event }, index) => {
     if (turn === null) return;
     if (event.type === "turn.end" && !turnEndIndex.has(turn)) {
       turnEndIndex.set(turn, index);

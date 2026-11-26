@@ -39,9 +39,11 @@ interface AdapterSession {
 
 `provider` matches the bot's `provider` field and the manifest's `contributes.botAdapter.provider`. Pass the adapter to `mainAdapter`, which runs it on standard input and output, the way `main` runs a plugin.
 
-`AdapterContext` has the bot's `id`, the working `folder`, the vendor session to `resume` (or `null`), a `log` function, and `decide`.
+`AdapterContext` has the bot's `id`, the working `folder`, the vendor session to `resume` (or `null`), and a `log` function.
 
-`decide` asks whether a tool may run. The adapter calls it from its tool's permission hook, such as the `canUseTool` hook of Claude. The runtime reports the request and the answer, so an adapter can't forget to report a permission, and can't report one that wasn't asked.
+Each call to `turn` gets a `TurnInput` with the turn's `id`, the prompt `text`, and `decide`. `decide` belongs to that one turn. It asks whether a tool may run. The adapter calls it from its tool's permission hook, such as the `canUseTool` hook of Claude, and must use the `decide` of the turn the hook belongs to. The runtime reports the request and the answer, so an adapter can't forget to report a permission, and can't report one that wasn't asked.
+
+A turn that has ended, was cancelled, or sits in a process that is shutting down is denied at once, with no event. A stale turn can't get an answer that is credited to a newer turn.
 
 ## Events
 
@@ -56,10 +58,10 @@ No event has a field that can hold a command, a path or free text, except the te
 | `tool.start` | `call`, `tool`, `kind` | A tool call began. There is no tool input. `kind` is `file.read`, `file.write`, `shell`, `web` or `other`. A tool the adapter doesn't know is `other`. |
 | `tool.end` | `call`, `outcome` | The call ended with `ok`, `error`, `denied` or `cancelled`. There is no tool output. It may come after its turn ended, for a call that keeps running, such as a background command. |
 | `permission.request` | `request`, `call`, `tool`, `kind`, `pathCount`, `hasCommand` | The runtime sends it, not the adapter. `call` is `null` when the tool asks before it announces the call. The paths and the command stay in memory and never go into an event. |
-| `permission.decision` | `request`, `decision`, `by`, `reason` | The runtime sends it. `decision` is `allow` or `deny`. `by` is `rule`, `policy`, `owner` or `default`. `reason` is a short code such as `outside-folder`, never text. |
+| `permission.decision` | `request`, `decision`, `by`, `reason` | The runtime sends it. `decision` is `allow` or `deny`. `by` is `rule`, `policy`, `owner` or `default`. `reason` is one of a fixed list of codes, never text: `inside-folder`, `outside-folder`, `web`, `shell`, `unknown-tool`, `cancelled`, `turn-ended`, `timeout`, `shutdown`, `no-decider`, `invalid-request`, `duplicate-request`, `invalid-decision` or `decider-failed`. A new code raises the minor version. |
 | `usage` | `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `costUsd` | At most once per turn. `costUsd` is `null` when the tool gives no cost. |
 | `error` | `code` | One of `cli-not-found`, `cli-exited`, `signed-out`, `rate-limited`, `vendor` or `adapter`. There is no message, so nothing the tool printed or the user typed can ride along. A client turns the code into text. |
-| `turn.end` | `reason` | Exactly once per turn. `completed`, `cancelled` (only a user's cancel), `denied` (the tool ended the turn because a permission was refused), `limit`, `refused` or `error`. |
+| `turn.end` | `reason` | Exactly once per turn. `completed`, `cancelled` (a user's cancel, or a shutdown), `denied` (the tool ended the turn because a permission was refused), `limit`, `refused` or `error`. |
 
 ### On the wire
 
@@ -75,42 +77,44 @@ Every event travels as `{ seq, turn, event }`.
 | Turn id | The bot runner | 1 to 64 letters, digits, `_` or `-` |
 | Tool call id | The adapter, usually the tool's own id | 1 to 128 letters, digits, `_`, `.`, `:` or `-` |
 | Permission request id | The adapter | The same form as a tool call id |
-| Session ref | The tool | 1 to 256 printable ASCII characters. It is opaque. |
+| Session ref | The tool | 1 to 256 printable ASCII characters, with no space and no `/`. It is opaque. Tools use UUID-like ids. |
+
+Tool call ids are unique for the whole process, not only for one turn. A tool call id, a request id and a tool name come from the tool or from the bot runner, never from what a user typed, and a set of allowed characters can't prove where a value came from. So the SDK limits the length and the characters, and relies on the adapter to pass only the tool's own ids and names.
 
 The SDK types each id as a **branded** string. A branded string is a string that TypeScript won't mix up with another kind of string, so a turn id can't pass as a call id. Make one with the matching schema, such as `toolCallId.parse(vendorId)`.
 
 ## The permission request
 
-The adapter builds a `PermissionRequest` and passes it to `context.decide`. It has the `request` id, the `call` id (or `null`), the `tool`, the `kind`, `paths` (at most 32, each at most 4096 bytes), `command` (at most 4 KiB, or `null`) and `truncated`. Set `truncated` when you cut a path list or a command to fit.
+The adapter builds a `PermissionRequest` and passes it to the turn's `decide`. It has the `request` id, the `call` id (or `null`), the `tool`, the `kind`, `paths` (at most 32, each at most 4096 bytes), `command` (at most 4 KiB, or `null`) and `truncated`. Set `truncated` when you cut a path list or a command to fit.
 
 `decide` always resolves with a `PermissionDecision`: `{ decision, by, reason }`. A grant covers that one request only. There is no "allow for the rest of the session" ([decision 0034](../decisions/0034-vendor-protocol-per-cli.md)).
 
 A **decider** is the function that answers. You give one to `runAdapter` in its options.
 
-- `denyAll` is the default. It denies every request, with `by: "default"` and reason `no-rule`.
+- `denyAll` is the default. It denies every request, with `by: "default"` and reason `no-decider`.
 - M1 adds a fixed rule ([#20](https://github.com/jcore9/Aphelion/issues/20) and [decision 0063](../decisions/0063-m1-planning-answers.md)). It reads `kind` and `paths`, so it works for every tool.
 - M2 replaces it with a decider that asks the policy engine over the wire. The adapter code stays the same.
 
 ## Rules a stream follows
 
-`checkStream(events)` from `@aphelion/plugin-sdk/testing` checks the events of one process against these seven rules. It returns the broken rules, and an empty list when the stream is good. The runtime enforces the ones it can. Tests run a fake adapter's output and the replays of [#25](https://github.com/jcore9/Aphelion/issues/25) through the same function.
+`checkStream(events)` from `@aphelion/plugin-sdk/testing` checks the events of one process against these seven rules. It checks each event with the same schema the runtime uses, so a caller needn't check first. An event that fails the schema is reported as rule 0. It returns the broken rules, and an empty list when the stream is good. The runtime enforces the ones it can. Tests run a fake adapter's output and the replays of [#25](https://github.com/jcore9/Aphelion/issues/25) through the same function.
 
 1. `seq` counts up by 1 from 1 across the process.
 2. An event with a turn id belongs to that turn. An event with `turn: null` may appear anywhere.
 3. Each turn has exactly one `turn.end`. After it, the turn's id appears only on `tool.end` events for calls that turn started.
-4. Each `tool.start` has at most one `tool.end` with the same `call`, at any later point in the process. A `tool.end` needs a `tool.start` before it. A call with no end is still running.
+4. Each call id has at most one `tool.start` in the whole process, and at most one `tool.end`, at any later point. A `tool.end` needs a `tool.start` before it. A call with no end is still running.
 5. Each `permission.request` has exactly one `permission.decision`, before its turn's `turn.end`.
-6. A `tool.end` with outcome `denied` follows a `deny` decision earlier in the same turn, for that call or with `call: null`.
+6. A `tool.end` with outcome `denied` follows a `deny` decision earlier in the turn that started the call, for that call or with `call: null`. The runtime forwards such an end only when it holds.
 7. A turn has at most one `usage`.
 
-The order of `tool.start` and its permission request isn't fixed. Claude announces the tool before it asks. Other tools ask first. A denied tool may end the turn (Grok ends it with `cancelled`) or not (Claude continues). A client must not assume either.
+The order of `tool.start` and its permission request isn't fixed. Claude announces the tool before it asks. Other tools ask first. A denied tool may end the turn (Grok ends it with `denied`) or not (Claude continues). A client must not assume either.
 
 ## What the runtime does
 
 - **One turn at a time.** A `turn.start` while a turn runs fails with the JSON-RPC error `busy`. A repeat of the running turn's own `turn.start`, or of a turn that ended, gets the same accept and runs nothing.
-- **A broken adapter ends the turn.** The runtime sends `error` with code `adapter`, then `turn.end` with reason `error`, and aborts the adapter's signal. That happens when the stream throws, ends without `turn.end`, yields an event that fails its schema, yields `permission.request` or `permission.decision` itself, yields a second `usage`, starts a call id twice, or ends a call that isn't running.
-- **Each permission request settles exactly once.** The runtime tracks every `decide` call. It denies each open request, with `by: "default"`, when the turn is cancelled, when the turn ends, and when the decider's deadline passes. It sends those decisions before `turn.end`, and ignores any later answer. A late `allow` can never run a tool after the client heard that the turn ended.
-- **A request that can't be asked is denied without an event.** That covers a request that isn't valid, a request after the turn ended or after a cancel, a repeated request id, and a request for a call that an earlier turn started. No `permission.request` was sent, so no decision follows.
+- **A broken adapter ends the turn.** The runtime sends `error` with code `adapter`, then `turn.end` with reason `error`, and aborts the adapter's signal. That happens when the stream throws, ends without `turn.end`, yields an event that fails its schema, yields `permission.request` or `permission.decision` itself, yields a second `usage`, starts a call id twice, ends a call that isn't running, or ends a call as `denied` when no deny decision covers it.
+- **Each permission request settles exactly once.** The runtime tracks every `decide` call. It denies each open request, with `by: "default"`, when the turn is cancelled, when the turn ends, when the process shuts down, and when the decider's deadline passes. It sends those decisions before `turn.end`, and ignores any later answer. A late `allow` can never run a tool after the client heard that the turn ended.
+- **A request that can't be asked is denied without an event.** That covers a request that isn't valid, a request from a turn that ended or was cancelled, a request once shutdown has begun, a repeated request id, and a request for a call that an earlier turn started. No `permission.request` was sent, so no decision follows.
 - **Cancel.** `turn.cancel` settles the open requests as `deny`, then aborts the adapter's signal. The adapter should stop its work and may yield its own `turn.end`, usually `cancelled`. If the stream hasn't ended 5 seconds later, the runtime sends `turn.end` with reason `cancelled` itself, and drops the stream's later events, except `tool.end` for calls the turn started. A stream that ends or throws after a cancel counts as `cancelled`, not as an error. Killing the process tree is the bot runner's job.
 - **The runtime never makes up a `tool.end`.** A call that the tool leaves running, such as a background command, stays open until the tool ends it or the process ends. The adapter yields that `tool.end` from the same stream or from a later turn's stream, and the runtime stamps it with the turn that started the call.
 
@@ -129,7 +133,9 @@ The bot runner and the adapter exchange JSON-RPC 2.0 messages, one JSON object p
 
 The bot runner refuses a prompt longer than 256 KiB, or one whose encoded line is longer than 1 MiB, before it sends it.
 
-If `open` fails, the runtime answers `initialize` with the error `Operation failed` and stops. On `shutdown` or when the input closes, the runtime aborts the running turn, answers its open requests with `deny` and no event, and calls `close`.
+If `open` fails, the runtime answers `initialize` with the error `Operation failed` and stops. On `shutdown` or when the input closes, the runtime first marks itself as closing, so new requests are denied at once with reason `shutdown` and no event. It then aborts the running turn, sends the `permission.decision` for each open request, sends one `turn.end` with reason `cancelled` for a turn that is open, and calls `close`. Calls that are still open get no `tool.end`, which rule 4 allows.
+
+When the connection is lost and the runtime can't flush, the bot runner repairs the stream instead. It appends `error` with code `cli-exited`, a `tool.end` with outcome `cancelled` for each open call, and `turn.end` with reason `error`.
 
 ## Declare an adapter in a manifest
 
@@ -165,6 +171,6 @@ A test for an adapter runs the events it produces through `checkStream` and expe
 ## What comes later
 
 - [#20](https://github.com/jcore9/Aphelion/issues/20) builds the Claude adapter and the fixed permission rule.
-- [#22](https://github.com/jcore9/Aphelion/issues/22) builds the bot runner, which saves the latest `session` ref and resumes from it. When a bot process dies, it adds `error` with code `cli-exited`, a `tool.end` with outcome `cancelled` for each open call, and `turn.end` with reason `error`.
+- [#22](https://github.com/jcore9/Aphelion/issues/22) builds the bot runner, which saves the latest `session` ref and resumes from it. When a bot process dies, it repairs the stream as [the wire](#the-wire) says.
 - [#23](https://github.com/jcore9/Aphelion/issues/23) adds the frames that carry these events to clients, with bot and session ids and a saved format version. `packages/protocol` doesn't change before then.
 - [#25](https://github.com/jcore9/Aphelion/issues/25) adds recorded streams that replay through an adapter.

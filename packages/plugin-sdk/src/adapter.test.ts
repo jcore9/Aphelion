@@ -153,8 +153,11 @@ describe("events", () => {
       streamEvent.safeParse({ ...decision, reason: "/etc/passwd" }).success,
     ).toBe(false);
     expect(
-      streamEvent.safeParse({ ...decision, reason: "x".repeat(65) }).success,
+      streamEvent.safeParse({ ...decision, reason: "secret.txt" }).success,
     ).toBe(false);
+    expect(streamEvent.safeParse({ ...decision, reason: "ls" }).success).toBe(
+      false,
+    );
     expect(streamEvent.safeParse({ ...request, pathCount: 33 }).success).toBe(
       false,
     );
@@ -251,8 +254,17 @@ describe("ids", () => {
   });
 
   test("a session ref is printable ASCII", () => {
-    expect(sessionRef.safeParse("session 1/ok").success).toBe(true);
+    expect(
+      sessionRef.safeParse("0c9e5a1e-7f3b-4c1d-8a52-3f6b2d9e4a10").success,
+    ).toBe(true);
     expect(sessionRef.safeParse("é").success).toBe(false);
+  });
+
+  test("a session ref can't be a path or a command with spaces", () => {
+    expect(sessionRef.safeParse("/etc/passwd").success).toBe(false);
+    expect(sessionRef.safeParse("rm -rf x").success).toBe(false);
+    expect(sessionRef.safeParse("a/b").success).toBe(false);
+    expect(sessionRef.safeParse("a b").success).toBe(false);
   });
 });
 
@@ -294,7 +306,11 @@ describe("permission request and decision", () => {
   });
 
   test("a decision has no scope field, so a grant covers one request", () => {
-    const decision = { decision: "allow", by: "owner", reason: "ok" };
+    const decision = {
+      decision: "allow",
+      by: "owner",
+      reason: "inside-folder",
+    };
     expect(permissionDecision.safeParse(decision).success).toBe(true);
     expect(
       permissionDecision.safeParse({ ...decision, scope: "always" }).success,
@@ -312,7 +328,7 @@ describe("permission request and decision", () => {
     expect(answer).toEqual({
       decision: "deny",
       by: "default",
-      reason: "no-rule",
+      reason: "no-decider",
     });
     expect(permissionDecision.safeParse(answer).success).toBe(true);
   });
@@ -350,5 +366,35 @@ describe("wire params", () => {
       }).success,
     ).toBe(false);
     expect(turnCancelParams.safeParse({ turn: "t 1" }).success).toBe(false);
+  });
+});
+
+describe("permission reasons", () => {
+  test.each([
+    "inside-folder",
+    "outside-folder",
+    "web",
+    "shell",
+    "unknown-tool",
+    "cancelled",
+    "turn-ended",
+    "timeout",
+    "shutdown",
+    "no-decider",
+  ])("accepts %s", (reason) => {
+    expect(
+      permissionDecision.safeParse({ decision: "deny", by: "default", reason })
+        .success,
+    ).toBe(true);
+  });
+
+  test("refuses a code that isn't in the list", () => {
+    expect(
+      permissionDecision.safeParse({
+        decision: "deny",
+        by: "default",
+        reason: "whatever",
+      }).success,
+    ).toBe(false);
   });
 });

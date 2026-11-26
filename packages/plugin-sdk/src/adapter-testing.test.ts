@@ -6,21 +6,27 @@ import {
   turnId,
   type AdapterContext,
   type AdapterEvent,
+  type TurnInput,
 } from "./adapter.ts";
 import { fakeAdapter } from "./adapter-testing.ts";
 
 const done: AdapterEvent = { type: "turn.end", reason: "completed" };
 
-const context = (
-  decide: AdapterContext["decide"] = () =>
-    Promise.resolve({ decision: "allow", by: "rule", reason: "ok" }),
-): AdapterContext => ({
+const context = (): AdapterContext => ({
   bot: { id: "b1" },
   folder: "/work",
   resume: null,
-  decide,
   log: () => undefined,
 });
+
+const allowAll: TurnInput["decide"] = () =>
+  Promise.resolve({ decision: "allow", by: "rule", reason: "inside-folder" });
+
+const input = (
+  turn: string,
+  text: string,
+  decide: TurnInput["decide"] = allowAll,
+): TurnInput => ({ turn: turnId.parse(turn), text, decide });
 
 const collect = async (stream: AsyncIterable<AdapterEvent>) => {
   const events: AdapterEvent[] = [];
@@ -36,15 +42,9 @@ describe("fakeAdapter", () => {
     ]);
     const session = await adapter.open(context());
     const signal = new AbortController().signal;
-    const first = await collect(
-      session.turn({ turn: turnId.parse("t1"), text: "go" }, signal),
-    );
-    const second = await collect(
-      session.turn({ turn: turnId.parse("t2"), text: "again" }, signal),
-    );
-    const third = await collect(
-      session.turn({ turn: turnId.parse("t3"), text: "more" }, signal),
-    );
+    const first = await collect(session.turn(input("t1", "go"), signal));
+    const second = await collect(session.turn(input("t2", "again"), signal));
+    const third = await collect(session.turn(input("t3", "more"), signal));
     expect(first).toEqual([{ type: "text.delta", text: "a" }, done]);
     expect(second).toEqual([{ type: "session", ref: "s1" }]);
     expect(third).toEqual([]);
@@ -66,19 +66,17 @@ describe("fakeAdapter", () => {
       truncated: false,
     });
     const adapter = fakeAdapter([[{ ask: request }, { emit: done }]]);
-    const session = await adapter.open(
-      context(() =>
-        Promise.resolve({ decision: "deny", by: "policy", reason: "no" }),
-      ),
-    );
+    const session = await adapter.open(context());
     await collect(
       session.turn(
-        { turn: turnId.parse("t1"), text: "go" },
+        input("t1", "go", () =>
+          Promise.resolve({ decision: "deny", by: "policy", reason: "web" }),
+        ),
         new AbortController().signal,
       ),
     );
     expect(adapter.answers).toEqual([
-      { decision: "deny", by: "policy", reason: "no" },
+      { decision: "deny", by: "policy", reason: "web" },
     ]);
   });
 
@@ -86,9 +84,7 @@ describe("fakeAdapter", () => {
     const adapter = fakeAdapter([[{ waitForAbort: true }, { emit: done }]]);
     const session = await adapter.open(context());
     const controller = new AbortController();
-    const running = collect(
-      session.turn({ turn: turnId.parse("t1"), text: "go" }, controller.signal),
-    );
+    const running = collect(session.turn(input("t1", "go"), controller.signal));
     controller.abort();
     expect(await running).toEqual([done]);
   });
@@ -103,7 +99,7 @@ describe("fakeAdapter", () => {
     const events: AdapterEvent[] = [];
     const running = (async () => {
       for await (const event of session.turn(
-        { turn: turnId.parse("t1"), text: "go" },
+        input("t1", "go"),
         new AbortController().signal,
       ))
         events.push(event);
@@ -119,12 +115,7 @@ describe("fakeAdapter", () => {
     const adapter = fakeAdapter([[{ throws: true }]]);
     const session = await adapter.open(context());
     await expect(
-      collect(
-        session.turn(
-          { turn: turnId.parse("t1"), text: "go" },
-          new AbortController().signal,
-        ),
-      ),
+      collect(session.turn(input("t1", "go"), new AbortController().signal)),
     ).rejects.toThrow("told to throw");
     expect(adapter.closed).toBe(false);
     await session.close?.();
@@ -137,10 +128,7 @@ describe("fakeAdapter", () => {
     ]);
     const session = await adapter.open(context());
     const events = await collect(
-      session.turn(
-        { turn: turnId.parse("t1"), text: "go" },
-        new AbortController().signal,
-      ),
+      session.turn(input("t1", "go"), new AbortController().signal),
     );
     expect(events).toEqual([{ nope: "c" }]);
   });

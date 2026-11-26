@@ -2,12 +2,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   adapterEvent,
   permissionRequest,
-  type AdapterContext,
   type AdapterEvent,
   type AdapterSession,
   type BotAdapter,
   type Decider,
   type PermissionDecision,
+  type TurnInput,
 } from "./adapter.ts";
 import { checkStream } from "./adapter-check.ts";
 import {
@@ -402,7 +402,7 @@ describe("permission requests", () => {
     ]);
     const run = await runTurn(adapter);
     expect(adapter.answers).toEqual([
-      { decision: "deny", by: "default", reason: "no-rule" },
+      { decision: "deny", by: "default", reason: "no-decider" },
     ]);
     const asked = run.events.find(
       ({ event }) => event.type === "permission.request",
@@ -452,11 +452,11 @@ describe("permission requests", () => {
   });
 
   test("an invalid request is denied without an event", async () => {
-    const adapter = fakeAdapter([[{ emitRaw: undefined }, text("x"), done()]]);
+    const adapter = fakeAdapter([[{ hang: true }]]);
     const harness = startAdapter(adapter);
     await harness.initialize();
-    const [context] = adapter.contexts;
-    const answer = await (context as AdapterContext).decide({
+    await harness.startTurn("t1", "x");
+    const answer = await adapter.inputs[0]?.decide({
       request: "r1",
     } as never);
     expect(answer).toEqual({
@@ -464,8 +464,8 @@ describe("permission requests", () => {
       by: "default",
       reason: "invalid-request",
     });
-    await harness.shutdown();
     expect(harness.events).toEqual([]);
+    await harness.shutdown();
   });
 
   test("a decider that throws, or answers badly, is denied", async () => {
@@ -511,8 +511,7 @@ describe("permission requests", () => {
     await harness.initialize();
     await harness.startTurn("t1", "x");
     await harness.untilEvent(({ event }) => event.type === "turn.end");
-    const [context] = adapter.contexts;
-    const answer = await (context as AdapterContext).decide(
+    const answer = await adapter.inputs[0]?.decide(
       permissionRequest.parse({
         request: "late",
         call: null,
@@ -539,8 +538,7 @@ describe("permission requests", () => {
     await harness.startTurn("t1", "x");
     await harness.untilEvent(({ event }) => event.type === "turn.end");
     await harness.startTurn("t2", "y");
-    const [context] = adapter.contexts;
-    const answer = await (context as AdapterContext).decide(
+    const answer = await adapter.inputs[1]?.decide(
       permissionRequest.parse({
         request: "r1",
         call: "bg",
@@ -551,7 +549,7 @@ describe("permission requests", () => {
         truncated: false,
       }),
     );
-    expect(answer.reason).toBe("turn-ended");
+    expect(answer?.reason).toBe("turn-ended");
     await harness.shutdown();
     expect(types(harness.events)).not.toContain("permission.request");
   });
@@ -559,9 +557,9 @@ describe("permission requests", () => {
   test("a request still open when the turn ends is settled before turn.end", async () => {
     const adapter: BotAdapter = {
       provider: "x",
-      open: (context): AdapterSession => ({
-        async *turn() {
-          const pending = context.decide(
+      open: (): AdapterSession => ({
+        async *turn({ decide }) {
+          const pending = decide(
             permissionRequest.parse({
               request: "r1",
               call: null,
@@ -616,7 +614,7 @@ describe("permission requests", () => {
     await harness.untilEvent(({ event }) => event.type === "turn.end");
     expect(harness.events[1]?.event).toMatchObject({
       decision: "deny",
-      reason: "deadline",
+      reason: "timeout",
     });
     expect(checkStream(harness.events)).toEqual([]);
     await harness.shutdown();
@@ -794,6 +792,242 @@ describe("cancel", () => {
       reason: "cancelled",
     });
     await harness.shutdown();
+  });
+});
+
+describe("an ask is bound to its own turn", () => {
+  test("a stale turn that asks after the runtime ended it gets deny, and the next turn's stream is untouched", async () => {
+    vi.useFakeTimers();
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const adapter = fakeAdapter([
+      [{ wait: gate }, ask("stale"), text("dropped"), done("cancelled")],
+      [{ hang: true }],
+    ]);
+    const harness = startAdapter(adapter, { decider: () => allow });
+    await harness.initialize();
+    await harness.startTurn("t1", "x");
+    await harness.cancel("t1");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await harness.startTurn("t2", "y")).toEqual({ result: {} });
+    open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(adapter.answers).toEqual([
+      { decision: "deny", by: "default", reason: "turn-ended" },
+    ]);
+    expect(types(harness.events)).toEqual(["turn.end"]);
+    expect(harness.events.every(({ turn }) => turn !== "t2")).toBe(true);
+    await harness.shutdown();
+  });
+
+  test("a turn's own decide still reaches the decider while it runs", async () => {
+    const adapter = fakeAdapter([
+      [ask("r1"), done()],
+      [ask("r2"), done()],
+    ]);
+    const harness = startAdapter(adapter, { decider: () => allow });
+    await harness.initialize();
+    await harness.startTurn("t1", "x");
+    await harness.untilEvent(({ event }) => event.type === "turn.end");
+    await harness.startTurn("t2", "y");
+    await harness.untilEvent(
+      ({ turn, event }) => turn === "t2" && event.type === "turn.end",
+    );
+    expect(adapter.answers).toEqual([allow, allow]);
+    expect(
+      harness.events
+        .filter(({ event }) => event.type === "permission.request")
+        .map(({ turn }) => turn),
+    ).toEqual(["t1", "t2"]);
+    expect(checkStream(harness.events)).toEqual([]);
+    await harness.shutdown();
+  });
+});
+
+describe("shutdown", () => {
+  test("flushes an open ask and ends an open turn as cancelled", async () => {
+    const adapter = fakeAdapter([
+      [toolStart("c1"), ask("r1", "c1"), toolEnd("c1", "denied"), done()],
+    ]);
+    const harness = startAdapter(adapter, {
+      decider: () => new Promise(() => undefined),
+    });
+    await harness.initialize();
+    await harness.startTurn("t1", "x");
+    await harness.untilEvent(
+      ({ event }) => event.type === "permission.request",
+    );
+    await harness.shutdown();
+    await harness.done;
+    expect(types(harness.events)).toEqual([
+      "tool.start",
+      "permission.request",
+      "permission.decision",
+      "turn.end",
+    ]);
+    expect(harness.events[2]?.event).toMatchObject({
+      decision: "deny",
+      by: "default",
+      reason: "shutdown",
+    });
+    expect(harness.events[3]?.event).toEqual({
+      type: "turn.end",
+      reason: "cancelled",
+    });
+    expect(adapter.answers).toEqual([
+      { decision: "deny", by: "default", reason: "shutdown" },
+    ]);
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+
+  test("a running turn without asks ends as cancelled", async () => {
+    const harness = startAdapter(fakeAdapter([[text("a"), { hang: true }]]));
+    await harness.initialize();
+    await harness.startTurn("t1", "x");
+    await harness.untilEvent(({ event }) => event.type === "text.delta");
+    await harness.shutdown();
+    await harness.done;
+    expect(types(harness.events)).toEqual(["text.delta", "turn.end"]);
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+
+  test("an idle shutdown sends no event", async () => {
+    const harness = startAdapter(fakeAdapter([[done()]]));
+    await harness.initialize();
+    await harness.startTurn("t1", "x");
+    await harness.untilEvent(({ event }) => event.type === "turn.end");
+    await harness.shutdown();
+    await harness.done;
+    expect(types(harness.events)).toEqual(["turn.end"]);
+  });
+
+  test("an ask made from close() is denied at once with no event", async () => {
+    let decide: TurnInput["decide"] | undefined;
+    const answers: PermissionDecision[] = [];
+    const adapter: BotAdapter = {
+      provider: "x",
+      open: (): AdapterSession => ({
+        async *turn(input) {
+          decide = input.decide;
+          yield ev({ type: "text.delta", text: "a" });
+          await new Promise(() => undefined);
+        },
+        async close() {
+          answers.push(
+            await (decide as TurnInput["decide"])(
+              permissionRequest.parse({
+                request: "r9",
+                call: null,
+                tool: "Bash",
+                kind: "shell",
+                paths: [],
+                command: null,
+                truncated: false,
+              }),
+            ),
+          );
+        },
+      }),
+    };
+    const harness = startAdapter(adapter, { decider: () => allow });
+    await harness.initialize();
+    await harness.startTurn("t1", "x");
+    await harness.untilEvent(({ event }) => event.type === "text.delta");
+    await harness.shutdown();
+    await harness.done;
+    expect(answers).toEqual([
+      { decision: "deny", by: "default", reason: "shutdown" },
+    ]);
+    expect(types(harness.events)).toEqual(["text.delta", "turn.end"]);
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+});
+
+describe("a denied tool.end needs a deny decision", () => {
+  const denied = (...steps: FakeStep[]) => [
+    toolStart("c1"),
+    ...steps,
+    toolEnd("c1", "denied"),
+    done(),
+  ];
+
+  test("a denied end with no deny ends the turn with an adapter error", async () => {
+    const run = await runTurn(fakeAdapter([denied()]));
+    expect(types(run.events)).toEqual(["tool.start", "error", "turn.end"]);
+    expect(checkStream(run.events)).toEqual([]);
+  });
+
+  test("a deny for that call, or a deny with call null, lets it through", async () => {
+    for (const call of ["c1", null]) {
+      const run = await runTurn(fakeAdapter([denied(ask("r1", call))]));
+      expect(types(run.events)).toContain("tool.end");
+      expect(types(run.events)).not.toContain("error");
+      expect(checkStream(run.events)).toEqual([]);
+    }
+  });
+
+  test("a deny for another call, or an allow, doesn't count", async () => {
+    const other = await runTurn(
+      fakeAdapter([[toolStart("c2"), ...denied(ask("r1", "c2"))]]),
+    );
+    expect(types(other.events)).toContain("error");
+    const allowed = await runTurn(fakeAdapter([denied(ask("r1", "c1"))]), {
+      decider: () => allow,
+    });
+    expect(types(allowed.events)).toContain("error");
+  });
+
+  test("a late denied end for a call started in an earlier turn needs that turn's deny", async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const harness = startAdapter(
+      fakeAdapter([
+        [toolStart("bg"), done(), { wait: gate }, toolEnd("bg", "denied")],
+        [{ hang: true }],
+      ]),
+    );
+    await harness.initialize();
+    await harness.startTurn("t1", "x");
+    await harness.untilEvent(({ event }) => event.type === "turn.end");
+    await harness.startTurn("t2", "y");
+    open();
+    await Promise.resolve();
+    await harness.shutdown();
+    expect(types(harness.events)).not.toContain("tool.end");
+    expect(harness.logs.join("\n")).toContain("after its turn ended");
+  });
+
+  test("a late denied end passes when the starting turn denied that call", async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const harness = startAdapter(
+      fakeAdapter([
+        [
+          toolStart("bg"),
+          ask("r1", "bg"),
+          done(),
+          { wait: gate },
+          toolEnd("bg", "denied"),
+        ],
+        [{ hang: true }],
+      ]),
+    );
+    await harness.initialize();
+    await harness.startTurn("t1", "x");
+    await harness.untilEvent(({ event }) => event.type === "turn.end");
+    await harness.startTurn("t2", "y");
+    open();
+    await harness.untilEvent(({ event }) => event.type === "tool.end");
+    expect(harness.events.at(-1)?.turn).toBe("t1");
+    await harness.shutdown();
+    await harness.done;
+    expect(checkStream(harness.events)).toEqual([]);
   });
 });
 

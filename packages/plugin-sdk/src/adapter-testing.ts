@@ -78,13 +78,13 @@ export function fakeAdapter(
 
   async function* run(
     steps: readonly FakeStep[],
-    context: AdapterContext,
+    input: TurnInput,
     signal: AbortSignal,
   ): AsyncGenerator<AdapterEvent> {
     for (const step of steps) {
       if ("emit" in step) yield step.emit;
       else if ("emitRaw" in step) yield step.emitRaw as AdapterEvent;
-      else if ("ask" in step) answers.push(await context.decide(step.ask));
+      else if ("ask" in step) answers.push(await input.decide(step.ask));
       else if ("wait" in step) await step.wait;
       else if ("waitForAbort" in step) {
         await new Promise<void>((resolve) => {
@@ -119,7 +119,7 @@ export function fakeAdapter(
           const steps = script[inputs.length] ?? [];
           inputs.push(input);
           signals.push(signal);
-          return run(steps, context, signal);
+          return run(steps, input, signal);
         },
         close: () => {
           state.closed = true;

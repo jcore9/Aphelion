@@ -15,9 +15,11 @@ import {
   type PermissionDecision,
   type PermissionRequest,
   type PermissionRequestId,
+  type ReasonCode,
   type StreamEvent,
   type ToolCallId,
   type TurnId,
+  type TurnInput,
 } from "./adapter.ts";
 import type { PluginIO } from "./plugin.ts";
 import { describeError } from "./runtime.ts";
@@ -36,13 +38,14 @@ export interface RunAdapterOptions {
   readonly decider?: Decider;
   /** How long a cancelled turn has to end by itself before the runtime ends it with `cancelled`, in milliseconds. The default is 5000. */
   readonly cancelGraceMs?: number;
-  /** How long the decider has to answer, in milliseconds. After that the request is denied with reason `deadline`. The default is no deadline. */
+  /** How long the decider has to answer, in milliseconds. After that the request is denied with reason `timeout`. The default is no deadline. */
   readonly decisionDeadlineMs?: number;
 }
 
 const defaultCancelGraceMs = 5000;
 
 interface Ask {
+  readonly call: ToolCallId | null;
   settled: boolean;
   timer: ReturnType<typeof setTimeout> | undefined;
   resolve(decision: PermissionDecision): void;
@@ -52,17 +55,18 @@ interface Turn {
   readonly id: TurnId;
   readonly controller: AbortController;
   readonly asks: Map<PermissionRequestId, Ask>;
+  readonly denied: { any: boolean; readonly calls: Set<ToolCallId> };
   phase: "running" | "cancelling" | "ended";
   usageSent: boolean;
   cancelTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
 interface Call {
-  readonly turn: TurnId;
+  readonly owner: Turn;
   ended: boolean;
 }
 
-const deny = (reason: string): PermissionDecision => ({
+const deny = (reason: ReasonCode): PermissionDecision => ({
   decision: "deny",
   by: "default",
   reason,
@@ -100,6 +104,7 @@ export async function runAdapter(
   const calls = new Map<ToolCallId, Call>();
   const seen = new Set<TurnId>();
   let session: AdapterSession | undefined;
+  let closing = false;
   let current: Turn | undefined;
   let seq = 0;
   let writing = Promise.resolve();
@@ -145,13 +150,17 @@ export async function runAdapter(
     clearTimeout(ask.timer);
     if (announce) {
       emit(turn.id, { type: "permission.decision", request: id, ...decision });
+      if (decision.decision === "deny") {
+        if (ask.call === null) turn.denied.any = true;
+        else turn.denied.calls.add(ask.call);
+      }
     }
     ask.resolve(decision);
   };
 
-  const settleAll = (turn: Turn, reason: string, announce = true) => {
+  const settleAll = (turn: Turn, reason: ReasonCode) => {
     for (const id of turn.asks.keys()) {
-      settleAsk(id, turn, deny(reason), announce);
+      settleAsk(id, turn, deny(reason), true);
     }
   };
 
@@ -188,13 +197,20 @@ export async function runAdapter(
     }, cancelGraceMs);
   };
 
+  const mayEnd = (call: Call, event: { call: ToolCallId; outcome: string }) =>
+    !call.ended &&
+    (event.outcome !== "denied" ||
+      call.owner.denied.any ||
+      call.owner.denied.calls.has(event.call));
+
   const late = (raw: unknown) => {
+    if (closing) return;
     const parsed = adapterEvent.safeParse(raw);
     if (parsed.success && parsed.data.type === "tool.end") {
       const call = calls.get(parsed.data.call);
-      if (call && !call.ended) {
+      if (call && mayEnd(call, parsed.data)) {
         call.ended = true;
-        emit(call.turn, parsed.data);
+        emit(call.owner.id, parsed.data);
         return;
       }
     }
@@ -228,17 +244,20 @@ export async function runAdapter(
           fail(turn, "the adapter started a call id twice");
           return;
         }
-        calls.set(event.call, { turn: turn.id, ended: false });
+        calls.set(event.call, { owner: turn, ended: false });
         emit(turn.id, event);
         return;
       case "tool.end": {
         const call = calls.get(event.call);
-        if (!call || call.ended) {
-          fail(turn, "the adapter ended a call that isn't running");
+        if (!call || !mayEnd(call, event)) {
+          fail(
+            turn,
+            "the adapter ended a call that isn't running, or denied one with no deny decision",
+          );
           return;
         }
         call.ended = true;
-        emit(call.turn, event);
+        emit(call.owner.id, event);
         return;
       }
       case "usage":
@@ -257,10 +276,12 @@ export async function runAdapter(
 
   const consume = async (opened: AdapterSession, turn: Turn, text: string) => {
     try {
-      for await (const raw of opened.turn(
-        { turn: turn.id, text },
-        turn.controller.signal,
-      )) {
+      const input: TurnInput = {
+        turn: turn.id,
+        text,
+        decide: (raw) => decide(turn, raw),
+      };
+      for await (const raw of opened.turn(input, turn.controller.signal)) {
         handle(turn, raw);
       }
       if (turn.phase === "cancelling") {
@@ -294,27 +315,33 @@ export async function runAdapter(
     settleAsk(id, turn, decision, true);
   };
 
-  const decide = (raw: PermissionRequest): Promise<PermissionDecision> => {
+  const decide = (
+    turn: Turn,
+    raw: PermissionRequest,
+  ): Promise<PermissionDecision> => {
+    if (closing) return Promise.resolve(deny("shutdown"));
     const parsed = permissionRequest.safeParse(raw);
     if (!parsed.success) return Promise.resolve(deny("invalid-request"));
     const request = parsed.data;
-    const turn = current;
-    if (!turn || turn.phase === "ended") {
-      return Promise.resolve(deny("turn-ended"));
-    }
+    if (turn.phase === "ended") return Promise.resolve(deny("turn-ended"));
     if (turn.phase === "cancelling") return Promise.resolve(deny("cancelled"));
     const owner = request.call ? calls.get(request.call) : undefined;
-    if (owner && owner.turn !== turn.id) {
+    if (owner && owner.owner !== turn) {
       return Promise.resolve(deny("turn-ended"));
     }
     if (turn.asks.has(request.request)) {
       return Promise.resolve(deny("duplicate-request"));
     }
     const answered = new Promise<PermissionDecision>((resolve) => {
-      const ask: Ask = { settled: false, timer: undefined, resolve };
+      const ask: Ask = {
+        call: request.call,
+        settled: false,
+        timer: undefined,
+        resolve,
+      };
       if (options.decisionDeadlineMs !== undefined) {
         ask.timer = setTimeout(() => {
-          settleAsk(request.request, turn, deny("deadline"), true);
+          settleAsk(request.request, turn, deny("timeout"), true);
         }, options.decisionDeadlineMs);
       }
       turn.asks.set(request.request, ask);
@@ -338,6 +365,7 @@ export async function runAdapter(
       id,
       controller: new AbortController(),
       asks: new Map(),
+      denied: { any: false, calls: new Set() },
       phase: "running",
       usageSent: false,
       cancelTimer: undefined,
@@ -347,11 +375,12 @@ export async function runAdapter(
   };
 
   const closeDown = async () => {
+    closing = true;
     const turn = current;
     if (turn && turn.phase !== "ended") {
       turn.controller.abort();
-      settleAll(turn, "shutdown", false);
-      clearTimeout(turn.cancelTimer);
+      settleAll(turn, "shutdown");
+      conclude(turn, [{ type: "turn.end", reason: "cancelled" }]);
     }
     try {
       await session?.close?.();
@@ -392,7 +421,6 @@ export async function runAdapter(
             bot: parsed.data.bot,
             folder: parsed.data.folder,
             resume: parsed.data.resume,
-            decide,
             log: (message) => {
               io.log(message);
             },

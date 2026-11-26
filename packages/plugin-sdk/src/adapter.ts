@@ -39,10 +39,10 @@ export const permissionRequestId = z
 /** The id of one permission request. */
 export type PermissionRequestId = z.infer<typeof permissionRequestId>;
 
-/** The Zod schema for the vendor's session id. The id is opaque: 1 to 256 printable ASCII characters. */
+/** The Zod schema for the vendor's session id. The id is opaque: 1 to 256 printable ASCII characters, with no space and no `/`, so it can't be a path or a command with arguments. Vendor session ids are UUID-like. */
 export const sessionRef = z
   .string()
-  .regex(/^[\x20-\x7e]{1,256}$/)
+  .regex(/^[\x21-\x2e\x30-\x7e]{1,256}$/)
   .brand<"SessionRef">();
 /** The vendor's id for a session, which the bot runner saves so the bot can resume it. */
 export type SessionRef = z.infer<typeof sessionRef>;
@@ -62,7 +62,25 @@ export type ToolKind = z.infer<typeof toolKind>;
 
 const decisionValue = z.enum(["allow", "deny"]);
 const decidedBy = z.enum(["rule", "policy", "owner", "default"]);
-const reasonCode = z.string().regex(/^[a-z0-9-]{1,64}$/);
+/** The Zod schema for the reason of a permission decision. It is a fixed code, never text. A new code is a minor version bump. */
+export const reasonCode = z.enum([
+  "inside-folder",
+  "outside-folder",
+  "web",
+  "shell",
+  "unknown-tool",
+  "cancelled",
+  "turn-ended",
+  "timeout",
+  "shutdown",
+  "no-decider",
+  "invalid-request",
+  "duplicate-request",
+  "invalid-decision",
+  "decider-failed",
+]);
+/** Why a permission was allowed or denied. */
+export type ReasonCode = z.infer<typeof reasonCode>;
 
 const count = z.int().nonnegative();
 
@@ -202,7 +220,7 @@ export const permissionRequest = z.strictObject({
 /** What an adapter asks before a tool runs. `truncated` is true when the adapter cut a path list or a command to fit. */
 export type PermissionRequest = z.infer<typeof permissionRequest>;
 
-/** The Zod schema for the answer to a permission request. `reason` is a short code, such as `outside-folder`, never text. */
+/** The Zod schema for the answer to a permission request. `reason` is one of a fixed list of codes, such as `outside-folder`, never text. */
 export const permissionDecision = z.strictObject({
   decision: decisionValue,
   by: decidedBy,
@@ -251,11 +269,6 @@ export interface AdapterContext {
   readonly folder: string;
   /** The vendor session to resume, or `null` to start a new one. */
   readonly resume: SessionRef | null;
-  /**
-   * Asks whether a tool may run. The runtime puts `permission.request` and `permission.decision` on the stream, so the adapter reports nothing itself.
-   * It always resolves. A request that is invalid, comes after the turn ended or after a cancel, or isn't answered in time resolves as `deny`.
-   */
-  decide(request: PermissionRequest): Promise<PermissionDecision>;
   /** Writes a message to the server's log. Never pass event payloads. */
   log(message: string): void;
 }
@@ -266,6 +279,11 @@ export interface TurnInput {
   readonly turn: TurnId;
   /** The prompt, at most 256 KiB. */
   readonly text: string;
+  /**
+   * Asks whether a tool may run in this turn. The runtime puts `permission.request` and `permission.decision` on the stream, so the adapter reports nothing itself.
+   * It always resolves. A request that is invalid, comes after this turn ended, after a cancel or after shutdown began, or isn't answered in time resolves as `deny`. The ones that can't be asked send no event.
+   */
+  readonly decide: (request: PermissionRequest) => Promise<PermissionDecision>;
 }
 
 /** One running conversation with the vendor's CLI. */
@@ -298,5 +316,5 @@ export type Decider = (
 export const denyAll: Decider = () => ({
   decision: "deny",
   by: "default",
-  reason: "no-rule",
+  reason: "no-decider",
 });

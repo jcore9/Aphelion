@@ -47,7 +47,7 @@ const decide = (request: string, decision = "allow"): Row["1"] => ({
   request,
   decision,
   by: "rule",
-  reason: "ok",
+  reason: "inside-folder",
 });
 const usage: Row["1"] = {
   type: "usage",
@@ -420,4 +420,60 @@ test("a violation names ids and numbers only", () => {
   expect(violation?.message).toBe(
     "request r-secret-1 in turn t1 has no decision",
   );
+});
+
+describe("calls and events that can't be trusted", () => {
+  test("a second tool.start for a call id seen before breaks rule 4", () => {
+    expect(
+      rules([
+        ["t1", start("c1")],
+        ["t1", end("c1")],
+        ["t1", start("c1")],
+        ["t1", end("c1")],
+        ["t1", done],
+      ]),
+    ).toEqual([4, 4]);
+  });
+
+  test("a call id started in another turn breaks rule 4 too", () => {
+    expect(
+      rules([
+        ["t1", start("c1")],
+        ["t1", done],
+        ["t2", start("c1")],
+        ["t2", done],
+      ]),
+    ).toEqual([4]);
+  });
+
+  test("distinct call ids pass", () => {
+    expect(
+      rules([
+        ["t1", start("c1")],
+        ["t1", end("c1")],
+        ["t1", start("c2")],
+        ["t1", end("c2")],
+        ["t1", done],
+      ]),
+    ).toEqual([]);
+  });
+
+  test("an event that fails its schema is reported, and is not checked further", () => {
+    const bad = [
+      { seq: 1, turn: "t1", event: { type: "text.delta", text: "" } },
+      { seq: 2, turn: "t1", event: { type: "turn.end", reason: "completed" } },
+    ] as unknown as AdapterEnvelope[];
+    expect(checkStream(bad).map(({ rule }) => rule)).toEqual([0]);
+  });
+
+  test("an event with no turn that isn't session or error is reported", () => {
+    const bad = [
+      {
+        seq: 1,
+        turn: null,
+        event: { type: "tool.start", call: "c1", tool: "Bash", kind: "shell" },
+      },
+    ] as unknown as AdapterEnvelope[];
+    expect(checkStream(bad).map(({ rule }) => rule)).toEqual([0]);
+  });
 });
