@@ -328,20 +328,28 @@ describe("the bot manager", () => {
   );
 
   it.live(
-    "accepts a replayed turn without marking the bot busy, and doesn't send a running turn twice",
+    "reports a replayed finished turn as ended, keeps the bot idle, and accepts a repeat of the running turn",
     () =>
       Effect.gen(function* () {
         const chief = recording([sessionTurn, [{ waitForAbort: true }]]);
-        const { fake, manager, reach } = yield* system(chief.bot);
+        const { fake, manager, reach, seen } = yield* system(chief.bot);
         yield* manager.start("chief");
         yield* reach("running");
         expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe(
           "accepted",
         );
+        yield* Effect.gen(function* () {
+          while (
+            !seen.some(
+              ({ envelope }) =>
+                envelope.turn === "t1" && envelope.event.type === "turn.end",
+            )
+          ) {
+            yield* Effect.sleep("5 millis");
+          }
+        }).pipe(Effect.timeout("5 seconds"), Effect.orDie);
         yield* reach("running");
-        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe(
-          "accepted",
-        );
+        expect(yield* manager.startTurn("chief", t("t1"), "hi")).toBe("ended");
         expect(yield* manager.status("chief")).toEqual({ state: "running" });
         expect(yield* manager.startTurn("chief", t("t2"), "hi")).toBe(
           "accepted",

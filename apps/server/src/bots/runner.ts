@@ -35,6 +35,7 @@ import type {
   RunnerReply,
   RunnerRequest,
   StartRequest,
+  TurnRefusal,
 } from "./runner-protocol";
 import { streamTracker, type StreamTracker } from "./stream";
 
@@ -101,6 +102,12 @@ const tagOf = (slot: Slot): Tag => ({
   bot: slot.start.bot,
   run: slot.start.run,
 });
+
+function refusalOf(code: number | null): TurnRefusal {
+  if (code === rpcErrors.busy.code) return "busy";
+  if (code === rpcErrors.turnEnded.code) return "ended";
+  return "refused";
+}
 
 function parseLine(text: string): RpcMessage | undefined {
   try {
@@ -388,10 +395,7 @@ export const runBotRunner = (
             type: "turn.refused",
             ...tagOf(slot),
             turn: pending.turn,
-            reason:
-              "error" in message && message.error.code === rpcErrors.busy.code
-                ? "busy"
-                : "refused",
+            reason: refusalOf("error" in message ? message.error.code : null),
           });
         case "other":
           return;

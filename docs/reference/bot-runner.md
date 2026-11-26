@@ -17,7 +17,7 @@ Each message is one JSON object on one line, at most 8 MiB. Every message names 
 | Bot runner | `spawned` | The adapter process started |
 | Bot runner | `started` | The adapter answered `initialize` for the right provider |
 | Bot runner | `start-failed` | The process didn't start (`stage: "spawn"`), or the adapter refused `initialize` (`stage: "initialize"`) |
-| Bot runner | `turn.accepted`, `turn.refused` | The adapter's answer to `turn.start`. A refusal is `not-running`, `busy`, `too-long` or `refused`. |
+| Bot runner | `turn.accepted`, `turn.refused` | The adapter's answer to `turn.start`. A refusal is `not-running`, `busy`, `ended`, `too-long` or `refused`. |
 | Bot runner | `event` | One event from the adapter, as [the adapter wire](bot-adapters.md#on-the-wire) shapes it |
 | Bot runner | `log` | One line the adapter wrote to its standard error, or a note from the bot runner about the adapter |
 | Bot runner | `exited` | The adapter process ended without a stop, with its exit code or signal |
@@ -58,6 +58,8 @@ The adapter becomes non-dumpable twice over, so there's no moment when a sibling
 - The image installs `/usr/local/bin/bun` with mode `0711`: every user can run it, and only `root` can read it. Linux makes a process non-dumpable from its first instruction when it runs a program it can't read. This covers the time Bun takes to start, before any JavaScript runs. It also covers the bot runner, the plugin runner and every plugin.
 - The launcher calls `PR_SET_DUMPABLE=0` itself before the adapter loads, in case a host's `fs.suid_dumpable` setting is `1`, which would leave the first step open.
 
+The first step depends on a setting of the host's Linux kernel, `fs.suid_dumpable`. Containers share the host's kernel, so the image can't set it. The Linux default is `0`, and with `0` there's no gap. To check it on the host, run `sysctl fs.suid_dumpable`. It should print `fs.suid_dumpable = 0`. If it prints `1`, a new adapter process stays open to its siblings for a few milliseconds, from the moment Bun starts until the launcher runs. In that window another bot could open the new adapter's pipes. The value `2` behaves like `0` here. To set it back to `0`, run `sudo sysctl -w fs.suid_dumpable=0`, and remove any line that sets it to `1` from `/etc/sysctl.conf` or `/etc/sysctl.d/`.
+
 Some things stay open under the shared user ([decision 0006](../decisions/0006-shared-bot-user.md)):
 
 - A bot can still signal, and so stop, another bot's processes or the bot runner itself ([decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md)). If the bot runner dies, the launcher stops the container.
@@ -78,7 +80,7 @@ The server, not the bot runner, decides when a bot starts again. It runs each bo
 | Crashed | The process ended by itself. The server waits, then starts it again. |
 | Given up | The bot crashed too often and stays stopped |
 
-A prompt sent again with the id of a turn that is running, or one that already ended, is accepted and not run a second time. The adapter does the same. The server remembers the ids of the last 1,024 turns that ended in the bot's current process, so a repeat doesn't leave the bot showing "in turn" and refusing the next prompt as busy.
+A prompt sent again with the id of the turn that is running is accepted and not run a second time. A prompt sent again with the id of a turn that already ended is refused with `ended`: the turn ran once, and its events have already been sent. The adapter decides which case it is, because it knows which turns it ran, so the bot stays idle and the next prompt runs. See [what the runtime does](bot-adapters.md#what-the-runtime-does).
 
 After a crash the server waits 1 second, then 2, 4, 8 and 16. The sixth crash in a row gives up, and the server logs `the bot crashed too often, so it stays stopped`. A bot that ran for 60 seconds before it crashed starts the count again.
 

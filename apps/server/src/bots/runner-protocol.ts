@@ -42,6 +42,7 @@ export const runnerRequestSchema = z.discriminatedUnion("type", [
 export const turnRefusal = z.enum([
   "not-running",
   "busy",
+  "ended",
   "too-long",
   "refused",
 ]);

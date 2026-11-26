@@ -119,18 +119,7 @@ interface Slot {
   turn: TurnId | undefined;
   resume: SessionRef | null;
   readonly turns: Map<TurnId, Deferred.Deferred<TurnOutcome>[]>;
-  readonly finished: Set<TurnId>;
   readonly waiters: Set<Waiter>;
-}
-
-const maxFinishedTurns = 1024;
-
-function remember(finished: Set<TurnId>, turn: TurnId) {
-  finished.add(turn);
-  const [oldest] = finished;
-  if (finished.size > maxFinishedTurns && oldest !== undefined) {
-    finished.delete(oldest);
-  }
 }
 
 export class BotManager extends Context.Service<
@@ -204,9 +193,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
         });
 
       const sendStart = (slot: Slot, run: number) =>
-        Effect.suspend(() => {
-          slot.finished.clear();
-          return link.send({
+        Effect.suspend(() =>
+          link.send({
             type: "start",
             bot: slot.bot.name,
             run,
@@ -214,8 +202,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             adapter: slot.adapter,
             folder: slot.bot.folder,
             resume: slot.resume,
-          });
-        });
+          }),
+        );
 
       const run = (slot: Slot, command: LifecycleCommand) =>
         Effect.gen(function* () {
@@ -320,12 +308,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 run: reply.run,
               });
             case "turn.accepted":
-              if (
-                reply.run === slot.state.run &&
-                !slot.finished.has(reply.turn)
-              ) {
-                slot.turn = reply.turn;
-              }
+              if (reply.run === slot.state.run) slot.turn = reply.turn;
               yield* settleTurn(slot, reply.turn, "accepted");
               return yield* settleWaiters(slot);
             case "turn.refused":
@@ -346,7 +329,6 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               ) {
                 return;
               }
-              remember(slot.finished, envelope.turn);
               if (envelope.turn === slot.turn) {
                 slot.turn = undefined;
                 yield* settleWaiters(slot);
@@ -451,7 +433,6 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             turn: undefined,
             resume: null,
             turns: new Map(),
-            finished: new Set(),
             waiters: new Set(),
           };
           slots.set(definition.name, slot);
