@@ -1,6 +1,8 @@
-import { streamEvent, type StreamEvent } from "@aphelion/plugin-sdk";
 import { z } from "zod";
 import type { Row } from "../store";
+import { formatOneEvent, type FormatOneEvent } from "./format-1";
+
+export type StoredEvent = FormatOneEvent;
 
 export const eventFormat = 1;
 
@@ -11,7 +13,7 @@ export interface SavedEvent {
   readonly turn: string | null;
   readonly run: number;
   readonly format: number;
-  readonly event: StreamEvent;
+  readonly event: StoredEvent;
   readonly at: number;
 }
 
@@ -38,17 +40,17 @@ const eventRow = z.object({
   at: z.int().nonnegative(),
 });
 
-export function encodePayload(event: StreamEvent): string {
+export function encodePayload(event: StoredEvent): string {
   return JSON.stringify(
     Object.fromEntries(Object.entries(event).filter(([key]) => key !== "type")),
   );
 }
 
 const decoders: Readonly<
-  Record<number, (kind: string, payload: string) => StreamEvent>
+  Record<number, (kind: string, payload: string) => StoredEvent>
 > = {
   1: (kind, payload) =>
-    streamEvent.parse({ type: kind, ...(JSON.parse(payload) as object) }),
+    formatOneEvent.parse({ type: kind, ...(JSON.parse(payload) as object) }),
 };
 
 export function decodeEvent(row: Row): SavedEvent {

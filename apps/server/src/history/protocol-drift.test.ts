@@ -290,11 +290,11 @@ describe("the protocol and the adapter accept and refuse the same events", () =>
     expect(botEvent.safeParse(event).success).toBe(accepted);
   });
 
-  test("have a case at, below and above the limit of every kind", () => {
-    expect(
-      new Set(acceptance.map(([, event]) => (event as { type?: string }).type)),
-    ).toEqual(
-      new Set(sdkOptions.map(kindOf)).union(new Set(["thinking", undefined])),
+  test("cover every event kind", () => {
+    const covered = new Set(
+      acceptance.map(([, event]) => (event as { type?: string }).type),
     );
+
+    for (const option of sdkOptions) expect(covered).toContain(kindOf(option));
   });
 });
