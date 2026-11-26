@@ -87,7 +87,7 @@ The SDK types each id as a **branded** string. A branded string is a string that
 
 The adapter builds a `PermissionRequest` and passes it to the turn's `decide`. It has the `request` id, the `call` id (or `null`), the `tool`, the `kind`, `paths` (at most 32, each at most 4096 bytes), `command` (at most 4 KiB, or `null`) and `truncated`. Set `truncated` when you cut a path list or a command to fit.
 
-`decide` always resolves with a `PermissionDecision`: `{ decision, by, reason }`. A grant covers that one request only. There is no "allow for the rest of the session" ([decision 0034](../decisions/0034-vendor-protocol-per-cli.md)).
+`decide` always resolves with a `TurnDecision`: a `PermissionDecision` (`{ decision, by, reason }`) plus `announced`. `announced` is `true` when the runtime sent a `permission.decision` event for the request, and `false` for a request it denied without an event (see [What the runtime does](#what-the-runtime-does)). Report a call as `denied` only when its deny has `announced: true`, and as `error` otherwise, so the stream keeps rule 6. `announced` lives only in the adapter's memory. It never goes on the wire and is never saved, so adding it changes no event and no stored data. A grant covers that one request only. There is no "allow for the rest of the session" ([decision 0034](../decisions/0034-vendor-protocol-per-cli.md)).
 
 A **decider** is the function that answers. You give one to `runAdapter` in its options. It gets the request, the turn's signal, and `{ folder }`, the bot's folder from `initialize`.
 

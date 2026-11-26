@@ -358,6 +358,29 @@ describe("the PreToolUse hook", () => {
     expect(await ask(hook, "Bash", { command: "ls" }, "toolu_3")).toEqual({});
   });
 
+  it("ends a call the hook stopped as an error, since canUseTool never announced a deny", async () => {
+    const secret = { file_path: join(outside, "secret.txt") };
+    const scripted = scriptedQuery([
+      [
+        { send: sdk.init() },
+        { send: sdk.toolUse("toolu_1", "Read", secret) },
+        { send: sdk.toolResult("toolu_1", true) },
+        { send: sdk.result() },
+      ],
+    ]);
+    const adapter = claudeAdapter({ query: scripted.query, env: {}, rule });
+    const run = await runTurn(adapter, { decider: rule, folder });
+    const hook = hookOf(scripted.runs[0]?.options);
+    expect(await ask(hook, "Read", secret, "toolu_1")).toEqual(denied);
+    expect(
+      run.events.find(({ event }) => event.type === "tool.end")?.event,
+    ).toEqual({ type: "tool.end", call: "toolu_1", outcome: "error" });
+    expect(
+      run.events.some(({ event }) => event.type === "permission.decision"),
+    ).toBe(false);
+    expect(checkStream(run.events)).toEqual([]);
+  });
+
   it("denies a call it can't read", async () => {
     const { scripted } = await runCases([]);
     const hook = hookOf(scripted.runs[0]?.options);

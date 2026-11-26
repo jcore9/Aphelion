@@ -12,7 +12,6 @@ import {
   type AdapterSession,
   type BotAdapter,
   type Decider,
-  type PermissionDecision,
   type SessionRef,
   type ToolCallId,
   type TurnInput,
@@ -103,11 +102,6 @@ const refusal: PermissionResult = {
   message: refusalMessage,
 };
 
-const silentReasons = new Set<PermissionDecision["reason"]>([
-  "invalid-request",
-  "duplicate-request",
-]);
-
 const failureClasses = [
   "aborted",
   "control_request_failed",
@@ -190,13 +184,12 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               request: requestId,
             });
             if (!request) return refusal;
-            const announces = !turn.signal.aborted;
             const decision = await unlessAborted(
               turn.input.decide(request),
               signal,
             );
             if (decision?.decision === "allow") return { behavior: "allow" };
-            if (decision && announces && !silentReasons.has(decision.reason)) {
+            if (decision?.announced) {
               turn.denied.add(toolUseID);
             }
             return refusal;

@@ -19,6 +19,7 @@ import {
   type ReasonCode,
   type StreamEvent,
   type ToolCallId,
+  type TurnDecision,
   type TurnId,
   type TurnInput,
 } from "./adapter.ts";
@@ -49,7 +50,7 @@ interface Ask {
   readonly call: ToolCallId | null;
   settled: boolean;
   timer: ReturnType<typeof setTimeout> | undefined;
-  resolve(decision: PermissionDecision): void;
+  resolve(decision: TurnDecision): void;
 }
 
 interface Opened {
@@ -78,6 +79,9 @@ const deny = (reason: ReasonCode): PermissionDecision => ({
   by: "default",
   reason,
 });
+
+const silently = (reason: ReasonCode): Promise<TurnDecision> =>
+  Promise.resolve({ ...deny(reason), announced: false });
 
 function parseLine(line: string) {
   try {
@@ -149,25 +153,22 @@ export async function runAdapter(
     id: PermissionRequestId,
     turn: Turn,
     decision: PermissionDecision,
-    announce: boolean,
   ) => {
     const ask = turn.asks.get(id);
     if (!ask || ask.settled) return;
     ask.settled = true;
     clearTimeout(ask.timer);
-    if (announce) {
-      emit(turn.id, { type: "permission.decision", request: id, ...decision });
-      if (decision.decision === "deny") {
-        if (ask.call === null) turn.denied.any = true;
-        else turn.denied.calls.add(ask.call);
-      }
+    emit(turn.id, { type: "permission.decision", request: id, ...decision });
+    if (decision.decision === "deny") {
+      if (ask.call === null) turn.denied.any = true;
+      else turn.denied.calls.add(ask.call);
     }
-    ask.resolve(decision);
+    ask.resolve({ ...decision, announced: true });
   };
 
   const settleAll = (turn: Turn, reason: ReasonCode) => {
     for (const id of turn.asks.keys()) {
-      settleAsk(id, turn, deny(reason), true);
+      settleAsk(id, turn, deny(reason));
     }
   };
 
@@ -319,27 +320,23 @@ export async function runAdapter(
     } catch {
       decision = deny("decider-failed");
     }
-    settleAsk(id, turn, decision, true);
+    settleAsk(id, turn, decision);
   };
 
   const decide = (
     turn: Turn,
     raw: PermissionRequest,
-  ): Promise<PermissionDecision> => {
-    if (closing) return Promise.resolve(deny("shutdown"));
+  ): Promise<TurnDecision> => {
+    if (closing) return silently("shutdown");
     const parsed = permissionRequest.safeParse(raw);
-    if (!parsed.success) return Promise.resolve(deny("invalid-request"));
+    if (!parsed.success) return silently("invalid-request");
     const request = parsed.data;
-    if (turn.phase === "ended") return Promise.resolve(deny("turn-ended"));
-    if (turn.phase === "cancelling") return Promise.resolve(deny("cancelled"));
+    if (turn.phase === "ended") return silently("turn-ended");
+    if (turn.phase === "cancelling") return silently("cancelled");
     const owner = request.call ? calls.get(request.call) : undefined;
-    if (owner && owner.owner !== turn) {
-      return Promise.resolve(deny("turn-ended"));
-    }
-    if (turn.asks.has(request.request)) {
-      return Promise.resolve(deny("duplicate-request"));
-    }
-    const answered = new Promise<PermissionDecision>((resolve) => {
+    if (owner && owner.owner !== turn) return silently("turn-ended");
+    if (turn.asks.has(request.request)) return silently("duplicate-request");
+    const answered = new Promise<TurnDecision>((resolve) => {
       const ask: Ask = {
         call: request.call,
         settled: false,
@@ -348,7 +345,7 @@ export async function runAdapter(
       };
       if (options.decisionDeadlineMs !== undefined) {
         ask.timer = setTimeout(() => {
-          settleAsk(request.request, turn, deny("timeout"), true);
+          settleAsk(request.request, turn, deny("timeout"));
         }, options.decisionDeadlineMs);
       }
       turn.asks.set(request.request, ask);

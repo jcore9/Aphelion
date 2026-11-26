@@ -30,6 +30,7 @@ export {
   type StreamEvent,
   type ToolCallId,
   type ToolKind,
+  type TurnDecision,
   type TurnId,
   type TurnInput,
 } from "./adapter.ts";

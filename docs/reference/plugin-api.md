@@ -745,6 +745,16 @@ What a tool does, in terms that don't depend on the vendor.
 type ToolKind = "file.read" | "file.write" | "shell" | "web" | "other";
 ```
 
+### `TurnDecision`
+
+What `decide` resolves to. `announced` is true when the runtime put a `permission.decision` event for this request on the stream. It stays in memory and never goes on the wire.
+
+```ts
+type TurnDecision = PermissionDecision & {
+  readonly announced: boolean;
+};
+```
+
 ### `TurnId`
 
 The id of one turn, the bot's work on one prompt.
@@ -761,14 +771,15 @@ The prompt the bot runner sends for one turn.
 interface TurnInput {
   readonly turn: TurnId;
   readonly text: string;
-  readonly decide: (request: PermissionRequest) => Promise<PermissionDecision>;
+  readonly decide: (request: PermissionRequest) => Promise<TurnDecision>;
 }
 ```
 
 - `turn`: The turn's id.
 - `text`: The prompt, at most 256 KiB.
 - `decide`: Asks whether a tool may run in this turn. The runtime puts `permission.request` and `permission.decision` on the stream, so the adapter reports nothing itself.
-  It always resolves. A request that is invalid, comes after this turn ended, after a cancel or after shutdown began, or isn't answered in time resolves as `deny`. The ones that can't be asked send no event.
+  It always resolves. A request that is invalid, comes after this turn ended, after a cancel or after shutdown began, or isn't answered in time resolves as `deny`. The ones that can't be asked send no event, and resolve with `announced: false`.
+  An adapter may report a tool call as `denied` only when its deny has `announced: true`.
 
 ### `adapterApiVersion`
 
@@ -1530,7 +1541,7 @@ interface FakeAdapter extends BotAdapter {
   readonly contexts: readonly AdapterContext[];
   readonly inputs: readonly TurnInput[];
   readonly signals: readonly AbortSignal[];
-  readonly answers: readonly PermissionDecision[];
+  readonly answers: readonly TurnDecision[];
   readonly closed: boolean;
 }
 ```
