@@ -22,7 +22,7 @@ Asks the server to run a command.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | [`CommandId`](#commandid) | yes | The client picks it. A retry sends the same id. |
-| `name` | `"ping"` | yes | The command to run. |
+| `name` | `"ping"` or `"bot.prompt"` or `"bot.cancel"` or `"history.read"` | yes | The command to run. |
 | `payload` | object | yes | The command's input. |
 
 ### `resume` frame
@@ -42,7 +42,7 @@ Answers a command that succeeded.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | [`CommandId`](#commandid) | yes | The id of the command this frame answers. |
-| `name` | `"ping"` | yes | The command that ran. |
+| `name` | `"ping"` or `"bot.prompt"` or `"bot.cancel"` or `"history.read"` | yes | The command that ran. |
 | `result` | object | yes | The command's output. |
 
 ### `event` frame
@@ -69,7 +69,7 @@ Rejects a frame.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `code` | `"malformed"` or `"unsupported-version"` | yes | Why the frame was rejected. |
+| `code` | `"malformed"` or `"unsupported-version"` or `"bot-not-running"` or `"bot-busy"` or `"prompt-too-long"` or `"prompt-refused"` or `"interrupted"` or `"id-reused"` or `"internal"` | yes | Why the frame was rejected. |
 | `message` | string | yes | Fixed text that is safe to log. |
 | `id` | [`CommandId`](#commandid) | no | The rejected command's id, when it had a valid one. |
 
@@ -82,6 +82,50 @@ A `command` frame carries a command's `payload`, and the `result` frame that ans
 `payload` has no fields, so it is `{}`.
 
 `result` has no fields, so it is `{}`.
+
+### `bot.prompt` command
+
+`payload` has these fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `bot` | string matching `^[a-z][a-z0-9-]{0,62}$` | yes | The bot to give the prompt to. |
+| `text` | string | yes | The prompt. The server refuses one over 256 KiB of UTF-8 with `prompt-too-long`. |
+
+`result` has these fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `turn` | string matching `^[A-Za-z0-9_-]{1,64}$` | yes | The turn the bot started. A repeat of the command returns the same turn. |
+
+### `bot.cancel` command
+
+`payload` has these fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `bot` | string matching `^[a-z][a-z0-9-]{0,62}$` | yes | The bot that runs the turn. |
+| `turn` | string matching `^[A-Za-z0-9_-]{1,64}$` | yes | The turn to cancel. |
+
+`result` has no fields, so it is `{}`.
+
+### `history.read` command
+
+`payload` has these fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `bot` | string matching `^[a-z][a-z0-9-]{0,62}$` | yes | The bot to read events of. |
+| `after` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | no | Read the events after this position. Leave it out to start at the oldest event. |
+| `limit` | integer from 1 to 500 | yes | The most saved events to read, from 1 to 500. |
+
+`result` has these fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `events` | list of object | yes | The events the client may see, in order. A page can hold fewer than `limit`, or none, while `more` is `true`. |
+| `next` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | The position to send as `after` to read the next page. It can be higher than the last event, because the server skips events a client never sees. |
+| `more` | boolean | yes | Whether the server holds saved events after `next`. |
 
 ## Events
 
@@ -232,6 +276,13 @@ An `error` frame's `code` is one of these. [The client protocol](protocol.md#err
 
 - `malformed`
 - `unsupported-version`
+- `bot-not-running`
+- `bot-busy`
+- `prompt-too-long`
+- `prompt-refused`
+- `interrupted`
+- `id-reused`
+- `internal`
 
 ## JSON Schema
 

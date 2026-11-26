@@ -34,7 +34,22 @@ export const cursor = z
   });
 export type Cursor = z.infer<typeof cursor>;
 
-export const errorCodes = ["malformed", "unsupported-version"] as const;
+export const commandFailures = [
+  "bot-not-running",
+  "bot-busy",
+  "prompt-too-long",
+  "prompt-refused",
+  "interrupted",
+  "id-reused",
+  "internal",
+] as const;
+export type CommandFailure = (typeof commandFailures)[number];
+
+export const errorCodes = [
+  "malformed",
+  "unsupported-version",
+  ...commandFailures,
+] as const;
 export type ErrorCode = (typeof errorCodes)[number];
 
 type Commands = typeof commands;

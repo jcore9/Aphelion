@@ -45,6 +45,188 @@
           ],
           "additionalProperties": false,
           "description": "Asks the server to run a command."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number",
+              "const": 1,
+              "description": "The protocol version."
+            },
+            "type": {
+              "type": "string",
+              "const": "command",
+              "description": "The frame type."
+            },
+            "id": {
+              "description": "The client picks it. A retry sends the same id.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CommandId"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "const": "bot.prompt",
+              "description": "The command to run."
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "bot": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                  "description": "The bot to give the prompt to."
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 262144,
+                  "description": "The prompt. The server refuses one over 256 KiB of UTF-8 with `prompt-too-long`."
+                }
+              },
+              "required": [
+                "bot",
+                "text"
+              ],
+              "additionalProperties": false,
+              "description": "The command's input."
+            }
+          },
+          "required": [
+            "v",
+            "type",
+            "id",
+            "name",
+            "payload"
+          ],
+          "additionalProperties": false,
+          "description": "Asks the server to run a command."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number",
+              "const": 1,
+              "description": "The protocol version."
+            },
+            "type": {
+              "type": "string",
+              "const": "command",
+              "description": "The frame type."
+            },
+            "id": {
+              "description": "The client picks it. A retry sends the same id.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CommandId"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "const": "bot.cancel",
+              "description": "The command to run."
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "bot": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                  "description": "The bot that runs the turn."
+                },
+                "turn": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                  "description": "The turn to cancel."
+                }
+              },
+              "required": [
+                "bot",
+                "turn"
+              ],
+              "additionalProperties": false,
+              "description": "The command's input."
+            }
+          },
+          "required": [
+            "v",
+            "type",
+            "id",
+            "name",
+            "payload"
+          ],
+          "additionalProperties": false,
+          "description": "Asks the server to run a command."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number",
+              "const": 1,
+              "description": "The protocol version."
+            },
+            "type": {
+              "type": "string",
+              "const": "command",
+              "description": "The frame type."
+            },
+            "id": {
+              "description": "The client picks it. A retry sends the same id.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CommandId"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "const": "history.read",
+              "description": "The command to run."
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "bot": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                  "description": "The bot to read events of."
+                },
+                "after": {
+                  "description": "Read the events after this position. Leave it out to start at the oldest event.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 500,
+                  "description": "The most saved events to read, from 1 to 500."
+                }
+              },
+              "required": [
+                "bot",
+                "limit"
+              ],
+              "additionalProperties": false,
+              "description": "The command's input."
+            }
+          },
+          "required": [
+            "v",
+            "type",
+            "id",
+            "name",
+            "payload"
+          ],
+          "additionalProperties": false,
+          "description": "Asks the server to run a command."
         }
       ]
     },
