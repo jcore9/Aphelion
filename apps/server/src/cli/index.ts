@@ -13,9 +13,20 @@ import { pluginEnable } from "./plugin-enable";
 import { pluginDev } from "./plugin-dev";
 import { restoreFinish } from "./restore";
 import { pluginRestart, pluginRollback, pluginUpdate } from "./plugin-update";
+import {
+  defaultToolListFile,
+  toolInstall,
+  toolCheck,
+  toolList,
+  toolRemove,
+  toolUpdate,
+} from "./tool";
 
 export { CliIo, processIo } from "./io";
 export { CliFailure } from "./failure";
+
+const toolListFile = () =>
+  process.env["APHELION_TOOL_LIST"] ?? defaultToolListFile;
 
 const run = (command: Command) =>
   Effect.gen(function* () {
@@ -43,6 +54,16 @@ const run = (command: Command) =>
         return yield* pluginRestart(command);
       case "plugin dev":
         return yield* pluginDev(command);
+      case "tool list":
+        return yield* toolList(command, toolListFile());
+      case "tool install":
+        return yield* toolInstall(command, toolListFile());
+      case "tool remove":
+        return yield* toolRemove(command);
+      case "tool update":
+        return yield* toolUpdate(command, toolListFile());
+      case "tool check":
+        return yield* toolCheck(toolListFile(), fetch);
       case "restore finish":
         return yield* restoreFinish(command);
       case "device list":

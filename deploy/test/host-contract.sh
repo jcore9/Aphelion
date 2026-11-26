@@ -257,14 +257,26 @@ case " $* " in
     echo "the-token"
     echo "Added device" >&2
     exit "${FAKE_DEVICE_EXIT:-0}" ;;
+  *" --user harness aphelion aphelion tool list"*)
+    printf 'NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\n'
+    for entry in "claude 2.1.330 claude auth status --text" "codex 0.172.0 codex login status" "grok 1.0.92 -" "opencode 2.4.1 -"; do
+      read -r name version status <<<"$entry"
+      state="not installed" installed=-
+      if [[ " ${FAKE_TOOLS:-} " == *" $name "* ]]; then
+        state=installed installed=$version
+      elif [[ " ${FAKE_OLD_TOOLS:-} " == *" $name "* ]]; then
+        state="update available" installed=0.1.0
+      fi
+      printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$version" "$installed" "$state" "$status"
+    done
+    exit "${FAKE_TOOL_EXIT:-0}" ;;
+  *" --user harness aphelion aphelion tool "*)
+    all="$*"
+    echo "ran tool ${all##* aphelion tool }"
+    exit "${FAKE_TOOL_EXIT:-0}" ;;
   *" --user aphelion-bot aphelion "*)
     all="$*"
     rest=${all#*--user aphelion-bot aphelion }
-    if [[ $rest == "sh -c "* ]]; then
-      tool=${rest##* }
-      [[ " ${FAKE_TOOLS:-} " == *" $tool "* ]]
-      exit
-    fi
     echo "SECRET-FROM-THE-TOOL"
     [[ " ${FAKE_SIGNED_IN:-} " == *" ${rest%% *} "* ]]
     exit ;;
@@ -299,11 +311,11 @@ error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" status 2>&1 >
 [[ $status == 2 && $error == "Run it with sudo: sudo aphelion status" ]] ||
   fail "the command didn't refuse a user other than root with status 2: $status $error"
 help=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" --help) || fail "--help needs root"
-[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* ]] ||
+[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* && $help == *"aphelion tool install NAME"* ]] ||
   fail "--help doesn't list the commands: $help"
 pass "the command refuses a user other than root with status 2, and --help works for everyone"
 
-for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b"; do
+for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b" tool "tool frobnicate" "tool list extra" "tool install" "tool install a b" "tool remove" "tool remove a b" "tool update a b" "tool check a" "tool check now please"; do
   status=0
   read -ra words <<<"$bad" || true
   error=$(as_root_aphelion "${words[@]}" 2>&1 >/dev/null) || status=$?
@@ -335,6 +347,16 @@ out=$(as_root_aphelion status) || fail "status failed with no AI tool installed"
 [[ $out == *"AI tools: none installed"* ]] || fail "status didn't say that no AI tool is installed: $out"
 pass "status lists only the installed tools, or says none is installed"
 
+out=$(FAKE_TOOLS=grok FAKE_OLD_TOOLS="claude opencode" FAKE_SIGNED_IN=claude as_root_aphelion status) || fail "status failed with tools to update"
+[[ $out == *$'\nclaude: signed in (update available: 0.1.0 -> 2.1.330)'* ]] ||
+  fail "status didn't show the update next to a signed-in tool: $out"
+[[ $out == *$'\ngrok: installed, sign-in state unknown'$'\n'* || $out == *$'\ngrok: installed, sign-in state unknown' ]] ||
+  fail "status added an update note to a tool that is current: $out"
+[[ $out == *"opencode: installed, sign-in state unknown (update available: 0.1.0 -> 2.4.1)"* ]] ||
+  fail "status didn't show the update next to a tool with no sign-in check: $out"
+[[ $out != *codex* ]] || fail "status listed a tool that isn't installed: $out"
+pass "status shows update available, with both versions, for a tool whose installed version differs from the list"
+
 cp /opt/aphelion/deploy/.env /opt/aphelion/deploy/.env.saved
 printf 'APHELION_TAILNET_ADDRESS="100.100.5.1" # the tailnet address\n' >/opt/aphelion/deploy/.env
 out=$(as_root_aphelion status) || fail "status failed with a comment after the tailnet address in .env: $out"
@@ -358,3 +380,23 @@ stdout=$(FAKE_DEVICE_EXIT=3 as_root_aphelion device add laptop --days 30 2>/dev/
 stderr=$(as_root_aphelion device list 2>&1 >/dev/null)
 [[ $stderr == "Added device" ]] || fail "device list changed the standard error: $stderr"
 pass "device runs the server's command as harness and passes its output and exit code through"
+
+out=$(as_root_aphelion tool install claude) || fail "tool install failed"
+[[ $out == "ran tool install claude" ]] || fail "tool install didn't run the server's command: $out"
+status=0
+out=$(FAKE_TOOL_EXIT=4 as_root_aphelion tool remove claude 2>&1) || status=$?
+[[ $status == 4 && $out == "ran tool remove claude" ]] || fail "tool remove changed the exit code or output ($status, $out)"
+rows=$(FAKE_TOOLS=grok as_root_aphelion tool list) || fail "tool list failed"
+grep -qP "^grok\t1\.0\.92\t1\.0\.92\tinstalled\t-$" <<<"$rows" || fail "tool list didn't pass the server's table through: $rows"
+pass "tool list, install and remove run the server's command as harness and pass its output and exit code through"
+
+out=$(as_root_aphelion tool update) || fail "tool update with no name failed"
+[[ $out == "ran tool update" ]] || fail "tool update with no name didn't run the server's command: $out"
+out=$(as_root_aphelion tool update claude) || fail "tool update claude failed"
+[[ $out == "ran tool update claude" ]] || fail "tool update claude didn't run the server's command: $out"
+out=$(as_root_aphelion tool check) || fail "tool check failed"
+[[ $out == "ran tool check" ]] || fail "tool check didn't run the server's command: $out"
+status=0
+out=$(FAKE_TOOL_EXIT=1 as_root_aphelion tool check 2>&1) || status=$?
+[[ $status == 1 && $out == "ran tool check" ]] || fail "tool check changed the exit code or output ($status, $out)"
+pass "tool update and tool check run the server's command as harness and pass its output and exit code through"

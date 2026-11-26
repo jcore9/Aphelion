@@ -45,6 +45,7 @@ The image has no `sudo`. The build removes the Ubuntu image's default `ubuntu` u
 | `/var/lib/aphelion-secrets` | `aphelion-secrets:aphelion-secrets` | `0700` | Volume `secrets` | The broker's encrypted store |
 | `/var/lib/aphelion-plugins` | `aphelion-plugins:aphelion-plugins` | `0700` | Volume `plugin-data` | One data folder per plugin |
 | `/opt/aphelion/plugins` | `harness:harness` | `0755` | Volume `plugin-files` | The installed plugins: the folders you copied in, and a folder `<id>@<version>` for each release that [`plugin update`](plugins.md#updates) installed |
+| `/opt/aphelion/tools` | `harness:harness` | `0755` | Volume `ai-tools` | The installed [AI tools](cli.md#aphelion-tool-install-name), one folder per tool. The [backup](../guides/install.md#back-up-and-restore) doesn't hold it, because `tool install` rebuilds it from the list. |
 | `/run/aphelion-secrets` | `aphelion-secrets:harness` | `2710` | Memory | The broker's socket |
 | `/run/secrets/bootstrap` | `root:root` | `0400` | File from the host's `/run/credentials/aphelion.service/` | The [bootstrap key](secrets.md#the-bootstrap-key). It is a file, not a folder. |
 | `/run` | `root:root` | `0755` | Memory | Runtime files |
@@ -53,6 +54,8 @@ The image has no `sudo`. The build removes the Ubuntu image's default `ubuntu` u
 The rest of the file system is read-only.
 
 Docker fills a new, empty volume from the image, and copies the owner and mode of the folder too. The launcher refuses to start if a folder in the table has another owner, or a mode with permissions beyond the one shown. `/run/aphelion-secrets` must have mode `2710` exactly.
+
+Only `harness` can write the `ai-tools` volume, so a bot can run an AI tool but can't change it. `/usr/local/bin/claude`, `codex`, `grok` and `opencode` are links into `ai-tools`. They point at nothing until you install the tool, so a new image shows no AI tool. The image sets `DISABLE_AUTOUPDATER=1` for Claude Code, and `/etc/codex/requirements.toml` turns off Codex's update check. A user setting can't turn the Codex check back on, because the file is `root`'s and the settings in it win.
 
 Only `harness` can write the `plugin-files` volume, so a plugin can't change its own code or another plugin's code. The [plugin runner](plugins.md#how-your-plugin-is-started) refuses a plugin folder that `aphelion-plugins` owns or can write.
 

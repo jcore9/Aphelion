@@ -2,7 +2,7 @@
 
 `aphelion` on the host is a root-only script, [`deploy/host/aphelion`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/aphelion). It runs the Docker steps of the [install guide](../guides/install.md) for you, so you type no Docker words. [`deploy/host/install`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/install) links it to `/usr/local/bin/aphelion`, a folder on root's PATH, which is the list of folders the shell searches for commands.
 
-It is not the server's [`aphelion` command](cli.md). That one runs inside the container. The host command runs it for the `device` commands.
+It is not the server's [`aphelion` command](cli.md). That one runs inside the container. The host command runs it for the `device` and `tool` commands.
 
 ## Commands
 
@@ -12,6 +12,11 @@ It is not the server's [`aphelion` command](cli.md). That one runs inside the co
 | `sudo aphelion device add NAME [--days N]` | Adds a device and prints its token. The token is the only line on standard output. |
 | `sudo aphelion device list` | Lists the devices |
 | `sudo aphelion device revoke ID` | Stops a device's token at once |
+| `sudo aphelion tool list` | Lists the AI tools Aphelion can install and whether each is installed |
+| `sudo aphelion tool install NAME` | Downloads an AI tool from the list, checks it and installs it |
+| `sudo aphelion tool update [NAME]` | Moves an installed AI tool, or every installed one, to the version the list pins |
+| `sudo aphelion tool check` | Asks each AI tool's vendor for its newest version |
+| `sudo aphelion tool remove NAME` | Removes an installed AI tool |
 | `sudo aphelion check` | Runs every check the host can run alone |
 | `aphelion --help` | Prints the commands. Works without `sudo`. |
 
@@ -25,7 +30,7 @@ Run any other command without root, and it prints `Run it with sudo: sudo apheli
 | 1 | `status` found the service or `/health` down. `check` found a failed check. |
 | 2 | The command was misused, or it wasn't run as root. |
 
-A `device` command exits with the code of the server's own `aphelion device` command, which [the aphelion command](cli.md#exit-codes) lists.
+A `device` or `tool` command exits with the code of the server's own `aphelion device` or `aphelion tool` command, which [the aphelion command](cli.md#exit-codes) lists.
 
 ## `status`
 
@@ -33,7 +38,7 @@ A `device` command exits with the code of the server's own `aphelion device` com
 service: enabled, running
 container: running
 health: ok
-claude: signed in
+claude: signed in (update available: 2.1.330 -> 2.1.332)
 codex: not signed in, or the check failed
 grok: installed, sign-in state unknown
 ```
@@ -41,15 +46,15 @@ grok: installed, sign-in state unknown
 - `service` comes from `systemctl is-enabled aphelion` and `systemctl is-active aphelion`.
 - `container` comes from `docker compose ps`.
 - `health` asks `http://ADDRESS:7400/health` from the host. `ADDRESS` is `APHELION_TAILNET_ADDRESS` in `/opt/aphelion/deploy/.env`.
-- The AI tool lines list only tools that exist in the container for `aphelion-bot`, the user that runs bots. With none installed, the line is `AI tools: none installed`. With the container stopped, it is `AI tools: unknown, the container isn't running`.
+- The AI tool lines come from [`aphelion tool list`](cli.md#aphelion-tool-list). They list only tools with the state `installed` or `update available`. A tool with an update ends with `(update available: INSTALLED -> PINNED)`, the installed version and the version the list pins. [`tool update`](cli.md#aphelion-tool-update-name) applies it. With none installed, the line is `AI tools: none installed`. With the container stopped, it is `AI tools: unknown, the container isn't running`.
 
-For each tool, Aphelion runs the tool's own status command as `aphelion-bot` and keeps only whether it exited with 0 ([decision 0019](../decisions/0019-cli-subscription-use.md)). It never prints the command's output.
+For each installed tool that has a status command, Aphelion runs that command as `aphelion-bot` and keeps only whether it exited with 0 ([decision 0019](../decisions/0019-cli-subscription-use.md)). It never prints the command's output. A tool whose status command is `-` shows `<name>: installed, sign-in state unknown`.
 
 | Tool | Status command | Shown when signed in |
 | --- | --- | --- |
 | `claude` | `claude auth status --text` | `claude: signed in` |
 | `codex` | `codex login status` | `codex: signed in` |
-| `grok` | none that is reliable | `grok: installed, sign-in state unknown` |
+| `grok`, `opencode` | none that is reliable | `<name>: installed, sign-in state unknown` |
 
 ## `check`
 
@@ -90,4 +95,5 @@ Compose's own `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` pass through to every ca
 | Command | Runs |
 | --- | --- |
 | `device …` | `docker compose exec -T --user harness aphelion aphelion device …`, with output and exit code passed through |
-| `status`, `check` | `systemctl`, `curl`, `iptables -t mangle -S`, `docker compose ps`, `docker inspect`, and for each tool `docker compose exec -T --user aphelion-bot aphelion …` |
+| `tool …` | `docker compose exec -T --user harness aphelion aphelion tool …`, with output and exit code passed through |
+| `status`, `check` | `systemctl`, `curl`, `iptables -t mangle -S`, `docker compose ps`, `docker inspect`, and for each installed tool `docker compose exec -T --user aphelion-bot aphelion <status command>` |

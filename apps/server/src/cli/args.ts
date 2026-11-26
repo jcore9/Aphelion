@@ -3,9 +3,11 @@ import { parseArgs } from "node:util";
 import { z } from "zod";
 import { defaultConfigDir } from "../config";
 import { deviceId, deviceName, lifetimeDays } from "../devices";
+import { toolName, type ToolName } from "../tools/list";
 
 export const defaultStateDir = "/var/lib/aphelion";
 export const defaultPluginsDir = "/opt/aphelion/plugins";
+export const defaultToolsDir = "/opt/aphelion/tools";
 
 const options = {
   help: { type: "boolean", short: "h" },
@@ -14,6 +16,7 @@ const options = {
   "config-dir": { type: "string" },
   "state-dir": { type: "string" },
   "plugins-dir": { type: "string" },
+  "tools-dir": { type: "string" },
   compose: { type: "string" },
   days: { type: "string" },
   approve: { type: "string" },
@@ -83,6 +86,20 @@ export type Command =
       readonly stateDir: string;
       readonly folder: string;
     }
+  | { readonly kind: "tool list"; readonly toolsDir: string }
+  | {
+      readonly kind: "tool install" | "tool remove";
+      readonly stateDir: string;
+      readonly toolsDir: string;
+      readonly name: ToolName;
+    }
+  | {
+      readonly kind: "tool update";
+      readonly stateDir: string;
+      readonly toolsDir: string;
+      readonly name?: ToolName;
+    }
+  | { readonly kind: "tool check" }
   | { readonly kind: "restore finish"; readonly stateDir: string }
   | { readonly kind: "device list"; readonly stateDir: string }
   | {
@@ -103,6 +120,7 @@ const grammar: Record<
   {
     readonly words: number;
     readonly operand?: string;
+    readonly optional?: true;
     readonly flags: Option[];
   }
 > = {
@@ -146,6 +164,24 @@ const grammar: Record<
   },
   "plugin restart": { words: 2, operand: "plugin id", flags: ["state-dir"] },
   "plugin dev": { words: 2, operand: "folder", flags: ["state-dir"] },
+  "tool list": { words: 2, flags: ["tools-dir"] },
+  "tool install": {
+    words: 2,
+    operand: "tool name",
+    flags: ["state-dir", "tools-dir"],
+  },
+  "tool remove": {
+    words: 2,
+    operand: "tool name",
+    flags: ["state-dir", "tools-dir"],
+  },
+  "tool update": {
+    words: 2,
+    operand: "tool name",
+    optional: true,
+    flags: ["state-dir", "tools-dir"],
+  },
+  "tool check": { words: 2, flags: [] },
   "restore finish": { words: 2, flags: ["state-dir"] },
   "device list": { words: 2, flags: ["state-dir"] },
   "device revoke": { words: 2, operand: "id", flags: ["state-dir"] },
@@ -179,6 +215,8 @@ const runnerFds = z
   .refine(({ replies, requests }) => replies !== requests, {
     error: "must name two different descriptors",
   });
+
+const toolNameText = z.string().pipe(toolName);
 
 const absolutePath = z
   .string()
@@ -283,18 +321,29 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
     );
   }
   const operands = positionals.slice(rule.words);
-  const expected = rule.operand === undefined ? 0 : 1;
-  if (operands.length !== expected) {
+  const most = rule.operand === undefined ? 0 : 1;
+  const fewest = rule.optional === true ? 0 : most;
+  if (operands.length < fewest) {
+    return fail(`"${kind}" needs a ${rule.operand ?? "value"}`);
+  }
+  if (operands.length > most) {
+    const allowed =
+      rule.operand === undefined
+        ? "no arguments"
+        : `${rule.optional === true ? "no more than " : ""}one ${rule.operand}`;
     return fail(
-      rule.operand !== undefined && operands.length === 0
-        ? `"${kind}" needs a ${rule.operand}`
-        : `"${kind}" takes ${rule.operand === undefined ? "no arguments" : `one ${rule.operand}`}, but got ${String(operands.length)}`,
+      `"${kind}" takes ${allowed}, but got ${String(operands.length)}`,
     );
   }
 
   const configDir = values["config-dir"] ?? defaultConfigDir;
   const stateDir = values["state-dir"] ?? defaultStateDir;
   const operand = operands[0] ?? "";
+  const toolsDir = check(
+    "--tools-dir",
+    absolutePath,
+    values["tools-dir"] ?? defaultToolsDir,
+  );
   const pluginsDir = check(
     "--plugins-dir",
     absolutePath,
@@ -395,6 +444,36 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
       return { ok: true, command: { kind, stateDir, plugin: operand } };
     case "plugin dev":
       return { ok: true, command: { kind, stateDir, folder: operand } };
+    case "tool list":
+      if (!toolsDir.ok) return toolsDir;
+      return { ok: true, command: { kind, toolsDir: toolsDir.value } };
+    case "tool install":
+    case "tool remove": {
+      if (!toolsDir.ok) return toolsDir;
+      const name = check("the tool name", toolNameText, operand);
+      if (!name.ok) return name;
+      return {
+        ok: true,
+        command: { kind, stateDir, toolsDir: toolsDir.value, name: name.value },
+      };
+    }
+    case "tool update": {
+      if (!toolsDir.ok) return toolsDir;
+      if (operands.length === 0) {
+        return {
+          ok: true,
+          command: { kind, stateDir, toolsDir: toolsDir.value },
+        };
+      }
+      const name = check("the tool name", toolNameText, operand);
+      if (!name.ok) return name;
+      return {
+        ok: true,
+        command: { kind, stateDir, toolsDir: toolsDir.value, name: name.value },
+      };
+    }
+    case "tool check":
+      return { ok: true, command: { kind } };
     case "restore finish":
     case "device list":
       return { ok: true, command: { kind, stateDir } };
