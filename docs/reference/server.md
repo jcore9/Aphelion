@@ -61,7 +61,7 @@ Two replies come from the listener, `@effect/platform-bun`, before Aphelion's ow
 
 ## WebSockets
 
-A client with a valid token opens a WebSocket on `/ws` and sends [protocol frames](protocol.md), one JSON text message each. The server reads each one with `parseClientFrame`. M1 answers the frames. Until then the server reads them and sends nothing back.
+A client with a valid token opens a WebSocket on `/ws` and sends [protocol frames](protocol.md), one JSON text message each. The server reads each one with `parseClientFrame`. It answers a `resume` frame with the saved bot events the client missed and then every new one, or with a `resync` ([replay](protocol.md#sequence-numbers-and-replay)). It reads a `command` frame and sends nothing back, because no command exists yet that changes state.
 
 The server closes the WebSocket in these cases. The close code and reason are fixed text.
 
@@ -70,6 +70,7 @@ The server closes the WebSocket in these cases. The close code and reason are fi
 | A message isn't a valid client frame, or is binary | `1007` | `malformed frame` |
 | A frame has a protocol version that the server doesn't speak | `1007` | `unsupported version` |
 | The token is revoked or expires | `1008` | `token no longer valid` |
+| A saved event can't be read | `1011` | `history could not be read` |
 | A message is larger than 64 KiB | `1009` | Set by Bun |
 | Unread messages from the client pass 256 KiB | `1008` | `Inbound message buffer limit exceeded`, set by the listener |
 
@@ -137,7 +138,7 @@ The check parses the YAML with the `yaml` package and checks its shape with Zod.
 | --- | --- |
 | [`apps/server/src/http/app.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/http/app.ts) | The request handler and the `Authenticator` service |
 | [`apps/server/src/http/authenticator.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/http/authenticator.ts) | `deviceTokens(db)`, the `Authenticator` that checks device tokens |
-| [`apps/server/src/http/socket.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/http/socket.ts) | One WebSocket: reads frames and closes it when a frame is bad or the token ends |
-| [`apps/server/src/http/index.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/http/index.ts) | `serveHttp({ address, port }, db)`, which starts the server |
+| [`apps/server/src/http/socket.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/http/socket.ts) | One WebSocket: reads frames, replays and follows saved events after a `resume`, and closes it when a frame is bad or the token ends |
+| [`apps/server/src/http/index.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/http/index.ts) | `serveHttp({ address, port }, db, history)`, which starts the server |
 | [`apps/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/adapters/http-server.ts) | The Bun listener and its WebSocket limits, the only file that imports `@effect/platform-bun` |
 | [`apps/server/src/config/compose.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/config/compose.ts) | `checkComposePorts`, `checkServerListener` and `composeListener` |

@@ -19,11 +19,12 @@ Each message is one JSON object on one line, at most 8 MiB. Every message names 
 | Bot runner | `start-failed` | The process didn't start (`stage: "spawn"`), or the adapter refused `initialize` (`stage: "initialize"`) |
 | Bot runner | `turn.accepted`, `turn.refused` | The adapter's answer to `turn.start`. A refusal is `not-running`, `busy`, `ended`, `too-long` or `refused`. |
 | Bot runner | `event` | One event from the adapter, as [the adapter wire](bot-adapters.md#on-the-wire) shapes it |
-| Bot runner | `log` | One line the adapter wrote to its standard error, or a note from the bot runner about the adapter |
+| Bot runner | `log` | One line the adapter wrote to its standard error |
+| Bot runner | `notice` | A note from the bot runner about the adapter, as a code: `line-too-long`, `not-a-message`, `stopped-reading` or `too-much-log` |
 | Bot runner | `exited` | The adapter process ended without a stop, with its exit code or signal |
 | Bot runner | `stopped` | The stop finished |
 
-The bot runner checks every line from an adapter against the adapter wire, and drops a line that doesn't fit with a `log` note. It never reads a bot id from an adapter. It tags each message with the bot it started that process for.
+The bot runner checks every line from an adapter against the adapter wire, and drops a line that doesn't fit and sends a `notice` with code `not-a-message`. It never reads a bot id from an adapter. It tags each message with the bot it started that process for.
 
 The bot runner holds at most 4 MiB of one adapter's output that it hasn't handled yet. When an adapter writes faster than the bot runner can pass its messages on, the bot runner stops reading that adapter until the backlog drains. The adapter then waits on its own writes. This is called back-pressure. It keeps one bot's flood from filling the bot runner's memory, and the other bots' messages keep moving.
 
@@ -80,13 +81,19 @@ The server, not the bot runner, decides when a bot starts again. It runs each bo
 | Crashed | The process ended by itself. The server waits, then starts it again. |
 | Given up | The bot crashed too often and stays stopped |
 
-A prompt sent again with the id of the turn that is running is accepted and not run a second time. A prompt sent again with the id of a turn that already ended is refused with `ended`: the turn ran once, and its events have already been sent. The adapter decides which case it is, because it knows which turns it ran, so the bot stays idle and the next prompt runs. See [what the runtime does](bot-adapters.md#what-the-runtime-does).
+A prompt sent again with the id of the turn that is running is accepted and not run a second time. A prompt sent again with the id of a turn that already ended is refused with `ended`: the turn ran once, and its events have already been sent. The adapter decides which case it is, because it knows which turns it ran, so the bot stays idle and the next prompt runs. See [what the runtime does](bot-adapters.md#what-the-runtime-does). The server itself makes a new UUIDv7 as the turn's id for every prompt, so it never sends one id twice.
 
 After a crash the server waits 1 second, then 2, 4, 8 and 16. The sixth crash in a row gives up, and the server logs `the bot crashed too often, so it stays stopped`. A bot that ran for 60 seconds before it crashed starts the count again.
 
-The adapter reports the AI tool's own session id in a `session` event. The server keeps the latest one for each bot, with the bot's folder, and hands it to the adapter as `resume` on every start. A session saved for another folder isn't resumed. If the adapter refuses `initialize` while it resumes, the server forgets the saved session, logs `the saved session could not be resumed, so the bot started a new one`, and starts the bot again at once without it. That retry doesn't count as a crash.
+The adapter reports the AI tool's own session id in a `session` event. The server keeps the latest one for each bot, with the bot's folder and provider, and hands it to the adapter as `resume` on every start. A session saved for another folder or another provider isn't resumed, so a bot that moves or changes provider starts a new session. If the adapter refuses `initialize` while it resumes, the server forgets the saved session, logs `the saved session could not be resumed, so the bot started a new one`, and starts the bot again at once without it. That retry doesn't count as a crash.
 
-The saved session lives in the server's memory, so a restart of the container forgets it. [#23](https://github.com/jcore9/Aphelion/issues/23) stores it in the database.
+The server keeps the saved session in the `bot_sessions` table of its database ([the store](store.md#the-server-id-turns-and-events)), so a restart of the server or the container keeps it. A restored backup brings it back too.
+
+The server also saves every event a bot sends, with the turn it belongs to, and it sends the event to every connected client as a `bot.event` frame. [The client protocol](protocol.md#sequence-numbers-and-replay) explains how a client that reconnects gets the events it missed. When the server itself stops in the middle of a turn, it closes that turn at the next boot ([turns that a shutdown left open](store.md#turns-that-a-shutdown-left-open)).
+
+## What the server logs about a bot
+
+The server never writes what a bot prints to its standard error into its log. It logs only the bot's name and how many lines the bot has printed since its process started, because an adapter can echo a prompt in a diagnostic. A `notice` isn't standard error, so the server doesn't count it as a line. It logs one fixed sentence for each code, with the bot's name and the run, and never any text from the adapter.
 
 ## When a bot process dies
 
@@ -94,7 +101,7 @@ If an adapter process ends in the middle of a turn, the adapter can't finish its
 
 An adapter that closes its standard output counts as gone, even if its process keeps running, because the bot runner can no longer hear it. The bot runner finishes the stream at once, as above. It refuses with `not-running` any prompt still waiting for the adapter's answer, and any new one. Then it kills the adapter and sends `exited`, so the server restarts the bot.
 
-The bot runner also kills an adapter that stops reading its input for 5 seconds, and logs `the adapter stopped reading its input, and the runner killed it`.
+The bot runner also kills an adapter that stops reading its input for 5 seconds. It sends the `stopped-reading` notice, and the server logs `the adapter stopped reading its input, and the runner killed it`.
 
 ## How a bot stops
 

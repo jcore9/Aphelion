@@ -1,4 +1,6 @@
+import { randomUUIDv7 } from "node:crypto";
 import {
+  turnId,
   turnStartParams,
   type AdapterEnvelope,
   type SessionRef,
@@ -28,6 +30,7 @@ import {
 } from "../plugins/lifecycle";
 import type { Link } from "../plugins/link";
 import type {
+  RunnerNotice,
   RunnerReply,
   RunnerRequest,
   TurnRefusal,
@@ -40,6 +43,17 @@ export const adapterBundles: Readonly<Record<string, string>> = {
 
 export const resumeFailed =
   "the saved session could not be resumed, so the bot started a new one";
+
+export const runnerNotices = {
+  "line-too-long":
+    "the adapter wrote a line longer than 1 MiB, and the runner dropped it",
+  "not-a-message":
+    "the adapter wrote a line that isn't a message the runner reads, and the runner dropped it",
+  "stopped-reading":
+    "the adapter stopped reading its input, and the runner killed it",
+  "too-much-log":
+    "the adapter wrote more than 1000 log lines in a minute, and the runner drops the rest of that minute",
+} as const satisfies Record<RunnerNotice, string>;
 
 export class BotRunnerLink extends Context.Service<
   BotRunnerLink,
@@ -94,6 +108,11 @@ export interface BotEvent {
 export type StartOutcome = "starting" | "unknown bot" | "unknown provider";
 export type TurnOutcome = "accepted" | TurnRefusal;
 
+export interface StartedTurn {
+  readonly turn: TurnId;
+  readonly outcome: TurnOutcome;
+}
+
 interface Waiter {
   readonly until: (state: BotState) => boolean;
   readonly done: Deferred.Deferred<BotState>;
@@ -118,6 +137,7 @@ interface Slot {
   state: LifecycleState;
   turn: TurnId | undefined;
   resume: SessionRef | null;
+  stderrLines: number;
   readonly turns: Map<TurnId, Deferred.Deferred<TurnOutcome>[]>;
   readonly waiters: Set<Waiter>;
 }
@@ -129,9 +149,8 @@ export class BotManager extends Context.Service<
     readonly stop: (bot: string) => Effect.Effect<void>;
     readonly startTurn: (
       bot: string,
-      turn: TurnId,
       text: string,
-    ) => Effect.Effect<TurnOutcome>;
+    ) => Effect.Effect<StartedTurn>;
     readonly cancelTurn: (bot: string, turn: TurnId) => Effect.Effect<void>;
     readonly status: (bot: string) => Effect.Effect<BotState | undefined>;
     readonly waitFor: (
@@ -139,11 +158,22 @@ export class BotManager extends Context.Service<
       until: (state: BotState) => boolean,
     ) => Effect.Effect<BotState | undefined>;
     readonly events: Stream.Stream<BotEvent>;
+    readonly subscribe: Effect.Effect<
+      PubSub.Subscription<BotEvent>,
+      never,
+      Scope.Scope
+    >;
   }
 >()("aphelion/bots/BotManager") {}
 
+export interface TurnLedger {
+  readonly open: (bot: string, turn: TurnId) => Effect.Effect<boolean>;
+  readonly end: (turn: TurnId, reason: "refused") => Effect.Effect<void>;
+}
+
 export interface BotManagerOptions {
   readonly bots: readonly BotDefinition[];
+  readonly turns?: TurnLedger;
   readonly logger: Logger;
   readonly policy?: RestartPolicy;
   readonly adapters?: Readonly<Record<string, string>>;
@@ -185,6 +215,9 @@ export const botManagerLayer = (options: BotManagerOptions) =>
         Effect.gen(function* () {
           const waiting = slot.turns.get(turn) ?? [];
           slot.turns.delete(turn);
+          if (outcome !== "accepted" && options.turns !== undefined) {
+            yield* options.turns.end(turn, "refused");
+          }
           yield* Effect.forEach(
             waiting,
             (done) => Deferred.succeed(done, outcome),
@@ -211,7 +244,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             case "spawn": {
               const saved = yield* refs.get(slot.bot.name);
               slot.resume =
-                saved?.folder === slot.bot.folder ? saved.ref : null;
+                saved?.folder === slot.bot.folder &&
+                saved.provider === slot.bot.provider
+                  ? saved.ref
+                  : null;
               return yield* sendStart(slot, command.run);
             }
             case "initialize":
@@ -274,6 +310,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const bot = slot.bot.name;
           switch (reply.type) {
             case "spawned":
+              slot.stderrLines = 0;
               logger.info("the bot runner started the bot's process", {
                 bot,
                 run: reply.run,
@@ -320,6 +357,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 yield* refs.set(bot, {
                   ref: envelope.event.ref,
                   folder: slot.bot.folder,
+                  provider: slot.bot.provider,
                 });
               }
               if (
@@ -336,7 +374,17 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               return;
             }
             case "log":
-              logger.info("bot wrote to stderr", { bot, line: reply.line });
+              slot.stderrLines += 1;
+              logger.info("bot wrote to stderr", {
+                bot,
+                lines: slot.stderrLines,
+              });
+              return;
+            case "notice":
+              logger.warn(runnerNotices[reply.code], {
+                bot,
+                run: reply.run,
+              });
               return;
             case "exited":
               logger.warn("a bot process exited", {
@@ -354,6 +402,17 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }
         });
 
+      const refuse = (
+        input: Extract<SlotInput, { type: "turn" }>,
+        outcome: TurnRefusal,
+      ) =>
+        Effect.gen(function* () {
+          if (options.turns !== undefined) {
+            yield* options.turns.end(input.turn, "refused");
+          }
+          yield* Deferred.succeed(input.done, outcome);
+        });
+
       const handle = (slot: Slot, input: SlotInput) =>
         Effect.gen(function* () {
           switch (input.type) {
@@ -364,18 +423,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               return yield* settleWaiters(slot);
             case "turn": {
               if (slot.state.state !== "running") {
-                return yield* Deferred.succeed(input.done, "not-running");
-              }
-              if (slot.turn === input.turn) {
-                return yield* Deferred.succeed(input.done, "accepted");
+                return yield* refuse(input, "not-running");
               }
               if (slot.turn !== undefined) {
-                return yield* Deferred.succeed(input.done, "busy");
-              }
-              const waiting = slot.turns.get(input.turn);
-              if (waiting !== undefined) {
-                waiting.push(input.done);
-                return;
+                return yield* refuse(input, "busy");
               }
               slot.turns.set(input.turn, [input.done]);
               return yield* link.send({
@@ -432,6 +483,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             state: installed,
             turn: undefined,
             resume: null,
+            stderrLines: 0,
             turns: new Map(),
             waiters: new Set(),
           };
@@ -478,16 +530,35 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           yield* waitFor(name, (state) => stoppedStates.has(state.state));
         });
 
-      const startTurn = (name: string, turn: TurnId, text: string) =>
+      const startTurn = (name: string, text: string) =>
         Effect.gen(function* () {
+          const turn = turnId.parse(randomUUIDv7());
           const slot = slots.get(name);
-          if (slot === undefined) return "not-running" as const;
+          if (slot === undefined)
+            return { turn, outcome: "not-running" as const };
           if (!turnStartParams.safeParse({ turn, text }).success) {
-            return "too-long" as const;
+            return { turn, outcome: "too-long" as const };
           }
           const done = yield* Deferred.make<TurnOutcome>();
-          yield* Queue.offer(slot.mailbox, { type: "turn", turn, text, done });
-          return yield* Deferred.await(done);
+          const dispatched = yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              if (
+                options.turns !== undefined &&
+                !(yield* options.turns.open(name, turn))
+              ) {
+                return false;
+              }
+              yield* Queue.offer(slot.mailbox, {
+                type: "turn",
+                turn,
+                text,
+                done,
+              });
+              return true;
+            }),
+          );
+          if (!dispatched) return { turn, outcome: "refused" as const };
+          return { turn, outcome: yield* Deferred.await(done) };
         });
 
       yield* Effect.addFinalizer(() =>
@@ -518,6 +589,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }),
         waitFor,
         events: Stream.fromPubSub(events),
+        subscribe: PubSub.subscribe(events),
       });
     }),
   );

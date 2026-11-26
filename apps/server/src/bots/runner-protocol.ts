@@ -47,6 +47,13 @@ export const turnRefusal = z.enum([
   "refused",
 ]);
 
+export const runnerNotice = z.enum([
+  "line-too-long",
+  "not-a-message",
+  "stopped-reading",
+  "too-much-log",
+]);
+
 export const runnerReplySchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("spawned"), bot, run }),
   z.strictObject({ type: z.literal("started"), bot, run }),
@@ -77,6 +84,7 @@ export const runnerReplySchema = z.discriminatedUnion("type", [
     run,
     line: z.string().max(maxPluginLineBytes),
   }),
+  z.strictObject({ type: z.literal("notice"), bot, run, code: runnerNotice }),
   z.strictObject({
     type: z.literal("exited"),
     bot,
@@ -91,3 +99,4 @@ export type RunnerRequest = z.infer<typeof runnerRequestSchema>;
 export type RunnerReply = z.infer<typeof runnerReplySchema>;
 export type StartRequest = Extract<RunnerRequest, { type: "start" }>;
 export type TurnRefusal = z.infer<typeof turnRefusal>;
+export type RunnerNotice = z.infer<typeof runnerNotice>;

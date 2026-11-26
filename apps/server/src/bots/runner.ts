@@ -28,10 +28,11 @@ import type { Logger } from "../log";
 import { LineSplitter, type LinePiece } from "../plugins/lines";
 import type { Link } from "../plugins/link";
 import type { ProcessExit } from "../plugins/processes";
-import { logBudget, maxLogLinesPerMinute, utf8Bytes } from "../plugins/runner";
+import { logBudget, utf8Bytes } from "../plugins/runner";
 import { botEnvironment } from "./environment";
 import { BotProcesses, type BotProcess } from "./processes";
 import type {
+  RunnerNotice,
   RunnerReply,
   RunnerRequest,
   StartRequest,
@@ -47,14 +48,6 @@ export interface BotRunnerOptions {
 }
 
 export const maxQueuedOutputBytes = 4 * maxPluginLineBytes;
-
-export const lineTooLong =
-  "the adapter wrote a line longer than 1 MiB, and the runner dropped it";
-export const notAMessage =
-  "the adapter wrote a line that isn't a message the runner reads, and the runner dropped it";
-export const stoppedReading =
-  "the adapter stopped reading its input, and the runner killed it";
-export const tooMuchLog = `the adapter wrote more than ${String(maxLogLinesPerMinute)} log lines in a minute, and the runner drops the rest of that minute`;
 
 const initializeResult = z.object({ provider: z.string() });
 
@@ -159,21 +152,27 @@ export const runBotRunner = (
       }),
     );
 
-    const notice = (slot: Slot, line: string) =>
+    const report = (
+      slot: Slot,
+      reply: (tag: Tag) => Extract<RunnerReply, { type: "log" | "notice" }>,
+    ) =>
       Effect.gen(function* () {
         switch (slot.budget(yield* Clock.currentTimeMillis)) {
           case "send":
-            return yield* link.send({ type: "log", ...tagOf(slot), line });
+            return yield* link.send(reply(tagOf(slot)));
           case "notice":
             return yield* link.send({
-              type: "log",
+              type: "notice",
               ...tagOf(slot),
-              line: tooMuchLog,
+              code: "too-much-log",
             });
           case "drop":
             return;
         }
       });
+
+    const notice = (slot: Slot, code: Exclude<RunnerNotice, "too-much-log">) =>
+      report(slot, (tag) => ({ type: "notice", ...tag, code }));
 
     const call = (
       slot: Slot,
@@ -237,7 +236,13 @@ export const runBotRunner = (
         const errors = yield* FiberSet.run(
           work,
           lines(process.stderr)((piece) =>
-            notice(slot, piece.kind === "line" ? piece.text : lineTooLong),
+            piece.kind === "line"
+              ? report(slot, (tag) => ({
+                  type: "log",
+                  ...tag,
+                  line: piece.text,
+                }))
+              : notice(slot, "line-too-long"),
           ),
         );
         yield* FiberSet.run(
@@ -403,9 +408,10 @@ export const runBotRunner = (
     });
 
     const onLine = Effect.fnUntraced(function* (slot: Slot, piece: LinePiece) {
-      if (piece.kind === "too-long") return yield* notice(slot, lineTooLong);
+      if (piece.kind === "too-long")
+        return yield* notice(slot, "line-too-long");
       const message = parseLine(piece.text);
-      if (message === undefined) return yield* notice(slot, notAMessage);
+      if (message === undefined) return yield* notice(slot, "not-a-message");
       if (!("method" in message)) return yield* answer(slot, message);
       if ("id" in message) {
         return yield* Queue.offer(
@@ -417,7 +423,7 @@ export const runBotRunner = (
         message.method === adapterMethods.event
           ? adapterEnvelope.safeParse(message.params)
           : undefined;
-      if (!envelope?.success) return yield* notice(slot, notAMessage);
+      if (!envelope?.success) return yield* notice(slot, "not-a-message");
       slot.stream.observe(envelope.data);
       yield* link.send({
         type: "event",
@@ -517,7 +523,7 @@ export const runBotRunner = (
           if (slot === undefined) return;
           if (slot.phase === "stopping" || slot.phase === "lost") return;
           slot.phase = "lost";
-          yield* notice(slot, stoppedReading);
+          yield* notice(slot, "stopped-reading");
           yield* FiberSet.run(work, stopAll(event.bot));
           return;
         }

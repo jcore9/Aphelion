@@ -175,5 +175,5 @@ A test for an adapter runs the events it produces through `checkStream` and expe
 
 - [#20](https://github.com/jcore9/Aphelion/issues/20) builds the Claude adapter and the fixed permission rule.
 - [#216](https://github.com/jcore9/Aphelion/issues/216) makes a cancel and a stop leave no process of the bot alive.
-- [#23](https://github.com/jcore9/Aphelion/issues/23) adds the frames that carry these events to clients, with bot and session ids and a saved format version. `packages/protocol` doesn't change before then.
+- [#23](https://github.com/jcore9/Aphelion/issues/23) part a saves these events and sends them to clients in `bot.event` frames ([the frame](protocol.md#the-botevent-frame)). The frame has the bot and the turn, and no vendor session id. `packages/protocol` copies the event schemas, and a server test fails when they differ from the ones in this contract. Part b adds the first client commands.
 - [#25](https://github.com/jcore9/Aphelion/issues/25) adds recorded streams that replay through an adapter.
