@@ -13,7 +13,7 @@ export const runBots = (options: BotManagerOptions, history: EventStore) =>
     const services = yield* Layer.buildWithScope(
       botManagerLayer({
         ...options,
-        turns: { open: history.openTurn, drop: history.dropTurn },
+        turns: { open: history.openTurn, end: history.endTurn },
       }),
       botsScope,
     );

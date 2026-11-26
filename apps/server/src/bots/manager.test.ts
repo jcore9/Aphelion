@@ -1,5 +1,6 @@
 import {
   sessionRef,
+  turnId,
   type AdapterContext,
   type BotAdapter,
 } from "@aphelion/plugin-sdk";
@@ -12,10 +13,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
-import { Context, Effect, Layer, Stream } from "effect";
+import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import type { RestartPolicy } from "../plugins/lifecycle";
+import type { RunnerReply } from "./runner-protocol";
 import { openStore, readServerId } from "../store";
 import {
   BotManager,
@@ -55,6 +57,9 @@ const system = (
   provider = "fake",
   sessionLayer: Layer.Layer<SessionRefs> = memorySessionRefs,
   turns?: TurnLedger,
+  shape: (
+    link: Context.Service.Shape<typeof BotRunnerLink>,
+  ) => Context.Service.Shape<typeof BotRunnerLink> = (link) => link,
 ) =>
   Effect.gen(function* () {
     const fake = fakeBotProcesses({ chief: bot });
@@ -72,7 +77,7 @@ const system = (
         ...(turns === undefined ? {} : { turns }),
       }).pipe(
         Layer.provideMerge(sessionLayer),
-        Layer.provide(Layer.succeed(BotRunnerLink, link)),
+        Layer.provide(Layer.succeed(BotRunnerLink, shape(link))),
       ),
     );
     const refs = Context.get(services, SessionRefs);
@@ -233,7 +238,7 @@ describe("the bot manager", () => {
   );
 
   it.live(
-    "records each turn with the ledger before the adapter sees it, and drops one the bot refuses",
+    "records each turn with the ledger before the adapter sees it, and ends one the bot refuses",
     () =>
       Effect.gen(function* () {
         const chief = recording([sessionTurn, [{ waitForAbort: true }]]);
@@ -249,9 +254,9 @@ describe("the bot manager", () => {
                 calls.push(`open ${bot} ${turn}`);
                 return true;
               }),
-            drop: (turn) =>
+            end: (turn, reason) =>
               Effect.sync(() => {
-                calls.push(`drop ${turn}`);
+                calls.push(`end ${turn} ${reason}`);
               }),
           },
         );
@@ -270,8 +275,114 @@ describe("the bot manager", () => {
         expect(calls.slice(1)).toEqual([
           `open chief ${second.turn}`,
           `open chief ${busy.turn}`,
-          `drop ${busy.turn}`,
+          `end ${busy.turn} refused`,
         ]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "ends a turn the adapter refuses after its caller stopped waiting",
+    () =>
+      Effect.gen(function* () {
+        const calls: string[] = [];
+        const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+        const { manager, reach } = yield* system(
+          recording([sessionTurn]).bot,
+          () => Effect.void,
+          "fake",
+          memorySessionRefs,
+          {
+            open: (_bot, turn) =>
+              Effect.sync(() => {
+                calls.push(`open ${turn}`);
+                return true;
+              }),
+            end: (turn, reason) =>
+              Effect.sync(() => {
+                calls.push(`end ${turn} ${reason}`);
+              }),
+          },
+          (link) => {
+            Effect.runFork(
+              Queue.take(link.incoming).pipe(
+                Effect.flatMap((reply) => Queue.offer(incoming, reply)),
+                Effect.forever,
+                Effect.ignore,
+              ),
+            );
+            return {
+              incoming,
+              send: (message) =>
+                message.type === "turn.start"
+                  ? Effect.void
+                  : link.send(message),
+            };
+          },
+        );
+        yield* manager.start("chief");
+        yield* reach("running");
+        const caller = yield* manager
+          .startTurn("chief", "hi")
+          .pipe(Effect.forkScoped);
+        yield* Effect.sleep("30 millis");
+        yield* Fiber.interrupt(caller);
+        const opened = calls[0]?.slice("open ".length) ?? "";
+        expect(calls).toEqual([`open ${opened}`]);
+
+        yield* Queue.offer(incoming, {
+          type: "turn.refused",
+          bot: "chief",
+          run: 1,
+          turn: turnId.parse(opened),
+          reason: "refused",
+        });
+        yield* Effect.sleep("30 millis");
+        expect(calls).toEqual([`open ${opened}`, `end ${opened} refused`]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "ends the turn row when the caller is interrupted while the ledger opens it",
+    () =>
+      Effect.gen(function* () {
+        const calls: string[] = [];
+        const { manager, reach } = yield* system(
+          recording([[{ waitForAbort: true }]]).bot,
+          () => Effect.void,
+          "fake",
+          memorySessionRefs,
+          {
+            open: (_bot, turn) =>
+              Effect.sleep("40 millis").pipe(
+                Effect.as(true),
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    calls.push(`open ${turn}`);
+                  }),
+                ),
+              ),
+            end: (turn, reason) =>
+              Effect.sync(() => {
+                calls.push(`end ${turn} ${reason}`);
+              }),
+          },
+        );
+        yield* manager.start("chief");
+        yield* reach("running");
+        const first = yield* manager.startTurn("chief", "first");
+        const caller = yield* manager
+          .startTurn("chief", "second")
+          .pipe(Effect.forkScoped);
+        yield* Effect.sleep("10 millis");
+        yield* Fiber.interrupt(caller);
+        yield* Effect.sleep("100 millis");
+
+        expect(first.outcome).toBe("accepted");
+        expect(calls).toHaveLength(3);
+        expect(calls[1]).toMatch(/^open /);
+        expect(calls[2]).toBe(
+          `end ${calls[1]?.slice("open ".length) ?? ""} refused`,
+        );
       }).pipe(Effect.scoped),
   );
 
@@ -283,7 +394,7 @@ describe("the bot manager", () => {
         () => Effect.void,
         "fake",
         memorySessionRefs,
-        { open: () => Effect.succeed(false), drop: () => Effect.void },
+        { open: () => Effect.succeed(false), end: () => Effect.void },
       );
       yield* manager.start("chief");
       yield* reach("running");

@@ -227,19 +227,41 @@ describe("the event store", () => {
   );
 
   it.effect(
-    "drops a turn that never got an event, and keeps one that did",
+    "ends a refused turn and keeps its events, whether they were saved before or after the refusal",
     () =>
       Effect.gen(function* () {
         const { db } = tempStore();
         const store = yield* open(db);
         yield* store.openTurn("chief", "t2");
-        yield* store.record(delta("a"));
+        yield* store.record(delta("a", "t1"));
+        yield* store.endTurn("t1", "refused");
         yield* store.flush;
-        yield* store.dropTurn("t1");
-        yield* store.dropTurn("t2");
+        yield* store.record(delta("b", "t2"));
+        yield* store.flush;
+        yield* store.endTurn("t2", "refused");
 
-        expect(db.all("SELECT id FROM turns")).toEqual([{ id: "t1" }]);
+        expect(
+          db.all("SELECT id, end_reason, ended_at IS NULL AS open FROM turns"),
+        ).toEqual([
+          { id: "t1", end_reason: "refused", open: 0 },
+          { id: "t2", end_reason: "refused", open: 0 },
+        ]);
+        expect(saved(db).map((row) => row["turn"])).toEqual(["t1", "t2"]);
       }).pipe(Effect.scoped),
+  );
+
+  it.effect("never ends a turn twice", () =>
+    Effect.gen(function* () {
+      const { db } = tempStore();
+      const store = yield* open(db);
+      yield* store.record(end("completed"));
+      yield* store.flush;
+      yield* store.endTurn("t1", "refused");
+
+      expect(db.all("SELECT end_reason FROM turns")).toEqual([
+        { end_reason: "completed" },
+      ]);
+    }).pipe(Effect.scoped),
   );
 
   it.effect(

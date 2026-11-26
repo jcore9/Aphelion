@@ -224,6 +224,27 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
+it.effect("leaves a refused turn alone, with its events kept", () =>
+  Effect.gen(function* () {
+    const path = tempPath();
+    yield* Effect.gen(function* () {
+      const { store } = yield* boot(path);
+      yield* save(store, [midTurn[3] as NewEvent]);
+      yield* store.endTurn("t1", "refused");
+    }).pipe(Effect.scoped);
+
+    const { db, store } = yield* boot(path);
+    expect(yield* closeDanglingTurns(db, store, quiet)).toEqual({
+      turns: 0,
+      calls: 0,
+    });
+    expect(store.read(0, 100)).toHaveLength(1);
+    expect(db.all("SELECT end_reason FROM turns")).toEqual([
+      { end_reason: "refused" },
+    ]);
+  }).pipe(Effect.scoped),
+);
+
 it.effect("adds nothing to a database with no open turn", () =>
   Effect.gen(function* () {
     const { db, store } = yield* boot(tempPath());

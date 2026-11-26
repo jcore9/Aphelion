@@ -34,7 +34,7 @@ export interface EventLog {
 
 export interface EventStore extends EventLog {
   readonly openTurn: (bot: string, turn: string) => Effect.Effect<boolean>;
-  readonly dropTurn: (turn: string) => Effect.Effect<void>;
+  readonly endTurn: (turn: string, reason: "refused") => Effect.Effect<void>;
   readonly record: (entry: NewEvent) => Effect.Effect<void>;
   readonly appendNow: (entries: readonly NewEvent[]) => Effect.Effect<void>;
   readonly flush: Effect.Effect<void>;
@@ -291,25 +291,27 @@ export const openEventStore = (
         }),
       );
 
-    const dropTurn = (turn: string) =>
-      Effect.sync(() => {
-        try {
-          db.run(
-            "DELETE FROM turns WHERE id = ? AND NOT EXISTS (SELECT 1 FROM events WHERE turn = ?)",
-            [turn, turn],
-          );
-        } catch (error) {
-          logger.error("dropping an unused turn failed", {
-            error: error instanceof Error ? error.name : "unknown",
-          });
-        }
-      });
+    const endTurn = (turn: string, reason: "refused") =>
+      Effect.flatMap(Clock.currentTimeMillis, (at) =>
+        Effect.sync(() => {
+          try {
+            db.run(
+              "UPDATE turns SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL",
+              [at, reason, turn],
+            );
+          } catch (error) {
+            logger.error("ending a refused turn failed", {
+              error: error instanceof Error ? error.name : "unknown",
+            });
+          }
+        }),
+      );
 
     const store: EventStore = {
       serverId,
       epoch,
       openTurn,
-      dropTurn,
+      endTurn,
       streamId: readStreamId(db),
       head,
       firstKept,

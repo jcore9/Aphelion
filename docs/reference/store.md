@@ -81,7 +81,7 @@ Migration 8 adds four tables, all `STRICT`. Every row in `turns`, `events` and `
 | Table | Holds |
 | --- | --- |
 | `server_meta` | Four rows. `server_id` is a UUIDv7 that never changes. `stream_id` is a UUIDv7 that names the event stream and changes at each restore. `next_position` is the position the next saved event gets. `boot_epoch` is a counter that goes up by one each time the server starts. |
-| `turns` | One row per turn: its id, the bot, `started_at`, and `ended_at` with `end_reason`. A turn with no `ended_at` is still open. The server makes the id (a UUIDv7) and inserts the row, owned by the bot, when it starts the turn. It then sends the id to the adapter as the turn's id, so no two bots share one. A turn the bot refuses, and that has no events, loses its row again. |
+| `turns` | One row per turn: its id, the bot, `started_at`, and `ended_at` with `end_reason`. A turn with no `ended_at` is still open. The server makes the id (a UUIDv7) and inserts the row, owned by the bot, when it starts the turn. It then sends the id to the adapter as the turn's id, so no two bots share one. A turn is never deleted. When the bot refuses a turn, or the server can't hand it to the bot, the server ends the turn with `end_reason` `refused`, whether or not the caller is still waiting. Events saved for that turn stay. Boot repair skips an ended turn. |
 | `events` | One row per bot event: `id`, `position`, `bot`, `turn`, `run`, `epoch`, `format`, `kind`, `payload` and `at`. `run` is the number of the bot process run that sent the event, and `epoch` is the `boot_epoch` of the server start that saved it. A `run` starts again at 1 after each server start, so `epoch` and `run` together name one adapter process. An event's `turn` must belong to the event's `bot`, and the database refuses it otherwise. |
 | `bot_sessions` | One row per server and bot, with the AI tool's session id, the bot's folder and the bot's provider. The server hands the id to the adapter as `resume` on the next start, and only when the bot, the folder and the provider all match the saved row. A bot that changes provider starts a new session. |
 
@@ -117,7 +117,7 @@ Boot repair reads each saved event through the same versioned reader that the re
 
 ### Retention
 
-The server keeps every turn and event. Nothing prunes them yet, so the table grows with every token a bot writes. Pruning is later work. A client whose cursor is older than the oldest saved event gets a `resync`.
+The server keeps every turn and event. Nothing prunes them yet, so the table grows with every token a bot writes. Pruning is later work. A client whose cursor is more than one behind the oldest retained event gets a `resync`.
 
 ## Rules
 
