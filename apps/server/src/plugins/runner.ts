@@ -57,7 +57,7 @@ export function pluginEnvironment(
   };
 }
 
-function logBudget() {
+export function logBudget() {
   let windowStart = Number.NEGATIVE_INFINITY;
   let used = 0;
   return (now: number): "send" | "notice" | "drop" => {
