@@ -88,6 +88,26 @@ as_root bash -euo pipefail -c '
 ' >/dev/null || fail "the image's users, groups or tools are not as expected"
 pass "four fixed users, a private harness group, no sudo, no set-user-ID files, no AI tool"
 
+as_root bash -euo pipefail -c '
+  adapters=/usr/local/lib/aphelion/adapters/claude
+  [[ $(stat -c "%U:%G %a" "${adapters%/*}" "$adapters" | tr "\n" " ") == "root:root 755 root:root 755 " ]]
+  [[ $(ls -A "$adapters" | tr "\n" " ") == "adapter.js aphelion-plugin.json " ]]
+  for file in "$adapters"/*; do [[ $(stat -c "%U:%G %a" "$file") == "root:root 644" ]]; done
+  [[ -z $(find / -xdev \( -name node_modules -o -name "claude-agent-sdk*" \) -print -quit) ]]
+  [[ -z $(find / -xdev -path /opt/aphelion/tools -prune -o -name claude -type f -print -quit) ]]
+' || fail "the Claude adapter bundle isn't in place, or the image holds node_modules or another claude binary"
+adapter_out=$(docker run --rm --interactive --entrypoint "" --network none --user aphelion-bot \
+  --env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 --env ANTHROPIC_API_KEY=sk-ant-contract-fake "$image" \
+  bash -c 'mkdir -p /tmp/work && { printf "%s\n" "$1" "$2"; sleep 3; printf "%s\n" "$3"; } |
+    bun /usr/local/lib/aphelion/adapters/claude/adapter.js 2>&1' _ \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"api":"0.1.0","bot":{"id":"contract"},"folder":"/tmp/work","resume":null}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"turn.start","params":{"turn":"t1","text":"hello"}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"shutdown"}') || fail "the Claude adapter bundle didn't run: $adapter_out"
+grep -qF '"result":{"api":"0.1.0","provider":"claude"}' <<<"$adapter_out" || fail "the Claude adapter didn't answer initialize: $adapter_out"
+grep -qF '"event":{"type":"error","code":"cli-not-found"}' <<<"$adapter_out" || fail "the Claude adapter didn't report a missing CLI: $adapter_out"
+[[ $adapter_out != *sk-ant* ]] || fail "the Claude adapter printed the key from its environment"
+pass "the image runs the bundled Claude adapter with no node_modules, ships no other claude binary, and reports the missing CLI without the key"
+
 cp deploy/test/probe.mjs deploy/test/probe-plugin/* "$scratch/plugins/contract-probe/"
 cat >"$scratch/plugins/contract-probe/checks.json" <<'EOF'
 [
@@ -281,9 +301,9 @@ tar -C "$scratch" -cf - bot-test | docker exec -i --user aphelion-bot "$containe
 driven=$(docker exec --user aphelion-bot "$container" /usr/local/bin/bun /tmp/bot-test/drive.mjs 2>&1) ||
   fail "the bot runner check failed: $driven"
 docker exec --user aphelion-bot "$container" rm -rf /tmp/bot-test /var/lib/aphelion-bots/contract-bot
-wait_for_log "\"msg\":\"the bot runner couldn't start the bot\",\"bot\":\"chief-of-staff\",\"adapter\":\"/usr/local/lib/aphelion/adapters/claude/adapter.js\""
+wait_for_log "\"msg\":\"the bot runner started the bot's process\",\"bot\":\"chief-of-staff\""
 wait_for_log "no adapter in this image runs the bot's provider, so the bot won't start\",\"bot\":\"triage\""
-pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner, and its log names a missing adapter bundle"
+pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner, which starts the bundled Claude adapter for the example bot"
 
 probe aphelion-plugins '[
   ["list", "/etc/aphelion", "EACCES"],

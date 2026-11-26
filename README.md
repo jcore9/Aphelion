@@ -64,6 +64,7 @@ The code has two kinds of folder. Apps are programs you run. Packages hold code 
 | `apps/mobile` | The phone app (M9), empty for now |
 | `packages/protocol` | The messages the server and the apps exchange |
 | `packages/plugin-sdk` | What plugin authors use |
+| `packages/claude-adapter` | The bot adapter that runs Claude Code |
 | `packages/ui` | The shared screens, for the desktop app, the phone app and the web app the server serves |
 | `docs` | This documentation |
 
