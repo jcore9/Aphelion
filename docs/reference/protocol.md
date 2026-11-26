@@ -53,9 +53,13 @@ The server subscribes to new events before it reads the saved ones, sends the sa
 
 The server sends an event only after the database has committed it, so a client never sees an event that a restart would lose. The server writes events in batches of up to 200, or whatever arrived in 50 milliseconds. A client sees an event up to 50 milliseconds after the bot sent it.
 
+A crash or a power loss can lose the events of the batch that was still waiting, at most the last 50 milliseconds. No client ever received them, because clients only get saved events. At the next boot the server closes the turn they belonged to, so the saved history stays valid. An orderly shutdown loses nothing ([how events are written](store.md#how-events-are-written)).
+
 A restore from a backup brings back the positions that the backup had. So that no client takes a new event for one it already saw, `aphelion restore finish` gives the server a new stream ID in the same transaction as its other steps. The server ID stays the same. Every cursor saved before the restore names the old stream, so the server answers it with `resync`. Positions keep counting from the restored value. A client that gets `resync` takes the new cursor and loads the history again.
 
-The server keeps a buffer of new events for each client. It fills while the server replays saved events to that client, and while the client's connection is too slow to take what the server sends. The buffer holds at most 5,000 events. When a client's buffer would go past that, the server closes that client's connection with code 1013 and the reason `client too slow, reconnect`. The client reconnects and sends `resume` with its cursor. Other clients are not affected, and the server's memory stays bounded.
+The server keeps a buffer of new events for each client. It fills while the server replays saved events to that client, and while the server's own sending queue for that client is behind. The buffer holds at most 5,000 events. When a client's buffer would go past that, the server closes that client's connection with code 1013 and the reason `client too slow, reconnect`. Other clients are not affected, and the server's memory stays bounded.
+
+That limit covers only Aphelion's buffer. Below it, Bun has its own send buffer for each connection. When a client reads so slowly that Bun's buffer fills, Bun drops the connection without the 1013 code. The client sees the connection end, reconnects, and sends `resume` with its cursor. Either way the client gets every event after its cursor and loses none.
 
 If the server can't read a saved event, it closes the connection with code 1011 and the reason `history could not be read`. The server never skips an event.
 
@@ -78,7 +82,7 @@ One `bot.event` frame carries one event of one bot. Its payload has the bot's na
 }
 ```
 
-`turn` is `null` for an `error` outside a turn. `event` is one of the kinds in [the bot adapter contract](bot-adapters.md), and [the protocol spec](protocol-spec.md#botevent) lists their fields. The frame has no vendor session id. The server keeps that id, and a client has no use for it.
+`turn` is `null` for an `error` outside a turn. `event` is one of the kinds in [the bot adapter contract](bot-adapters.md), and [the protocol spec](protocol-spec.md#botevent) lists their fields. The frame has no vendor session id. The server keeps that id, and a client has no use for it. The server never sends a `session` event, live or in a replay, so a client may see `seq` jump over the position of one.
 
 `format` is the version of the saved event's shape. It is 1 today. A change to an event's shape raises it, and the server keeps reading the older rows. A client that sees a `format` it doesn't know should show the event as unreadable and go on.
 

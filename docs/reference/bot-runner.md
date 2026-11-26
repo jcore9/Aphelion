@@ -80,15 +80,19 @@ The server, not the bot runner, decides when a bot starts again. It runs each bo
 | Crashed | The process ended by itself. The server waits, then starts it again. |
 | Given up | The bot crashed too often and stays stopped |
 
-A prompt sent again with the id of the turn that is running is accepted and not run a second time. A prompt sent again with the id of a turn that already ended is refused with `ended`: the turn ran once, and its events have already been sent. The adapter decides which case it is, because it knows which turns it ran, so the bot stays idle and the next prompt runs. See [what the runtime does](bot-adapters.md#what-the-runtime-does).
+A prompt sent again with the id of the turn that is running is accepted and not run a second time. A prompt sent again with the id of a turn that already ended is refused with `ended`: the turn ran once, and its events have already been sent. The adapter decides which case it is, because it knows which turns it ran, so the bot stays idle and the next prompt runs. See [what the runtime does](bot-adapters.md#what-the-runtime-does). The server itself makes a new UUIDv7 as the turn's id for every prompt, so it never sends one id twice.
 
 After a crash the server waits 1 second, then 2, 4, 8 and 16. The sixth crash in a row gives up, and the server logs `the bot crashed too often, so it stays stopped`. A bot that ran for 60 seconds before it crashed starts the count again.
 
-The adapter reports the AI tool's own session id in a `session` event. The server keeps the latest one for each bot, with the bot's folder, and hands it to the adapter as `resume` on every start. A session saved for another folder isn't resumed. If the adapter refuses `initialize` while it resumes, the server forgets the saved session, logs `the saved session could not be resumed, so the bot started a new one`, and starts the bot again at once without it. That retry doesn't count as a crash.
+The adapter reports the AI tool's own session id in a `session` event. The server keeps the latest one for each bot, with the bot's folder and provider, and hands it to the adapter as `resume` on every start. A session saved for another folder or another provider isn't resumed, so a bot that moves or changes provider starts a new session. If the adapter refuses `initialize` while it resumes, the server forgets the saved session, logs `the saved session could not be resumed, so the bot started a new one`, and starts the bot again at once without it. That retry doesn't count as a crash.
 
 The server keeps the saved session in the `bot_sessions` table of its database ([the store](store.md#the-server-id-turns-and-events)), so a restart of the server or the container keeps it. A restored backup brings it back too.
 
 The server also saves every event a bot sends, with the turn it belongs to, and it sends the event to every connected client as a `bot.event` frame. [The client protocol](protocol.md#sequence-numbers-and-replay) explains how a client that reconnects gets the events it missed. When the server itself stops in the middle of a turn, it closes that turn at the next boot ([turns that a shutdown left open](store.md#turns-that-a-shutdown-left-open)).
+
+## What the server logs about a bot
+
+The server never writes what a bot prints to its standard error into its log. It logs only the bot's name and how many lines the bot has printed since its process started, because an adapter can echo a prompt in a diagnostic.
 
 ## When a bot process dies
 

@@ -81,9 +81,9 @@ Migration 8 adds four tables, all `STRICT`. Every row in `turns`, `events` and `
 | Table | Holds |
 | --- | --- |
 | `server_meta` | Three rows. `server_id` is a UUIDv7 that never changes. `stream_id` is a UUIDv7 that names the event stream and changes at each restore. `next_position` is the position the next saved event gets. |
-| `turns` | One row per turn: its id, the bot, `started_at`, and `ended_at` with `end_reason`. A turn with no `ended_at` is still open. |
-| `events` | One row per bot event: `id`, `position`, `bot`, `turn`, `format`, `kind`, `payload` and `at` |
-| `bot_sessions` | One row per bot with the AI tool's session id and the bot's folder. The server hands it to the adapter as `resume` on the next start. |
+| `turns` | One row per turn: its id, the bot, `started_at`, and `ended_at` with `end_reason`. A turn with no `ended_at` is still open. The server makes the id (a UUIDv7) when it starts the turn, and sends it to the adapter as the turn's id, so no two bots share one. |
+| `events` | One row per bot event: `id`, `position`, `bot`, `turn`, `run`, `format`, `kind`, `payload` and `at`. `run` is the number of the bot process run that sent the event. An event's `turn` must belong to the event's `bot`, and the database refuses it otherwise. |
+| `bot_sessions` | One row per server and bot, with the AI tool's session id, the bot's folder and the bot's provider. The server hands the id to the adapter as `resume` on the next start, and only when the bot, the folder and the provider all match the saved row. A bot that changes provider starts a new session. |
 
 `openStore` creates the server ID right after it applies the migrations. It reads `server_id` and, when there is none, writes a new UUIDv7 in the same transaction. The ID never changes afterwards. A restored backup keeps it, because it is in the database. Two new databases get different IDs.
 
@@ -91,19 +91,25 @@ The same step writes the stream ID, a second UUIDv7, when there is none. The str
 
 A record's `id` is a UUIDv7 from `node:crypto`. The first 48 bits are the time in milliseconds, so ids sort in creation order. Two servers can't make the same id. `position` is a different thing. It is a counter for this server's stream, and it is the `seq` of the event frame. The server raises `next_position` in the same transaction that inserts the event, so positions have no gap and a position is never used twice, even when the table is emptied. The audit log keeps its integer ids.
 
-`events.kind` is the event's `type`, and `payload` is the rest of the event as JSON text. `format` says how that JSON is shaped. Every event saved today has `format` 1. A later change to an event's shape raises the number, and the server keeps reading the rows with older numbers. A row whose `format` the server doesn't know, or whose payload doesn't match its format, makes the replay fail, and the server closes that client's connection.
+`events.kind` is the event's `type`, and `payload` is the rest of the event as JSON text. `format` says how that JSON is shaped. Every event saved today has `format` 1. The server reads format 1 with its own copy of the schema, which a later change to the adapter SDK doesn't touch. A later change to an event's shape raises the number and adds a conversion, and the server keeps reading the rows with older numbers. A row whose `format` the server doesn't know, or whose payload doesn't match its format, makes the replay fail, and the server closes that client's connection.
 
 `text.delta` events hold the conversation. The server saves them as they are, and it never writes them to a log line. The state volume is in every backup, so every backup holds the conversations too. Keep the archive as private as the server.
 
 ### How events are written
 
-The writer collects events for up to 50 milliseconds or 200 events, whichever comes first, and inserts them in one transaction. A client gets an event only after that transaction commits, so a client never sees an event that a crash would lose. At shutdown the server writes what is still waiting. When a write fails, the server logs `saving bot events failed, so the server will retry` and tries again every second. The events wait in memory until the write works.
+The writer collects events for up to 50 milliseconds or 200 events, whichever comes first, and inserts them in one transaction. A client gets an event only after that transaction commits, so a client never sees an event that a crash would lose.
+
+An orderly shutdown loses nothing. The server stops the bots first, so the events a stopping bot sends are still saved. It then takes the events still queued for saving, writes them, and only then closes the database.
+
+A crash or a power loss can lose the events that were waiting for their batch, which is at most the last 50 milliseconds. Those events were never sent to a client, so no client has a position that the database lacks. At the next boot the server closes the turn they belonged to ([below](#turns-that-a-shutdown-left-open)). When a write fails, the server logs `saving bot events failed, so the server will retry` and tries again every second. The events wait in memory until the write works.
 
 The database stays in WAL mode with `synchronous` at its default of `FULL`, because the same database holds device tokens and the audit log, and a revoked token must stay revoked after a power loss. A bot that sends fewer than 4,000 events a second makes at most 20 commits a second, so the cost of the disk flush is small. On the development machine (a Proxmox VM, 4 cores, real disk), saving 5,000 text deltas of 100 bytes took a median of 64 ms in batches and 3,780 ms with one transaction per event. At about 430 events a second, a batched event reached a subscriber after a median of 29 ms and at most 56 ms.
 
 ### Turns that a shutdown left open
 
-When the server stops while a bot is in the middle of a turn, that turn has no `turn.end`. At boot, before the server listens, it closes each open turn the way [the bot runner closes a turn when a bot process dies](bot-runner.md#when-a-bot-process-dies). It adds `error` with code `cli-exited`, a `deny` for each permission request that has no answer, `tool.end` with outcome `cancelled` for each call still open, and `turn.end` with reason `error`. All of them are saved in one transaction, and the turn gets its `ended_at`. A call that a turn started and left running after its own `turn.end` isn't closed. The server logs how many turns it closed.
+When the server stops while a bot is in the middle of a turn, that turn has no `turn.end`. At boot, before the server listens, it closes each open turn the way [the bot runner closes a turn when a bot process dies](bot-runner.md#when-a-bot-process-dies). It adds `error` with code `cli-exited`, a `deny` for each permission request that has no answer, `tool.end` with outcome `cancelled` for each call still open, and `turn.end` with reason `error`. All of them are saved in one transaction, and the turn gets its `ended_at`.
+
+The server also closes every call that no `tool.end` has closed, even when its turn ended long ago, such as a background command. A server start means a fresh bot runner, so no process from an earlier run is alive. Each such call gets `tool.end` with outcome `cancelled`. The server tells calls apart by bot and run, because an adapter reuses call ids across runs. The server logs how many turns and calls it closed.
 
 ### Retention
 
