@@ -22,14 +22,18 @@ import {
   parseGithubAsset,
   parseSha256Sums,
   type Expected,
+  verifyManifestSignature,
+  type GpgRun,
   type Parsed,
 } from "../apps/server/src/tools/vendor-checksums.ts";
 
 const usage = `usage:
-  bun scripts/verify-ai-tools.ts [--download] [--list FILE]
+  bun scripts/verify-ai-tools.ts [--download] [--skip-signature] [--list FILE]
       Check every entry of the list against its vendor. With --download, also
       download each build from its listed address and check the file itself.
-  bun scripts/verify-ai-tools.ts --print NAME VERSION
+      Claude's manifest must carry a good gpg signature, so the check fails
+      when gpg isn't installed. --skip-signature skips that check and says so.
+  bun scripts/verify-ai-tools.ts --print NAME VERSION [--skip-signature]
       Print the "builds" entry for a tool version, taken from the vendor.`;
 
 const claudeBase = "https://downloads.claude.ai/claude-code-releases";
@@ -102,13 +106,87 @@ function hashUrl(url: string) {
 
 const fail = (message: string): Parsed<never> => ({ ok: false, message });
 
+let skipSignature = false;
+
+type ClaudeManifest = {
+  readonly text: string;
+  readonly signature: Parsed<string> | "skipped";
+};
+
+const claudeManifests = new Map<string, Promise<ClaudeManifest>>();
+
+const gpgRunner =
+  (home: string): GpgRun =>
+  (args) => {
+    const ran = spawnSync(
+      "gpg",
+      ["--homedir", home, "--batch", "--status-fd", "1", ...args],
+      { encoding: "utf8" },
+    );
+    return {
+      found: ran.error === undefined,
+      status: ran.status,
+      stdout: ran.stdout,
+    };
+  };
+
+async function downloadClaudeManifest(
+  version: string,
+): Promise<ClaudeManifest> {
+  const home = mkdtempSync(join(tmpdir(), "verify-ai-tools-"));
+  try {
+    const manifest = join(home, "manifest.json");
+    writeFileSync(
+      manifest,
+      await getText(`${claudeBase}/${version}/manifest.json`),
+    );
+    if (skipSignature) {
+      return { text: readFileSync(manifest, "utf8"), signature: "skipped" };
+    }
+    const sig = await fetch(`${claudeBase}/${version}/manifest.json.sig`);
+    if (!sig.ok) {
+      return {
+        text: "",
+        signature: fail(
+          `the manifest has no signature (${String(sig.status)})`,
+        ),
+      };
+    }
+    const signature = join(home, "manifest.json.sig");
+    writeFileSync(signature, new Uint8Array(await sig.arrayBuffer()));
+    const key = join(home, "key.asc");
+    writeFileSync(key, await getText(claudeKeyUrl));
+    return {
+      text: readFileSync(manifest, "utf8"),
+      signature: verifyManifestSignature(
+        gpgRunner(home),
+        { key, signature, manifest },
+        claudeKeyFingerprint,
+      ),
+    };
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+function claudeManifestFor(version: string) {
+  const known = claudeManifests.get(version);
+  if (known !== undefined) return known;
+  const pending = downloadClaudeManifest(version);
+  claudeManifests.set(version, pending);
+  return pending;
+}
+
 async function claudeExpected(
   version: string,
   processor: Processor,
 ): Promise<Parsed<Expected>> {
   const platform = claudePlatformFor(processor);
-  const text = await getText(`${claudeBase}/${version}/manifest.json`);
-  const parsed = parseClaudeManifest(text, version, platform);
+  const manifest = await claudeManifestFor(version);
+  if (manifest.signature !== "skipped" && !manifest.signature.ok) {
+    return manifest.signature;
+  }
+  const parsed = parseClaudeManifest(manifest.text, version, platform);
   if (!parsed.ok) return parsed;
   return {
     ok: true,
@@ -118,50 +196,6 @@ async function claudeExpected(
       format: "binary",
       entry: "claude",
     },
-  };
-}
-
-function checkClaudeSignature(version: string) {
-  return async (): Promise<Parsed<string>> => {
-    if (spawnSync("gpg", ["--version"]).error !== undefined) {
-      return fail("gpg isn't installed, so the signature wasn't checked");
-    }
-    const home = mkdtempSync(join(tmpdir(), "verify-ai-tools-"));
-    try {
-      const manifest = join(home, "manifest.json");
-      writeFileSync(
-        manifest,
-        await getText(`${claudeBase}/${version}/manifest.json`),
-      );
-      const signature = join(home, "manifest.json.sig");
-      const sig = await fetch(`${claudeBase}/${version}/manifest.json.sig`);
-      if (!sig.ok)
-        return fail(`the manifest has no signature (${String(sig.status)})`);
-      writeFileSync(signature, new Uint8Array(await sig.arrayBuffer()));
-      const key = join(home, "key.asc");
-      writeFileSync(key, await getText(claudeKeyUrl));
-      const gpg = (...args: string[]) =>
-        spawnSync(
-          "gpg",
-          ["--homedir", home, "--batch", "--status-fd", "1", ...args],
-          {
-            encoding: "utf8",
-          },
-        );
-      gpg("--import", key);
-      const verified = gpg("--verify", signature, manifest);
-      const good = new RegExp(
-        `^\\[GNUPG:\\] VALIDSIG \\S+ .*${claudeKeyFingerprint}$`,
-        "m",
-      );
-      return verified.status === 0 && good.test(verified.stdout)
-        ? { ok: true, value: claudeKeyFingerprint }
-        : fail(
-            "gpg doesn't accept the manifest's signature from Anthropic's key",
-          );
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
   };
 }
 
@@ -347,16 +381,22 @@ async function checkList(file: string, download: boolean) {
   }
   for (const tool of parsed.list.tools) {
     if (tool.name === "claude") {
-      const signature = await settled(checkClaudeSignature(tool.version));
-      if (signature.ok) {
+      const manifest = await settled(async () => ({
+        ok: true as const,
+        value: await claudeManifestFor(tool.version),
+      }));
+      const label = `claude ${tool.version} manifest`;
+      if (!manifest.ok) {
+        line("FAIL", `${label}: ${manifest.message}`);
+      } else if (manifest.value.signature === "skipped") {
         line(
-          "ok",
-          `claude ${tool.version} manifest: signed by key ${signature.value}`,
+          "skip",
+          `${label}: --skip-signature, so its signature wasn't checked`,
         );
-      } else if (signature.message.startsWith("gpg isn't installed")) {
-        line("skip", `claude ${tool.version} manifest: ${signature.message}`);
+      } else if (manifest.value.signature.ok) {
+        line("ok", `${label}: signed by key ${manifest.value.signature.value}`);
       } else {
-        line("FAIL", `claude ${tool.version} manifest: ${signature.message}`);
+        line("FAIL", `${label}: ${manifest.value.signature.message}`);
       }
     }
     for (const processor of processors) {
@@ -399,6 +439,7 @@ try {
       download: { type: "boolean" },
       list: { type: "string" },
       print: { type: "boolean" },
+      "skip-signature": { type: "boolean" },
     },
     allowPositionals: true,
     strict: true,
@@ -408,6 +449,7 @@ try {
   process.exit(2);
 }
 const { values, positionals } = command;
+skipSignature = values["skip-signature"] === true;
 
 if (values.print === true) {
   const [name = "", version = ""] = positionals;

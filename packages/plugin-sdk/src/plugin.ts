@@ -16,7 +16,7 @@ export interface NetworkReply {
 export interface PluginContext {
   /** The plugin's `id`, as the host sent it when it started the plugin. */
   readonly id: string;
-  /** The plugin API version that the host runs, such as `0.2.2`. */
+  /** The plugin API version that the host runs, such as `0.2.3`. */
   readonly api: string;
   /**
    * `subscribe(name, handle)` asks the host for an event, and the SDK then calls `handle` with each event's data each time the host delivers it. The deployed server doesn't publish events yet, so only a test host delivers one.

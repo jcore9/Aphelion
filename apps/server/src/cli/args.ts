@@ -63,6 +63,12 @@ export type Command =
       readonly approve: string | undefined;
     }
   | {
+      readonly kind: "plugin enable";
+      readonly stateDir: string;
+      readonly plugin: string;
+      readonly approve: string | undefined;
+    }
+  | {
       readonly kind: "plugin rollback";
       readonly stateDir: string;
       readonly pluginsDir: string;
@@ -85,6 +91,7 @@ export type Command =
       readonly toolsDir: string;
       readonly name: ToolName;
     }
+  | { readonly kind: "restore finish"; readonly stateDir: string }
   | { readonly kind: "device list"; readonly stateDir: string }
   | {
       readonly kind: "device revoke";
@@ -134,6 +141,11 @@ const grammar: Record<
     operand: "plugin id",
     flags: ["state-dir", "plugins-dir", "approve"],
   },
+  "plugin enable": {
+    words: 2,
+    operand: "plugin id",
+    flags: ["state-dir", "approve"],
+  },
   "plugin rollback": {
     words: 2,
     operand: "plugin id",
@@ -152,6 +164,7 @@ const grammar: Record<
     operand: "tool name",
     flags: ["state-dir", "tools-dir"],
   },
+  "restore finish": { words: 2, flags: ["state-dir"] },
   "device list": { words: 2, flags: ["state-dir"] },
   "device revoke": { words: 2, operand: "id", flags: ["state-dir"] },
 };
@@ -375,6 +388,11 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
             : { kind, ...base },
       };
     }
+    case "plugin enable":
+      return {
+        ok: true,
+        command: { kind, stateDir, plugin: operand, approve: values.approve },
+      };
     case "plugin restart":
       return { ok: true, command: { kind, stateDir, plugin: operand } };
     case "plugin dev":
@@ -392,6 +410,7 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
         command: { kind, stateDir, toolsDir: toolsDir.value, name: name.value },
       };
     }
+    case "restore finish":
     case "device list":
       return { ok: true, command: { kind, stateDir } };
     case "device revoke": {

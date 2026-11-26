@@ -13,6 +13,7 @@ import { Effect, Layer, Stream } from "effect";
 import {
   PluginProcesses,
   SpawnFailed,
+  type Interruptibly,
   type PluginProcess,
   type SpawnSpec,
 } from "../plugins/processes";
@@ -190,31 +191,40 @@ export const bunPluginProcesses = (runtime: string, pluginUid: number) =>
 
       const sweep = Effect.suspend(() => reap(freezeAndKill(orphans)));
 
-      const spawn = (spec: SpawnSpec) =>
+      const spawn = (spec: SpawnSpec, interruptibly: Interruptibly) =>
         Effect.gen(function* () {
           const fail = (reason: string) => new SpawnFailed({ reason });
-          const folder = yield* Effect.tryPromise({
-            try: () => realpath(spec.folder),
-            catch: () => fail("the plugin's folder can't be read"),
-          });
-          const entry = yield* Effect.tryPromise({
-            try: () => realpath(join(folder, spec.entry)),
-            catch: () => fail("the plugin's entry file can't be found"),
-          });
+          const folder = yield* interruptibly(
+            Effect.tryPromise({
+              try: () => realpath(spec.folder),
+              catch: () => fail("the plugin's folder can't be read"),
+            }),
+          );
+          const entry = yield* interruptibly(
+            Effect.tryPromise({
+              try: () => realpath(join(folder, spec.entry)),
+              catch: () => fail("the plugin's entry file can't be found"),
+            }),
+          );
           if (!inside(folder, entry)) {
             return yield* fail("the entry is outside the plugin's folder");
           }
-          const problem = yield* Effect.tryPromise({
-            try: async () =>
-              (await installProblem(folder, pluginUid)) ??
-              (await ancestorProblem(folder, pluginUid)),
-            catch: () => fail("the plugin's folder can't be read"),
-          });
+          const problem = yield* interruptibly(
+            Effect.tryPromise({
+              try: async () =>
+                (await installProblem(folder, pluginUid)) ??
+                (await ancestorProblem(folder, pluginUid)),
+              catch: () => fail("the plugin's folder can't be read"),
+            }),
+          );
           if (problem !== undefined) return yield* fail(problem);
-          yield* Effect.tryPromise({
-            try: () => mkdir(spec.dataFolder, { recursive: true, mode: 0o700 }),
-            catch: () => fail("the plugin's data folder can't be created"),
-          });
+          yield* interruptibly(
+            Effect.tryPromise({
+              try: () =>
+                mkdir(spec.dataFolder, { recursive: true, mode: 0o700 }),
+              catch: () => fail("the plugin's data folder can't be created"),
+            }),
+          );
           const child = yield* Effect.try({
             try: () =>
               Bun.spawn([runtime, "--no-env-file", entry], {

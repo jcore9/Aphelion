@@ -846,6 +846,130 @@ describe("length limits count characters the way JSON Schema does", () => {
   );
 });
 
+describe("contributes.botAdapter", () => {
+  const adapter = {
+    ...minimal,
+    contributes: { botAdapter: { provider: "claude" } },
+  };
+
+  test("accepts a server part with a provider", () => {
+    const parsed = parsePluginManifest(adapter);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.manifest.contributes.botAdapter).toEqual({
+        provider: "claude",
+      });
+    }
+  });
+
+  test("a manifest without it has no botAdapter", () => {
+    const parsed = parsePluginManifest(minimal);
+    expect(parsed.ok && parsed.manifest.contributes.botAdapter).toBeFalsy();
+  });
+
+  test("accepts empty lists beside it", () => {
+    expect(
+      parsePluginManifest({
+        ...adapter,
+        permissions: { network: [] },
+        contributes: {
+          botAdapter: { provider: "claude" },
+          screens: [],
+          secretSchemes: [],
+        },
+      }).ok,
+    ).toBe(true);
+  });
+
+  test("refuses a provider that isn't an id", () => {
+    expect(
+      issuesOf({
+        ...minimal,
+        contributes: { botAdapter: { provider: "Claude Code" } },
+      }),
+    ).toEqual([
+      {
+        field: "contributes.botAdapter.provider",
+        message:
+          "must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter",
+      },
+    ]);
+  });
+
+  test("refuses a missing provider and an unknown field", () => {
+    expect(issuesOf({ ...minimal, contributes: { botAdapter: {} } })).toEqual([
+      { field: "contributes.botAdapter.provider", message: "is required" },
+    ]);
+    expect(
+      issuesOf({
+        ...minimal,
+        contributes: { botAdapter: { provider: "claude", entry: "x.js" } },
+      }),
+    ).toEqual([
+      { field: "contributes.botAdapter", message: "has an unknown field" },
+    ]);
+  });
+
+  test.each([
+    [
+      "a permission",
+      { permissions: { network: ["api.github.com"] } },
+      "permissions.network",
+    ],
+    [
+      "a secret scheme",
+      {
+        contributes: {
+          botAdapter: { provider: "claude" },
+          secretSchemes: ["op"],
+        },
+      },
+      "contributes.secretSchemes",
+    ],
+    [
+      "a screen",
+      {
+        contributes: {
+          botAdapter: { provider: "claude" },
+          screens: [{ id: "a", title: "A" }],
+        },
+      },
+      "contributes.screens",
+    ],
+  ])("refuses %s beside it", (_name, extra, field) => {
+    expect(issuesOf({ ...adapter, ...extra })).toContainEqual({
+      field,
+      message: "must be empty with contributes.botAdapter",
+    });
+  });
+
+  test("refuses a client part", () => {
+    expect(
+      issuesOf({ ...adapter, client: { entry: "dist/client.js" } }),
+    ).toEqual([
+      { field: "client", message: "isn't allowed with contributes.botAdapter" },
+    ]);
+  });
+
+  test("refuses a package with no server part", () => {
+    expect(
+      issuesOf({
+        ...identity,
+        client: { entry: "dist/client.js" },
+        contributes: { botAdapter: { provider: "claude" } },
+      }),
+    ).toEqual([
+      { field: "contributes.botAdapter", message: "needs a server part" },
+      { field: "client", message: "isn't allowed with contributes.botAdapter" },
+    ]);
+  });
+});
+
+test("the plugin API version is 0.2.3, which a ^0.2.2 manifest still accepts", () => {
+  expect(pluginApiVersion).toBe("0.2.3");
+  expect(parsePluginManifest({ ...minimal, api: "^0.2.2" }).ok).toBe(true);
+});
+
 test("plugin-manifest.schema.json matches the schema", async () => {
   const schema = jsonSchema();
   await expect(`${JSON.stringify(schema, null, 2)}\n`).toMatchFileSnapshot(

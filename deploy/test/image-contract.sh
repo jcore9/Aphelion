@@ -545,6 +545,14 @@ refused=$(host_aphelion device revoke "$device_id" 2>&1) || status=$?
   fail "revoking a revoked device didn't exit 1 with the server's message (exit $status): $refused"
 pass "device add prints only the token on standard output, and device list and revoke pass the server's output and exit codes through"
 
+http_status() {
+  env "PATH=$fakebin:$PATH" "FAKE_CONTAINER=$container" curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' \
+    --header "Authorization: Bearer $1" "http://$APHELION_TAILNET_ADDRESS:7400/api/status"
+}
+restore_token=$(host_aphelion device add contract-restore --days 30 2>/dev/null) ||
+  fail "device add failed for the restore check"
+[[ $(http_status "$restore_token") == 404 ]] || fail "the server refused a valid device token before the restore"
+
 status=0
 shown=$(host_aphelion status 2>&1) || status=$?
 [[ $status == 0 && $shown == $'service: enabled, running\ncontainer: running\nhealth: ok\nAI tools: none installed' ]] ||
@@ -594,6 +602,41 @@ for name in "the container is running" "/health answers on the tailnet address" 
   grep -q "^FAIL  $name: " <<<"$checked" || fail "check didn't print FAIL for: $name"
 done
 pass "with the container stopped, status exits 1 and check fails the container, health and hardening checks"
+
+restore_finish() {
+  docker run --rm --pull never --network none --entrypoint "" --user harness \
+    -v "${project}_state:/var/lib/aphelion" "$image" aphelion restore finish 2>&1
+}
+restored=$(restore_finish) || fail "restore finish failed: $restored"
+for name in contract-probe "$test_plugin"; do
+  grep -qF "aphelion plugin enable $name" <<<"$restored" || fail "restore finish didn't list $name: $restored"
+done
+again=$(restore_finish) ||
+  fail "a second restore finish failed: $again"
+[[ $again == "$restored" ]] || fail "a second restore finish printed something else: $again"
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+sleep 1
+"${compose[@]}" start >/dev/null 2>&1
+wait_for_log '"msg":"plugin host started","installed":2'
+wait_for_log 'a switched-off plugin was not started'
+if "${compose[@]}" logs --no-color --since "$since" 2>&1 | grep -F "$test_plugin 1.0.0 started" >/dev/null; then
+  fail "a switched-off plugin started"
+fi
+[[ $(http_status "$restore_token") == 401 ]] || fail "a device token from before the restore still works"
+[[ $(host_aphelion device list | grep -c 'active') == 0 ]] || fail "device list still shows an active device after the restore"
+fresh_token=$(host_aphelion device add contract-fresh --days 30 2>/dev/null) || fail "device add failed after the restore"
+[[ $(http_status "$fresh_token") == 404 ]] || fail "a device enrolled after the restore was refused"
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+for name in contract-probe "$test_plugin"; do
+  enable=(docker exec --user harness "$container" aphelion plugin enable "$name")
+  approval=$("${enable[@]}" | sed -n 's/.*--approve \([0-9a-f]\{64\}\)$/\1/p')
+  [[ -n $approval ]] || fail "plugin enable printed no approval for $name"
+  switched=$("${enable[@]}" --approve "$approval" 2>&1) || fail "plugin enable failed for $name: $switched"
+  [[ $switched == "Switched on $name. It runs." ]] || fail "plugin enable printed something else for $name: $switched"
+done
+wait_for_log "$test_plugin 1.0.0 started"
+"${compose[@]}" stop >/dev/null 2>&1
+pass "restore finish revokes every device token and switches every plugin off, and plugin enable switches each back on"
 
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 sleep 1
