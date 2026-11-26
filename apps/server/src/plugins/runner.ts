@@ -36,7 +36,8 @@ export interface RunnerOptions {
 
 export const maxLogLinesPerMinute = 1000;
 
-export const utf8Bytes = (text: string) => new TextEncoder().encode(text).byteLength;
+export const utf8Bytes = (text: string) =>
+  new TextEncoder().encode(text).byteLength;
 
 export const lineTooLong =
   "the plugin wrote a line longer than 1 MiB, and the runner dropped it";
