@@ -7,7 +7,7 @@ This page is the contract. It covers what an adapter yields, the rules a stream 
 ## What exists today
 
 - The SDK has the contract (`BotAdapter`), the runtime that wraps an adapter (`runAdapter` and `mainAdapter`), and test tools (`fakeAdapter`, `runTurn` and `checkStream`).
-- The **bot runner** doesn't exist yet. It will start one process per bot as the `aphelion-bot` user, and talk to the adapter inside it ([#22](https://github.com/jcore9/Aphelion/issues/22)). Until then, `runTurn` plays the bot runner in tests.
+- The [bot runner](bot-runner.md) starts one process per bot as the `aphelion-bot` user, and talks to the adapter inside it over [the wire](#the-wire). In an adapter's own tests, `runTurn` plays the bot runner.
 - No real adapter exists yet. The Claude adapter is [#20](https://github.com/jcore9/Aphelion/issues/20).
 
 ## Where an adapter runs
@@ -53,7 +53,7 @@ No event has a field that can hold a command, a path or free text, except the te
 
 | Event | Fields | Notes |
 | --- | --- | --- |
-| `session` | `ref` | The tool's own session id. Sent when the tool names its session, and again when the id changes. The last one wins, and the bot runner saves it so the bot can resume. |
+| `session` | `ref` | The tool's own session id. Sent when the tool names its session, and again when the id changes. The last one wins. The server saves it, so the bot can resume. |
 | `text.delta` | `text` | A piece of the reply, 1 byte to 16 KiB. The adapter splits longer text. The runtime drops an empty one without a word. |
 | `tool.start` | `call`, `tool`, `kind` | A tool call began. There is no tool input. `kind` is `file.read`, `file.write`, `shell`, `web` or `other`. A tool the adapter doesn't know is `other`. |
 | `tool.end` | `call`, `outcome` | The call ended with `ok`, `error`, `denied` or `cancelled`. There is no tool output. It may come after its turn ended, for a call that keeps running, such as a background command. |
@@ -135,6 +135,8 @@ The bot runner refuses a prompt longer than 256 KiB, or one whose encoded line i
 
 If `open` fails, the runtime answers `initialize` with the error `Operation failed` and stops. On `shutdown` or when the input closes, the runtime first marks itself as closing, so new requests are denied at once with reason `shutdown` and no event. It then aborts the running turn, sends the `permission.decision` for each open request, sends one `turn.end` with reason `cancelled` for a turn that is open, and calls `close`. Calls that are still open get no `tool.end`, which rule 4 allows.
 
+On each start, the bot runner sends `resume` with the session that the bot's last `session` event named, if the bot's folder is still the same. If the adapter refuses `initialize` while it resumes, the server forgets that session and starts the bot once more with `resume: null`. An adapter that can't resume a session answers `initialize` with an error, so the bot doesn't loop on a session that is gone. See [Restart and resume](bot-runner.md#restart-and-resume).
+
 When the connection is lost and the runtime can't flush, the bot runner repairs the stream instead. It appends `error` with code `cli-exited`, a `permission.decision` with `deny`, `by: "default"` and reason `shutdown` for each request that has no decision yet, a `tool.end` with outcome `cancelled` for each open call, and `turn.end` with reason `error`. The repaired stream then passes `checkStream`.
 
 ## Declare an adapter in a manifest
@@ -171,6 +173,6 @@ A test for an adapter runs the events it produces through `checkStream` and expe
 ## What comes later
 
 - [#20](https://github.com/jcore9/Aphelion/issues/20) builds the Claude adapter and the fixed permission rule.
-- [#22](https://github.com/jcore9/Aphelion/issues/22) builds the bot runner, which saves the latest `session` ref and resumes from it. When a bot process dies, it repairs the stream as [the wire](#the-wire) says.
+- [#216](https://github.com/jcore9/Aphelion/issues/216) makes a cancel and a stop leave no process of the bot alive.
 - [#23](https://github.com/jcore9/Aphelion/issues/23) adds the frames that carry these events to clients, with bot and session ids and a saved format version. `packages/protocol` doesn't change before then.
 - [#25](https://github.com/jcore9/Aphelion/issues/25) adds recorded streams that replay through an adapter.

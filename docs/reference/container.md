@@ -11,7 +11,8 @@ The image is built on Ubuntu 26.04 LTS. The Ubuntu and Bun base images are pinne
 | `/usr/local/bin/aphelion` | The server and its [command](cli.md), compiled with `bun build --compile` |
 | `/usr/local/bin/aphelion-secrets` | The [secrets broker](secrets.md#local-secrets-broker), compiled the same way |
 | `/usr/local/lib/aphelion/plugin-runner.js` | The [plugin runner](plugins.md#running-the-runner), bundled into one file that `bun` runs |
-| `/usr/local/bin/bun` | Bun 1.4.5, which runs the plugin runner and every plugin |
+| `/usr/local/lib/aphelion/bot-runner.js` | The [bot runner](bot-runner.md), bundled the same way |
+| `/usr/local/bin/bun` | Bun 1.4.5, which runs both runners, every plugin and every bot adapter |
 | `/usr/local/lib/aphelion/launch` | The launcher script that starts the processes |
 | `/usr/bin/tini` | The init process, process 1 in the container |
 | `/etc/aphelion/*.yaml` | The default config files, copied from [`docs/reference/config/example`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config/example) |
@@ -23,7 +24,7 @@ The image also has `git` and `ca-certificates`. It has no AI tool such as Claude
 | User | UID and GID | Runs | Extra groups |
 | --- | --- | --- | --- |
 | `harness` | 10001 | The server | `aphelion-bot`, to read the bot folders |
-| `aphelion-bot` | 10002 | Bots, from M1 | None |
+| `aphelion-bot` | 10002 | The bot runner and every bot | None |
 | `aphelion-secrets` | 10003 | The secrets broker | None |
 | `aphelion-plugins` | 10004 | The plugin runner and every plugin | None |
 
@@ -58,33 +59,32 @@ Only `harness` can write the `plugin-files` volume, so a plugin can't change its
 
 1. It checks the owner and mode of each folder in the table above.
 2. It checks that `/run/secrets/bootstrap` exists, belongs to root, and can't be read by any group or other user. The file holds the [bootstrap key](secrets.md#the-bootstrap-key), which `aphelion.service` loads and Compose mounts. If the file is missing, the launcher stops the container and says to start Aphelion with `systemctl`.
-3. It creates the two pipes between the server and the plugin runner. A pipe is a one-way channel between two processes. The launcher makes each one as a named pipe in a new folder under `/run` that only root can open. It opens both ends of both pipes, and then deletes the folder.
-4. It starts three processes. Each one starts with `setpriv --init-groups --inh-caps=-all --reset-env`, which switches to the process's user and its groups, drops every capability and clears the environment.
+3. It creates two pipes between the server and the plugin runner, and two between the server and the bot runner. A pipe is a one-way channel between two processes. The launcher makes each one as a named pipe in a new folder under `/run` that only root can open. It opens both ends of every pipe, and then deletes the folder.
+4. It starts four processes. Each one starts with `setpriv --init-groups --inh-caps=-all --reset-env`, which switches to the process's user and its groups, drops every capability and clears the environment.
 5. It closes its own copies of the pipes.
 
 | Process | User | Standard input | Command |
 | --- | --- | --- | --- |
 | Secrets broker | `aphelion-secrets` | `/run/secrets/bootstrap`. The broker reads the key and closes it. | `aphelion-secrets` |
 | Plugin runner | `aphelion-plugins` | The requests pipe. Its standard output is the replies pipe. | `bun plugin-runner.js --bun /usr/local/bin/bun --data /var/lib/aphelion-plugins` |
-| Server | `harness` | Nothing. It reads replies on descriptor 3 and writes requests on descriptor 4. | `aphelion --headless --plugin-runner-fds 3,4` |
-
-The bot runner comes with M1-04 ([#22](https://github.com/jcore9/Aphelion/issues/22)). The launcher will start it the same way.
+| Bot runner | `aphelion-bot` | The bot requests pipe. Its standard output is the bot replies pipe. | `bun bot-runner.js --bun /usr/local/bin/bun --home /var/lib/aphelion-bots` |
+| Server | `harness` | Nothing. It reads the plugin runner's replies on descriptor 3 and writes its requests on descriptor 4. It reads the bot runner's replies on descriptor 5 and writes its requests on descriptor 6. | `aphelion --headless --plugin-runner-fds 3,4 --bot-runner-fds 5,6` |
 
 If the environment variable `APHELION_PLUGIN_DEV_FOLDER` is set and not empty, the launcher adds `--plugin-dev` with its value to the server's command. [`deploy/compose.plugin-dev.yaml`](https://github.com/jcore9/Aphelion/blob/main/deploy/compose.plugin-dev.yaml) sets it. Without the variable, the server refuses reload requests on its [control socket](plugins.md#control-socket). See [Dev mode](plugins.md#dev-mode).
 
-After the launcher closes its copies, only the server and the plugin runner hold the pipes. No file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved, if its manifest is still the approved one ([`aphelion --headless`](cli.md#aphelion---headless)).
+After the launcher closes its copies, only the server and the plugin runner hold the plugin runner's pipes, and only the server and the bot runner hold the bot runner's pipes. No file in the file system leads to them. The server then starts every plugin that `aphelion plugin install` approved, if its manifest is still the approved one, and every bot in `bots.yaml` ([`aphelion --headless`](cli.md#aphelion---headless)).
 
 ### Stopping
 
 On `SIGTERM`, which `docker compose stop` sends, the launcher stops the processes in this order:
 
-1. It sends `SIGTERM` to the server and waits up to 20 seconds. The server first sends `shutdown` to every plugin and gives each one 5 seconds to exit, with at most 10 seconds for all of them. See [When the server stops](plugins.md#when-the-server-stops).
-2. It waits up to 5 seconds for the runner. The runner exits by itself when the server closes the pipe, and kills any plugin that is left. If the runner is still running, the launcher sends it `SIGTERM` and waits 5 more seconds.
+1. It sends `SIGTERM` to the server and waits up to 20 seconds. The server first sends `shutdown` to every plugin and gives each one 5 seconds to exit, with at most 10 seconds for all of them. See [When the server stops](plugins.md#when-the-server-stops). It also stops every bot, with at most 15 seconds for all of them. See [How a bot stops](bot-runner.md#how-a-bot-stops).
+2. It waits up to 5 seconds for the plugin runner, then up to 5 seconds for the bot runner. Each runner exits by itself when the server closes its pipe, and kills any plugin or bot that is left. If a runner is still running, the launcher sends it `SIGTERM` and waits 5 more seconds.
 3. It sends `SIGTERM` to the broker and waits up to 5 seconds.
 
 A process that doesn't stop in time gets `SIGKILL`. The launcher then exits with code 0. The Compose file gives the container 45 seconds before Docker kills it.
 
-If the server, the runner or the broker exits while the container runs, the launcher logs which one. It stops the other two the same way and exits with code 1. The container stops, and [`aphelion.service`](../guides/install.md#what-the-service-does) starts it again 10 seconds later.
+If the server, either runner or the broker exits while the container runs, the launcher logs which one. It stops the others the same way and exits with code 1. The container stops, and [`aphelion.service`](../guides/install.md#what-the-service-does) starts it again 10 seconds later.
 
 ## Hardening
 
@@ -138,11 +138,12 @@ Names still resolve. Docker's resolver in the container sends its queries from t
 
 - The users, the groups, the missing `sudo` and AI tools, and the cleared set-user-ID bits.
 - `config check` accepts the Compose file and refuses a port published on every address.
-- A probe plugin, installed with `aphelion plugin install`, starts at boot as `aphelion-plugins`. It can't read the config, the state, the secrets store or the bot folders. It can't reach the broker, read the runner's or the server's pipe, or signal the server.
+- A probe plugin, installed with `aphelion plugin install`, starts at boot as `aphelion-plugins`. It can't read the config, the state, the secrets store or the bot folders. It can't reach the broker, read either runner's pipe or the server's, or signal the server.
 - `docker inspect` shows the settings in [Hardening](#hardening).
-- Each process runs as its user with no capabilities, with no-new-privileges and with a seccomp filter. Only the server and the runner hold the pipes. The broker no longer holds the bootstrap file.
+- Each process runs as its user with no capabilities, with no-new-privileges and with a seccomp filter. Only the server and each runner hold that runner's pipes, by device and inode. The broker no longer holds the bootstrap file.
 - The `secrets` volume holds `recipient.pub` and no `identity.agekey`.
-- Each user, probed with `docker compose exec`, can reach what it needs and nothing else. Only root reads the bootstrap file.
+- Each user, probed with `docker compose exec`, can reach what it needs and nothing else. Only root reads the bootstrap file. `aphelion-bot` can't read the bot runner's descriptors or environment, though it is the same user.
+- The shipped bot runner runs a fake adapter bot as `aphelion-bot`. The bot starts, answers one turn and stops, and gets only [its own environment](bot-runner.md#what-a-bot-process-gets). At boot the server reaches the bot runner and refuses the example `triage` bot, whose provider has no adapter.
 - A stop exits with code 0. A plugin install survives a restart. A killed broker stops the container with code 1. The launcher refuses a bootstrap file that others can read, and a missing bootstrap file.
 - The bootstrap key, made with `aphelion-secrets --new-key`, appears in no container log.
 
@@ -166,5 +167,6 @@ A real host checks the rest during the M0 exit test. That covers the install, a 
 | [`deploy/image/launch`](https://github.com/jcore9/Aphelion/blob/main/deploy/image/launch) | The launcher |
 | [`deploy/compose.yaml`](https://github.com/jcore9/Aphelion/blob/main/deploy/compose.yaml) | The Compose file |
 | [`deploy/host/`](https://github.com/jcore9/Aphelion/tree/main/deploy/host) | `aphelion.service` and the host scripts |
-| [`apps/server/src/plugins/runner-pipe.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/plugins/runner-pipe.ts) | The server's end of the runner pipes |
-| [`deploy/test/`](https://github.com/jcore9/Aphelion/tree/main/deploy/test) | The two contract tests and the probe plugin |
+| [`apps/server/src/plugins/runner-pipe.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/plugins/runner-pipe.ts) | The server's end of the plugin runner's pipes |
+| [`apps/server/src/bots/runner-pipe.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/bots/runner-pipe.ts) | The server's end of the bot runner's pipes |
+| [`deploy/test/`](https://github.com/jcore9/Aphelion/tree/main/deploy/test) | The two contract tests, the probe plugin and the fake adapter bot |
