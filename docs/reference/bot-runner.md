@@ -86,7 +86,9 @@ After a crash the server waits 1 second, then 2, 4, 8 and 16. The sixth crash in
 
 The adapter reports the AI tool's own session id in a `session` event. The server keeps the latest one for each bot, with the bot's folder, and hands it to the adapter as `resume` on every start. A session saved for another folder isn't resumed. If the adapter refuses `initialize` while it resumes, the server forgets the saved session, logs `the saved session could not be resumed, so the bot started a new one`, and starts the bot again at once without it. That retry doesn't count as a crash.
 
-The saved session lives in the server's memory, so a restart of the container forgets it. [#23](https://github.com/jcore9/Aphelion/issues/23) stores it in the database.
+The server keeps the saved session in the `bot_sessions` table of its database ([the store](store.md#the-server-id-turns-and-events)), so a restart of the server or the container keeps it. A restored backup brings it back too.
+
+The server also saves every event a bot sends, with the turn it belongs to, and it sends the event to every connected client as a `bot.event` frame. [The client protocol](protocol.md#sequence-numbers-and-replay) explains how a client that reconnects gets the events it missed. When the server itself stops in the middle of a turn, it closes that turn at the next boot ([turns that a shutdown left open](store.md#turns-that-a-shutdown-left-open)).
 
 ## When a bot process dies
 
