@@ -55,6 +55,9 @@ const refusals = {
 
 const fail = (code: CommandFailure): Outcome => ({ ok: false, code });
 
+export const changesState = (frame: CommandFrame) =>
+  frame.name === "bot.prompt" || frame.name === "bot.cancel";
+
 const reply = (
   id: CommandId,
   name: CommandFrame["name"],
@@ -71,6 +74,11 @@ const reply = (
           message: failureMessages[outcome.code],
         },
   );
+
+export const refusal = (
+  frame: CommandFrame,
+  code: CommandFailure,
+): ServerFrame => reply(frame.id, frame.name, fail(code));
 
 const execute = (
   { bots, ledger, history, logger }: CommandContext,

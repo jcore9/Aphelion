@@ -7,6 +7,7 @@ import {
 } from "@aphelion/protocol";
 import { Cause, Deferred, Duration, Effect, Fiber, type Scope } from "effect";
 import { Socket } from "effect/socket";
+import { changesState, refusal } from "../commands";
 import { follow, LiveBufferFullError, type EventLog } from "../history";
 
 export const closeReasons = {
@@ -88,12 +89,14 @@ export const serveSocket = (
       });
 
     const command: Command = (frame) =>
-      run(frame).pipe(
-        Effect.flatMap((answer) => write(encodeFrame(answer))),
-        Effect.ignore,
-        Effect.forkScoped,
-        Effect.asVoid,
-      );
+      Effect.gen(function* () {
+        if (changesState(frame) && !(yield* stillValid)) {
+          yield* write(encodeFrame(refusal(frame, "device-revoked")));
+          yield* Deferred.succeed(broken, closeReasons.tokenEnded);
+          return;
+        }
+        yield* write(encodeFrame(yield* run(frame)));
+      }).pipe(Effect.ignore, Effect.forkScoped, Effect.asVoid);
 
     const close = yield* Effect.raceFirst(
       Effect.raceFirst(

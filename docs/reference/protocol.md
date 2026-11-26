@@ -42,6 +42,7 @@ These codes answer a command that the server read and then couldn't finish. Each
 | `prompt-refused` | The bot refused the turn, the turn had already ended, or the server couldn't save it. |
 | `interrupted` | The server stopped while it ran this command, so it can't say whether the command took effect. It doesn't run the command again. Check the bot's history before you send the command with a new `id` ([command ids](#command-ids)). |
 | `storage-failed` | The server ran the command but couldn't save its result, even after it tried again. The command did take effect. A repeat of the `id` gets `interrupted`. Check the bot's history before you send the command with a new `id`. |
+| `device-revoked` | The device's token was revoked or expired since the connection opened. The server checks before it runs each `bot.prompt` or `bot.cancel`, sends this error, and closes the socket with code 1008. It runs nothing and saves no `id`. |
 | `id-reused` | The `id` already ran a different command. |
 | `internal` | The server failed in a way it didn't expect. |
 

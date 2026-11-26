@@ -74,7 +74,7 @@ The server closes the WebSocket in these cases. The close code and reason are fi
 | A message is larger than 1 MiB | `1009` | Set by Bun |
 | Unread messages from the client pass 2 MiB | `1008` | `Inbound message buffer limit exceeded`, set by the listener |
 
-The server checks the token again every 5 seconds while the WebSocket is open, so a revoked or expired token closes it within 5 seconds.
+The server checks the token again every 5 seconds while the WebSocket is open, so a revoked or expired token closes it within 5 seconds. The server also checks the token before it runs each `bot.prompt` or `bot.cancel`, so a revoked device can't start or cancel a turn in that window ([`device-revoked`](protocol.md#errors)).
 
 These limits are set in [`apps/server/src/adapters/http-server.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/adapters/http-server.ts):
 

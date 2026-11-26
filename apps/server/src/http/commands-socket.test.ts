@@ -19,8 +19,8 @@ import {
   fakeRunnerLink,
   memorySessionRefs,
 } from "../bots/test-fixture";
-import { openCommandLedger } from "../commands";
-import { addDevice } from "../devices";
+import { failureMessages, openCommandLedger } from "../commands";
+import { addDevice, revokeDevice } from "../devices";
 import { openEventStore, runBots } from "../history";
 import { createLogger } from "../log";
 import { openStore, readServerId, readStreamId } from "../store";
@@ -359,6 +359,68 @@ it.live("closes the socket with 1009 for a message over 1 MiB", () =>
 
     expect(yield* client.closeCode).toBe(1009);
     expect(server.turnsStarted()).toBe(0);
+    yield* server.stop;
+  }),
+);
+
+const revokeOnlyDevice = (db: ReturnType<typeof openStore>) => {
+  const id = db.all("SELECT id FROM devices")[0]?.["id"];
+  revokeDevice(db, String(id));
+};
+
+it.live(
+  "refuses a prompt from a device revoked since its last command, and closes the socket",
+  () =>
+    Effect.gen(function* () {
+      const path = tempDb();
+      const token = deviceToken(path);
+      const server = yield* startServer(path, [finishes]);
+      const client = yield* connectClient(server.url, token);
+      client.send(prompt("c1"));
+      yield* client.until(1);
+
+      revokeOnlyDevice(server.db);
+      client.send(prompt("c2"));
+      const [, refused] = yield* client.until(2);
+
+      expect(refused).toMatchObject({
+        type: "error",
+        id: "c2",
+        code: "device-revoked",
+        message: failureMessages["device-revoked"],
+      });
+      expect(yield* client.closeCode).toBe(1008);
+      expect(server.turnsStarted()).toBe(1);
+      expect(server.db.all("SELECT id FROM commands")).toEqual([{ id: "c1" }]);
+      yield* server.stop;
+    }),
+);
+
+it.live("refuses a cancel from a revoked device", () =>
+  Effect.gen(function* () {
+    const path = tempDb();
+    const token = deviceToken(path);
+    const server = yield* startServer(path, [hangs]);
+    const client = yield* connectClient(server.url, token);
+    client.send(prompt("c1"));
+    const [answer] = yield* client.until(1);
+    const turn =
+      answer?.type === "result" && answer.name === "bot.prompt"
+        ? answer.result.turn
+        : "";
+
+    revokeOnlyDevice(server.db);
+    client.send({
+      v: 1,
+      type: "command",
+      id: commandId.parse("x1"),
+      name: "bot.cancel",
+      payload: { bot: "chief", turn },
+    });
+    const [, refused] = yield* client.until(2);
+
+    expect(refused).toMatchObject({ type: "error", code: "device-revoked" });
+    expect(server.db.all("SELECT id FROM commands")).toEqual([{ id: "c1" }]);
     yield* server.stop;
   }),
 );
