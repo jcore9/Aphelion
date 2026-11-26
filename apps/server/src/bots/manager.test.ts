@@ -22,6 +22,7 @@ import {
   botManagerLayer,
   BotRunnerLink,
   resumeFailed,
+  runnerNotices,
   type BotEvent,
   type BotState,
 } from "./manager";
@@ -225,6 +226,30 @@ describe("the bot manager", () => {
         ]);
         expect(JSON.stringify(logs)).not.toContain("secret plan");
         expect(JSON.stringify(logs)).not.toContain("conversation");
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "logs a runner diagnostic with its own fixed line, never counts it as stderr, and never logs the adapter's text",
+    () =>
+      Effect.gen(function* () {
+        const { fake, logs, manager, reach } = yield* system({
+          adapter: () => fakeAdapter([]),
+        });
+        yield* manager.start("chief");
+        yield* reach("running");
+        fake
+          .latest("chief")
+          ?.say("the user asked: where is my secret plan? not json");
+        yield* Effect.sleep("50 millis");
+
+        expect(logs.map((log) => log["msg"])).toContain(
+          runnerNotices["not-a-message"],
+        );
+        expect(logs.some((log) => log["msg"] === "bot wrote to stderr")).toBe(
+          false,
+        );
+        expect(JSON.stringify(logs)).not.toContain("secret plan");
       }).pipe(Effect.scoped),
   );
 

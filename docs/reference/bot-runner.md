@@ -19,11 +19,12 @@ Each message is one JSON object on one line, at most 8 MiB. Every message names 
 | Bot runner | `start-failed` | The process didn't start (`stage: "spawn"`), or the adapter refused `initialize` (`stage: "initialize"`) |
 | Bot runner | `turn.accepted`, `turn.refused` | The adapter's answer to `turn.start`. A refusal is `not-running`, `busy`, `ended`, `too-long` or `refused`. |
 | Bot runner | `event` | One event from the adapter, as [the adapter wire](bot-adapters.md#on-the-wire) shapes it |
-| Bot runner | `log` | One line the adapter wrote to its standard error, or a note from the bot runner about the adapter |
+| Bot runner | `log` | One line the adapter wrote to its standard error |
+| Bot runner | `notice` | A note from the bot runner about the adapter, as a code: `line-too-long`, `not-a-message`, `stopped-reading` or `too-much-log` |
 | Bot runner | `exited` | The adapter process ended without a stop, with its exit code or signal |
 | Bot runner | `stopped` | The stop finished |
 
-The bot runner checks every line from an adapter against the adapter wire, and drops a line that doesn't fit with a `log` note. It never reads a bot id from an adapter. It tags each message with the bot it started that process for.
+The bot runner checks every line from an adapter against the adapter wire, and drops a line that doesn't fit and sends a `notice` with code `not-a-message`. It never reads a bot id from an adapter. It tags each message with the bot it started that process for.
 
 The bot runner holds at most 4 MiB of one adapter's output that it hasn't handled yet. When an adapter writes faster than the bot runner can pass its messages on, the bot runner stops reading that adapter until the backlog drains. The adapter then waits on its own writes. This is called back-pressure. It keeps one bot's flood from filling the bot runner's memory, and the other bots' messages keep moving.
 
@@ -92,7 +93,7 @@ The server also saves every event a bot sends, with the turn it belongs to, and 
 
 ## What the server logs about a bot
 
-The server never writes what a bot prints to its standard error into its log. It logs only the bot's name and how many lines the bot has printed since its process started, because an adapter can echo a prompt in a diagnostic.
+The server never writes what a bot prints to its standard error into its log. It logs only the bot's name and how many lines the bot has printed since its process started, because an adapter can echo a prompt in a diagnostic. A `notice` isn't standard error, so the server doesn't count it as a line. It logs one fixed sentence for each code, with the bot's name and the run, and never any text from the adapter.
 
 ## When a bot process dies
 
@@ -100,7 +101,7 @@ If an adapter process ends in the middle of a turn, the adapter can't finish its
 
 An adapter that closes its standard output counts as gone, even if its process keeps running, because the bot runner can no longer hear it. The bot runner finishes the stream at once, as above. It refuses with `not-running` any prompt still waiting for the adapter's answer, and any new one. Then it kills the adapter and sends `exited`, so the server restarts the bot.
 
-The bot runner also kills an adapter that stops reading its input for 5 seconds, and logs `the adapter stopped reading its input, and the runner killed it`.
+The bot runner also kills an adapter that stops reading its input for 5 seconds. It sends the `stopped-reading` notice, and the server logs `the adapter stopped reading its input, and the runner killed it`.
 
 ## How a bot stops
 

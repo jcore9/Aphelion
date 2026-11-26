@@ -29,7 +29,9 @@ import {
   type RestartPolicy,
 } from "../plugins/lifecycle";
 import type { Link } from "../plugins/link";
+import { maxLogLinesPerMinute } from "../plugins/runner";
 import type {
+  RunnerNotice,
   RunnerReply,
   RunnerRequest,
   TurnRefusal,
@@ -42,6 +44,16 @@ export const adapterBundles: Readonly<Record<string, string>> = {
 
 export const resumeFailed =
   "the saved session could not be resumed, so the bot started a new one";
+
+export const runnerNotices: Readonly<Record<RunnerNotice, string>> = {
+  "line-too-long":
+    "the adapter wrote a line longer than 1 MiB, and the runner dropped it",
+  "not-a-message":
+    "the adapter wrote a line that isn't a message the runner reads, and the runner dropped it",
+  "stopped-reading":
+    "the adapter stopped reading its input, and the runner killed it",
+  "too-much-log": `the adapter wrote more than ${String(maxLogLinesPerMinute)} log lines in a minute, and the runner drops the rest of that minute`,
+};
 
 export class BotRunnerLink extends Context.Service<
   BotRunnerLink,
@@ -357,6 +369,12 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               logger.info("bot wrote to stderr", {
                 bot,
                 lines: slot.stderrLines,
+              });
+              return;
+            case "notice":
+              logger.warn(runnerNotices[reply.code], {
+                bot,
+                run: reply.run,
               });
               return;
             case "exited":

@@ -18,12 +18,7 @@ import type { z } from "zod";
 import { createLogger } from "../log";
 import { memoryLinkPair, type Framing } from "../plugins/link";
 import { botEnvironment } from "./environment";
-import {
-  maxQueuedOutputBytes,
-  notAMessage,
-  runBotRunner,
-  stoppedReading,
-} from "./runner";
+import { maxQueuedOutputBytes, runBotRunner } from "./runner";
 import {
   maxFrameBytes,
   runnerReplySchema,
@@ -272,13 +267,14 @@ describe("the bot runner", () => {
         ];
         for (const line of forged) fake.latest("alpha")?.say(line);
         for (let count = 0; count < forged.length; count++) {
-          yield* until(is("log", "alpha"));
+          yield* until(is("notice", "alpha"));
         }
         expect(
           frames
-            .filter(is("log", "alpha"))
-            .map((frame) => (frame.type === "log" ? frame.line : "")),
-        ).toEqual([notAMessage, notAMessage, notAMessage]);
+            .filter(is("notice", "alpha"))
+            .map((frame) => (frame.type === "notice" ? frame.code : "")),
+        ).toEqual(["not-a-message", "not-a-message", "not-a-message"]);
+        expect(frames.some(is("log"))).toBe(false);
 
         yield* send({
           type: "turn.start",
@@ -372,6 +368,32 @@ describe("the bot runner", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "sends a stderr line as a log frame, an over-long one as a line-too-long notice, and a stderr flood as one too-much-log notice",
+    () =>
+      Effect.gen(function* () {
+        const { fake, frames, until, send } = yield* runner({
+          alpha: scripted([]).bot,
+        });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started", "alpha"));
+        const run = fake.latest("alpha");
+        run?.writeStderr("plain stderr");
+        run?.writeStderr("x".repeat(1024 * 1024 + 8));
+        for (let count = 0; count < 1100; count++) run?.writeStderr("more");
+        yield* until(
+          (frame) => frame.type === "notice" && frame.code === "too-much-log",
+        );
+        const logs = frames.filter(is("log", "alpha"));
+        expect(logs[0]).toMatchObject({ line: "plain stderr" });
+        expect(
+          frames
+            .filter(is("notice", "alpha"))
+            .map((frame) => (frame.type === "notice" ? frame.code : "")),
+        ).toEqual(["line-too-long", "too-much-log"]);
+      }).pipe(Effect.scoped),
+  );
+
   it.live("kills a bot that stops reading its input", () =>
     Effect.gen(function* () {
       const { fake, frames, until, send } = yield* runner({
@@ -381,10 +403,10 @@ describe("the bot runner", () => {
       yield* until(is("exited"));
       expect(frames.map((frame) => frame.type)).toEqual([
         "spawned",
-        "log",
+        "notice",
         "exited",
       ]);
-      expect(frames[1]).toMatchObject({ line: stoppedReading });
+      expect(frames[1]).toMatchObject({ code: "stopped-reading" });
       expect(fake.stopAllCalls).toEqual(["stuck"]);
     }).pipe(Effect.scoped),
   );
