@@ -1,5 +1,5 @@
 import type { SessionRef } from "@aphelion/plugin-sdk";
-import { Context, Effect, Layer } from "effect";
+import { Context, type Effect } from "effect";
 
 export interface SavedSession {
   readonly ref: SessionRef;
@@ -14,18 +14,3 @@ export class SessionRefs extends Context.Service<
     readonly clear: (bot: string) => Effect.Effect<void>;
   }
 >()("aphelion/bots/SessionRefs") {}
-
-export const memorySessionRefs = Layer.sync(SessionRefs, () => {
-  const saved = new Map<string, SavedSession>();
-  return SessionRefs.of({
-    get: (bot) => Effect.sync(() => saved.get(bot)),
-    set: (bot, session) =>
-      Effect.sync(() => {
-        saved.set(bot, session);
-      }),
-    clear: (bot) =>
-      Effect.sync(() => {
-        saved.delete(bot);
-      }),
-  });
-});

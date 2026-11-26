@@ -9,11 +9,15 @@ import {
   type FakeAdapter,
   type FakeScript,
 } from "@aphelion/plugin-sdk/testing";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
 import { Context, Effect, Exit, Layer, Scope, Stream } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import type { RestartPolicy } from "../plugins/lifecycle";
+import { openStore, readServerId } from "../store";
 import { memoryLinkPair, type Framing } from "../plugins/link";
 import {
   BotManager,
@@ -31,8 +35,13 @@ import {
   type RunnerReply,
   type RunnerRequest,
 } from "./runner-protocol";
-import { memorySessionRefs, SessionRefs } from "./session-refs";
-import { fakeBotProcesses, type FakeBot } from "./test-fixture";
+import { SessionRefs } from "./session-refs";
+import { sqliteSessionRefs } from "./sqlite-session-refs";
+import {
+  fakeBotProcesses,
+  memorySessionRefs,
+  type FakeBot,
+} from "./test-fixture";
 
 const framing = <T>(schema: Framing<T>["schema"]): Framing<T> => ({
   schema,
@@ -57,6 +66,7 @@ const system = (
     refs: Context.Service.Shape<typeof SessionRefs>,
   ) => Effect.Effect<void> = () => Effect.void,
   provider = "fake",
+  sessionLayer: Layer.Layer<SessionRefs> = memorySessionRefs,
 ) =>
   Effect.gen(function* () {
     const fake = fakeBotProcesses({ chief: bot });
@@ -87,7 +97,7 @@ const system = (
         policy,
         adapters: { fake: "/adapters/fake/adapter.js" },
       }).pipe(
-        Layer.provideMerge(memorySessionRefs),
+        Layer.provideMerge(sessionLayer),
         Layer.provide(Layer.succeed(BotRunnerLink, a)),
       ),
     );
@@ -268,6 +278,48 @@ describe("the bot manager", () => {
         expect(logs.map((log) => log["msg"])).toContain(resumeFailed);
         expect(logs.filter((log) => log["to"] === "crashed")).toEqual([]);
         expect(yield* refs.get("chief")).toBeUndefined();
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "saves the session in the database, and a new server resumes it from there",
+    () =>
+      Effect.gen(function* () {
+        const dir = mkdtempSync(join(tmpdir(), "aphelion-bot-sessions-"));
+        const path = join(dir, "aphelion.db");
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            rmSync(dir, { recursive: true });
+          }),
+        );
+        const first = openStore(path);
+        const firstChief = recording([sessionTurn]);
+        const one = yield* system(
+          firstChief.bot,
+          () => Effect.void,
+          "fake",
+          sqliteSessionRefs(first, readServerId(first)),
+        );
+        yield* one.manager.start("chief");
+        yield* one.reach("running");
+        yield* one.manager.startTurn("chief", t("t1"), "hi");
+        yield* one.reach("running");
+        yield* one.manager.stop("chief");
+        expect(firstChief.made[0]?.contexts[0]?.resume).toBeNull();
+        first.close();
+
+        const second = openStore(path);
+        const secondChief = recording([]);
+        const two = yield* system(
+          secondChief.bot,
+          () => Effect.void,
+          "fake",
+          sqliteSessionRefs(second, readServerId(second)),
+        );
+        yield* two.manager.start("chief");
+        yield* two.reach("running");
+        expect(secondChief.made[0]?.contexts[0]?.resume).toBe("s-1");
+        second.close();
       }).pipe(Effect.scoped),
   );
 

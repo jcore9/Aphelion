@@ -139,6 +139,11 @@ export class BotManager extends Context.Service<
       until: (state: BotState) => boolean,
     ) => Effect.Effect<BotState | undefined>;
     readonly events: Stream.Stream<BotEvent>;
+    readonly subscribe: Effect.Effect<
+      PubSub.Subscription<BotEvent>,
+      never,
+      Scope.Scope
+    >;
   }
 >()("aphelion/bots/BotManager") {}
 
@@ -518,6 +523,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }),
         waitFor,
         events: Stream.fromPubSub(events),
+        subscribe: PubSub.subscribe(events),
       });
     }),
   );

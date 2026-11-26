@@ -6,6 +6,7 @@ import {
 import { Effect, Layer, Stream } from "effect";
 import { SpawnFailed, type ProcessExit } from "../plugins/processes";
 import { BotProcesses, type BotProcess, type BotSpec } from "./processes";
+import { SessionRefs, type SavedSession } from "./session-refs";
 
 export interface FakeBot {
   readonly adapter: () => BotAdapter;
@@ -209,3 +210,18 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
 
   return { layer, runs, stopAllCalls, latest };
 }
+
+export const memorySessionRefs = Layer.sync(SessionRefs, () => {
+  const saved = new Map<string, SavedSession>();
+  return SessionRefs.of({
+    get: (bot) => Effect.sync(() => saved.get(bot)),
+    set: (bot, session) =>
+      Effect.sync(() => {
+        saved.set(bot, session);
+      }),
+    clear: (bot) =>
+      Effect.sync(() => {
+        saved.delete(bot);
+      }),
+  });
+});

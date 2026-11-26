@@ -6,8 +6,9 @@ import {
   type BotDefinition,
 } from "../bots/manager";
 import { botRunnerPipeLink } from "../bots/runner-pipe";
-import { memorySessionRefs } from "../bots/session-refs";
+import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
 import { formatIssue } from "../config";
+import { openEventStore, persistBotEvents, type EventStore } from "../history";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
 import { installedPlugins, readInstall } from "../plugins/approvals";
@@ -19,7 +20,7 @@ import {
 import { sqlitePluginGrants } from "../plugins/grants";
 import { PluginHost, pluginHostLayer } from "../plugins/host";
 import { runnerPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
-import type { Database } from "../store";
+import { readServerId, type Database } from "../store";
 import { version } from "../version";
 import { checkDirs, migratedNote } from "./checks";
 import { withStore } from "./device";
@@ -66,16 +67,22 @@ const startBots = (
   bots: readonly BotDefinition[],
   fds: RunnerPipeFds,
   logger: Logger,
+  db: Database,
+  history: EventStore,
 ) =>
   Effect.gen(function* () {
     const services = yield* Layer.build(
       botManagerLayer({ bots, logger }).pipe(
         Layer.provide(
-          Layer.mergeAll(botRunnerPipeLink(fds, logger), memorySessionRefs),
+          Layer.mergeAll(
+            botRunnerPipeLink(fds, logger),
+            sqliteSessionRefs(db, history.serverId),
+          ),
         ),
       ),
     );
     const manager = Context.get(services, BotManager);
+    yield* persistBotEvents(manager.subscribe, history);
     for (const bot of bots) yield* manager.start(bot.name);
   });
 
@@ -106,6 +113,7 @@ export const headless = (
     const fds = options.pluginRunnerFds;
     return yield* withStore(options.stateDir, (db) =>
       Effect.gen(function* () {
+        const history = yield* openEventStore(db, readServerId(db), { logger });
         yield* Layer.build(serveHttp({ address, port }, db));
         logger.info("server started", { version, address, port });
         if (fds === undefined) {
@@ -128,6 +136,8 @@ export const headless = (
             checked.config.bots.bots,
             options.botRunnerFds,
             logger,
+            db,
+            history,
           );
         }
         return yield* Effect.never;
