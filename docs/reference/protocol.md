@@ -36,7 +36,7 @@ An error `message` is fixed text. For bad JSON it is `frame is not valid JSON`, 
 
 ## Sequence numbers and replay
 
-The server keeps one event stream. Its id is the server ID, a UUID that the server makes once and keeps in its database, so a restart or a restore keeps the stream. The server saves every event in the database before it sends it to a client, and it gives each one a position: 1, 2, 3 and so on. The position is the `seq` of the event frame. A cursor names a stream and the position of the last event a client has seen:
+The server keeps one event stream. Its id is the stream ID, a UUID that the server makes on its first start and keeps in its database, so a restart keeps the stream. It is not the server ID. A restore gives the server a new stream ID. The server saves every event in the database before it sends it to a client, and it gives each one a position: 1, 2, 3 and so on. The position is the `seq` of the event frame. A cursor names a stream and the position of the last event a client has seen:
 
 ```json
 { "stream": "0192f0a0-7c1e-7a3b-8d2f-5e4c3b2a1d09", "seq": 41 }
@@ -53,7 +53,9 @@ The server subscribes to new events before it reads the saved ones, sends the sa
 
 The server sends an event only after the database has committed it, so a client never sees an event that a restart would lose. The server writes events in batches of up to 200, or whatever arrived in 50 milliseconds. A client sees an event up to 50 milliseconds after the bot sent it.
 
-A restore from a backup brings back the server ID and the positions that the backup had. A client that saw events newer than the backup gets `resync`, as long as the restored server is behind it. When the restored server saves new events past that position, the client can no longer tell that the history changed. Reload every client after a restore.
+A restore from a backup brings back the positions that the backup had. So that no client takes a new event for one it already saw, `aphelion restore finish` gives the server a new stream ID in the same transaction as its other steps. The server ID stays the same. Every cursor saved before the restore names the old stream, so the server answers it with `resync`. Positions keep counting from the restored value. A client that gets `resync` takes the new cursor and loads the history again.
+
+The server keeps a buffer of new events for each client. It fills while the server replays saved events to that client, and while the client's connection is too slow to take what the server sends. The buffer holds at most 5,000 events. When a client's buffer would go past that, the server closes that client's connection with code 1013 and the reason `client too slow, reconnect`. The client reconnects and sends `resume` with its cursor. Other clients are not affected, and the server's memory stays bounded.
 
 If the server can't read a saved event, it closes the connection with code 1011 and the reason `history could not be read`. The server never skips an event.
 

@@ -6,7 +6,7 @@ import { ensureServerId } from "./server-id";
 
 export type { Database, Row, SqlValue } from "./database";
 export type { Migration } from "./migrate";
-export { readServerId } from "./server-id";
+export { readServerId, readStreamId, renewStreamId } from "./server-id";
 
 export function openStore(path: string): Database {
   const db = openSqlite(path);

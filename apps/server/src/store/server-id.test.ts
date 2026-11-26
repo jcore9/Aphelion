@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, onTestFinished, test } from "vitest";
-import { openStore, readServerId } from ".";
+import { openStore, readServerId, readStreamId, renewStreamId } from ".";
 import { openSqlite } from "../adapters/sqlite";
 import { migrate } from "./migrate";
 import { migrations } from "./migrations";
@@ -77,4 +77,37 @@ test("the position counter starts at 1", () => {
   expect(
     store.all("SELECT value FROM server_meta WHERE key = 'next_position'"),
   ).toEqual([{ value: "1" }]);
+});
+
+test("a stream ID is made with the server ID, differs from it, and a reopen keeps it", () => {
+  const path = tempDatabasePath();
+  const first = openStore(path);
+  const stream = readStreamId(first);
+  const server = readServerId(first);
+  first.close();
+
+  const second = openStore(path);
+  onTestFinished(() => {
+    second.close();
+  });
+
+  expect(stream).toMatch(uuidV7);
+  expect(stream).not.toBe(server);
+  expect(readStreamId(second)).toBe(stream);
+});
+
+test("renewing the stream ID changes it and leaves the server ID", () => {
+  const db = openStore(tempDatabasePath());
+  onTestFinished(() => {
+    db.close();
+  });
+  const stream = readStreamId(db);
+  const server = readServerId(db);
+
+  const renewed = renewStreamId(db);
+
+  expect(renewed).toMatch(uuidV7);
+  expect(renewed).not.toBe(stream);
+  expect(readStreamId(db)).toBe(renewed);
+  expect(readServerId(db)).toBe(server);
 });

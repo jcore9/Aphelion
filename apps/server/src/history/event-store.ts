@@ -2,7 +2,7 @@ import { randomUUIDv7 } from "node:crypto";
 import type { StreamEvent } from "@aphelion/plugin-sdk";
 import { Clock, Duration, Effect, Fiber, PubSub, Scope } from "effect";
 import type { Logger } from "../log";
-import type { Database } from "../store";
+import { readStreamId, type Database } from "../store";
 import {
   decodeEvent,
   encodePayload,
@@ -18,6 +18,7 @@ export interface NewEvent {
 
 export interface EventLog {
   readonly serverId: string;
+  readonly streamId: string;
   readonly head: () => number;
   readonly firstKept: () => number;
   readonly read: (after: number, limit: number) => readonly SavedEvent[];
@@ -242,6 +243,7 @@ export const openEventStore = (
 
     const store: EventStore = {
       serverId,
+      streamId: readStreamId(db),
       head,
       firstKept,
       read,

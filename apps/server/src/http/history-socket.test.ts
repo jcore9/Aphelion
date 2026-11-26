@@ -14,7 +14,7 @@ import { afterAll } from "vitest";
 import { addDevice } from "../devices";
 import { openEventStore, type EventStore } from "../history";
 import { createLogger } from "../log";
-import { openStore, readServerId } from "../store";
+import { openStore, readServerId, readStreamId } from "../store";
 import { serveHttp } from "./index";
 
 const live = { excludeTestServices: true };
@@ -117,7 +117,7 @@ const connect = connectWith(token);
 const seqs = (frames: readonly ServerFrame[]) =>
   frames.map((frame) => (frame.type === "event" ? frame.seq : frame.type));
 
-const cursor = (seq: number, stream = readServerId(db)) => ({
+const cursor = (seq: number, stream = readStreamId(db)) => ({
   stream: streamId.parse(stream),
   seq,
 });
@@ -213,7 +213,7 @@ layer(
   it.effect("continues from its cursor in the same stream", () =>
     Effect.gen(function* () {
       const before = store.head();
-      expect(restarted.serverId).toBe(store.serverId);
+      expect(restarted.streamId).toBe(store.streamId);
       yield* say(restarted, "after the restart");
 
       const client = yield* connect;
@@ -248,7 +248,7 @@ layer(
                 encodeFrame({
                   v: 1,
                   type: "resume",
-                  cursor: cursor(0, readServerId(damaged)),
+                  cursor: cursor(0, readStreamId(damaged)),
                 }),
               );
             });

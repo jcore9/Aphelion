@@ -1,13 +1,14 @@
 import { parseClientFrame, encodeFrame, type Cursor } from "@aphelion/protocol";
-import { Deferred, Duration, Effect, Fiber, type Scope } from "effect";
+import { Cause, Deferred, Duration, Effect, Fiber, type Scope } from "effect";
 import { Socket } from "effect/socket";
-import { follow, type EventLog } from "../history";
+import { follow, LiveBufferFullError, type EventLog } from "../history";
 
 export const closeReasons = {
   malformed: new Socket.CloseEvent(1007, "malformed frame"),
   "unsupported-version": new Socket.CloseEvent(1007, "unsupported version"),
   tokenEnded: new Socket.CloseEvent(1008, "token no longer valid"),
   historyFailed: new Socket.CloseEvent(1011, "history could not be read"),
+  tooSlow: new Socket.CloseEvent(1013, "client too slow, reconnect"),
 } as const;
 
 type Resume = (
@@ -40,6 +41,7 @@ export const serveSocket = (
   stillValid: Effect.Effect<boolean>,
   recheckEvery: Duration.Duration,
   log: EventLog,
+  liveLimit?: number,
 ) =>
   Effect.gen(function* () {
     const { write } = yield* socket.writer;
@@ -50,11 +52,26 @@ export const serveSocket = (
     const resume: Resume = (cursor) =>
       Effect.gen(function* () {
         if (following !== undefined) yield* Fiber.interrupt(following);
-        following = yield* follow(log, cursor, (frame) =>
-          write(encodeFrame(frame)),
+        following = yield* follow(
+          log,
+          cursor,
+          (frame) => write(encodeFrame(frame)),
+          liveLimit,
         ).pipe(
-          Effect.catchCause(() =>
-            Effect.asVoid(Deferred.succeed(broken, closeReasons.historyFailed)),
+          Effect.catchCause((cause) =>
+            Effect.asVoid(
+              Deferred.succeed(
+                broken,
+                Cause.hasFails(cause) &&
+                  cause.reasons.some(
+                    (reason) =>
+                      Cause.isFailReason(reason) &&
+                      reason.error instanceof LiveBufferFullError,
+                  )
+                  ? closeReasons.tooSlow
+                  : closeReasons.historyFailed,
+              ),
+            ),
           ),
           Effect.forkScoped,
         );

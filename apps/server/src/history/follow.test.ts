@@ -7,12 +7,18 @@ import {
   type ResyncFrame,
 } from "@aphelion/protocol";
 import { expect, it } from "@effect/vitest";
-import { Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { onTestFinished } from "vitest";
 import { createLogger } from "../log";
-import { openStore, readServerId } from "../store";
+import { openStore, readServerId, readStreamId } from "../store";
 import { openEventStore, type EventLog, type EventStore } from "./event-store";
-import { follow, replayPage } from "./follow";
+import { finishRestore } from "../restore";
+import {
+  follow,
+  liveBufferLimit,
+  LiveBufferFullError,
+  replayPage,
+} from "./follow";
 
 const tempPath = () => {
   const dir = mkdtempSync(join(tmpdir(), "aphelion-follow-"));
@@ -51,7 +57,7 @@ const sayAll = (store: EventStore, count: number, from = 1) =>
 
 type Sent = EventFrame | ResyncFrame;
 
-const watch = (log: EventLog, seq: number | null, stream = log.serverId) =>
+const watch = (log: EventLog, seq: number | null, stream = log.streamId) =>
   Effect.gen(function* () {
     const sent: Sent[] = [];
     const fiber = yield* follow(
@@ -130,7 +136,7 @@ it.effect(
     Effect.gen(function* () {
       const { store } = yield* openAt(tempPath());
       yield* sayAll(store, 3);
-      const head = { stream: store.serverId, seq: 3 };
+      const head = { stream: store.streamId, seq: 3 };
 
       const cases: [string, number | null, string?][] = [
         ["no cursor", null],
@@ -157,7 +163,7 @@ it.effect(
       const behind = yield* watch(store, 1);
       yield* settle;
       expect(behind.sent).toEqual([
-        { v: 1, type: "resync", cursor: { stream: store.serverId, seq: 5 } },
+        { v: 1, type: "resync", cursor: { stream: store.streamId, seq: 5 } },
       ]);
 
       const adjacent = yield* watch(store, 2);
@@ -223,12 +229,12 @@ it.effect("resumes a client's cursor after the server restarts", () =>
     const before = yield* Effect.gen(function* () {
       const { store } = yield* openAt(path);
       yield* sayAll(store, 3);
-      return { stream: store.serverId, seq: 2 };
+      return { stream: store.streamId, seq: 2 };
     }).pipe(Effect.scoped);
 
     const { store } = yield* openAt(path);
     yield* sayAll(store, 2, 4);
-    expect(store.serverId).toBe(before.stream);
+    expect(store.streamId).toBe(before.stream);
 
     const { sent } = yield* watch(store, before.seq);
     yield* settle;
@@ -248,5 +254,65 @@ it.effect(
       const exit = yield* Fiber.await(fiber);
 
       expect(exit._tag).toBe("Failure");
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "gives a cursor saved before a restore a resync, and keeps the server ID",
+  () =>
+    Effect.gen(function* () {
+      const path = tempPath();
+      const before = yield* Effect.gen(function* () {
+        const { store, db } = yield* openAt(path);
+        yield* sayAll(store, 3);
+        const saved = { stream: store.streamId, seq: 2 };
+        finishRestore(db);
+        return { saved, serverId: store.serverId };
+      }).pipe(Effect.scoped);
+
+      const { store, db } = yield* openAt(path);
+      expect(store.serverId).toBe(before.serverId);
+      expect(readServerId(db)).toBe(before.serverId);
+      expect(store.streamId).not.toBe(before.saved.stream);
+      yield* sayAll(store, 2, 4);
+
+      const { sent } = yield* watch(
+        store,
+        before.saved.seq,
+        before.saved.stream,
+      );
+      yield* settle;
+      expect(sent).toEqual([
+        {
+          v: 1,
+          type: "resync",
+          cursor: { stream: readStreamId(db), seq: 5 },
+        },
+      ]);
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "fails a client whose live buffer passes the limit and keeps serving the others",
+  () =>
+    Effect.gen(function* () {
+      const { store } = yield* openAt(tempPath());
+      const stuck = yield* Deferred.make<undefined>();
+      const stalled = yield* follow(
+        store,
+        { stream: streamId.parse(store.streamId), seq: 0 },
+        () => Deferred.await(stuck),
+      ).pipe(Effect.flip, Effect.forkScoped);
+      const healthy = yield* watch(store, 0);
+      yield* settle;
+
+      yield* sayAll(store, liveBufferLimit + 5);
+      const error = yield* Fiber.join(stalled);
+      yield* Effect.repeat(Effect.yieldNow, {
+        until: () => healthy.sent.length === liveBufferLimit + 5,
+      });
+
+      expect(error).toBeInstanceOf(LiveBufferFullError);
+      expect(healthy.sent).toHaveLength(liveBufferLimit + 5);
     }).pipe(Effect.scoped),
 );

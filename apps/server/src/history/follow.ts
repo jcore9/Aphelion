@@ -5,11 +5,16 @@ import {
   type EventFrame,
   type ResyncFrame,
 } from "@aphelion/protocol";
-import { Effect, PubSub } from "effect";
+import { Data, Effect, PubSub, Queue } from "effect";
 import type { EventLog } from "./event-store";
 import type { SavedEvent } from "./saved-event";
 
 export const replayPage = 500;
+export const liveBufferLimit = 5000;
+
+export class LiveBufferFullError extends Data.TaggedError(
+  "LiveBufferFullError",
+) {}
 
 export const eventFrame = ({
   position,
@@ -29,11 +34,22 @@ export const follow = <E>(
   log: EventLog,
   cursor: Cursor | null,
   send: (frame: EventFrame | ResyncFrame) => Effect.Effect<void, E>,
+  limit: number = liveBufferLimit,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const live = yield* log.subscribe;
-      const stream = streamId.parse(log.serverId);
+      const subscription = yield* log.subscribe;
+      const live = yield* Queue.unbounded<SavedEvent>();
+      const pump = Effect.forever(
+        PubSub.take(subscription).pipe(
+          Effect.tap((saved) => Queue.offer(live, saved)),
+          Effect.andThen(Queue.size(live)),
+          Effect.flatMap((size) =>
+            size > limit ? Effect.fail(new LiveBufferFullError()) : Effect.void,
+          ),
+        ),
+      );
+      const stream = streamId.parse(log.streamId);
       const head = log.head();
       if (
         cursor === null ||
@@ -48,19 +64,22 @@ export const follow = <E>(
         });
       }
 
-      let last = cursor.seq;
-      for (let page = log.read(last, replayPage); page.length > 0;) {
-        for (const saved of page) {
+      const replayThenLive = Effect.gen(function* () {
+        let last = cursor.seq;
+        for (let page = log.read(last, replayPage); page.length > 0;) {
+          for (const saved of page) {
+            yield* send(eventFrame(saved));
+            last = saved.position;
+          }
+          page = page.length < replayPage ? [] : log.read(last, replayPage);
+        }
+        for (;;) {
+          const saved = yield* Queue.take(live);
+          if (saved.position <= last) continue;
           yield* send(eventFrame(saved));
           last = saved.position;
         }
-        page = page.length < replayPage ? [] : log.read(last, replayPage);
-      }
-      for (;;) {
-        const saved = yield* PubSub.take(live);
-        if (saved.position <= last) continue;
-        yield* send(eventFrame(saved));
-        last = saved.position;
-      }
+      });
+      return yield* Effect.raceFirst(replayThenLive, pump);
     }),
   );

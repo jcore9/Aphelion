@@ -5,7 +5,13 @@ export {
   type EventStoreOptions,
   type NewEvent,
 } from "./event-store";
-export { eventFrame, follow, replayPage } from "./follow";
+export {
+  eventFrame,
+  follow,
+  liveBufferLimit,
+  LiveBufferFullError,
+  replayPage,
+} from "./follow";
 export { persistBotEvents } from "./persist";
 export { closeDanglingTurns } from "./repair";
 export {

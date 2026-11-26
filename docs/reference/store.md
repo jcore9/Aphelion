@@ -80,12 +80,14 @@ Migration 8 adds four tables, all `STRICT`. Every row in `turns`, `events` and `
 
 | Table | Holds |
 | --- | --- |
-| `server_meta` | Two rows. `server_id` is a UUIDv7 that never changes. `next_position` is the position the next saved event gets. |
+| `server_meta` | Three rows. `server_id` is a UUIDv7 that never changes. `stream_id` is a UUIDv7 that names the event stream and changes at each restore. `next_position` is the position the next saved event gets. |
 | `turns` | One row per turn: its id, the bot, `started_at`, and `ended_at` with `end_reason`. A turn with no `ended_at` is still open. |
 | `events` | One row per bot event: `id`, `position`, `bot`, `turn`, `format`, `kind`, `payload` and `at` |
 | `bot_sessions` | One row per bot with the AI tool's session id and the bot's folder. The server hands it to the adapter as `resume` on the next start. |
 
-`openStore` creates the server ID right after it applies the migrations. It reads `server_id` and, when there is none, writes a new UUIDv7 in the same transaction. The ID never changes afterwards. A restored backup keeps it, because it is in the database. Two new databases get different IDs. The ID is also the id of the [event stream](protocol.md#sequence-numbers-and-replay), so a client's cursor still works after a restart.
+`openStore` creates the server ID right after it applies the migrations. It reads `server_id` and, when there is none, writes a new UUIDv7 in the same transaction. The ID never changes afterwards. A restored backup keeps it, because it is in the database. Two new databases get different IDs.
+
+The same step writes the stream ID, a second UUIDv7, when there is none. The stream ID is the id in a client's cursor (see [event stream](protocol.md#sequence-numbers-and-replay)). It stays the same across restarts, so a cursor still works after one. `aphelion restore finish` writes a new stream ID in its transaction, so a cursor saved before the restore gets `resync`, even though the restored database brings back older positions.
 
 A record's `id` is a UUIDv7 from `node:crypto`. The first 48 bits are the time in milliseconds, so ids sort in creation order. Two servers can't make the same id. `position` is a different thing. It is a counter for this server's stream, and it is the `seq` of the event frame. The server raises `next_position` in the same transaction that inserts the event, so positions have no gap and a position is never used twice, even when the table is emptied. The audit log keeps its integer ids.
 
