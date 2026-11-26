@@ -28,10 +28,16 @@ describe("the bot.event frame", () => {
     });
   });
 
-  test("allows no turn for a session event", () => {
-    const body = payload({ type: "session", ref: "s-1" }, { turn: null });
+  test("allows no turn for an error outside a turn", () => {
+    const body = payload({ type: "error", code: "cli-exited" }, { turn: null });
 
     expect(parseServerFrame(frame(body)).ok).toBe(true);
+  });
+
+  test("has no session event, so a client never gets the vendor's session ref", () => {
+    const body = payload({ type: "session", ref: "s-1" }, { turn: null });
+
+    expect(parseServerFrame(frame(body)).ok).toBe(false);
   });
 
   test.each([

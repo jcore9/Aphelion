@@ -22,21 +22,28 @@ export const eventFrame = ({
   turn,
   format,
   event,
-}: SavedEvent): EventFrame => ({
-  v: version,
-  type: "event",
-  seq: position,
-  name: "bot.event",
-  payload: { bot, turn, format, event },
-});
+}: SavedEvent): EventFrame | undefined =>
+  event.type === "session"
+    ? undefined
+    : {
+        v: version,
+        type: "event",
+        seq: position,
+        name: "bot.event",
+        payload: { bot, turn, format, event },
+      };
 
 export const follow = <E>(
   log: EventLog,
   cursor: Cursor | null,
   send: (frame: EventFrame | ResyncFrame) => Effect.Effect<void, E>,
   limit: number = liveBufferLimit,
-) =>
-  Effect.scoped(
+) => {
+  const sendSaved = (saved: SavedEvent) => {
+    const frame = eventFrame(saved);
+    return frame === undefined ? Effect.void : send(frame);
+  };
+  return Effect.scoped(
     Effect.gen(function* () {
       const subscription = yield* log.subscribe;
       const live = yield* Queue.unbounded<SavedEvent>();
@@ -68,7 +75,7 @@ export const follow = <E>(
         let last = cursor.seq;
         for (let page = log.read(last, replayPage); page.length > 0;) {
           for (const saved of page) {
-            yield* send(eventFrame(saved));
+            yield* sendSaved(saved);
             last = saved.position;
           }
           page = page.length < replayPage ? [] : log.read(last, replayPage);
@@ -76,10 +83,11 @@ export const follow = <E>(
         for (;;) {
           const saved = yield* Queue.take(live);
           if (saved.position <= last) continue;
-          yield* send(eventFrame(saved));
+          yield* sendSaved(saved);
           last = saved.position;
         }
       });
       return yield* Effect.raceFirst(replayThenLive, pump);
     }),
   );
+};

@@ -106,7 +106,7 @@ One event of one bot, in the order the server saved it.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `bot` | string matching `^[a-z][a-z0-9-]{0,62}$` | yes | The bot the event belongs to. |
-| `turn` | string matching `^[A-Za-z0-9_-]{1,64}$` or `null` | yes | The turn the event belongs to. It is `null` for a `session` event and for an `error` outside a turn. |
+| `turn` | string matching `^[A-Za-z0-9_-]{1,64}$` or `null` | yes | The turn the event belongs to. It is `null` for an `error` outside a turn. |
 | `format` | integer from 1 to 9,007,199,254,740,991 (the largest safe integer) | yes | The format version of the saved event. It is 1 today, and a change to an event's shape raises it. |
 | `event` | [`BotEvent`](#botevent) | yes | What happened. |
 
@@ -129,18 +129,9 @@ A position in an event stream.
 
 ### `StreamId`
 
-Names one event stream. A server's stream is its server ID, which a restart keeps.
+Names one event stream. It is not the server ID: the server gives the stream a new ID when it restores a backup, so a cursor from before the restore gets `resync`.
 
 It is a string matching `^[A-Za-z0-9_-]{1,64}$`.
-
-### `BotSession`
-
-The bot's session started or resumed.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `type` | `"session"` | yes | The kind of event. |
-| `ref` | string matching `^[\x21-\x2e\x30-\x7e]{1,256}$` | yes | The vendor's id for the bot's session. |
 
 ### `BotTextDelta`
 
@@ -231,9 +222,9 @@ A permission request was allowed or denied.
 
 ### `BotEvent`
 
-One thing a bot did.
+One thing a bot did. The bot's session is not one of them: the server keeps it.
 
-It is a [`BotSession`](#botsession) or [`BotTextDelta`](#bottextdelta) or [`BotToolStart`](#bottoolstart) or [`BotToolEnd`](#bottoolend) or [`BotUsage`](#botusage) or [`BotError`](#boterror) or [`BotTurnEnd`](#botturnend) or [`BotPermissionRequest`](#botpermissionrequest) or [`BotPermissionDecision`](#botpermissiondecision).
+It is a [`BotTextDelta`](#bottextdelta) or [`BotToolStart`](#bottoolstart) or [`BotToolEnd`](#bottoolend) or [`BotUsage`](#botusage) or [`BotError`](#boterror) or [`BotTurnEnd`](#botturnend) or [`BotPermissionRequest`](#botpermissionrequest) or [`BotPermissionDecision`](#botpermissiondecision).
 
 ## Error codes
 

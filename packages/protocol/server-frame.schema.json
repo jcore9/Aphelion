@@ -142,7 +142,7 @@
                       "type": "null"
                     }
                   ],
-                  "description": "The turn the event belongs to. It is `null` for a `session` event and for an `error` outside a turn."
+                  "description": "The turn the event belongs to. It is `null` for an `error` outside a turn."
                 },
                 "format": {
                   "type": "integer",
@@ -261,27 +261,6 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]{1,64}$",
       "description": "Names one command. The client picks it, and a retry sends the same id."
-    },
-    "BotSession": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "const": "session",
-          "description": "The kind of event."
-        },
-        "ref": {
-          "type": "string",
-          "pattern": "^[\\x21-\\x2e\\x30-\\x7e]{1,256}$",
-          "description": "The vendor's id for the bot's session."
-        }
-      },
-      "required": [
-        "type",
-        "ref"
-      ],
-      "additionalProperties": false,
-      "description": "The bot's session started or resumed."
     },
     "BotTextDelta": {
       "type": "object",
@@ -615,9 +594,6 @@
     "BotEvent": {
       "oneOf": [
         {
-          "$ref": "#/definitions/BotSession"
-        },
-        {
           "$ref": "#/definitions/BotTextDelta"
         },
         {
@@ -642,12 +618,12 @@
           "$ref": "#/definitions/BotPermissionDecision"
         }
       ],
-      "description": "One thing a bot did."
+      "description": "One thing a bot did. The bot's session is not one of them: the server keeps it."
     },
     "StreamId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]{1,64}$",
-      "description": "Names one event stream. A server's stream is its server ID, which a restart keeps."
+      "description": "Names one event stream. It is not the server ID: the server gives the stream a new ID when it restores a backup, so a cursor from before the restore gets `resync`."
     },
     "Cursor": {
       "type": "object",

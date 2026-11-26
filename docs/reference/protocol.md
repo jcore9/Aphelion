@@ -78,7 +78,7 @@ One `bot.event` frame carries one event of one bot. Its payload has the bot's na
 }
 ```
 
-`turn` is `null` for a `session` event and for an `error` outside a turn. `event` is one of the kinds in [the bot adapter contract](bot-adapters.md), and [the protocol spec](protocol-spec.md#botevent) lists their fields. The frame has no vendor session id. The server keeps that id, and a client has no use for it.
+`turn` is `null` for an `error` outside a turn. `event` is one of the kinds in [the bot adapter contract](bot-adapters.md), and [the protocol spec](protocol-spec.md#botevent) lists their fields. The frame has no vendor session id. The server keeps that id, and a client has no use for it.
 
 `format` is the version of the saved event's shape. It is 1 today. A change to an event's shape raises it, and the server keeps reading the older rows. A client that sees a `format` it doesn't know should show the event as unreadable and go on.
 

@@ -38,19 +38,6 @@ const botName = z
   .regex(/^[a-z][a-z0-9-]{0,62}$/)
   .describe("The name of the bot, as in its config.");
 
-const session = z
-  .strictObject({
-    type: z.literal("session").describe("The kind of event."),
-    ref: z
-      .string()
-      .regex(/^[\x21-\x2e\x30-\x7e]{1,256}$/)
-      .describe("The vendor's id for the bot's session."),
-  })
-  .meta({
-    id: "BotSession",
-    description: "The bot's session started or resumed.",
-  });
-
 const textDelta = z
   .strictObject({
     type: z.literal("text.delta").describe("The kind of event."),
@@ -187,7 +174,6 @@ const permissionDecision = z
   });
 
 export const botEvents = [
-  session,
   textDelta,
   toolStart,
   toolEnd,
@@ -198,9 +184,11 @@ export const botEvents = [
   permissionDecision,
 ] as const;
 
-export const botEvent = z
-  .discriminatedUnion("type", botEvents)
-  .meta({ id: "BotEvent", description: "One thing a bot did." });
+export const botEvent = z.discriminatedUnion("type", botEvents).meta({
+  id: "BotEvent",
+  description:
+    "One thing a bot did. The bot's session is not one of them: the server keeps it.",
+});
 export type BotEvent = z.infer<typeof botEvent>;
 
 export const botEventPayload = z
@@ -209,7 +197,7 @@ export const botEventPayload = z
     turn: turnId
       .nullable()
       .describe(
-        "The turn the event belongs to. It is `null` for a `session` event and for an `error` outside a turn.",
+        "The turn the event belongs to. It is `null` for an `error` outside a turn.",
       ),
     format: z
       .int()

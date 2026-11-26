@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sessionRef } from "@aphelion/plugin-sdk";
 import {
   streamId,
   type EventFrame,
@@ -112,6 +113,38 @@ it.effect(
           event: { type: "text.delta", text: "m2" },
         },
       });
+    }).pipe(Effect.scoped),
+);
+
+const saySession = (store: EventStore, ref: string) =>
+  store.record({
+    bot: "chief",
+    run: 1,
+    turn: null,
+    event: { type: "session", ref: sessionRef.parse(ref) },
+  });
+
+it.effect(
+  "never sends the vendor session ref to a client, whether it replays or follows live",
+  () =>
+    Effect.gen(function* () {
+      const { store } = yield* openAt(tempPath());
+      yield* say(store, "m1");
+      yield* saySession(store, "s-secret-1");
+      yield* say(store, "m2");
+      yield* store.flush;
+
+      const { sent } = yield* watch(store, 0);
+      yield* settle;
+      yield* saySession(store, "s-secret-2");
+      yield* say(store, "m3");
+      yield* store.flush;
+      yield* settle;
+
+      expect(positions(sent)).toEqual([1, 3, 5]);
+      expect(texts(sent)).toEqual(["m1", "m2", "m3"]);
+      expect(JSON.stringify(sent)).not.toContain("s-secret");
+      expect(JSON.stringify(sent)).not.toContain('"session"');
     }).pipe(Effect.scoped),
 );
 

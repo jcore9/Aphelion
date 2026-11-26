@@ -17,7 +17,7 @@ export type CommandId = z.infer<typeof commandId>;
 export const streamId = token.brand<"StreamId">().meta({
   id: "StreamId",
   description:
-    "Names one event stream. A server's stream is its server ID, which a restart keeps.",
+    "Names one event stream. It is not the server ID: the server gives the stream a new ID when it restores a backup, so a cursor from before the restore gets `resync`.",
 });
 export type StreamId = z.infer<typeof streamId>;
 
