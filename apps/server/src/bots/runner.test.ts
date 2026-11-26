@@ -65,7 +65,6 @@ const runner = (bots: Readonly<Record<string, FakeBot>>) =>
       framing(runnerRequestSchema),
     );
     yield* runBotRunner(b, {
-      bun: "/usr/local/bin/bun",
       home: "/var/lib/aphelion-bots",
       shutdownGrace: "200 millis",
       writeDeadline: "200 millis",
@@ -121,11 +120,7 @@ describe("the bot runner", () => {
         ]);
         expect(fake.runs[0]?.spec).toEqual({
           bot: "alpha",
-          argv: [
-            "/usr/local/bin/bun",
-            "--no-env-file",
-            "/adapters/fake/adapter.js",
-          ],
+          adapter: "/adapters/fake/adapter.js",
           env: botEnvironment("fake", "/var/lib/aphelion-bots"),
           cwd: "/bots/alpha",
         });

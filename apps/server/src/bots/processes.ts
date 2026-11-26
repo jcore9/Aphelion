@@ -3,7 +3,7 @@ import type { Cleanup, ProcessExit, SpawnFailed } from "../plugins/processes";
 
 export interface BotSpec {
   readonly bot: string;
-  readonly argv: readonly [string, ...string[]];
+  readonly adapter: string;
   readonly env: Readonly<Record<string, string>>;
   readonly cwd: string;
 }

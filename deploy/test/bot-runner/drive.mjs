@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline";
 import { setTimeout } from "node:timers";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const adapter = join(import.meta.dirname, "fake-adapter.mjs");
 const folder = "/var/lib/aphelion-bots/contract-bot";
@@ -49,6 +51,14 @@ const next = async (type) => {
   }
 };
 const send = (frame) => runner.stdin.write(`${JSON.stringify(frame)}\n`);
+const fds = (pid) => {
+  try {
+    readdirSync(`/proc/${pid}/fd`);
+    return "ok";
+  } catch (error) {
+    return error.code;
+  }
+};
 
 send({
   type: "start",
@@ -73,6 +83,10 @@ for (;;) {
   const { envelope } = await next("event");
   events.push(envelope);
   if (envelope.event.type === "turn.end") break;
+}
+const { pid } = JSON.parse(events[1].event.text);
+if (fds(pid) !== "EACCES") {
+  fail(`another aphelion-bot process opened the adapter's fds (${fds(pid)})`);
 }
 send({ type: "stop", bot: "contract-bot", run: 1 });
 await next("stopped");
@@ -99,6 +113,26 @@ if (report.cwd !== folder) fail(`the bot ran in ${report.cwd}`);
 if (report.runnerFd !== "EACCES" || report.runnerEnviron !== "EACCES") {
   fail(
     `the bot reached the runner's fds (${report.runnerFd}) or environment (${report.runnerEnviron})`,
+  );
+}
+
+const plain = spawn(
+  "/usr/local/bin/bun",
+  ["--eval", "await Bun.sleep(20000)"],
+  {
+    stdio: ["pipe", "ignore", "ignore"],
+  },
+);
+for (let tries = 0; tries < 100; tries++) {
+  const command = readFileSync(`/proc/${plain.pid}/cmdline`, "utf8");
+  if (command.includes("--eval")) break;
+  await sleep(20);
+}
+const plainFds = fds(plain.pid);
+plain.kill("SIGKILL");
+if (plainFds !== "EACCES") {
+  fail(
+    `a bun process started without the launcher had readable fds (${plainFds})`,
   );
 }
 process.stdout.write("bot runner check passed\n");

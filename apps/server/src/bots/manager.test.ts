@@ -71,7 +71,6 @@ const system = (
     const runnerScope = yield* Scope.make();
     yield* Effect.addFinalizer(() => Scope.close(runnerScope, Exit.void));
     yield* runBotRunner(b, {
-      bun: "/usr/local/bin/bun",
       home: "/var/lib/aphelion-bots",
       shutdownGrace: "200 millis",
       writeDeadline: "1 second",

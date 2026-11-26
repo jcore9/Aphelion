@@ -32,6 +32,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       const { turn } = message.params;
       send({ id: message.id, result: {} });
       const report = {
+        pid: process.pid,
         bot,
         uid: process.getuid(),
         cwd: process.cwd(),

@@ -29,6 +29,7 @@ import {
 
 const sdk = join(import.meta.dirname, "../../../../packages/plugin-sdk/src");
 const runnerMain = join(import.meta.dirname, "runner-main.ts");
+const launcher = join(import.meta.dirname, "../adapters/adapter-launcher.ts");
 const sleepSeconds = String(5000 + Math.floor(Math.random() * 4000));
 const isRoot = (process.getuid?.() ?? 0) === 0;
 
@@ -86,6 +87,15 @@ function sleepers(): number[] {
   return found;
 }
 
+const attempt = (read: () => unknown) => {
+  try {
+    read();
+    return "ok";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code;
+  }
+};
+
 const poll = <A>(read: () => A, done: (value: A) => boolean) =>
   Effect.gen(function* () {
     let value = read();
@@ -129,7 +139,15 @@ const startRunner = Effect.gen(function* () {
   const home = join(base, "home");
   const runner = spawn(
     process.execPath,
-    [runnerMain, "--bun", process.execPath, "--home", home],
+    [
+      runnerMain,
+      "--bun",
+      process.execPath,
+      "--launcher",
+      launcher,
+      "--home",
+      home,
+    ],
     {
       stdio: [requests.reader, replies.writer, "inherit"],
       env: { ...process.env, HTTPS_PROXY: "http://proxy.test:3128" },
@@ -228,6 +246,7 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
           const report = JSON.parse(
             event?.type === "text.delta" ? event.text : "{}",
           ) as {
+            pid: number;
             fds: [number, number][];
             env: Record<string, string>;
             runnerFd: string;
@@ -243,6 +262,12 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
           expect(held.filter((fd) => pipes.includes(fd))).toEqual([]);
           expect(report.runnerFd).toBe("EACCES");
           expect(report.runnerEnviron).toBe("EACCES");
+          expect(
+            attempt(() => readdirSync(`/proc/${String(report.pid)}/fd`)),
+          ).toBe("EACCES");
+          expect(
+            attempt(() => readdirSync(`/proc/${String(process.pid)}/fd`)),
+          ).toBe("ok");
 
           expect(
             yield* poll(

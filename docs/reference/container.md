@@ -12,7 +12,8 @@ The image is built on Ubuntu 26.04 LTS. The Ubuntu and Bun base images are pinne
 | `/usr/local/bin/aphelion-secrets` | The [secrets broker](secrets.md#local-secrets-broker), compiled the same way |
 | `/usr/local/lib/aphelion/plugin-runner.js` | The [plugin runner](plugins.md#running-the-runner), bundled into one file that `bun` runs |
 | `/usr/local/lib/aphelion/bot-runner.js` | The [bot runner](bot-runner.md), bundled the same way |
-| `/usr/local/bin/bun` | Bun 1.4.5, which runs both runners, every plugin and every bot adapter |
+| `/usr/local/lib/aphelion/adapter-launcher.js` | The [adapter launcher](bot-runner.md#what-a-bot-process-gets), which `bun` loads before each bot adapter |
+| `/usr/local/bin/bun` | Bun 1.4.5, which runs both runners, every plugin and every bot adapter. Its mode is `0711`, so only `root` can read it, which makes every other user's Bun process non-dumpable ([why](bot-runner.md#how-one-bot-is-kept-from-another)). |
 | `/usr/local/lib/aphelion/launch` | The launcher script that starts the processes |
 | `/usr/bin/tini` | The init process, process 1 in the container |
 | `/etc/aphelion/*.yaml` | The default config files, copied from [`docs/reference/config/example`](https://github.com/jcore9/Aphelion/tree/main/docs/reference/config/example) |

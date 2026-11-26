@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import { Effect } from "effect";
-import { bunBotProcesses } from "../adapters/bot-processes";
+import { bunBotProcesses, type BunBotOptions } from "../adapters/bot-processes";
 import { createLogger } from "../log";
 import { pipeLink } from "../plugins/link";
 import { runBotRunner } from "./runner";
@@ -11,8 +11,7 @@ import {
   runnerRequestSchema,
 } from "./runner-protocol";
 
-export interface BotRunnerMainOptions {
-  readonly bun: string;
+export interface BotRunnerMainOptions extends BunBotOptions {
   readonly home: string;
 }
 
@@ -47,13 +46,12 @@ export async function serveBotRunner(
       runnerReplySchema,
     );
     yield* runBotRunner(link, {
-      bun: options.bun,
       home: options.home,
       shutdownGrace: "5 seconds",
       writeDeadline: "5 seconds",
       logger,
     });
-  }).pipe(Effect.scoped, Effect.provide(bunBotProcesses));
+  }).pipe(Effect.scoped, Effect.provide(bunBotProcesses(options)));
   await Effect.runPromise(program);
 }
 
@@ -61,9 +59,13 @@ if (import.meta.main) {
   const { values } = parseArgs({
     options: {
       bun: { type: "string", default: process.execPath },
+      launcher: {
+        type: "string",
+        default: "/usr/local/lib/aphelion/adapter-launcher.js",
+      },
       home: { type: "string", default: "/var/lib/aphelion-bots" },
     },
   });
-  await serveBotRunner({ bun: values.bun, home: values.home });
+  await serveBotRunner(values);
   process.exit(0);
 }

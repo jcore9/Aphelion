@@ -283,7 +283,7 @@ driven=$(docker exec --user aphelion-bot "$container" /usr/local/bin/bun /tmp/bo
 docker exec --user aphelion-bot "$container" rm -rf /tmp/bot-test /var/lib/aphelion-bots/contract-bot
 wait_for_log "\"msg\":\"the bot runner started the bot's process\",\"bot\":\"chief-of-staff\""
 wait_for_log "no adapter in this image runs the bot's provider, so the bot won't start\",\"bot\":\"triage\""
-pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment, and the server reaches the bot runner"
+pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner"
 
 probe aphelion-plugins '[
   ["list", "/etc/aphelion", "EACCES"],

@@ -27,7 +27,7 @@ The bot runner checks every line from an adapter against the adapter wire, and d
 
 ## What a bot process gets
 
-The bot runner starts `bun --no-env-file <adapter file>` in the bot's folder from `bots.yaml`, and creates the folder with mode `0750` if it is missing. The process gets only its standard input, output and error. It gets this environment and nothing else:
+The bot runner starts `bun --no-env-file --preload /usr/local/lib/aphelion/adapter-launcher.js <adapter file>` in the bot's folder from `bots.yaml`, and creates the folder with mode `0750` if it is missing. If the adapter file isn't there, the start fails at once, and the server's log line names the file. The launcher runs first in the same process. It sets the process non-dumpable, then Bun loads the adapter file ([how one bot is kept from another](#how-one-bot-is-kept-from-another)). The process gets only its standard input, output and error. It gets this environment and nothing else:
 
 | Variable | Value |
 | --- | --- |
@@ -46,11 +46,22 @@ The server picks the adapter file from a fixed table, by the bot's `provider`. T
 
 Bots share the `aphelion-bot` user with the bot runner. Through the bot runner, a bot can't start, stop or send a prompt to another bot:
 
-- A bot can't write to the server's pipe. It never gets the pipe as a descriptor. The bot runner also sets itself non-dumpable (`PR_SET_DUMPABLE=0`), so a process of the same user can't open `/proc/<bot runner>/fd` or read its memory or environment.
+- A bot can't write to the server's pipe. It never gets the pipe as a descriptor.
+- A bot can't open another bot's adapter pipes, or the bot runner's. Linux lets a process open another process's descriptors through `/proc/<pid>/fd`, and read its memory and environment, when both run as the same user. A **non-dumpable** process (`PR_SET_DUMPABLE=0`) refuses that to everyone but `root`. The bot runner sets itself non-dumpable, and so does each adapter process. Without this, one bot could read the prompts the bot runner sends another bot, or write events the bot runner would take as the other bot's.
 - A bot can't name another bot. The bot runner reads a bot's output as adapter messages only, and tags them itself.
 - A message for one bot reaches only the process the bot runner started for that bot.
 
-The shared user still lets a bot signal another bot's processes or the bot runner itself ([decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md)). If the bot runner dies, the launcher stops the container.
+The adapter becomes non-dumpable twice over, so there's no moment when a sibling can open its pipes:
+
+- The image installs `/usr/local/bin/bun` with mode `0711`: every user can run it, and only `root` can read it. Linux makes a process non-dumpable from its first instruction when it runs a program it can't read. This covers the time Bun takes to start, before any JavaScript runs. It also covers the bot runner, the plugin runner and every plugin.
+- The launcher calls `PR_SET_DUMPABLE=0` itself before the adapter loads, in case a host's `fs.suid_dumpable` setting is `1`, which would leave the first step open.
+
+Some things stay open under the shared user ([decision 0006](../decisions/0006-shared-bot-user.md)):
+
+- A bot can still signal, and so stop, another bot's processes or the bot runner itself ([decision 0045](../decisions/0045-no-bot-namespaces-default-seccomp.md)). If the bot runner dies, the launcher stops the container.
+- An adapter starts the AI tool's own program, such as Claude Code. Starting a new program makes a process dumpable again, so another bot can open that program's descriptors and memory. Those pipes lead to that bot's adapter, not to the bot runner, but the program's memory holds that bot's conversation.
+
+Separate users per bot would close both. That is a later change.
 
 ## Restart and resume
 
@@ -88,9 +99,9 @@ When the server stops, it stops every bot, with at most 15 seconds for all of th
 ## Tests
 
 - `apps/server/src/bots/runner.test.ts` runs the bot runner with the SDK's runtime and fake adapters in the same process. It checks a start, a turn and a stop, resume, the repaired stream, the isolation rules, and the refusals.
-- `apps/server/src/bots/runner-process.test.ts` runs the real bot runner over two named pipes, with a real Bun adapter. It checks that the adapter gets exactly the environment above, holds neither pipe, and can't read the bot runner's descriptors or environment. It checks the tree kill and a repaired stream after `SIGKILL`.
+- `apps/server/src/bots/runner-process.test.ts` runs the real bot runner over two named pipes, with a real Bun adapter. It checks that the adapter gets exactly the environment above, holds neither pipe, and can't read the bot runner's descriptors or environment, and that another process of the same user can't open the adapter's descriptors. It checks the tree kill and a repaired stream after `SIGKILL`.
 - `apps/server/src/bots/manager.test.ts` runs the server's bot manager against the bot runner. It checks restart with resume, giving up, the retry without a session, the folder check, and an unknown provider.
-- [`deploy/test/image-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/image-contract.sh) checks the shipped image. The bot runner runs as `aphelion-bot` and holds its own pipes and no others. A fake adapter bot starts, answers one turn and stops, with the environment above.
+- [`deploy/test/image-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/image-contract.sh) checks the shipped image. The bot runner runs as `aphelion-bot` and holds its own pipes and no others. A fake adapter bot starts, answers one turn and stops, with the environment above. A second `aphelion-bot` process can't open the adapter's descriptors, or those of a `bun` started without the launcher.
 
 ## Code
 
@@ -102,3 +113,4 @@ When the server stops, it stops every bot, with at most 15 seconds for all of th
 | [`apps/server/src/bots/environment.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/bots/environment.ts) | A bot's environment |
 | [`apps/server/src/bots/manager.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/bots/manager.ts) | The server's side: states, restart, resume and the adapter table |
 | [`apps/server/src/adapters/bot-processes.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/adapters/bot-processes.ts) | Starting and killing bot processes with Bun |
+| [`apps/server/src/adapters/adapter-launcher.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/adapters/adapter-launcher.ts) | The launcher that makes an adapter process non-dumpable |

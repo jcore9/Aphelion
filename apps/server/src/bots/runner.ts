@@ -38,7 +38,6 @@ import type {
 import { streamTracker, type StreamTracker } from "./stream";
 
 export interface BotRunnerOptions {
-  readonly bun: string;
   readonly home: string;
   readonly shutdownGrace: Duration.Input;
   readonly writeDeadline: Duration.Input;
@@ -252,7 +251,7 @@ export const runBotRunner = (
         processes
           .start({
             bot: start.bot,
-            argv: [options.bun, "--no-env-file", start.adapter],
+            adapter: start.adapter,
             env: botEnvironment(start.provider, options.home),
             cwd: start.folder,
           })
