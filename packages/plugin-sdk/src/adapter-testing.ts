@@ -7,8 +7,8 @@ import {
   type AdapterEvent,
   type AdapterSession,
   type BotAdapter,
-  type PermissionDecision,
   type PermissionRequest,
+  type TurnDecision,
   type TurnInput,
 } from "./adapter.ts";
 import { runAdapter, type RunAdapterOptions } from "./adapter-runtime.ts";
@@ -58,7 +58,7 @@ export interface FakeAdapter extends BotAdapter {
   /** The signal of each turn, in order. */
   readonly signals: readonly AbortSignal[];
   /** The answers to the `ask` steps, in order. */
-  readonly answers: readonly PermissionDecision[];
+  readonly answers: readonly TurnDecision[];
   /** Whether the runtime has called `close`. */
   readonly closed: boolean;
 }
@@ -71,7 +71,7 @@ export function fakeAdapter(
   const contexts: AdapterContext[] = [];
   const inputs: TurnInput[] = [];
   const signals: AbortSignal[] = [];
-  const answers: PermissionDecision[] = [];
+  const answers: TurnDecision[] = [];
   const state = { closed: false };
 
   const never = new Promise<never>(() => undefined);

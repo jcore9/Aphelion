@@ -7,6 +7,7 @@ import {
   type BotAdapter,
   type Decider,
   type PermissionDecision,
+  type TurnDecision,
   type TurnInput,
 } from "./adapter.ts";
 import { checkStream } from "./adapter-check.ts";
@@ -58,6 +59,19 @@ const allow: PermissionDecision = {
   by: "rule",
   reason: "inside-folder",
 };
+
+const announced = (decision: PermissionDecision): TurnDecision => ({
+  ...decision,
+  announced: true,
+});
+const silent = (reason: PermissionDecision["reason"]): TurnDecision => ({
+  decision: "deny",
+  by: "default",
+  reason,
+  announced: false,
+});
+const announcedDeny = (reason: PermissionDecision["reason"]): TurnDecision =>
+  announced({ decision: "deny", by: "default", reason });
 
 afterEach(() => {
   vi.useRealTimers();
@@ -401,9 +415,7 @@ describe("permission requests", () => {
       ],
     ]);
     const run = await runTurn(adapter);
-    expect(adapter.answers).toEqual([
-      { decision: "deny", by: "default", reason: "no-decider" },
-    ]);
+    expect(adapter.answers).toEqual([announcedDeny("no-decider")]);
     const asked = run.events.find(
       ({ event }) => event.type === "permission.request",
     );
@@ -439,7 +451,7 @@ describe("permission requests", () => {
     const adapter = fakeAdapter([[ask("r1"), done()]]);
     const run = await runTurn(adapter, { decider });
     expect(seen).toEqual(["shell /work/secret-path.txt rm -rf secret-command"]);
-    expect(adapter.answers).toEqual([allow]);
+    expect(adapter.answers).toEqual([announced(allow)]);
     expect(
       run.events.find(({ event }) => event.type === "permission.decision")
         ?.event,
@@ -459,29 +471,28 @@ describe("permission requests", () => {
     const answer = await adapter.inputs[0]?.decide({
       request: "r1",
     } as never);
-    expect(answer).toEqual({
-      decision: "deny",
-      by: "default",
-      reason: "invalid-request",
-    });
+    expect(answer).toEqual(silent("invalid-request"));
     expect(harness.events).toEqual([]);
     await harness.shutdown();
   });
 
   test("a decider that throws, or answers badly, is denied", async () => {
-    const throwing = await runTurn(fakeAdapter([[ask("r1"), done()]]), {
+    const throwingAdapter = fakeAdapter([[ask("r1"), done()]]);
+    const throwing = await runTurn(throwingAdapter, {
       decider: () => {
         throw new Error("boom");
       },
     });
-    const nonsense = await runTurn(fakeAdapter([[ask("r1"), done()]]), {
+    const nonsenseAdapter = fakeAdapter([[ask("r1"), done()]]);
+    const nonsense = await runTurn(nonsenseAdapter, {
       decider: () =>
         ({ decision: "allow", by: "me", reason: "Has Spaces" }) as never,
     });
-    for (const [run, reason] of [
-      [throwing, "decider-failed"],
-      [nonsense, "invalid-decision"],
+    for (const [run, adapter, reason] of [
+      [throwing, throwingAdapter, "decider-failed"],
+      [nonsense, nonsenseAdapter, "invalid-decision"],
     ] as const) {
+      expect(adapter.answers).toEqual([announcedDeny(reason)]);
       expect(
         run.events.find(({ event }) => event.type === "permission.decision")
           ?.event,
@@ -495,9 +506,12 @@ describe("permission requests", () => {
   });
 
   test("a request id used twice in a turn is denied without a second event", async () => {
-    const run = await runTurn(fakeAdapter([[ask("r1"), ask("r1"), done()]]), {
-      decider: () => allow,
-    });
+    const adapter = fakeAdapter([[ask("r1"), ask("r1"), done()]]);
+    const run = await runTurn(adapter, { decider: () => allow });
+    expect(adapter.answers).toEqual([
+      announced(allow),
+      silent("duplicate-request"),
+    ]);
     expect(types(run.events)).toEqual([
       "permission.request",
       "permission.decision",
@@ -522,11 +536,7 @@ describe("permission requests", () => {
         truncated: false,
       }),
     );
-    expect(answer).toEqual({
-      decision: "deny",
-      by: "default",
-      reason: "turn-ended",
-    });
+    expect(answer).toEqual(silent("turn-ended"));
     await harness.shutdown();
     expect(types(harness.events)).toEqual(["turn.end"]);
   });
@@ -549,7 +559,7 @@ describe("permission requests", () => {
         truncated: false,
       }),
     );
-    expect(answer?.reason).toBe("turn-ended");
+    expect(answer).toEqual(silent("turn-ended"));
     await harness.shutdown();
     expect(types(harness.events)).not.toContain("permission.request");
   });
@@ -575,7 +585,7 @@ describe("permission requests", () => {
         },
       }),
     };
-    const answers: PermissionDecision[] = [];
+    const answers: TurnDecision[] = [];
     const run = await runTurn(adapter, {
       decider: () => new Promise(() => undefined),
     });
@@ -591,9 +601,7 @@ describe("permission requests", () => {
     });
     expect(checkStream(run.events)).toEqual([]);
     await Promise.resolve();
-    expect(answers).toEqual([
-      { decision: "deny", by: "default", reason: "turn-ended" },
-    ]);
+    expect(answers).toEqual([announcedDeny("turn-ended")]);
   });
 
   test("a decider that is too slow is denied at the deadline", async () => {
@@ -616,6 +624,7 @@ describe("permission requests", () => {
       decision: "deny",
       reason: "timeout",
     });
+    expect(adapter.answers).toEqual([announcedDeny("timeout")]);
     expect(checkStream(harness.events)).toEqual([]);
     await harness.shutdown();
   });
@@ -770,9 +779,7 @@ describe("cancel", () => {
       by: "default",
       reason: "cancelled",
     });
-    expect(adapter.answers).toEqual([
-      { decision: "deny", by: "default", reason: "cancelled" },
-    ]);
+    expect(adapter.answers).toEqual([announcedDeny("cancelled")]);
     expect(checkStream(harness.events)).toEqual([]);
     await harness.shutdown();
   });
@@ -787,10 +794,7 @@ describe("cancel", () => {
     await harness.cancel("t1");
     await harness.untilEvent(({ event }) => event.type === "turn.end");
     expect(types(harness.events)).toEqual(["turn.end"]);
-    expect(adapter.answers[0]).toMatchObject({
-      decision: "deny",
-      reason: "cancelled",
-    });
+    expect(adapter.answers).toEqual([silent("cancelled")]);
     await harness.shutdown();
   });
 });
@@ -814,9 +818,7 @@ describe("an ask is bound to its own turn", () => {
     expect(await harness.startTurn("t2", "y")).toEqual({ result: {} });
     open();
     await vi.advanceTimersByTimeAsync(0);
-    expect(adapter.answers).toEqual([
-      { decision: "deny", by: "default", reason: "turn-ended" },
-    ]);
+    expect(adapter.answers).toEqual([silent("turn-ended")]);
     expect(types(harness.events)).toEqual(["turn.end"]);
     expect(harness.events.every(({ turn }) => turn !== "t2")).toBe(true);
     await harness.shutdown();
@@ -835,7 +837,7 @@ describe("an ask is bound to its own turn", () => {
     await harness.untilEvent(
       ({ turn, event }) => turn === "t2" && event.type === "turn.end",
     );
-    expect(adapter.answers).toEqual([allow, allow]);
+    expect(adapter.answers).toEqual([announced(allow), announced(allow)]);
     expect(
       harness.events
         .filter(({ event }) => event.type === "permission.request")
@@ -876,9 +878,7 @@ describe("shutdown", () => {
       type: "turn.end",
       reason: "cancelled",
     });
-    expect(adapter.answers).toEqual([
-      { decision: "deny", by: "default", reason: "shutdown" },
-    ]);
+    expect(adapter.answers).toEqual([announcedDeny("shutdown")]);
     expect(checkStream(harness.events)).toEqual([]);
   });
 
@@ -905,7 +905,7 @@ describe("shutdown", () => {
 
   test("an ask made from close() is denied at once with no event", async () => {
     let decide: TurnInput["decide"] | undefined;
-    const answers: PermissionDecision[] = [];
+    const answers: TurnDecision[] = [];
     const adapter: BotAdapter = {
       provider: "x",
       open: (): AdapterSession => ({
@@ -937,9 +937,7 @@ describe("shutdown", () => {
     await harness.untilEvent(({ event }) => event.type === "text.delta");
     await harness.shutdown();
     await harness.done;
-    expect(answers).toEqual([
-      { decision: "deny", by: "default", reason: "shutdown" },
-    ]);
+    expect(answers).toEqual([silent("shutdown")]);
     expect(types(harness.events)).toEqual(["text.delta", "turn.end"]);
     expect(checkStream(harness.events)).toEqual([]);
   });

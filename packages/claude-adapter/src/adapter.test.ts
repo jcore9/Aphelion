@@ -954,6 +954,54 @@ describe("cancel", () => {
     expect(checkStream(harness.events)).toEqual([]);
   });
 
+  it("ends as an error a call from an earlier turn that the runtime denies without a decision", async () => {
+    const { adapter, scripted } = setup([
+      [
+        { send: sdk.init() },
+        { send: sdk.toolUse("toolu_bg", "Bash", { command: "sleep 60" }) },
+        { send: sdk.result() },
+      ],
+      [
+        { send: sdk.init() },
+        {
+          ask: {
+            tool: "Bash",
+            input: { command: "sleep 60" },
+            toolUseID: "toolu_bg",
+            requestId: "req-bg",
+          },
+        },
+        { send: sdk.toolResult("toolu_bg", true) },
+        { send: sdk.result() },
+      ],
+    ]);
+    const harness = startAdapter(adapter, { decider: allow });
+    await harness.initialize();
+    await harness.startTurn("t1", "one");
+    await untilTurnEnd(harness, "t1");
+    await harness.startTurn("t2", "two");
+    await untilTurnEnd(harness, "t2");
+    await harness.shutdown();
+
+    const events = harness.events.map(({ event }) => event);
+    expect(scripted.answers).toEqual([
+      { behavior: "deny", message: "Aphelion denied this tool call." },
+    ]);
+    expect(events.some(({ type }) => type.startsWith("permission."))).toBe(
+      false,
+    );
+    expect(events).toContainEqual({
+      type: "tool.end",
+      call: "toolu_bg",
+      outcome: "error",
+    });
+    expect(harness.events.at(-1)?.event).toEqual({
+      type: "turn.end",
+      reason: "completed",
+    });
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+
   it("counts the SDK's abort error during a cancel as the cancel", async () => {
     const { adapter } = setup([
       [

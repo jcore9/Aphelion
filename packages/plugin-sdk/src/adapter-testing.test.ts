@@ -20,7 +20,12 @@ const context = (): AdapterContext => ({
 });
 
 const allowAll: TurnInput["decide"] = () =>
-  Promise.resolve({ decision: "allow", by: "rule", reason: "inside-folder" });
+  Promise.resolve({
+    decision: "allow",
+    by: "rule",
+    reason: "inside-folder",
+    announced: true,
+  });
 
 const input = (
   turn: string,
@@ -70,13 +75,18 @@ describe("fakeAdapter", () => {
     await collect(
       session.turn(
         input("t1", "go", () =>
-          Promise.resolve({ decision: "deny", by: "policy", reason: "web" }),
+          Promise.resolve({
+            decision: "deny",
+            by: "policy",
+            reason: "web",
+            announced: true,
+          }),
         ),
         new AbortController().signal,
       ),
     );
     expect(adapter.answers).toEqual([
-      { decision: "deny", by: "policy", reason: "web" },
+      { decision: "deny", by: "policy", reason: "web", announced: true },
     ]);
   });
 
