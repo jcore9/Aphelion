@@ -14,7 +14,12 @@ import {
 } from "@aphelion/plugin-sdk/testing";
 import { describe, expect, it } from "vitest";
 import { claudeAdapter } from "./adapter.ts";
-import { scriptedQuery, sdk, type ScriptStep } from "./scripted-query.ts";
+import {
+  abortedError,
+  scriptedQuery,
+  sdk,
+  type ScriptStep,
+} from "./scripted-query.ts";
 
 const fakeKey = "sk-ant-api03-fake-0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -26,6 +31,7 @@ const setup = (
   const adapter = claudeAdapter({
     query: scripted.query,
     env,
+    interruptWaitMs: 50,
     closeWaitMs: 100,
   });
   return { scripted, adapter };
@@ -687,6 +693,7 @@ describe("keys stay out of events and logs", () => {
         return scripted.query(params);
       },
       env: { HOME: "/var/lib/aphelion-bots", ANTHROPIC_API_KEY: fakeKey },
+      interruptWaitMs: 50,
       closeWaitMs: 100,
     });
     const harness = startAdapter(adapter);
@@ -707,6 +714,149 @@ describe("keys stay out of events and logs", () => {
     expect(seen).not.toContain("sk-ant");
     expect(harness.logs).toContain("the CLI wrote 1 lines to stderr");
     expect(harness.events.map(({ event }) => event.type)).toContain("error");
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+});
+
+describe("cancel", () => {
+  it("interrupts the CLI and keeps the session when the result arrives", async () => {
+    const { adapter, scripted } = setup([
+      [
+        { send: sdk.init() },
+        { send: sdk.text("working") },
+        { waitForInterrupt: true },
+        {
+          send: sdk.result({
+            subtype: "error_during_execution",
+            is_error: true,
+            terminal_reason: "aborted_streaming",
+          }),
+        },
+      ],
+      completed,
+    ]);
+    const harness = startAdapter(adapter);
+    await harness.initialize();
+    await harness.startTurn("t1", "one");
+    await harness.untilEvent(({ event }) => event.type === "text.delta");
+    await harness.cancel("t1");
+    await untilTurnEnd(harness, "t1");
+    await harness.startTurn("t2", "two");
+    await untilTurnEnd(harness, "t2");
+    await harness.shutdown();
+
+    const ends = harness.events.flatMap(({ event }) =>
+      event.type === "turn.end" ? [event.reason] : [],
+    );
+    expect(ends).toEqual(["cancelled", "completed"]);
+    expect(scripted.runs).toHaveLength(1);
+    expect(scripted.runs[0]?.interrupts).toBe(1);
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+
+  it("aborts the CLI when no result comes, and resumes in a new process", async () => {
+    const { adapter, scripted } = setup([
+      [{ send: sdk.init() }, { send: sdk.text("working") }, { hang: true }],
+      completed,
+    ]);
+    const harness = startAdapter(adapter);
+    await harness.initialize();
+    await harness.startTurn("t1", "one");
+    await harness.untilEvent(({ event }) => event.type === "text.delta");
+    await harness.cancel("t1");
+    await untilTurnEnd(harness, "t1");
+    await harness.startTurn("t2", "two");
+    await untilTurnEnd(harness, "t2");
+    await harness.shutdown();
+
+    const ends = harness.events.flatMap(({ event }) =>
+      event.type === "turn.end" ? [event.reason] : [],
+    );
+    expect(ends).toEqual(["cancelled", "completed"]);
+    expect(scripted.runs).toHaveLength(2);
+    expect(scripted.runs[0]?.options.abortController?.signal.aborted).toBe(
+      true,
+    );
+    expect(scripted.runs[1]?.options.resume).toBe(sdk.sessionId);
+    expect(harness.logs).not.toContain("the Claude CLI stopped: aborted");
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+
+  it("denies a tool that is waiting for a decision", async () => {
+    const { adapter, scripted } = setup([
+      [
+        { send: sdk.init() },
+        { send: sdk.toolUse("toolu_07", "Write", { file_path: "/work/a" }) },
+        {
+          ask: {
+            tool: "Write",
+            input: { file_path: "/work/a" },
+            toolUseID: "toolu_07",
+            requestId: "req-7",
+          },
+        },
+        { send: sdk.toolResult("toolu_07", true) },
+        { waitForInterrupt: true },
+        {
+          send: sdk.result({
+            subtype: "error_during_execution",
+            is_error: true,
+            terminal_reason: "aborted_tools",
+          }),
+        },
+      ],
+    ]);
+    const harness = startAdapter(adapter, {
+      decider: (_request, signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener("abort", () => {
+            resolve({
+              decision: "allow",
+              by: "owner",
+              reason: "inside-folder",
+            });
+          });
+        }),
+    });
+    await harness.initialize();
+    await harness.startTurn("t1", "one");
+    await harness.untilEvent(
+      ({ event }) => event.type === "permission.request",
+    );
+    await harness.cancel("t1");
+    await untilTurnEnd(harness, "t1");
+    await harness.shutdown();
+
+    expect(scripted.answers).toEqual([
+      { behavior: "deny", message: "Aphelion denied this tool call." },
+    ]);
+    expect(harness.events.at(-1)?.event).toEqual({
+      type: "turn.end",
+      reason: "cancelled",
+    });
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+
+  it("counts the SDK's abort error during a cancel as the cancel", async () => {
+    const { adapter } = setup([
+      [
+        { send: sdk.init() },
+        { waitForInterrupt: true },
+        { throws: abortedError() },
+      ],
+    ]);
+    const harness = startAdapter(adapter);
+    await harness.initialize();
+    await harness.startTurn("t1", "one");
+    await harness.untilEvent(({ event }) => event.type === "session");
+    await harness.cancel("t1");
+    await untilTurnEnd(harness, "t1");
+    await harness.shutdown();
+
+    expect(harness.events.at(-1)?.event).toEqual({
+      type: "turn.end",
+      reason: "cancelled",
+    });
     expect(checkStream(harness.events)).toEqual([]);
   });
 });

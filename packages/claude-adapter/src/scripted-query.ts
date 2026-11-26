@@ -15,6 +15,7 @@ export type ScriptStep =
         readonly requestId: string;
       };
     }
+  | { readonly waitForInterrupt: true }
   | { readonly hang: true }
   | { readonly exit: true }
   | { readonly throws: unknown };
@@ -22,6 +23,7 @@ export type ScriptStep =
 export interface QueryRun {
   readonly options: Options;
   readonly prompts: SDKUserMessage[];
+  interrupts: number;
 }
 
 export interface ScriptedQuery {
@@ -52,12 +54,13 @@ export function scriptedQuery(
   let nextTurn = 0;
 
   const query: QueryFunction = ({ prompt, options }) => {
-    const run: QueryRun = { options, prompts: [] };
+    const run: QueryRun = { options, prompts: [], interrupts: 0 };
     runs.push(run);
     const signal =
       options.abortController?.signal ?? new AbortController().signal;
     const aborted = untilAborted(signal);
     aborted.catch(() => undefined);
+    let interrupted = Promise.withResolvers<undefined>();
 
     async function* messages(): AsyncGenerator {
       const input = prompt[Symbol.asyncIterator]();
@@ -65,6 +68,7 @@ export function scriptedQuery(
         const next = await Promise.race([input.next(), aborted]);
         if (next.done) return;
         run.prompts.push(next.value);
+        interrupted = Promise.withResolvers<undefined>();
         for (const step of turns[nextTurn++] ?? []) {
           if ("send" in step) {
             if (signal.aborted) throw abortedError();
@@ -79,6 +83,8 @@ export function scriptedQuery(
                 requestId,
               }),
             );
+          } else if ("waitForInterrupt" in step) {
+            await Promise.race([interrupted.promise, aborted]);
           } else if ("hang" in step) {
             await aborted;
           } else if ("exit" in step) {
@@ -93,6 +99,11 @@ export function scriptedQuery(
     const iterator = messages();
     const handle: ClaudeQuery = {
       [Symbol.asyncIterator]: () => iterator,
+      interrupt: () => {
+        run.interrupts += 1;
+        interrupted.resolve(undefined);
+        return Promise.resolve(undefined);
+      },
     };
     return handle;
   };

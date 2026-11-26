@@ -31,10 +31,18 @@ import {
   type ParentEnv,
 } from "./options.ts";
 import { splitBytes } from "./text.ts";
-import { settlesWithin, unlessAborted } from "./timing.ts";
+import {
+  after,
+  settlesWithin,
+  unlessAborted,
+  whenAborted,
+  type Wait,
+} from "./timing.ts";
 import { permissionRequestFor, toolKind } from "./tools.ts";
 
-export type ClaudeQuery = AsyncIterable<unknown>;
+export interface ClaudeQuery extends AsyncIterable<unknown> {
+  interrupt(): Promise<unknown>;
+}
 
 export type QueryFunction = (params: {
   prompt: AsyncIterable<SDKUserMessage>;
@@ -44,6 +52,7 @@ export type QueryFunction = (params: {
 export interface ClaudeAdapterOptions {
   readonly query: QueryFunction;
   readonly env: ParentEnv;
+  readonly interruptWaitMs?: number;
   readonly closeWaitMs?: number;
 }
 
@@ -139,6 +148,7 @@ const lineCount = (data: string) =>
   data.split("\n").filter((line) => line !== "").length;
 
 export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
+  const interruptWaitMs = options.interruptWaitMs ?? 3000;
   const closeWaitMs = options.closeWaitMs ?? 5000;
   const env = claudeEnv(options.env);
 
@@ -374,30 +384,54 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           errorSent: false,
         };
         active = turn;
+        const cancel = whenAborted(signal, "cancel" as const);
+        let deadline: Wait<"deadline"> | undefined;
+
         try {
           owner.prompts.push(prompt(input.text));
           for (;;) {
-            await turn.inbox.ready();
+            const woke = await Promise.race([
+              turn.inbox.ready().then(() => "item" as const),
+              deadline ? deadline.done : cancel.done,
+            ]);
+            if (woke === "cancel") {
+              deadline = after(interruptWaitMs, "deadline" as const);
+              void Promise.resolve()
+                .then(() => owner.query.interrupt())
+                .catch(() => undefined);
+              continue;
+            }
+            if (woke === "deadline") {
+              kill(owner);
+              yield turnEnd("cancelled");
+              return;
+            }
             const item = turn.inbox.take();
             if (item === undefined) continue;
             if (item.kind === "message") {
               const message = parseMessage(item.raw);
-              if (yield* translate(turn, message, false)) {
+              if (yield* translate(turn, message, deadline !== undefined)) {
                 return;
               }
               continue;
             }
-            yield* error(
-              turn,
-              item.kind === "failed" &&
-                notFoundClasses.has(failureClass(item.error))
-                ? "cli-not-found"
-                : "cli-exited",
-            );
-            yield turnEnd("error");
+            if (deadline) {
+              yield turnEnd("cancelled");
+            } else {
+              yield* error(
+                turn,
+                item.kind === "failed" &&
+                  notFoundClasses.has(failureClass(item.error))
+                  ? "cli-not-found"
+                  : "cli-exited",
+              );
+              yield turnEnd("error");
+            }
             return;
           }
         } finally {
+          cancel.stop();
+          deadline?.stop();
           if (active === turn) active = undefined;
         }
       }
