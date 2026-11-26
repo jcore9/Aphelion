@@ -57,9 +57,8 @@ test("a device token from before the restore is refused after it, and a new devi
   const old = addDevice(db, { name: "laptop" });
   expect(authorized(db, old.token)).toBe(true);
 
-  const result = finishRestore(db);
+  finishRestore(db);
 
-  expect(result.kind).toBe("finished");
   expect(authorized(db, old.token)).toBe(false);
   const fresh = addDevice(db, { name: "laptop" }, later(5));
   expect(authorized(db, fresh.token)).toBe(true);
@@ -92,10 +91,7 @@ test("finishing a restore switches every plugin off, lists them and audits the r
 
   const result = finishRestore(db);
 
-  expect(result).toEqual({
-    kind: "finished",
-    switchedOff: ["clock", "weather"],
-  });
+  expect(result).toEqual({ switchedOff: ["clock", "weather"] });
   expect(switchedOffPlugins(db)).toEqual(["clock", "weather"]);
   expect(restoreAudit(db)).toEqual([
     {
@@ -123,35 +119,24 @@ test("finishing twice with no device enrolled in between gives the same list and
   expect(switchedOffPlugins(db)).toEqual(["weather"]);
 });
 
-test("finishing again after a device was enrolled refuses and changes nothing", () => {
+test("restoring a backup taken after an earlier restore revokes the devices enrolled since", () => {
   const db = openTemp();
   addDevice(db, { name: "laptop" });
   recordVersion(db, plugin("weather"));
   finishRestore(db);
-  const fresh = addDevice(db, { name: "phone" }, later(5));
+  const enrolledLater = addDevice(db, { name: "phone" }, later(5));
   db.run("UPDATE plugin_installs SET enabled = 1");
-  const auditBefore = db.all("SELECT id FROM audit_log").length;
 
-  expect(finishRestore(db)).toEqual({ kind: "enrolled-since" });
+  expect(finishRestore(db)).toEqual({ switchedOff: ["weather"] });
 
-  expect(authorized(db, fresh.token)).toBe(true);
-  expect(switchedOffPlugins(db)).toEqual([]);
-  expect(db.all("SELECT id FROM audit_log").length).toBe(auditBefore);
-});
-
-test("a revoked device enrolled after the restore doesn't block a second run", () => {
-  const db = openTemp();
-  finishRestore(db);
-  const fresh = addDevice(db, { name: "phone" }, later(5));
-  revokeDevice(db, fresh.id);
-
-  expect(finishRestore(db).kind).toBe("finished");
+  expect(authorized(db, enrolledLater.token)).toBe(false);
+  expect(restoreAudit(db)).toHaveLength(2);
 });
 
 test("a restore with no devices and no plugins still finishes and is audited", () => {
   const db = openTemp();
 
-  expect(finishRestore(db)).toEqual({ kind: "finished", switchedOff: [] });
+  expect(finishRestore(db)).toEqual({ switchedOff: [] });
   expect(restoreAudit(db)).toHaveLength(1);
 });
 
@@ -168,9 +153,6 @@ test("a failure partway through leaves devices and plugins as they were, so a re
   expect(switchedOffPlugins(db)).toEqual([]);
 
   db.exec("DROP TRIGGER fail_restore_audit");
-  expect(finishRestore(db)).toEqual({
-    kind: "finished",
-    switchedOff: ["weather"],
-  });
+  expect(finishRestore(db)).toEqual({ switchedOff: ["weather"] });
   expect(authorized(db, laptop.token)).toBe(false);
 });

@@ -19,12 +19,6 @@ export const restoreFinish = (options: { readonly stateDir: string }) =>
     const result = yield* withStore(options.stateDir, (db) =>
       Effect.sync(() => finishRestore(db)),
     );
-    if (result.kind === "enrolled-since") {
-      yield* io.err(
-        "restore finish already ran, and devices were enrolled since. Nothing changed.",
-      );
-      return yield* failed;
-    }
     yield* io.out("Restore finished. Every device token is revoked.");
     for (const plugin of result.switchedOff) {
       yield* io.out(

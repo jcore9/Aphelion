@@ -165,7 +165,7 @@ Plugin weather is switched off. Switch it on: aphelion plugin enable weather
 Enroll a device: aphelion device add NAME
 ```
 
-Running it again with no new device gives the same result and revokes nothing more. If a device was enrolled since the last run, a second run would revoke it, so the command refuses instead. It prints `restore finish already ran, and devices were enrolled since. Nothing changed.` on standard error and exits with code 1. It also exits with code 1 and changes nothing when there is no database in the state folder.
+Running it again gives the same result. It revokes every active device again, including one enrolled after the first run, because it can't tell a second run from the restore of a newer backup. Revoking is the safe side: a device that should work only needs enrolling again. It exits with code 1 and changes nothing when there is no database in the state folder.
 
 ## `aphelion plugin enable ID`
 

@@ -73,7 +73,7 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
    Enroll a device: aphelion device add NAME
    ```
 
-   Running it again with no new device prints the same lines. It refuses if a device was enrolled since, because a second run would revoke that device too.
+   Running it again prints the same lines and revokes every device again, including any you enrolled in between. Enroll that device again afterwards.
 
 7. Start the service.
 

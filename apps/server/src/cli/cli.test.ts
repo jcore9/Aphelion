@@ -388,14 +388,12 @@ test("restore finish revokes every device, lists the plugins it switched off, an
 
   await new Promise((resolve) => setTimeout(resolve, 5));
   await run(["device", "add", "phone", ...state]);
-  const again = await run(["restore", "finish", ...state]);
-  expect(again).toEqual({
-    code: 1,
-    out: [],
-    err: [
-      "restore finish already ran, and devices were enrolled since. Nothing changed.",
-    ],
-  });
+  expect(await run(["restore", "finish", ...state])).toEqual(first);
+  const relisted = await run(["device", "list", ...state]);
+  expect(relisted.out.slice(1).map((line) => line.split("\t")[1])).toEqual([
+    "revoked",
+    "revoked",
+  ]);
 });
 
 test("an unexpected error prints its message and exits 1", async () => {
