@@ -17,7 +17,7 @@ import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import type { RestartPolicy } from "../plugins/lifecycle";
-import type { RunnerReply } from "./runner-protocol";
+import type { RunnerReply, RunnerRequest } from "./runner-protocol";
 import { openStore, readServerId } from "../store";
 import {
   BotManager,
@@ -26,6 +26,7 @@ import {
   resumeFailed,
   runnerNotices,
   type BotEvent,
+  type BotManagerOptions,
   type BotState,
   type TurnLedger,
 } from "./manager";
@@ -60,6 +61,7 @@ const system = (
   shape: (
     link: Context.Service.Shape<typeof BotRunnerLink>,
   ) => Context.Service.Shape<typeof BotRunnerLink> = (link) => link,
+  more: Partial<BotManagerOptions> = {},
 ) =>
   Effect.gen(function* () {
     const fake = fakeBotProcesses({ chief: bot });
@@ -75,6 +77,7 @@ const system = (
         policy,
         adapters: { fake: "/adapters/fake/adapter.js" },
         ...(turns === undefined ? {} : { turns }),
+        ...more,
       }).pipe(
         Layer.provideMerge(sessionLayer),
         Layer.provide(Layer.succeed(BotRunnerLink, shape(link))),
@@ -116,6 +119,149 @@ const sessionTurn: FakeScript[number] = [
 
 const uuidV7 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+const silentStarts = Effect.gen(function* () {
+  const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+  const sent: RunnerRequest[] = [];
+  const shape = (link: Context.Service.Shape<typeof BotRunnerLink>) => {
+    Effect.runFork(
+      Queue.take(link.incoming).pipe(
+        Effect.flatMap((reply) => Queue.offer(incoming, reply)),
+        Effect.forever,
+        Effect.ignore,
+      ),
+    );
+    return {
+      incoming,
+      send: (message: RunnerRequest) => {
+        sent.push(message);
+        return message.type === "turn.start" ? Effect.void : link.send(message);
+      },
+    };
+  };
+  return { incoming, sent, shape };
+});
+
+const ledgerCalls = () => {
+  const calls: string[] = [];
+  const turns: TurnLedger = {
+    open: (_bot, turn) =>
+      Effect.sync(() => {
+        calls.push(`open ${turn}`);
+        return true;
+      }),
+    end: (turn, reason) =>
+      Effect.sync(() => {
+        calls.push(`end ${turn} ${reason}`);
+      }),
+  };
+  return { calls, turns };
+};
+
+describe("a turn start that the adapter hasn't answered", () => {
+  it.live("makes another prompt wait as busy, not start a second turn", () =>
+    Effect.gen(function* () {
+      const { calls, turns } = ledgerCalls();
+      const { sent, shape } = yield* silentStarts;
+      const { manager, reach } = yield* system(
+        recording([sessionTurn]).bot,
+        () => Effect.void,
+        "fake",
+        memorySessionRefs,
+        turns,
+        shape,
+      );
+      yield* manager.start("chief");
+      yield* reach("running");
+      const first = yield* manager
+        .startTurn("chief", "first")
+        .pipe(Effect.forkScoped);
+      yield* Effect.sleep("30 millis");
+
+      const second = yield* manager.startTurn("chief", "second");
+
+      expect(second.outcome).toBe("busy");
+      expect(sent.filter(({ type }) => type === "turn.start")).toHaveLength(1);
+      expect(calls).toEqual([
+        expect.stringMatching(/^open /),
+        `open ${second.turn}`,
+        `end ${second.turn} refused`,
+      ]);
+      yield* Fiber.interrupt(first);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "ends the turn as refused when the deadline passes, and takes the next prompt",
+    () =>
+      Effect.gen(function* () {
+        const { calls, turns } = ledgerCalls();
+        const { sent, shape } = yield* silentStarts;
+        const { manager, reach } = yield* system(
+          recording([sessionTurn]).bot,
+          () => Effect.void,
+          "fake",
+          memorySessionRefs,
+          turns,
+          shape,
+          { turnAcceptDeadlineMs: 60 },
+        );
+        yield* manager.start("chief");
+        yield* reach("running");
+
+        const first = yield* manager.startTurn("chief", "first");
+        const next = yield* manager
+          .startTurn("chief", "second")
+          .pipe(Effect.forkScoped);
+        yield* Effect.sleep("30 millis");
+
+        expect(first.outcome).toBe("no-answer");
+        expect(calls.slice(0, 2)).toEqual([
+          `open ${first.turn}`,
+          `end ${first.turn} refused`,
+        ]);
+        expect(sent.filter(({ type }) => type === "turn.start")).toHaveLength(
+          2,
+        );
+        yield* Fiber.interrupt(next);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "tells the runner to cancel a turn the adapter accepts after the deadline",
+    () =>
+      Effect.gen(function* () {
+        const { turns } = ledgerCalls();
+        const { incoming, sent, shape } = yield* silentStarts;
+        const { manager, reach } = yield* system(
+          recording([sessionTurn]).bot,
+          () => Effect.void,
+          "fake",
+          memorySessionRefs,
+          turns,
+          shape,
+          { turnAcceptDeadlineMs: 40 },
+        );
+        yield* manager.start("chief");
+        yield* reach("running");
+        const late = yield* manager.startTurn("chief", "slow");
+        expect(late.outcome).toBe("no-answer");
+
+        yield* Queue.offer(incoming, {
+          type: "turn.accepted",
+          bot: "chief",
+          run: 1,
+          turn: late.turn,
+        });
+        yield* Effect.sleep("30 millis");
+
+        expect(sent.filter(({ type }) => type === "turn.cancel")).toEqual([
+          { type: "turn.cancel", bot: "chief", run: 1, turn: late.turn },
+        ]);
+        expect(yield* manager.status("chief")).toEqual({ state: "running" });
+      }).pipe(Effect.scoped),
+  );
+});
 
 describe("the bot manager", () => {
   it.live(

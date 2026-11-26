@@ -37,8 +37,9 @@ These codes answer a command that the server read and then couldn't finish. Each
 | Code | Meaning |
 | --- | --- |
 | `bot-not-running` | The bot isn't running, the server doesn't know its name, or the server runs no bots. |
-| `bot-busy` | The bot is still in another turn. |
+| `bot-busy` | The bot is still in another turn, or the bot hasn't yet said whether it accepts the turn before this one. |
 | `prompt-too-long` | The prompt is over 262,144 bytes (256 KiB) of UTF-8. |
+| `bot-not-responding` | The bot didn't accept the turn within 30 seconds. The server ends the turn as refused. |
 | `prompt-refused` | The bot refused the turn, the turn had already ended, or the server couldn't save it. |
 | `interrupted` | The server stopped while it ran this command, so it can't say whether the command took effect. It doesn't run the command again. Check the bot's history before you send the command with a new `id` ([command ids](#command-ids)). |
 | `storage-failed` | The server ran the command but couldn't save its result, even after it tried again. The command did take effect. A repeat of the `id` gets `interrupted`. Check the bot's history before you send the command with a new `id`. |
@@ -121,7 +122,9 @@ The prompt can hold up to 262,144 bytes (256 KiB) of UTF-8. A longer prompt gets
 
 The server reads a message of up to 1 MiB (1,048,576 bytes) after JSON encoding. It closes the socket with code 1009 when a message is larger. A 256 KiB prompt fits, unless most of its characters are ones that JSON writes as escapes, such as control characters, which take up to 6 bytes each.
 
-The command fails with `bot-not-running`, `bot-busy`, `prompt-too-long` or `prompt-refused`. A client that wants to try again sends the prompt with a new `id`.
+A bot takes one new turn at a time. While the server waits for the bot to accept a turn, another `bot.prompt` for that bot gets `bot-busy`. The server waits at most 30 seconds. After that it ends the turn as refused and answers `bot-not-responding`. If the bot accepts the turn later, the server tells it to cancel the turn.
+
+The command fails with `bot-not-running`, `bot-busy`, `bot-not-responding`, `prompt-too-long` or `prompt-refused`. A client that wants to try again sends the prompt with a new `id`.
 
 ### `bot.cancel`
 

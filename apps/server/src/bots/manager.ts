@@ -13,6 +13,7 @@ import {
   Deferred,
   Effect,
   Layer,
+  Option,
   PubSub,
   Queue,
   Scope,
@@ -106,7 +107,7 @@ export interface BotEvent {
 }
 
 export type StartOutcome = "starting" | "unknown bot" | "unknown provider";
-export type TurnOutcome = "accepted" | TurnRefusal;
+export type TurnOutcome = "accepted" | "no-answer" | TurnRefusal;
 
 export interface StartedTurn {
   readonly turn: TurnId;
@@ -128,6 +129,7 @@ type SlotInput =
       readonly done: Deferred.Deferred<TurnOutcome>;
     }
   | { readonly type: "cancel"; readonly turn: TurnId }
+  | { readonly type: "expire"; readonly turn: TurnId }
   | ({ readonly type: "wait" } & Waiter);
 
 interface Slot {
@@ -139,6 +141,7 @@ interface Slot {
   resume: SessionRef | null;
   stderrLines: number;
   readonly turns: Map<TurnId, Deferred.Deferred<TurnOutcome>[]>;
+  readonly expired: Set<TurnId>;
   readonly waiters: Set<Waiter>;
 }
 
@@ -178,7 +181,10 @@ export interface BotManagerOptions {
   readonly policy?: RestartPolicy;
   readonly adapters?: Readonly<Record<string, string>>;
   readonly stopDeadlineMs?: number;
+  readonly turnAcceptDeadlineMs?: number;
 }
+
+export const turnAcceptDeadlineMs = 30_000;
 
 const stoppedStates = new Set(["stopped", "given up"]);
 
@@ -278,7 +284,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const before = slot.state;
           const next = step(before, event, policy);
           slot.state = next.state;
-          if (next.state.state !== "running") slot.turn = undefined;
+          if (next.state.state !== "running") {
+            slot.turn = undefined;
+            slot.expired.clear();
+          }
           if (next.state.state !== before.state) {
             logger.info("bot state changed", {
               bot: slot.bot.name,
@@ -345,10 +354,20 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 run: reply.run,
               });
             case "turn.accepted":
+              if (slot.expired.delete(reply.turn)) {
+                if (reply.run !== slot.state.run) return;
+                return yield* link.send({
+                  type: "turn.cancel",
+                  bot,
+                  run: reply.run,
+                  turn: reply.turn,
+                });
+              }
               if (reply.run === slot.state.run) slot.turn = reply.turn;
               yield* settleTurn(slot, reply.turn, "accepted");
               return yield* settleWaiters(slot);
             case "turn.refused":
+              slot.expired.delete(reply.turn);
               return yield* settleTurn(slot, reply.turn, reply.reason);
             case "event": {
               const { envelope } = reply;
@@ -425,7 +444,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               if (slot.state.state !== "running") {
                 return yield* refuse(input, "not-running");
               }
-              if (slot.turn !== undefined) {
+              if (slot.turn !== undefined || slot.turns.size > 0) {
                 return yield* refuse(input, "busy");
               }
               slot.turns.set(input.turn, [input.done]);
@@ -437,6 +456,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 text: input.text,
               });
             }
+            case "expire":
+              if (!slot.turns.has(input.turn)) return;
+              slot.expired.add(input.turn);
+              return yield* settleTurn(slot, input.turn, "no-answer");
             case "cancel":
               if (slot.state.state !== "running" || slot.turn !== input.turn)
                 return;
@@ -485,6 +508,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             resume: null,
             stderrLines: 0,
             turns: new Map(),
+            expired: new Set(),
             waiters: new Set(),
           };
           slots.set(definition.name, slot);
@@ -558,6 +582,13 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             }),
           );
           if (!dispatched) return { turn, outcome: "refused" as const };
+          const answered = yield* Deferred.await(done).pipe(
+            Effect.timeoutOption(
+              options.turnAcceptDeadlineMs ?? turnAcceptDeadlineMs,
+            ),
+          );
+          if (Option.isSome(answered)) return { turn, outcome: answered.value };
+          yield* Queue.offer(slot.mailbox, { type: "expire", turn });
           return { turn, outcome: yield* Deferred.await(done) };
         });
 

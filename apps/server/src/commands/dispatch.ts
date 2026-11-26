@@ -51,6 +51,7 @@ const refusals = {
   "too-long": "prompt-too-long",
   ended: "prompt-refused",
   refused: "prompt-refused",
+  "no-answer": "bot-not-responding",
 } as const satisfies Record<Exclude<TurnOutcome, "accepted">, CommandFailure>;
 
 const fail = (code: CommandFailure): Outcome => ({ ok: false, code });

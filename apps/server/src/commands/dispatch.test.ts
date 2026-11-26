@@ -154,6 +154,7 @@ describe("bot.prompt", () => {
     { outcome: "too-long", code: "prompt-too-long" },
     { outcome: "ended", code: "prompt-refused" },
     { outcome: "refused", code: "prompt-refused" },
+    { outcome: "no-answer", code: "bot-not-responding" },
   ] as const)(
     "answers a $outcome turn with $code and fixed text, also on a repeat",
     ({ outcome, code }) =>
