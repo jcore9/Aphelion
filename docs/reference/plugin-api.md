@@ -1163,8 +1163,9 @@ function requestUrl(text: string): URL | undefined;
 
 ### `rpcErrors`
 
-The errors that the host replies with, by name.
+The errors that the host and the adapter runtime reply with, by name.
 [The plugin reference](plugins.md#errors) says when the host sends each one.
+`busy` and `turnEnded` also answer a bot adapter's `turn.start`, as [the bot adapter reference](bot-adapters.md#what-the-runtime-does) says.
 
 ```ts
 const rpcErrors: {
@@ -1196,6 +1197,10 @@ const rpcErrors: {
   readonly busy: {
     readonly code: -32004;
     readonly message: "Operation in progress";
+  };
+  readonly turnEnded: {
+    readonly code: -32005;
+    readonly message: "Turn already ended";
   };
 };
 ```

@@ -44,6 +44,7 @@ export interface RunAdapterOptions {
 }
 
 const defaultCancelGraceMs = 5000;
+const rememberedTurns = 1024;
 
 interface Ask {
   readonly call: ToolCallId | null;
@@ -106,7 +107,7 @@ export async function runAdapter(
   const decider = options.decider ?? denyAll;
   const cancelGraceMs = options.cancelGraceMs ?? defaultCancelGraceMs;
   const calls = new Map<ToolCallId, Call>();
-  const seen = new Set<TurnId>();
+  const started = new Set<TurnId>();
   let session: AdapterSession | undefined;
   let closing = false;
   let current: Turn | undefined;
@@ -357,7 +358,11 @@ export async function runAdapter(
   };
 
   const startTurn = (opened: AdapterSession, id: TurnId, text: string) => {
-    seen.add(id);
+    started.add(id);
+    const [oldest] = started;
+    if (started.size > rememberedTurns && oldest !== undefined) {
+      started.delete(oldest);
+    }
     const turn: Turn = {
       id,
       controller: new AbortController(),
@@ -436,8 +441,13 @@ export async function runAdapter(
           refuse(id, rpcErrors.invalidRequest);
         } else if (!parsed.success) {
           refuse(id, rpcErrors.invalidParams);
-        } else if (seen.has(parsed.data.turn)) {
+        } else if (
+          current?.id === parsed.data.turn &&
+          current.phase !== "ended"
+        ) {
           reply(id, {});
+        } else if (started.has(parsed.data.turn)) {
+          refuse(id, rpcErrors.turnEnded);
         } else if (current && current.phase !== "ended") {
           refuse(id, rpcErrors.busy);
         } else {
