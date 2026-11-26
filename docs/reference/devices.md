@@ -9,6 +9,10 @@ A device token is a long random password. One of the owner's devices, such as a 
 3. **Expire.** A token stops working 90 days after it was added, unless `device add --days` gave it another lifetime, from 1 to 365 days.
 4. **Revoke.** `aphelion device revoke <id>` stops a token at once. A WebSocket that uses it closes within 5 seconds. `aphelion device list` shows each device's id.
 
+## After a restore
+
+A restored database holds the devices that were enrolled when the backup was made. A backup can be old, and a device that you removed since then comes back with it. So [`aphelion restore finish`](cli.md#aphelion-restore-finish) revokes every active token in the restored database before the server starts. `device list` then shows each of those devices as `revoked`. Until you enroll a device again with `device add`, every request except `GET /health` gets the empty 401, and a new token works at once.
+
 ## What a token looks like
 
 ```
