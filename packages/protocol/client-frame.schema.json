@@ -104,7 +104,7 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "The last sequence number the client has seen."
+          "description": "The position of the last event the client has seen."
         }
       },
       "required": [
@@ -117,7 +117,7 @@
     "StreamId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]{1,64}$",
-      "description": "Names one event stream. A server that restarts starts a new stream."
+      "description": "Names one event stream. It is not the server ID: the server gives the stream a new ID when it restores a backup, so a cursor from before the restore gets `resync`."
     }
   }
 }

@@ -235,6 +235,39 @@ describe("one turn at a time", () => {
     await harness.shutdown();
   });
 
+  test("refuses a repeat of a finished turn's start with turnEnded and still runs a new turn", async () => {
+    const adapter = fakeAdapter([[done()], [done()]]);
+    const harness = startAdapter(adapter);
+    await harness.initialize();
+    await harness.startTurn("t1", "a");
+    await harness.untilEvent(({ event }) => event.type === "turn.end");
+    expect(await harness.startTurn("t1", "a")).toEqual({
+      error: rpcErrors.turnEnded,
+    });
+    expect(await harness.startTurn("t2", "b")).toEqual({ result: {} });
+    await harness.untilEvent(
+      ({ turn, event }) => turn === "t2" && event.type === "turn.end",
+    );
+    expect(adapter.inputs.map(({ text }) => text)).toEqual(["a", "b"]);
+    expect(checkStream(harness.events)).toEqual([]);
+    await harness.shutdown();
+  });
+
+  test("refuses a repeat of a finished turn with turnEnded, not busy, while another turn runs", async () => {
+    const adapter = fakeAdapter([[done()], [{ hang: true }]]);
+    const harness = startAdapter(adapter);
+    await harness.initialize();
+    await harness.startTurn("t1", "a");
+    await harness.untilEvent(({ event }) => event.type === "turn.end");
+    await harness.startTurn("t2", "b");
+    expect(await harness.startTurn("t1", "a")).toEqual({
+      error: rpcErrors.turnEnded,
+    });
+    expect(await harness.startTurn("t2", "b")).toEqual({ result: {} });
+    expect(adapter.inputs).toHaveLength(2);
+    await harness.shutdown();
+  });
+
   test("accepts a new turn as soon as the last one ended", async () => {
     const harness = startAdapter(fakeAdapter([[done()], [done()]]));
     await harness.initialize();

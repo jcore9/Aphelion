@@ -21,6 +21,7 @@ const options = {
   days: { type: "string" },
   approve: { type: "string" },
   "plugin-runner-fds": { type: "string" },
+  "bot-runner-fds": { type: "string" },
   "plugin-dev": { type: "string" },
 } as const;
 
@@ -33,7 +34,8 @@ export type Command =
       readonly kind: "headless";
       readonly configDir: string;
       readonly stateDir: string;
-      readonly pluginRunnerFds: PluginRunnerFds | undefined;
+      readonly pluginRunnerFds: RunnerFds | undefined;
+      readonly botRunnerFds: RunnerFds | undefined;
       readonly pluginDev: string | undefined;
     }
   | {
@@ -106,7 +108,7 @@ export type Command =
       readonly id: string;
     };
 
-export interface PluginRunnerFds {
+export interface RunnerFds {
   readonly replies: number;
   readonly requests: number;
 }
@@ -131,6 +133,7 @@ const grammar: Record<
       "config-dir",
       "state-dir",
       "plugin-runner-fds",
+      "bot-runner-fds",
       "plugin-dev",
     ],
   },
@@ -196,7 +199,7 @@ const days = z
   .transform(Number)
   .pipe(lifetimeDays);
 
-const pluginRunnerFds = z
+const runnerFds = z
   .string()
   .regex(/^\d{1,4},\d{1,4}$/, {
     error: "must be two file descriptor numbers, such as 3,4",
@@ -230,6 +233,16 @@ function check<T>(
     ok: false,
     message: `${label} ${parsed.error.issues[0]?.message ?? "is not valid"}`,
   };
+}
+
+function optional<T>(
+  label: string,
+  schema: z.ZodType<T, string>,
+  text: string | undefined,
+): { ok: true; value: T | undefined } | { ok: false; message: string } {
+  return text === undefined
+    ? { ok: true, value: undefined }
+    : check(label, schema, text);
 }
 
 function kindOf(
@@ -341,17 +354,29 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
     case "version":
       return { ok: true, command: { kind } };
     case "headless": {
-      const fdsText = values["plugin-runner-fds"];
-      const fds =
-        fdsText === undefined
-          ? ({ ok: true, value: undefined } as const)
-          : check("--plugin-runner-fds", pluginRunnerFds, fdsText);
+      const fds = optional(
+        "--plugin-runner-fds",
+        runnerFds,
+        values["plugin-runner-fds"],
+      );
       if (!fds.ok) return fds;
-      const devText = values["plugin-dev"];
-      const dev =
-        devText === undefined
-          ? ({ ok: true, value: undefined } as const)
-          : check("--plugin-dev", absolutePath, devText);
+      const botFds = optional(
+        "--bot-runner-fds",
+        runnerFds,
+        values["bot-runner-fds"],
+      );
+      if (!botFds.ok) return botFds;
+      const shared = [botFds.value?.replies, botFds.value?.requests].some(
+        (fd) =>
+          fd !== undefined &&
+          (fd === fds.value?.replies || fd === fds.value?.requests),
+      );
+      if (shared) {
+        return fail(
+          "--bot-runner-fds must name other descriptors than --plugin-runner-fds",
+        );
+      }
+      const dev = optional("--plugin-dev", absolutePath, values["plugin-dev"]);
       if (!dev.ok) return dev;
       return {
         ok: true,
@@ -360,6 +385,7 @@ export function parseCommandLine(argv: readonly string[]): ParseResult {
           configDir,
           stateDir,
           pluginRunnerFds: fds.value,
+          botRunnerFds: botFds.value,
           pluginDev: dev.value,
         },
       };

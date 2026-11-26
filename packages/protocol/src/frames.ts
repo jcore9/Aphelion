@@ -17,7 +17,7 @@ export type CommandId = z.infer<typeof commandId>;
 export const streamId = token.brand<"StreamId">().meta({
   id: "StreamId",
   description:
-    "Names one event stream. A server that restarts starts a new stream.",
+    "Names one event stream. It is not the server ID: the server gives the stream a new ID when it restores a backup, so a cursor from before the restore gets `resync`.",
 });
 export type StreamId = z.infer<typeof streamId>;
 
@@ -26,7 +26,7 @@ const seq = z.int().nonnegative();
 export const cursor = z
   .strictObject({
     stream: streamId.describe("The stream that the position is in."),
-    seq: seq.describe("The last sequence number the client has seen."),
+    seq: seq.describe("The position of the last event the client has seen."),
   })
   .meta({
     id: "Cursor",
@@ -116,7 +116,7 @@ const resultFrame = byName(commands, (name, spec) =>
 
 const eventFrames = byName(events, (name, payload) =>
   envelope("event", "Tells every client that something happened.", {
-    seq: seq.positive().describe("The event's number in the stream."),
+    seq: seq.positive().describe("The event's position in the stream."),
     name: z.literal(name).describe("The kind of event."),
     payload: payload.describe("What happened."),
   }),

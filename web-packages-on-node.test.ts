@@ -1,7 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+
+const NODE_START_BUDGET_MS = 60_000;
+vi.setConfig({ testTimeout: NODE_START_BUDGET_MS });
 
 function realNode(): string {
   const bun = realpathSync(process.execPath);
@@ -21,7 +24,7 @@ function runOnNodeIn(cwd: string, script: string, ...args: string[]): unknown {
   const output = execFileSync(
     realNode(),
     ["--input-type=module", "--no-warnings", "-e", script, ...args],
-    { cwd, encoding: "utf8" },
+    { cwd, encoding: "utf8", timeout: NODE_START_BUDGET_MS },
   );
   return JSON.parse(output);
 }

@@ -37,6 +37,7 @@
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
 | `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
+| `--bot-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the [bot runner](bot-runner.md)'s pipes, from 3 up and not the plugin runner's. The server reads the bot runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
 | `--plugin-dev FOLDER` | `--headless` | none | An absolute path. Turns on [dev mode](plugins.md#dev-mode): `plugin dev` can reload the approved plugin in `FOLDER` through the server's [control socket](plugins.md#control-socket). Needs `--plugin-runner-fds` to have any effect. |
 
 The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
@@ -59,6 +60,7 @@ The server starts in this order:
 3. It opens `aphelion.db` in the state folder and applies any new [migrations](store.md#migrations).
 4. It starts the [HTTP and WebSocket server](server.md) on the address and port from `server.yaml`, and logs `server started` with the version, address and port.
 5. With `--plugin-runner-fds`, it starts the [plugin host](plugins.md) on those pipes and asks the runner to start every plugin that `aphelion plugin install` approved. It logs an `error` line for a plugin that fails a check, and goes on with the others. A plugin fails when the server can't read its manifest, or when its files, version or permissions no longer match the approved version. Then the server logs `plugin host started` with the number of approved plugins, and opens the [control socket](plugins.md#control-socket). Without the option, it logs `plugins are off: no plugin runner pipe was given`.
+6. With `--bot-runner-fds`, it starts the [bot manager](bot-runner.md) on those pipes and asks the bot runner to start every bot in `bots.yaml`. It logs an `error` line for a bot whose provider has no adapter in the image, and goes on with the others. Without the option, it logs `bots are off: no bot runner pipe was given`.
 
 On `SIGTERM` or `SIGINT` it logs `server stopping`, closes the listener and the database, and exits with code 130.
 
@@ -68,7 +70,7 @@ The server logs JSON lines on standard output, through the redacting [logger](lo
 {"time":"2026-11-22T22:30:55.188Z","level":"info","msg":"server started","version":"0.1.0-alpha.1","address":"0.0.0.0","port":7400}
 ```
 
-Headless mode never loads Electron or any GUI library. In the container, the [launcher](container.md#how-the-processes-start) creates the pipes and passes `--plugin-runner-fds 3,4`, and `--plugin-dev` when `APHELION_PLUGIN_DEV_FOLDER` is set and not empty.
+Headless mode never loads Electron or any GUI library. In the container, the [launcher](container.md#how-the-processes-start) creates the pipes and passes `--plugin-runner-fds 3,4 --bot-runner-fds 5,6`, and `--plugin-dev` when `APHELION_PLUGIN_DEV_FOLDER` is set and not empty.
 
 ## `aphelion config check`
 
