@@ -79,7 +79,7 @@ Every event travels as `{ seq, turn, event }`.
 | Permission request id | The adapter | The same form as a tool call id |
 | Session ref | The tool | 1 to 256 printable ASCII characters, with no space and no `/`. It is opaque. Tools use UUID-like ids. |
 
-Tool call ids are unique for the whole process, not only for one turn. A tool call id, a request id and a tool name come from the tool or from the bot runner, never from what a user typed, and a set of allowed characters can't prove where a value came from. So the SDK limits the length and the characters, and relies on the adapter to pass only the tool's own ids and names.
+Tool call ids are unique for the whole process, not only for one turn. A tool call id, a request id and a tool name come from the tool or from the bot runner, never from what a user typed, and a set of allowed characters can't prove where a value came from. So the SDK limits the length and the characters, and relies on the adapter to pass only the tool's own ids and names. The same holds for a session `ref`: the SDK refuses spaces and `/`, but a value such as `notes.txt` still passes, so an adapter checks a saved `ref` against its tool's own id format before it resumes with it.
 
 The SDK types each id as a **branded** string. A branded string is a string that TypeScript won't mix up with another kind of string, so a turn id can't pass as a call id. Make one with the matching schema, such as `toolCallId.parse(vendorId)`.
 
@@ -135,7 +135,7 @@ The bot runner refuses a prompt longer than 256 KiB, or one whose encoded line i
 
 If `open` fails, the runtime answers `initialize` with the error `Operation failed` and stops. On `shutdown` or when the input closes, the runtime first marks itself as closing, so new requests are denied at once with reason `shutdown` and no event. It then aborts the running turn, sends the `permission.decision` for each open request, sends one `turn.end` with reason `cancelled` for a turn that is open, and calls `close`. Calls that are still open get no `tool.end`, which rule 4 allows.
 
-When the connection is lost and the runtime can't flush, the bot runner repairs the stream instead. It appends `error` with code `cli-exited`, a `tool.end` with outcome `cancelled` for each open call, and `turn.end` with reason `error`.
+When the connection is lost and the runtime can't flush, the bot runner repairs the stream instead. It appends `error` with code `cli-exited`, a `permission.decision` with `deny`, `by: "default"` and reason `shutdown` for each request that has no decision yet, a `tool.end` with outcome `cancelled` for each open call, and `turn.end` with reason `error`. The repaired stream then passes `checkStream`.
 
 ## Declare an adapter in a manifest
 
