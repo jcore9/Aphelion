@@ -11,6 +11,7 @@ The image is built on Ubuntu 26.04 LTS. The Ubuntu and Bun base images are pinne
 | `/usr/local/bin/aphelion` | The server and its [command](cli.md), compiled with `bun build --compile` |
 | `/usr/local/bin/aphelion-secrets` | The [secrets broker](secrets.md#local-secrets-broker), compiled the same way |
 | `/usr/local/lib/aphelion/plugin-runner.js` | The [plugin runner](plugins.md#running-the-runner), bundled into one file that `bun` runs |
+| `/usr/local/lib/aphelion/adapters/claude/` | The [Claude adapter](claude-adapter.md), bundled into `adapter.js` with its manifest. It has no `node_modules` and no copy of Claude Code. |
 | `/usr/local/bin/bun` | Bun 1.4.5, which runs the plugin runner and every plugin |
 | `/usr/local/lib/aphelion/launch` | The launcher script that starts the processes |
 | `/usr/bin/tini` | The init process, process 1 in the container |

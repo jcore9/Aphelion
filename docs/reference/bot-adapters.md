@@ -8,7 +8,7 @@ This page is the contract. It covers what an adapter yields, the rules a stream 
 
 - The SDK has the contract (`BotAdapter`), the runtime that wraps an adapter (`runAdapter` and `mainAdapter`), and test tools (`fakeAdapter`, `runTurn` and `checkStream`).
 - The **bot runner** doesn't exist yet. It will start one process per bot as the `aphelion-bot` user, and talk to the adapter inside it ([#22](https://github.com/jcore9/Aphelion/issues/22)). Until then, `runTurn` plays the bot runner in tests.
-- No real adapter exists yet. The Claude adapter is [#20](https://github.com/jcore9/Aphelion/issues/20).
+- [The Claude adapter](claude-adapter.md) is the first real adapter. Its fixed permission rule is [#214](https://github.com/jcore9/Aphelion/issues/214).
 
 ## Where an adapter runs
 
@@ -170,7 +170,7 @@ A test for an adapter runs the events it produces through `checkStream` and expe
 
 ## What comes later
 
-- [#20](https://github.com/jcore9/Aphelion/issues/20) builds the Claude adapter and the fixed permission rule.
+- [#214](https://github.com/jcore9/Aphelion/issues/214) adds the fixed permission rule to the Claude adapter.
 - [#22](https://github.com/jcore9/Aphelion/issues/22) builds the bot runner, which saves the latest `session` ref and resumes from it. When a bot process dies, it repairs the stream as [the wire](#the-wire) says.
 - [#23](https://github.com/jcore9/Aphelion/issues/23) adds the frames that carry these events to clients, with bot and session ids and a saved format version. `packages/protocol` doesn't change before then.
 - [#25](https://github.com/jcore9/Aphelion/issues/25) adds recorded streams that replay through an adapter.
