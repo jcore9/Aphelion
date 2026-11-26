@@ -13,7 +13,14 @@ import { pluginEnable } from "./plugin-enable";
 import { pluginDev } from "./plugin-dev";
 import { restoreFinish } from "./restore";
 import { pluginRestart, pluginRollback, pluginUpdate } from "./plugin-update";
-import { defaultToolListFile, toolInstall, toolList, toolRemove } from "./tool";
+import {
+  defaultToolListFile,
+  toolInstall,
+  toolCheck,
+  toolList,
+  toolRemove,
+  toolUpdate,
+} from "./tool";
 
 export { CliIo, processIo } from "./io";
 export { CliFailure } from "./failure";
@@ -53,6 +60,10 @@ const run = (command: Command) =>
         return yield* toolInstall(command, toolListFile());
       case "tool remove":
         return yield* toolRemove(command);
+      case "tool update":
+        return yield* toolUpdate(command, toolListFile());
+      case "tool check":
+        return yield* toolCheck(toolListFile(), fetch);
       case "restore finish":
         return yield* restoreFinish(command);
       case "device list":

@@ -401,14 +401,19 @@ mkdir -p "$fake_tools"
 printf '#!/bin/sh\necho fake tool ok\n' >"$fake_tools/claude-fake"
 fake_sha=$(sha256sum "$fake_tools/claude-fake" | cut -d' ' -f1)
 fake_size=$(stat -c %s "$fake_tools/claude-fake")
+printf '#!/bin/sh\necho fake tool ok, second version\n' >"$fake_tools/claude-fake-2"
+fake_sha_2=$(sha256sum "$fake_tools/claude-fake-2" | cut -d' ' -f1)
+fake_size_2=$(stat -c %s "$fake_tools/claude-fake-2")
 tool_list() {
-  local sha=$1 size=$2 build
-  build="{\"url\":\"http://127.0.0.1:8098/claude-fake\",\"sha256\":\"$sha\",\"size\":$size,\"format\":\"binary\",\"entry\":\"claude\"}"
-  printf '{"version":1,"tools":[{"name":"claude","version":"9.9.9","builds":{"x86_64":%s,"aarch64":%s},"signIn":["claude","auth","login"],"status":["claude","auth","status"],"checksumSource":"recorded"}]}\n' "$build" "$build"
+  local sha=$1 size=$2 build version=${3:-9.9.9} file=${4:-claude-fake}
+  build="{\"url\":\"http://127.0.0.1:8098/$file\",\"sha256\":\"$sha\",\"size\":$size,\"format\":\"binary\",\"entry\":\"claude\"}"
+  printf '{"version":1,"tools":[{"name":"claude","version":"%s","builds":{"x86_64":%s,"aarch64":%s},"signIn":["claude","auth","login"],"status":["claude","auth","status"],"checksumSource":"recorded"}]}\n' "$version" "$build" "$build"
 }
 tool_list "$fake_sha" "$fake_size" >"$fake_tools/list-good.json"
 tool_list "$(printf '0%.0s' {1..64})" "$fake_size" >"$fake_tools/list-wrong-checksum.json"
 tool_list "$fake_sha" "$((fake_size - 1))" >"$fake_tools/list-too-large.json"
+tool_list "$fake_sha_2" "$fake_size_2" 9.9.10 claude-fake-2 >"$fake_tools/list-next.json"
+tool_list "$(printf '0%.0s' {1..64})" "$fake_size_2" 9.9.10 claude-fake-2 >"$fake_tools/list-next-wrong-checksum.json"
 cp deploy/test/fake-tools.mjs "$fake_tools/"
 chmod -R a+rX,go-w "$fake_tools"
 tar -C "$scratch" -cf - fake-tools | docker exec -i --user harness "$container" tar -xf - -C /tmp
@@ -424,9 +429,9 @@ as_bot() {
 }
 
 shipped=$(docker exec --user harness "$container" aphelion tool list) || fail "tool list failed on the shipped list"
-[[ $(sed -n 1p <<<"$shipped") == $'NAME\tVERSION\tSTATE\tSTATUS-COMMAND' ]] || fail "tool list printed no header: $shipped"
-grep -qP '^claude\t\S+\tnot installed\tclaude auth status --text$' <<<"$shipped" || fail "tool list doesn't show Claude Code as not installed: $shipped"
-grep -qP '^grok\t\S+\tnot installed\t-$' <<<"$shipped" || fail "tool list doesn't show Grok Build with no status command: $shipped"
+[[ $(sed -n 1p <<<"$shipped") == $'NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND' ]] || fail "tool list printed no header: $shipped"
+grep -qP '^claude\t\S+\t-\tnot installed\tclaude auth status --text$' <<<"$shipped" || fail "tool list doesn't show Claude Code as not installed: $shipped"
+grep -qP '^grok\t\S+\t-\tnot installed\t-$' <<<"$shipped" || fail "tool list doesn't show Grok Build with no status command: $shipped"
 [[ $(grep -c . <<<"$shipped") == 5 ]] || fail "tool list doesn't list the four tools: $shipped"
 pass "tool list shows the four pinned tools as not installed"
 
@@ -472,6 +477,29 @@ for change in 'echo x >>/opt/aphelion/tools/claude/current/claude' \
 done
 [[ $(as_bot claude) == "fake tool ok" ]] || fail "the tool stopped working after aphelion-bot's attempts"
 pass "aphelion-bot can run the installed tool and can't write, replace, remove or re-mode anything in the tools volume"
+
+listed=$(tool_aphelion list-next.json list 2>&1) || fail "tool list failed against the next list: $listed"
+grep -qP '^claude\t9\.9\.10\t9\.9\.9\tupdate available\tclaude auth status$' <<<"$listed" ||
+  fail "tool list doesn't say update available once the list names a newer version: $listed"
+status=0
+refused=$(tool_aphelion list-next-wrong-checksum.json update claude 2>&1) || status=$?
+[[ $status == 1 && $refused == *"the list"* ]] || fail "tool update didn't refuse a wrong checksum (exit $status): $refused"
+[[ $(as_bot claude) == "fake tool ok" ]] || fail "a refused tool update changed the installed tool"
+updated=$(tool_aphelion list-next.json update claude 2>&1) || fail "tool update failed: $updated"
+[[ $updated == "updated claude 9.9.9 -> 9.9.10" ]] || fail "tool update printed something else: $updated"
+[[ $(as_bot claude) == "fake tool ok, second version" ]] || fail "aphelion-bot doesn't run the updated tool"
+[[ $(docker exec --user harness "$container" ls /opt/aphelion/tools/claude | tr '\n' ' ') == "9.9.10 current " ]] ||
+  fail "tool update left the old version folder behind"
+inode=$(docker exec --user harness "$container" stat -c %i /opt/aphelion/tools/claude/9.9.10/claude)
+for words in "update claude" "update"; do
+  again=$(tool_aphelion list-next.json $words 2>&1) || fail "a second tool $words failed: $again"
+  [[ $again == "claude is up to date (9.9.10)" ]] || fail "a second tool $words printed something else: $again"
+done
+[[ $(docker exec --user harness "$container" stat -c %i /opt/aphelion/tools/claude/9.9.10/claude) == "$inode" ]] ||
+  fail "a second tool update replaced the files"
+grep -qP '^claude\t9\.9\.10\t9\.9\.10\tinstalled\t' < <(tool_aphelion list-next.json list) ||
+  fail "tool list doesn't show the updated tool as installed"
+pass "tool list says update available, tool update installs the new version and removes the old one, and a second update changes nothing"
 
 removed=$(tool_aphelion list-good.json remove claude 2>&1) || fail "tool remove failed: $removed"
 [[ $removed == "Removed claude. Its sign-in in the bots volume is still there." ]] || fail "tool remove printed something else: $removed"

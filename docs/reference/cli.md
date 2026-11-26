@@ -16,6 +16,8 @@
 | `aphelion plugin dev FOLDER` | Reloads the approved plugin in `FOLDER` through the running server, and again after each change to the folder. Works only in [dev mode](plugins.md#dev-mode). |
 | `aphelion tool list` | Lists the AI tools on Aphelion's list and whether each is installed |
 | `aphelion tool install NAME` | Downloads an AI tool from the list, checks it and installs it |
+| `aphelion tool update [NAME]` | Moves an installed AI tool, or every installed AI tool, to the version the list pins |
+| `aphelion tool check` | Asks each AI tool's vendor for its newest version and compares it with the list's |
 | `aphelion tool remove NAME` | Removes an installed AI tool |
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
@@ -278,12 +280,22 @@ Stops the token of the device with this id. A WebSocket that uses it closes with
 Prints a header line and one tab-separated line per tool on the list. The list is the copy of [`deploy/ai-tools.json`](https://github.com/jcore9/Aphelion/blob/main/deploy/ai-tools.json) that the image ships.
 
 ```
-NAME	VERSION	STATE	STATUS-COMMAND
-claude	2.1.330	installed	claude auth status --text
-grok	1.0.92	not installed	-
+NAME	VERSION	INSTALLED	STATE	STATUS-COMMAND
+claude	2.1.332	2.1.330	update available	claude auth status --text
+codex	0.172.0	0.172.0	installed	codex login status
+grok	1.0.92	-	not installed	-
 ```
 
-`STATE` is `installed`, `not installed` or `unavailable`. A tool is `installed` when its pinned version is the one installed. A different installed version shows as `not installed`. `unavailable` means the list has no build for this processor. `STATUS-COMMAND` is the command that exits with 0 when the tool is signed in, or `-` when Aphelion has none for the tool.
+`VERSION` is the version the list pins. `INSTALLED` is the version `<tools folder>/<name>/current` points at, or `-` when the tool isn't installed. `STATE` is one of:
+
+| `STATE` | Meaning |
+| --- | --- |
+| `installed` | The installed version is the pinned version. |
+| `update available` | A version is installed, and it isn't the pinned one. [`tool update`](#aphelion-tool-update-name) installs the pinned one. |
+| `not installed` | Nothing usable is installed. This includes a `current` link that is missing, points outside the tool's folder or points at a folder that is gone. |
+| `unavailable` | The list has no build for this processor. |
+
+`STATUS-COMMAND` is the command that exits with 0 when the tool is signed in, or `-` when Aphelion has none for the tool.
 
 ## `aphelion tool install NAME`
 
@@ -297,6 +309,47 @@ Installs the tool `NAME` from the list: `claude`, `codex`, `grok` or `opencode`.
 Installing the version that is installed changes nothing. A run that stopped half way leaves only the staging folder or an unused link, and the next run clears them. The command holds the same lock as `plugin install`, and exits with code 1 and says `Another plugin or AI tool change is running. Try again when it finishes.` when another install, update, rollback, tool install or tool remove holds it. It exits with code 1 for every refusal, and prints the reason on standard error.
 
 The image links `/usr/local/bin/<name>` to the program in `current`, so a bot runs the tool by its name.
+
+## `aphelion tool update [NAME]`
+
+Moves an installed tool to the version the list pins. With `NAME` (`claude`, `codex`, `grok` or `opencode`), it updates that tool. Without a name, it goes through every tool on the list in the list's order. It refuses a name that isn't on the list.
+
+For a tool whose state is `update available`, the command installs the pinned version with every check of [`tool install`](#aphelion-tool-install-name): the size cap, the SHA-256 check before anything is unpacked, the archive listing, the atomic switch, and the lock. It then deletes the old version's folder. A tool that isn't installed isn't installed by this command.
+
+It prints one line per tool on standard output:
+
+| Line | Meaning |
+| --- | --- |
+| `updated NAME FROM -> TO` | The pinned version `TO` is installed in place of `FROM`. |
+| `NAME is up to date (VERSION)` | `VERSION` is the pinned version. Nothing changed. |
+| `NAME isn't installed` | There is nothing to update. |
+| `NAME has no build for this processor` | The list has no download for this processor. |
+
+Running it again changes nothing. It exits with 1 and prints the reason on standard error when a check refuses the download, and then the installed version stays. With no name, a refused tool doesn't stop the others. Each reason starts with the tool's name, and the exit code is 1 when any tool was refused. The command takes the same lock as `tool install`.
+
+## `aphelion tool check`
+
+Asks each tool's vendor for its newest version, and compares it with the version the list pins. It downloads no program: each lookup reads a small version file or release list and gives up after 10 seconds. The lookups run at the same time. Nothing is installed or changed.
+
+```
+NAME	PINNED	LATEST	STATE
+claude	2.1.330	2.1.332	newer version available
+codex	0.172.0	0.172.0	current
+grok	1.0.92	-	unknown
+opencode	2.4.1	2.4.1	current
+A newer version is available. Moving to it needs a new entry in the AI tool list, which you approve. See "Update an AI tool" in the install guide.
+```
+
+`STATE` is `current` when the vendor's newest version is the pinned one or older, `newer version available` when it is higher, and `unknown` when the vendor didn't answer or answered something that isn't a version. `LATEST` is `-` for `unknown`, and standard error says why. The last line appears only when some tool has a newer version.
+
+| Tool | Where the newest version comes from |
+| --- | --- |
+| `claude` | The `latest` file of Claude Code's release channel, `https://downloads.claude.ai/claude-code-releases/latest`. |
+| `grok` | The `stable` channel file at `https://x.ai/cli/stable`, and at xAI's Google Cloud address when the first doesn't answer. |
+| `codex` | GitHub's `releases/latest` for `openai/codex`, which is the newest release that isn't a prerelease. |
+| `opencode` | The highest plain version among the ten newest releases of `anomalyco/opencode`. GitHub's own `latest` mark points at an old release. |
+
+The command exits with 0 when it ran, even when newer versions exist, and with 1 when every vendor lookup failed or the list can't be read. A newer version reaches your server only through a new entry in the list, which the owner approves ([Update an AI tool](../guides/install.md#update-an-ai-tool)).
 
 ## `aphelion tool remove NAME`
 

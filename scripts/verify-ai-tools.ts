@@ -26,6 +26,10 @@ import {
   type GpgRun,
   type Parsed,
 } from "../apps/server/src/tools/vendor-checksums.ts";
+import {
+  claudeBase,
+  grokHosts,
+} from "../apps/server/src/tools/vendor-latest.ts";
 
 const usage = `usage:
   bun scripts/verify-ai-tools.ts [--download] [--skip-signature] [--list FILE]
@@ -36,13 +40,8 @@ const usage = `usage:
   bun scripts/verify-ai-tools.ts --print NAME VERSION [--skip-signature]
       Print the "builds" entry for a tool version, taken from the vendor.`;
 
-const claudeBase = "https://downloads.claude.ai/claude-code-releases";
 const claudeKeyUrl = "https://downloads.claude.ai/keys/claude-code.asc";
 const claudeKeyFingerprint = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE";
-const grokHosts = [
-  "https://x.ai/cli",
-  "https://storage.googleapis.com/grok-build-public-artifacts/cli",
-] as const;
 
 function checksumSourceOf(name: ToolName): Tool["checksumSource"] {
   switch (name) {

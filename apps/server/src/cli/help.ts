@@ -60,13 +60,24 @@ Usage:
 
   aphelion tool list [--tools-dir DIR]
       List the AI tools on Aphelion's list. A tab-separated table of the name,
-      the pinned version, whether it is installed, unavailable on this
-      processor or not installed, and the command that checks its sign-in.
+      the pinned version, the installed version, the state (installed, update
+      available, not installed or unavailable on this processor), and the
+      command that checks its sign-in.
 
   aphelion tool install NAME [--state-dir DIR] [--tools-dir DIR]
       Download the pinned build of an AI tool from the list, check it against
       the list's SHA-256 and size, and install it. Running it again for the
       installed version changes nothing.
+
+  aphelion tool update [NAME] [--state-dir DIR] [--tools-dir DIR]
+      Install the version the list pins for NAME, or for every installed tool
+      when no name is given, with the same checks as tool install. Prints one
+      line per tool. Running it again changes nothing.
+
+  aphelion tool check
+      Ask each tool's vendor for its newest version, and print it next to the
+      pinned one. Downloads no program. A newer version still needs a new
+      entry in the list.
 
   aphelion tool remove NAME [--state-dir DIR] [--tools-dir DIR]
       Remove an installed AI tool. Its sign-in stays in the bots volume.

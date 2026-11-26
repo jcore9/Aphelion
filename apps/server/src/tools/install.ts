@@ -14,14 +14,31 @@ import { join } from "node:path";
 import { Data, Effect } from "effect";
 import { extractArchive, listArchive } from "../adapters/system-tar";
 import { parseArchiveListing } from "./archive";
-import { buildFor, type Build, type Processor, type Tool } from "./list";
+import {
+  buildFor,
+  toolVersion,
+  type Build,
+  type Processor,
+  type Tool,
+} from "./list";
 
 export class ToolRefused extends Data.TaggedError("ToolRefused")<{
   readonly reason: string;
 }> {}
 
-export type ToolState = "installed" | "not installed" | "unavailable";
+export type ToolState =
+  "installed" | "update available" | "not installed" | "unavailable";
 export type InstallOutcome = "installed" | "unchanged";
+
+export interface ToolStatus {
+  readonly state: ToolState;
+  readonly installed?: string;
+}
+
+export type UpdateOutcome =
+  | { readonly kind: "updated"; readonly from: string; readonly to: string }
+  | { readonly kind: "current"; readonly version: string }
+  | { readonly kind: "not installed" };
 
 export const stagingFolder = ".staging";
 const downloadTimeoutMs = 30 * 60 * 1000;
@@ -36,35 +53,41 @@ const isRegularFile = (path: string) =>
     () => false,
   );
 
-async function currentVersion(toolFolder: string) {
-  try {
-    return await readlink(join(toolFolder, "current"));
-  } catch {
+async function installedVersion(toolFolder: string) {
+  const target = await readlink(join(toolFolder, "current")).catch(
+    () => undefined,
+  );
+  if (target === undefined || !toolVersion.safeParse(target).success) {
     return undefined;
   }
+  const folder = await lstat(join(toolFolder, target)).catch(() => undefined);
+  return folder?.isDirectory() === true ? target : undefined;
 }
 
-async function stateOf(
+async function statusOf(
   toolsDir: string,
   tool: Tool,
   build: Build,
-): Promise<ToolState> {
+): Promise<ToolStatus> {
   const folder = join(toolsDir, tool.name);
-  const installed =
-    (await currentVersion(folder)) === tool.version &&
-    (await isRegularFile(join(folder, tool.version, build.entry)));
-  return installed ? "installed" : "not installed";
+  const installed = await installedVersion(folder);
+  if (installed === undefined) return { state: "not installed" };
+  if (installed !== tool.version)
+    return { state: "update available", installed };
+  return (await isRegularFile(join(folder, installed, build.entry)))
+    ? { state: "installed", installed }
+    : { state: "not installed" };
 }
 
-export async function toolState(
+export async function toolStatus(
   toolsDir: string,
   tool: Tool,
   processor: Processor,
-): Promise<ToolState> {
+): Promise<ToolStatus> {
   const found = buildFor(tool, processor);
   return found.kind === "unavailable"
-    ? "unavailable"
-    : stateOf(toolsDir, tool, found.build);
+    ? { state: "unavailable" }
+    : statusOf(toolsDir, tool, found.build);
 }
 
 async function download(build: Build, file: string) {
@@ -157,7 +180,7 @@ async function unpack(build: Build, file: string, folder: string) {
 }
 
 async function install(toolsDir: string, tool: Tool, build: Build) {
-  if ((await stateOf(toolsDir, tool, build)) === "installed") {
+  if ((await statusOf(toolsDir, tool, build)).state === "installed") {
     return "unchanged" as const;
   }
   const staging = join(toolsDir, stagingFolder);
@@ -195,13 +218,37 @@ async function install(toolsDir: string, tool: Tool, build: Build) {
   }
 }
 
+async function update(
+  toolsDir: string,
+  tool: Tool,
+  build: Build,
+): Promise<UpdateOutcome> {
+  const status = await statusOf(toolsDir, tool, build);
+  if (status.installed === undefined || status.state === "not installed") {
+    return { kind: "not installed" };
+  }
+  if (status.state === "installed") {
+    return { kind: "current", version: status.installed };
+  }
+  await install(toolsDir, tool, build);
+  return { kind: "updated", from: status.installed, to: tool.version };
+}
+
+const failedAs = (verb: string, tool: Tool) => (error: unknown) =>
+  error instanceof ToolRefused
+    ? error
+    : new Error(`can't ${verb} ${tool.name}: ${errorText(error)}`);
+
 export const installTool = (toolsDir: string, tool: Tool, build: Build) =>
   Effect.tryPromise({
     try: () => install(toolsDir, tool, build),
-    catch: (error) =>
-      error instanceof ToolRefused
-        ? error
-        : new Error(`can't install ${tool.name}: ${errorText(error)}`),
+    catch: failedAs("install", tool),
+  });
+
+export const updateTool = (toolsDir: string, tool: Tool, build: Build) =>
+  Effect.tryPromise({
+    try: () => update(toolsDir, tool, build),
+    catch: failedAs("update", tool),
   });
 
 export const removeTool = (toolsDir: string, name: string) =>
