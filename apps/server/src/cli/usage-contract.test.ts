@@ -52,6 +52,10 @@ const usageErrors: readonly (readonly string[])[] = [
   ["plugin", "enable", canary, "--approve", canary, "--approve", canary],
   ["restore", "finish", canary],
   ["tool", "install", canary],
+  ["tool", "update", canary],
+  ["tool", "update", "claude", canary],
+  ["tool", "update", "--tools-dir", canary],
+  ["tool", "check", canary],
   ["tool", "list", "--tools-dir", canary],
   ["--headless", "--plugin-runner-fds", canary],
   ["--headless", "--plugin-dev", canary],
@@ -83,6 +87,7 @@ describe("an empty value", () => {
     ["plugin", "install", "/x", "--approve", ""],
     ["plugin", "install", "/x", "--plugins-dir", ""],
     ["tool", "list", "--tools-dir", ""],
+    ["tool", "update", "--tools-dir", ""],
     ["--headless", "--plugin-dev", ""],
   ])("%j is refused", async (...argv) => {
     const { code, out, err } = await run(argv);

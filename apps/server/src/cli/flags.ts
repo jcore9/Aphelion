@@ -36,8 +36,12 @@ export const operands = {
   "tool list": undefined,
   "tool install": "tool name",
   "tool remove": "tool name",
+  "tool update": "tool name",
+  "tool check": undefined,
   "restore finish": undefined,
 } as const;
+
+export const optionalOperands: ReadonlySet<string> = new Set(["tool update"]);
 
 export const ownText = "usage:";
 

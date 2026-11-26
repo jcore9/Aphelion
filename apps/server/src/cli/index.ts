@@ -30,11 +30,15 @@ import { restoreFinish, restoreFinishCommand } from "./restore";
 import {
   defaultToolListFile,
   toolInstall,
+  toolCheck,
+  toolCheckCommand,
   toolInstallCommand,
   toolList,
   toolListCommand,
   toolRemove,
   toolRemoveCommand,
+  toolUpdate,
+  toolUpdateCommand,
 } from "./tool";
 
 export { CliIo, processIo } from "./io";
@@ -55,6 +59,8 @@ export interface Handlers {
   readonly toolList: Parameters<typeof toolListCommand>[0];
   readonly toolInstall: Parameters<typeof toolInstallCommand>[0];
   readonly toolRemove: Parameters<typeof toolRemoveCommand>[0];
+  readonly toolUpdate: Parameters<typeof toolUpdateCommand>[0];
+  readonly toolCheck: Parameters<typeof toolCheckCommand>[0];
   readonly restoreFinish: Parameters<typeof restoreFinishCommand>[0];
 }
 
@@ -77,6 +83,8 @@ const handlers: Handlers = {
   toolList: (options) => toolList(options, toolListFile()),
   toolInstall: (options) => toolInstall(options, toolListFile()),
   toolRemove,
+  toolUpdate: (options) => toolUpdate(options, toolListFile()),
+  toolCheck: () => toolCheck(toolListFile(), fetch),
   restoreFinish,
 };
 
@@ -139,9 +147,11 @@ export const makeCli = (handle: Handlers) => {
           pluginDevCommand(handle.pluginDev),
         ],
       ),
-      group("tool", "List, install and remove AI tools.", [
+      group("tool", "List, install, update, check and remove AI tools.", [
         toolListCommand(handle.toolList),
         toolInstallCommand(handle.toolInstall),
+        toolUpdateCommand(handle.toolUpdate),
+        toolCheckCommand(handle.toolCheck),
         toolRemoveCommand(handle.toolRemove),
       ]),
       group("restore", "Finish a restore from a backup.", [

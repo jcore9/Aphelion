@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { CliOutput, type CliError } from "effect/cli";
-import { operands, options, ownText } from "./flags";
+import { operands, optionalOperands, options, ownText } from "./flags";
 import { CliIo } from "./io";
 
 const optionFlags: ReadonlySet<string> = new Set(
@@ -39,7 +39,10 @@ export const usageMessage = (
     case "UnexpectedArgument": {
       const operand = operands[command as keyof typeof operands];
       const got = (operand === undefined ? 0 : 1) + error.arguments.length;
-      const takes = operand === undefined ? "no arguments" : `one ${operand}`;
+      const takes =
+        operand === undefined
+          ? "no arguments"
+          : `${optionalOperands.has(command) ? "no more than " : ""}one ${operand}`;
       return `"${command}" takes ${takes}, but got ${String(got)}`;
     }
     case "MissingArgument":
