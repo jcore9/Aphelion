@@ -549,7 +549,7 @@ A tool's version changes only when the list changes. You see whether a newer ver
    opencode  2.4.1     2.4.1     current
    ```
 
-   `PINNED` is the version in the list. `STATE` is `current`, `newer version available`, or `unknown` when the vendor didn't answer within 10 seconds or its answer wasn't a version number. The reason for an `unknown` goes to standard error. The command exits with 0 when it ran, even when a newer version exists, and with 1 only when no vendor answered. It needs no tool to be installed.
+   `PINNED` is the version in the list. `STATE` is `current`, `newer version available`, or `unknown` when the vendor didn't answer within 10 seconds or its answer wasn't a version number. The reason for an `unknown` goes to standard error. The command exits with 0 when it ran, even when a newer version exists, and with 1 when the list can't be read or no vendor gave a version number. It needs no tool to be installed.
 
    Claude Code and Grok Build publish a small file with their newest version (Claude Code's `latest` file, Grok Build's `stable` file). Codex and OpenCode publish releases on GitHub, and Aphelion reads the newest release that is not a prerelease. For OpenCode that is the highest plain version among its ten newest releases, because the release GitHub marks as its latest is an old one.
 

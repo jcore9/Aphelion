@@ -165,6 +165,18 @@ describe("lookupLatest for Codex", () => {
     const { fetcher } = fakeFetch({ [codexLatest]: text(body) });
     expect((await lookupLatest("codex", fetcher)).ok).toBe(false);
   });
+
+  it("never repeats the vendor's tag, so control characters can't reach a terminal", async () => {
+    const tag = "x\u001b]0;owned\u0007\r\nrust-v9";
+    const { fetcher } = fakeFetch({
+      [codexLatest]: text(JSON.stringify(release(tag))),
+    });
+    const result = await lookupLatest("codex", fetcher);
+    expect(result).toEqual({
+      ok: false,
+      message: "the latest release isn't a plain version",
+    });
+  });
 });
 
 describe("lookupLatest for OpenCode", () => {
