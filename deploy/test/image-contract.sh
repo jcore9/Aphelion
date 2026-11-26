@@ -133,6 +133,7 @@ cat >"$scratch/plugins/contract-probe/checks.json" <<'EOF'
   ["read", "/run/secrets/bootstrap", "EACCES"],
   ["readlink", "/proc/{server}/fd/3", "EACCES"],
   ["readlink", "/proc/{runner}/fd/0", "EACCES"],
+  ["readlink", "/proc/{botRunner}/fd/0", "EACCES"],
   ["read", "/proc/{server}/environ", "EACCES"],
   ["read", "/proc/{server}/mem", "EACCES"],
   ["signal", "{server}", "EPERM"],
@@ -227,8 +228,9 @@ docker exec --privileged "$container" bash -euo pipefail -c '
       "/bin/bash /usr/local/lib/aphelion/launch"*) role=launcher user=0 ;;
       "/usr/local/bin/aphelion-secrets"*) role=broker user=10003 ;;
       *plugin-runner.js*) role=runner user=10004 ;;
+      *bot-runner.js*) role=bot_runner user=10002 ;;
       "/usr/local/bin/aphelion --headless"*) role=server user=10001 ;;
-      "/usr/local/bin/bun --no-env-file "*) role=plugin user=10004 ;;
+      "/usr/local/bin/bun --no-env-file /opt/aphelion/"*) role=plugin user=10004 ;;
       *) continue ;;
     esac
     pid_of[$role]=$pid
@@ -243,7 +245,7 @@ docker exec --privileged "$container" bash -euo pipefail -c '
       done
     fi
   done
-  for role in init launcher broker runner server plugin; do
+  for role in init launcher broker runner bot_runner server plugin; do
     [[ -n ${pid_of[$role]:-} ]] || { echo "no $role process"; exit 1; }
   done
   [[ $(awk "/^Groups:/ {print \$2, \$3}" "/proc/${pid_of[server]}/status") == "10001 10002" ]] || { echo "the server lost its bot group"; exit 1; }
@@ -251,19 +253,25 @@ docker exec --privileged "$container" bash -euo pipefail -c '
     [[ $(readlink "$fd") != /run/secrets/bootstrap ]] || { echo "the broker still holds the bootstrap file"; exit 1; }
   done
   ! compgen -G "/run/aphelion-launch.*" >/dev/null || { echo "the pipe folder is still there"; exit 1; }
-  pipe() { stat -L -c %i "/proc/$1/fd/$2"; }
+  pipe() { stat -L -c %d:%i "/proc/$1/fd/$2"; }
   requests=$(pipe "${pid_of[server]}" 4)
   replies=$(pipe "${pid_of[server]}" 3)
-  [[ $(pipe "${pid_of[runner]}" 0) == "$requests" && $(pipe "${pid_of[runner]}" 1) == "$replies" ]] || { echo "the server and runner hold different pipes"; exit 1; }
+  bot_requests=$(pipe "${pid_of[server]}" 6)
+  bot_replies=$(pipe "${pid_of[server]}" 5)
+  [[ $(pipe "${pid_of[runner]}" 0) == "$requests" && $(pipe "${pid_of[runner]}" 1) == "$replies" ]] || { echo "the server and plugin runner hold different pipes"; exit 1; }
+  [[ $(pipe "${pid_of[bot_runner]}" 0) == "$bot_requests" && $(pipe "${pid_of[bot_runner]}" 1) == "$bot_replies" ]] || { echo "the server and bot runner hold different pipes"; exit 1; }
   for fd in /proc/[0-9]*/fd/*; do
-    inode=$(stat -L -c %i "$fd" 2>/dev/null) || continue
-    if [[ $inode == "$requests" || $inode == "$replies" ]]; then
-      pid=${fd#/proc/}; pid=${pid%%/*}
-      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[runner]}" ]] || { echo "process $pid holds the runner pipe"; exit 1; }
+    held=$(stat -L -c %d:%i "$fd" 2>/dev/null) || continue
+    pid=${fd#/proc/}; pid=${pid%%/*}
+    if [[ $held == "$requests" || $held == "$replies" ]]; then
+      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[runner]}" ]] || { echo "process $pid holds the plugin runner pipe"; exit 1; }
+    fi
+    if [[ $held == "$bot_requests" || $held == "$bot_replies" ]]; then
+      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[bot_runner]}" ]] || { echo "process $pid holds the bot runner pipe"; exit 1; }
     fi
   done
 ' || fail "a process runs with the wrong user, privileges or pipes"
-pass "each process runs as its own user with no capabilities, NoNewPrivs and seccomp; only the server and runner hold the pipe"
+pass "each process runs as its own user with no capabilities, NoNewPrivs and seccomp; only the server and each runner hold that runner's pipe"
 
 docker exec --user aphelion-secrets "$container" bash -euo pipefail -c '
   [[ $(stat -c %a /var/lib/aphelion-secrets/recipient.pub) == 600 ]]
@@ -288,6 +296,8 @@ probe aphelion-bot '[
   ["read", "/run/secrets/bootstrap", "EACCES"],
   ["readlink", "/proc/{server}/fd/4", "EACCES"],
   ["readlink", "/proc/{runner}/fd/0", "EACCES"],
+  ["readlink", "/proc/{botRunner}/fd/0", "EACCES"],
+  ["read", "/proc/{botRunner}/environ", "EACCES"],
   ["signal", "{server}", "EPERM"],
   ["signal", "{runner}", "EPERM"],
   ["signal", "{broker}", "EPERM"],
@@ -295,7 +305,19 @@ probe aphelion-bot '[
   ["write", "/usr/local/bin", "EROFS"],
   ["write", "/opt/aphelion/plugins", "EACCES"]
 ]'
-pass "aphelion-bot can't reach the config, state, secrets, plugins, broker, pipes or other processes"
+pass "aphelion-bot can't reach the config, state, secrets, plugins, broker, pipes or other users' processes"
+
+bot_test=$scratch/bot-test
+mkdir "$bot_test"
+cp deploy/test/bot-runner/* "$bot_test/"
+chmod -R a+rX,go-w "$bot_test"
+tar -C "$scratch" -cf - bot-test | docker exec -i --user aphelion-bot "$container" tar -xf - -C /tmp
+driven=$(docker exec --user aphelion-bot "$container" /usr/local/bin/bun /tmp/bot-test/drive.mjs 2>&1) ||
+  fail "the bot runner check failed: $driven"
+docker exec --user aphelion-bot "$container" rm -rf /tmp/bot-test /var/lib/aphelion-bots/contract-bot
+wait_for_log "\"msg\":\"the bot runner started the bot's process\",\"bot\":\"chief-of-staff\""
+wait_for_log "no adapter in this image runs the bot's provider, so the bot won't start\",\"bot\":\"triage\""
+pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner, which starts the bundled Claude adapter for the example bot"
 
 probe aphelion-plugins '[
   ["list", "/etc/aphelion", "EACCES"],
@@ -320,6 +342,7 @@ probe harness '[
   ["list", "/var/lib/aphelion-plugins", "EACCES"],
   ["read", "/run/secrets/bootstrap", "EACCES"],
   ["readlink", "/proc/{runner}/fd/0", "EACCES"],
+  ["readlink", "/proc/{botRunner}/fd/0", "EACCES"],
   ["signal", "{broker}", "EPERM"]
 ]'
 pass "harness reads the config, state and bot folders, writes the plugin files and reaches the broker, and nothing else"

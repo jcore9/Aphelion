@@ -11,6 +11,7 @@ import process from "node:process";
 const roles = {
   server: "/usr/local/bin/aphelion --headless",
   runner: "/usr/local/lib/aphelion/plugin-runner.js",
+  botRunner: "/usr/local/lib/aphelion/bot-runner.js",
   broker: "/usr/local/bin/aphelion-secrets",
 };
 

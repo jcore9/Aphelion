@@ -1,5 +1,12 @@
 import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
+import {
+  BotManager,
+  botManagerLayer,
+  type BotDefinition,
+} from "../bots/manager";
+import { botRunnerPipeLink } from "../bots/runner-pipe";
+import { memorySessionRefs } from "../bots/session-refs";
 import { formatIssue } from "../config";
 import { serveHttp } from "../http";
 import type { Logger } from "../log";
@@ -55,11 +62,29 @@ const startPlugins = (
     }
   });
 
+const startBots = (
+  bots: readonly BotDefinition[],
+  fds: RunnerPipeFds,
+  logger: Logger,
+) =>
+  Effect.gen(function* () {
+    const services = yield* Layer.build(
+      botManagerLayer({ bots, logger }).pipe(
+        Layer.provide(
+          Layer.mergeAll(botRunnerPipeLink(fds, logger), memorySessionRefs),
+        ),
+      ),
+    );
+    const manager = Context.get(services, BotManager);
+    for (const bot of bots) yield* manager.start(bot.name);
+  });
+
 export const headless = (
   options: {
     readonly configDir: string;
     readonly stateDir: string;
     readonly pluginRunnerFds: RunnerPipeFds | undefined;
+    readonly botRunnerFds: RunnerPipeFds | undefined;
     readonly pluginDev: string | undefined;
   },
   logger: Logger,
@@ -93,6 +118,15 @@ export const headless = (
               stateDir: options.stateDir,
               devFolder: options.pluginDev,
             },
+            logger,
+          );
+        }
+        if (options.botRunnerFds === undefined) {
+          logger.info("bots are off: no bot runner pipe was given");
+        } else {
+          yield* startBots(
+            checked.config.bots.bots,
+            options.botRunnerFds,
             logger,
           );
         }

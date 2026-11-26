@@ -42,6 +42,7 @@ stop() {
 
 close_pipes() {
   exec {requests_in}<&- {requests_out}>&- {replies_in}<&- {replies_out}>&-
+  exec {bot_requests_in}<&- {bot_requests_out}>&- {bot_replies_in}<&- {bot_replies_out}>&-
 }
 
 check_dir /etc/aphelion harness:harness 750
@@ -65,11 +66,14 @@ stopping=0
 trap 'stopping=1' TERM INT
 
 pipes=$(mktemp -d /run/aphelion-launch.XXXXXX)
-mkfifo -m 0600 "$pipes/requests" "$pipes/replies"
+mkfifo -m 0600 "$pipes/requests" "$pipes/replies" "$pipes/bot-requests" "$pipes/bot-replies"
 exec {hold_requests}<>"$pipes/requests" {hold_replies}<>"$pipes/replies"
+exec {hold_bot_requests}<>"$pipes/bot-requests" {hold_bot_replies}<>"$pipes/bot-replies"
 exec {requests_in}<"$pipes/requests" {requests_out}>"$pipes/requests"
 exec {replies_in}<"$pipes/replies" {replies_out}>"$pipes/replies"
-exec {hold_requests}<&- {hold_replies}<&-
+exec {bot_requests_in}<"$pipes/bot-requests" {bot_requests_out}>"$pipes/bot-requests"
+exec {bot_replies_in}<"$pipes/bot-replies" {bot_replies_out}>"$pipes/bot-replies"
+exec {hold_requests}<&- {hold_replies}<&- {hold_bot_requests}<&- {hold_bot_replies}<&-
 rm -r "$pipes"
 
 (
@@ -89,13 +93,23 @@ broker=$!
 ) &
 runner=$!
 
-server_args=(--headless --plugin-runner-fds 3,4)
+(
+  exec <&"$bot_requests_in" >&"$bot_replies_out"
+  close_pipes
+  exec "${drop[@]}" --reuid=aphelion-bot --regid=aphelion-bot -- \
+    /usr/bin/env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 \
+    /usr/local/bin/bun /usr/local/lib/aphelion/bot-runner.js \
+    --bun /usr/local/bin/bun --home /var/lib/aphelion-bots
+) &
+bot_runner=$!
+
+server_args=(--headless --plugin-runner-fds 3,4 --bot-runner-fds 5,6)
 if [[ -n ${APHELION_PLUGIN_DEV_FOLDER:-} ]]; then
   server_args+=(--plugin-dev "$APHELION_PLUGIN_DEV_FOLDER")
 fi
 
 (
-  exec </dev/null 3<&"$replies_in" 4>&"$requests_out"
+  exec </dev/null 3<&"$replies_in" 4>&"$requests_out" 5<&"$bot_replies_in" 6>&"$bot_requests_out"
   close_pipes
   exec "${drop[@]}" --reuid=harness --regid=harness -- \
     /usr/local/bin/aphelion "${server_args[@]}"
@@ -103,20 +117,21 @@ fi
 server=$!
 
 close_pipes
-log info "the launcher started the secrets broker, the plugin runner and the server"
+log info "the launcher started the secrets broker, the plugin runner, the bot runner and the server"
 
 status=0
 if ((stopping == 0)); then
-  wait -n -p exited "$broker" "$runner" "$server" || status=$?
+  wait -n -p exited "$broker" "$runner" "$bot_runner" "$server" || status=$?
 fi
 
 if ((stopping == 1)); then
-  log info "the launcher is stopping the server, the plugin runner and the secrets broker"
+  log info "the launcher is stopping the server, the runners and the secrets broker"
   failed=0
 else
   case ${exited:-} in
     "$broker") name="secrets broker" ;;
     "$runner") name="plugin runner" ;;
+    "$bot_runner") name="bot runner" ;;
     "$server") name="server" ;;
     *) name="launcher's wait" ;;
   esac
@@ -126,6 +141,7 @@ fi
 
 stop "$server" 20
 await_exit "$runner" 5 || stop "$runner" 5
+await_exit "$bot_runner" 5 || stop "$bot_runner" 5
 stop "$broker" 5
 wait || true
 exit "$failed"
