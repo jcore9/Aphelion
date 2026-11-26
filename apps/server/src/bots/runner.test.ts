@@ -18,7 +18,12 @@ import type { z } from "zod";
 import { createLogger } from "../log";
 import { memoryLinkPair, type Framing } from "../plugins/link";
 import { botEnvironment } from "./environment";
-import { notAMessage, runBotRunner, stoppedReading } from "./runner";
+import {
+  maxQueuedOutputBytes,
+  notAMessage,
+  runBotRunner,
+  stoppedReading,
+} from "./runner";
 import {
   maxFrameBytes,
   runnerReplySchema,
@@ -425,6 +430,45 @@ describe("the bot runner", () => {
         yield* until(is("stopped"));
         expect(frames.map((frame) => frame.type)).toEqual(["stopped"]);
         expect(fake.runs[0]?.alive()).toBe(false);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "stops reading an adapter that writes faster than the runner forwards, and still runs a sibling's turn",
+    () =>
+      Effect.gen(function* () {
+        const alpha = scripted([reply]);
+        const floods = {
+          line: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "event",
+            params: {
+              seq: 1,
+              turn: "f1",
+              event: { type: "text.delta", text: "x".repeat(1000) },
+            },
+          }),
+          pulled: 0,
+        };
+        const { until, send } = yield* runner({
+          alpha: alpha.bot,
+          flood: { adapter: () => fakeAdapter([]), floods },
+        });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started", "alpha"));
+        yield* send(startFrame("flood"));
+        yield* until(is("spawned", "flood"));
+        yield* Effect.sleep("300 millis");
+        expect(floods.pulled).toBeGreaterThan(0);
+        expect(floods.pulled).toBeLessThan(maxQueuedOutputBytes + 1024 * 1024);
+        yield* send({
+          type: "turn.start",
+          bot: "alpha",
+          run: 1,
+          turn: "t1",
+          text: "hi",
+        });
+        yield* until(turnEnded("alpha"));
       }).pipe(Effect.scoped),
   );
 });

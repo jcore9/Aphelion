@@ -13,6 +13,7 @@ export interface FakeBot {
   readonly stopsReading?: boolean;
   readonly launchGate?: Promise<void>;
   readonly refuses?: string;
+  readonly floods?: { readonly line: string; pulled: number };
 }
 
 export interface FakeRun {
@@ -71,13 +72,45 @@ function pipe() {
   };
 }
 
+const floodLimit = 32 * 1024 * 1024;
+
+function flood(spec: NonNullable<FakeBot["floods"]>) {
+  const chunk = new TextEncoder().encode(`${spec.line}\n`.repeat(64));
+  let open = true;
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const readable = new ReadableStream<Uint8Array>(
+    {
+      start(opened) {
+        controller = opened;
+      },
+      pull(opened) {
+        if (!open || spec.pulled >= floodLimit) return;
+        spec.pulled += chunk.byteLength;
+        opened.enqueue(chunk);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return {
+    stream: Stream.fromReadableStream({
+      evaluate: () => readable,
+      onError: (error) => error,
+    }).pipe(Stream.orDie),
+    line: () => undefined,
+    close: () => {
+      open = false;
+      controller?.close();
+    },
+  };
+}
+
 export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
   const runs: FakeRun[] = [];
   const stopAllCalls: string[] = [];
 
   const launch = (spec: BotSpec, bot: FakeBot): BotProcess => {
     const input = inbox();
-    const stdout = pipe();
+    const stdout = bot.floods ? flood(bot.floods) : pipe();
     const stderr = pipe();
     const received: FakeRun["received"] = [];
     let alive = true;

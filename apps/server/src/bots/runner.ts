@@ -20,6 +20,7 @@ import {
   Fiber,
   FiberSet,
   Queue,
+  Semaphore,
   Stream,
 } from "effect";
 import { z } from "zod";
@@ -27,7 +28,7 @@ import type { Logger } from "../log";
 import { LineSplitter, type LinePiece } from "../plugins/lines";
 import type { Link } from "../plugins/link";
 import type { ProcessExit } from "../plugins/processes";
-import { logBudget, maxLogLinesPerMinute } from "../plugins/runner";
+import { logBudget, maxLogLinesPerMinute, utf8Bytes } from "../plugins/runner";
 import { botEnvironment } from "./environment";
 import { BotProcesses, type BotProcess } from "./processes";
 import type {
@@ -43,6 +44,8 @@ export interface BotRunnerOptions {
   readonly writeDeadline: Duration.Input;
   readonly logger: Logger;
 }
+
+export const maxQueuedOutputBytes = 4 * maxPluginLineBytes;
 
 export const lineTooLong =
   "the adapter wrote a line longer than 1 MiB, and the runner dropped it";
@@ -68,6 +71,7 @@ interface Slot {
   readonly pending: Map<number, Pending>;
   readonly gone: Deferred.Deferred<undefined>;
   readonly budget: ReturnType<typeof logBudget>;
+  readonly queued: Semaphore.Semaphore;
   nextId: number;
   stopReplies: number;
   failure: string | undefined;
@@ -83,7 +87,11 @@ type LoopEvent =
   | RunnerRequest
   | (Tag & { readonly type: "launched"; readonly process: BotProcess })
   | (Tag & { readonly type: "launch-failed"; readonly reason: string })
-  | (Tag & { readonly type: "line"; readonly piece: LinePiece })
+  | (Tag & {
+      readonly type: "line";
+      readonly piece: LinePiece;
+      readonly handled: Effect.Effect<unknown>;
+    })
   | (Tag & { readonly type: "exited"; readonly exit: ProcessExit })
   | (Tag & { readonly type: "stuck" })
   | (Tag & { readonly type: "ended" });
@@ -200,9 +208,19 @@ export const runBotRunner = (
         const writer = yield* FiberSet.run(work, feed(slot, process));
         const output = yield* FiberSet.run(
           work,
-          lines(process.stdout)((piece) =>
-            Queue.offer(events, { type: "line", ...tagOf(slot), piece }),
-          ),
+          lines(process.stdout)((piece) => {
+            const bytes = piece.kind === "line" ? utf8Bytes(piece.text) + 1 : 1;
+            return slot.queued.take(bytes).pipe(
+              Effect.andThen(
+                Queue.offer(events, {
+                  type: "line",
+                  ...tagOf(slot),
+                  piece,
+                  handled: slot.queued.release(bytes),
+                }),
+              ),
+            );
+          }),
         );
         const errors = yield* FiberSet.run(
           work,
@@ -304,6 +322,7 @@ export const runBotRunner = (
         pending: new Map(),
         gone: yield* Deferred.make<undefined>(),
         budget: logBudget(),
+        queued: yield* Semaphore.make(maxQueuedOutputBytes),
         nextId: 1,
         stopReplies: 0,
         failure: undefined,
@@ -441,6 +460,7 @@ export const runBotRunner = (
           });
         }
         case "line": {
+          yield* event.handled;
           const slot = current(event);
           if (slot?.process === undefined) return;
           return yield* onLine(slot, event.piece);
