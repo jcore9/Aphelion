@@ -40,6 +40,7 @@ const openAt = (path: string) =>
     const store = yield* openEventStore(db, readServerId(db), {
       logger: createLogger({ write: () => undefined }),
     });
+    yield* store.openTurn("chief", "t1");
     return { db, store };
   });
 

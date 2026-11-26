@@ -31,6 +31,7 @@ it.effect("saves every event a bot publishes, from the first one on", () =>
     const store = yield* openEventStore(db, readServerId(db), {
       logger: createLogger({ write: () => undefined }),
     });
+    yield* store.openTurn("scout", "t1");
     const published = yield* PubSub.unbounded<BotEvent>();
     yield* persistBotEvents(PubSub.subscribe(published), store);
 
@@ -80,6 +81,7 @@ it.effect(
         const store = yield* openEventStore(db, readServerId(db), {
           logger: createLogger({ write: () => undefined }),
         });
+        yield* store.openTurn("chief", "t1");
         yield* persistBotEvents(PubSub.subscribe(published), store);
       }).pipe(Scope.provide(app));
 

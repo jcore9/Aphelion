@@ -7,7 +7,7 @@ export const messageHistory: Migration = {
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   ) STRICT;
-  INSERT INTO server_meta (key, value) VALUES ('next_position', '1');
+  INSERT INTO server_meta (key, value) VALUES ('next_position', '1'), ('boot_epoch', '0');
   CREATE TABLE turns (
     id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 64),
     server_id TEXT NOT NULL CHECK (length(server_id) = 36),
@@ -26,6 +26,7 @@ export const messageHistory: Migration = {
     bot TEXT NOT NULL,
     turn TEXT,
     run INTEGER NOT NULL CHECK (run >= 1),
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
     format INTEGER NOT NULL CHECK (format >= 1),
     kind TEXT NOT NULL,
     payload TEXT NOT NULL CHECK (json_valid(payload)),

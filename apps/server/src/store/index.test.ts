@@ -148,7 +148,7 @@ test("migration 8 keeps a turn's end time and reason together, a saved event val
     bot = "triage",
   ) => {
     store.run(
-      "INSERT INTO events (id, server_id, position, bot, turn, run, format, kind, payload, at) VALUES (?, ?, 1, ?, ?, 1, 1, 'text.delta', ?, 0)",
+      "INSERT INTO events (id, server_id, position, bot, turn, run, epoch, format, kind, payload, at) VALUES (?, ?, 1, ?, ?, 1, 1, 1, 'text.delta', ?, 0)",
       [id, id, bot, turn, payload],
     );
   };

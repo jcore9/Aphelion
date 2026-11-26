@@ -47,9 +47,13 @@ const end = (reason: "completed" | "error", turn = "t1"): NewEvent => ({
 });
 
 const open = (db: Database, window?: number) =>
-  openEventStore(db, readServerId(db), {
-    logger: logs().logger,
-    ...(window === undefined ? {} : { window }),
+  Effect.gen(function* () {
+    const store = yield* openEventStore(db, readServerId(db), {
+      logger: logs().logger,
+      ...(window === undefined ? {} : { window }),
+    });
+    yield* store.openTurn("chief", "t1");
+    return store;
   });
 
 const saved = (db: Database) =>
@@ -146,22 +150,121 @@ describe("the event store", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.effect("opens a turn at its first event and closes it at turn.end", () =>
+  it.effect(
+    "records a turn when the server allocates it and closes it at turn.end",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const store = yield* open(db);
+        expect(
+          db.all("SELECT id, bot, ended_at, end_reason FROM turns"),
+        ).toEqual([
+          { id: "t1", bot: "chief", ended_at: null, end_reason: null },
+        ]);
+
+        yield* store.record(delta("a"));
+        yield* TestClock.adjust("50 millis");
+        yield* store.record(end("error"));
+        yield* TestClock.adjust("50 millis");
+        expect(db.all("SELECT ended_at, end_reason FROM turns")).toEqual([
+          { ended_at: 50, end_reason: "error" },
+        ]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "refuses an event that names a turn the server never started, logs a fixed line, and opens no turn",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const { lines, logger } = logs();
+        const store = yield* openEventStore(db, readServerId(db), { logger });
+        yield* store.openTurn("chief", "t1");
+        yield* store.record(delta("typo", "t1x"));
+        yield* store.record(delta("right"));
+        yield* store.record(end("completed"));
+        yield* store.flush;
+
+        expect(saved(db)).toEqual([
+          { position: 1, kind: "text.delta", turn: "t1" },
+          { position: 2, kind: "turn.end", turn: "t1" },
+        ]);
+        expect(db.all("SELECT id FROM turns")).toEqual([{ id: "t1" }]);
+        expect(lines).toContainEqual(
+          expect.objectContaining({
+            msg: "bot events for a turn the server didn't start were not saved",
+            count: 1,
+          }),
+        );
+        expect(JSON.stringify(lines)).not.toContain("t1x");
+        expect(JSON.stringify(lines)).not.toContain("typo");
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("still saves a late event for a turn that already ended", () =>
     Effect.gen(function* () {
       const { db } = tempStore();
       const store = yield* open(db);
-      yield* store.record(delta("a"));
-      yield* TestClock.adjust("50 millis");
-      expect(db.all("SELECT id, bot, ended_at, end_reason FROM turns")).toEqual(
-        [{ id: "t1", bot: "chief", ended_at: null, end_reason: null }],
-      );
+      yield* store.record(end("completed"));
+      yield* store.flush;
+      yield* store.record({
+        bot: "chief",
+        run: 1,
+        turn: "t1",
+        event: streamEvent.parse({
+          type: "tool.end",
+          call: "c1",
+          outcome: "ok",
+        }),
+      });
+      yield* store.flush;
 
-      yield* store.record(end("error"));
-      yield* TestClock.adjust("50 millis");
-      expect(db.all("SELECT ended_at, end_reason FROM turns")).toEqual([
-        { ended_at: 50, end_reason: "error" },
+      expect(saved(db).map((row) => row["kind"])).toEqual([
+        "turn.end",
+        "tool.end",
       ]);
     }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "drops a turn that never got an event, and keeps one that did",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const store = yield* open(db);
+        yield* store.openTurn("chief", "t2");
+        yield* store.record(delta("a"));
+        yield* store.flush;
+        yield* store.dropTurn("t1");
+        yield* store.dropTurn("t2");
+
+        expect(db.all("SELECT id FROM turns")).toEqual([{ id: "t1" }]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "advances the boot epoch once for each opened store and stamps its events with it",
+    () =>
+      Effect.gen(function* () {
+        const { db, path } = tempStore();
+        const first = yield* open(db);
+        yield* first.record(delta("a"));
+        yield* first.flush;
+        const reopened = openStore(path);
+        const second = yield* open(reopened);
+        yield* second.record(delta("b"));
+        yield* second.flush;
+
+        expect([first.epoch, second.epoch]).toEqual([1, 2]);
+        expect(
+          db.all("SELECT position, epoch FROM events ORDER BY position"),
+        ).toEqual([
+          { position: 1, epoch: 1 },
+          { position: 2, epoch: 2 },
+        ]);
+        expect(second.read(0, 10).map(({ epoch }) => epoch)).toEqual([1, 2]);
+        reopened.close();
+      }).pipe(Effect.scoped),
   );
 
   it.effect(
@@ -177,6 +280,8 @@ describe("the event store", () => {
           turn,
           event,
         });
+        yield* store.openTurn("chief", "t1");
+        yield* store.openTurn("scout", "t2");
         yield* store.record(delta("a"));
         yield* store.record(end("completed"));
         yield* store.record(scout({ type: "text.delta", text: "x" }, "t1"));
@@ -218,7 +323,7 @@ describe("the event store", () => {
       yield* store.flush;
 
       expect(saved(db)).toEqual([{ position: 1, kind: "error", turn: null }]);
-      expect(db.all("SELECT * FROM turns")).toEqual([]);
+      expect(db.all("SELECT id FROM turns")).toEqual([{ id: "t1" }]);
     }).pipe(Effect.scoped),
   );
 
@@ -278,6 +383,7 @@ describe("the event store", () => {
           readServerId(db),
           { logger },
         );
+        yield* store.openTurn("chief", "t1");
         const subscription = yield* store.subscribe;
         yield* store.record(delta("a"));
         yield* TestClock.adjust("50 millis");
@@ -307,6 +413,7 @@ describe("reading a saved event", () => {
     position: 7,
     bot: "chief",
     run: 1,
+    epoch: 3,
     turn: "t1",
     format: 1,
     kind: "tool.end",
@@ -326,6 +433,7 @@ describe("reading a saved event", () => {
       position: 7,
       bot: "chief",
       run: 1,
+      epoch: 3,
       turn: "t1",
       format: 1,
       event,

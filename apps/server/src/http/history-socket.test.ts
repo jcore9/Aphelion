@@ -29,6 +29,7 @@ const scope = Effect.runSync(Scope.make());
 const open = (database: typeof db) =>
   Effect.runSync(
     openEventStore(database, readServerId(database), { logger }).pipe(
+      Effect.tap((opened) => opened.openTurn("chief", "t1")),
       Scope.provide(scope),
     ),
   );

@@ -12,6 +12,7 @@ import {
 
 export interface NewEvent {
   readonly bot: string;
+  readonly epoch?: number;
   readonly run: number;
   readonly turn: string | null;
   readonly event: StreamEvent;
@@ -19,11 +20,11 @@ export interface NewEvent {
 
 export interface EventLog {
   readonly serverId: string;
+  readonly epoch: number;
   readonly streamId: string;
   readonly head: () => number;
   readonly firstKept: () => number;
   readonly read: (after: number, limit: number) => readonly SavedEvent[];
-  readonly turnEvents: (turn: string) => readonly SavedEvent[];
   readonly subscribe: Effect.Effect<
     PubSub.Subscription<SavedEvent>,
     never,
@@ -32,6 +33,8 @@ export interface EventLog {
 }
 
 export interface EventStore extends EventLog {
+  readonly openTurn: (bot: string, turn: string) => Effect.Effect<boolean>;
+  readonly dropTurn: (turn: string) => Effect.Effect<void>;
   readonly record: (entry: NewEvent) => Effect.Effect<void>;
   readonly appendNow: (entries: readonly NewEvent[]) => Effect.Effect<void>;
   readonly flush: Effect.Effect<void>;
@@ -48,7 +51,8 @@ interface Pending extends NewEvent {
   readonly at: number;
 }
 
-const columns = "id, position, bot, turn, run, format, kind, payload, at";
+export const eventColumns =
+  "id, position, bot, turn, run, epoch, format, kind, payload, at";
 
 export const openEventStore = (
   db: Database,
@@ -80,25 +84,41 @@ export const openEventStore = (
       return typeof first === "number" ? first : head() + 1;
     };
 
-    const claimTurn = (entry: Pending) => {
-      if (entry.turn === null) return true;
-      db.run(
-        "INSERT INTO turns (id, server_id, bot, started_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
-        [entry.turn, serverId, entry.bot, entry.at],
-      );
-      return (
-        db.all("SELECT bot FROM turns WHERE id = ?", [entry.turn])[0]?.[
-          "bot"
-        ] === entry.bot
-      );
+    const epoch = Number(
+      db.all(
+        "UPDATE server_meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'boot_epoch' RETURNING CAST(value AS INTEGER) AS epoch",
+      )[0]?.["epoch"],
+    );
+
+    const ownerOf = (turn: string) => {
+      const owner = db.all("SELECT bot FROM turns WHERE id = ?", [turn])[0]?.[
+        "bot"
+      ];
+      return typeof owner === "string" ? owner : undefined;
     };
 
     const write = (batch: readonly Pending[]): SavedEvent[] =>
       db.transaction(() => {
-        const accepted = batch.filter(claimTurn);
-        if (accepted.length < batch.length) {
+        const owners = new Map<string, string | undefined>();
+        let unknown = 0;
+        let foreign = 0;
+        const accepted = batch.filter(({ bot, turn }) => {
+          if (turn === null) return true;
+          if (!owners.has(turn)) owners.set(turn, ownerOf(turn));
+          const owner = owners.get(turn);
+          if (owner === undefined) unknown += 1;
+          else if (owner !== bot) foreign += 1;
+          return owner === bot;
+        });
+        if (unknown > 0) {
+          logger.error(
+            "bot events for a turn the server didn't start were not saved",
+            { count: unknown },
+          );
+        }
+        if (foreign > 0) {
           logger.error("bot events for another bot's turn were not saved", {
-            count: batch.length - accepted.length,
+            count: foreign,
           });
         }
         if (accepted.length === 0) return [];
@@ -113,14 +133,15 @@ export const openEventStore = (
           const id = randomUUIDv7();
           const position = first + index;
           db.run(
-            `INSERT INTO events (id, position, bot, turn, run, format, kind, payload, at, server_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO events (id, position, bot, turn, run, epoch, format, kind, payload, at, server_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               id,
               position,
               entry.bot,
               entry.turn,
               entry.run,
+              entry.epoch ?? epoch,
               eventFormat,
               entry.event.type,
               encodePayload(entry.event),
@@ -140,6 +161,7 @@ export const openEventStore = (
             bot: entry.bot,
             turn: entry.turn,
             run: entry.run,
+            epoch: entry.epoch ?? epoch,
             format: eventFormat,
             event: entry.event,
             at: entry.at,
@@ -246,25 +268,52 @@ export const openEventStore = (
     const read = (after: number, limit: number) =>
       db
         .all(
-          `SELECT ${columns} FROM events WHERE position > ? ORDER BY position LIMIT ?`,
+          `SELECT ${eventColumns} FROM events WHERE position > ? ORDER BY position LIMIT ?`,
           [after, limit],
         )
         .map(decodeEvent);
 
-    const turnEvents = (turn: string) =>
-      db
-        .all(`SELECT ${columns} FROM events WHERE turn = ? ORDER BY position`, [
-          turn,
-        ])
-        .map(decodeEvent);
+    const openTurn = (bot: string, turn: string) =>
+      Effect.flatMap(Clock.currentTimeMillis, (at) =>
+        Effect.sync(() => {
+          try {
+            db.run(
+              "INSERT INTO turns (id, server_id, bot, started_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+              [turn, serverId, bot, at],
+            );
+            return ownerOf(turn) === bot;
+          } catch (error) {
+            logger.error("saving a new turn failed", {
+              error: error instanceof Error ? error.name : "unknown",
+            });
+            return false;
+          }
+        }),
+      );
+
+    const dropTurn = (turn: string) =>
+      Effect.sync(() => {
+        try {
+          db.run(
+            "DELETE FROM turns WHERE id = ? AND NOT EXISTS (SELECT 1 FROM events WHERE turn = ?)",
+            [turn, turn],
+          );
+        } catch (error) {
+          logger.error("dropping an unused turn failed", {
+            error: error instanceof Error ? error.name : "unknown",
+          });
+        }
+      });
 
     const store: EventStore = {
       serverId,
+      epoch,
+      openTurn,
+      dropTurn,
       streamId: readStreamId(db),
       head,
       firstKept,
       read,
-      turnEvents,
       subscribe: PubSub.subscribe(live),
       record,
       appendNow,

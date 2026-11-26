@@ -12,6 +12,7 @@ export interface SavedEvent {
   readonly bot: string;
   readonly turn: string | null;
   readonly run: number;
+  readonly epoch: number;
   readonly format: number;
   readonly event: StoredEvent;
   readonly at: number;
@@ -34,6 +35,7 @@ const eventRow = z.object({
   bot: z.string(),
   turn: z.string().nullable(),
   run: z.int().positive(),
+  epoch: z.int().positive(),
   format: z.int().positive(),
   kind: z.string(),
   payload: z.string(),

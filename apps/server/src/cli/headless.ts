@@ -111,7 +111,7 @@ export const headless = (
     return yield* withStore(options.stateDir, (db) =>
       Effect.gen(function* () {
         const history = yield* openEventStore(db, readServerId(db), { logger });
-        const closed = yield* closeDanglingTurns(db, history);
+        const closed = yield* closeDanglingTurns(db, history, logger);
         if (closed.turns > 0 || closed.calls > 0) {
           logger.warn(
             "closed turns and tool calls that the last run left open",

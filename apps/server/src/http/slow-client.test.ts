@@ -58,6 +58,7 @@ it.effect(
       const store = yield* openEventStore(db, readServerId(db), {
         logger: createLogger({ write: () => undefined }),
       });
+      yield* store.openTurn("chief", "t1");
       const resume = encodeFrame({
         v: 1,
         type: "resume",

@@ -29,7 +29,6 @@ import {
   type RestartPolicy,
 } from "../plugins/lifecycle";
 import type { Link } from "../plugins/link";
-import { maxLogLinesPerMinute } from "../plugins/runner";
 import type {
   RunnerNotice,
   RunnerReply,
@@ -45,15 +44,16 @@ export const adapterBundles: Readonly<Record<string, string>> = {
 export const resumeFailed =
   "the saved session could not be resumed, so the bot started a new one";
 
-export const runnerNotices: Readonly<Record<RunnerNotice, string>> = {
+export const runnerNotices = {
   "line-too-long":
     "the adapter wrote a line longer than 1 MiB, and the runner dropped it",
   "not-a-message":
     "the adapter wrote a line that isn't a message the runner reads, and the runner dropped it",
   "stopped-reading":
     "the adapter stopped reading its input, and the runner killed it",
-  "too-much-log": `the adapter wrote more than ${String(maxLogLinesPerMinute)} log lines in a minute, and the runner drops the rest of that minute`,
-};
+  "too-much-log":
+    "the adapter wrote more than 1000 log lines in a minute, and the runner drops the rest of that minute",
+} as const satisfies Record<RunnerNotice, string>;
 
 export class BotRunnerLink extends Context.Service<
   BotRunnerLink,
@@ -166,8 +166,14 @@ export class BotManager extends Context.Service<
   }
 >()("aphelion/bots/BotManager") {}
 
+export interface TurnLedger {
+  readonly open: (bot: string, turn: TurnId) => Effect.Effect<boolean>;
+  readonly drop: (turn: TurnId) => Effect.Effect<void>;
+}
+
 export interface BotManagerOptions {
   readonly bots: readonly BotDefinition[];
+  readonly turns?: TurnLedger;
   readonly logger: Logger;
   readonly policy?: RestartPolicy;
   readonly adapters?: Readonly<Record<string, string>>;
@@ -519,9 +525,19 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           if (!turnStartParams.safeParse({ turn, text }).success) {
             return { turn, outcome: "too-long" as const };
           }
+          if (
+            options.turns !== undefined &&
+            !(yield* options.turns.open(name, turn))
+          ) {
+            return { turn, outcome: "refused" as const };
+          }
           const done = yield* Deferred.make<TurnOutcome>();
           yield* Queue.offer(slot.mailbox, { type: "turn", turn, text, done });
-          return { turn, outcome: yield* Deferred.await(done) };
+          const outcome = yield* Deferred.await(done);
+          if (outcome !== "accepted" && options.turns !== undefined) {
+            yield* options.turns.drop(turn);
+          }
+          return { turn, outcome };
         });
 
       yield* Effect.addFinalizer(() =>

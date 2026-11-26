@@ -11,7 +11,10 @@ export const runBots = (options: BotManagerOptions, history: EventStore) =>
   Effect.gen(function* () {
     const botsScope = yield* Scope.make();
     const services = yield* Layer.buildWithScope(
-      botManagerLayer(options),
+      botManagerLayer({
+        ...options,
+        turns: { open: history.openTurn, drop: history.dropTurn },
+      }),
       botsScope,
     );
     const manager = Context.get(services, BotManager);

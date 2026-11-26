@@ -11,6 +11,7 @@ const row = (kind: string, payload: string, format = 1) => ({
   bot: "chief",
   turn: kind === "session" ? null : "0192f0a1-3b7d-7c5e-9a21-0d4e6f8a1b23",
   run: 1,
+  epoch: 1,
   format,
   kind,
   payload,

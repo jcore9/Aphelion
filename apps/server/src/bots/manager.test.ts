@@ -25,6 +25,7 @@ import {
   runnerNotices,
   type BotEvent,
   type BotState,
+  type TurnLedger,
 } from "./manager";
 import { SessionRefs } from "./session-refs";
 import { sqliteSessionRefs } from "./sqlite-session-refs";
@@ -53,6 +54,7 @@ const system = (
   ) => Effect.Effect<void> = () => Effect.void,
   provider = "fake",
   sessionLayer: Layer.Layer<SessionRefs> = memorySessionRefs,
+  turns?: TurnLedger,
 ) =>
   Effect.gen(function* () {
     const fake = fakeBotProcesses({ chief: bot });
@@ -67,6 +69,7 @@ const system = (
         logger,
         policy,
         adapters: { fake: "/adapters/fake/adapter.js" },
+        ...(turns === undefined ? {} : { turns }),
       }).pipe(
         Layer.provideMerge(sessionLayer),
         Layer.provide(Layer.succeed(BotRunnerLink, link)),
@@ -227,6 +230,67 @@ describe("the bot manager", () => {
         expect(JSON.stringify(logs)).not.toContain("secret plan");
         expect(JSON.stringify(logs)).not.toContain("conversation");
       }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "records each turn with the ledger before the adapter sees it, and drops one the bot refuses",
+    () =>
+      Effect.gen(function* () {
+        const chief = recording([sessionTurn, [{ waitForAbort: true }]]);
+        const calls: string[] = [];
+        const { manager, seen, reach } = yield* system(
+          chief.bot,
+          () => Effect.void,
+          "fake",
+          memorySessionRefs,
+          {
+            open: (bot, turn) =>
+              Effect.sync(() => {
+                calls.push(`open ${bot} ${turn}`);
+                return true;
+              }),
+            drop: (turn) =>
+              Effect.sync(() => {
+                calls.push(`drop ${turn}`);
+              }),
+          },
+        );
+        yield* manager.start("chief");
+        yield* reach("running");
+        const first = yield* manager.startTurn("chief", "hi");
+        yield* reach("running");
+        expect(first.outcome).toBe("accepted");
+        expect(calls).toEqual([`open chief ${first.turn}`]);
+        expect(seen.length).toBeGreaterThan(0);
+
+        const second = yield* manager.startTurn("chief", "again");
+        expect(second.outcome).toBe("accepted");
+        const busy = yield* manager.startTurn("chief", "too soon");
+        expect(busy.outcome).toBe("busy");
+        expect(calls.slice(1)).toEqual([
+          `open chief ${second.turn}`,
+          `open chief ${busy.turn}`,
+          `drop ${busy.turn}`,
+        ]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("refuses a turn the ledger can't record, without sending it", () =>
+    Effect.gen(function* () {
+      const chief = recording([sessionTurn]);
+      const { manager, seen, reach } = yield* system(
+        chief.bot,
+        () => Effect.void,
+        "fake",
+        memorySessionRefs,
+        { open: () => Effect.succeed(false), drop: () => Effect.void },
+      );
+      yield* manager.start("chief");
+      yield* reach("running");
+      expect((yield* manager.startTurn("chief", "hi")).outcome).toBe("refused");
+      yield* Effect.sleep("30 millis");
+      expect(seen).toEqual([]);
+    }).pipe(Effect.scoped),
   );
 
   it.live(
