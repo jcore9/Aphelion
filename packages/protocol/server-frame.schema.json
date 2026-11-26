@@ -67,7 +67,7 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
-              "description": "The event's number in the stream."
+              "description": "The event's position in the stream."
             },
             "name": {
               "type": "string",
@@ -116,7 +116,7 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
-              "description": "The event's number in the stream."
+              "description": "The event's position in the stream."
             },
             "name": {
               "type": "string",
@@ -647,7 +647,7 @@
     "StreamId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]{1,64}$",
-      "description": "Names one event stream. A server that restarts starts a new stream."
+      "description": "Names one event stream. A server's stream is its server ID, which a restart keeps."
     },
     "Cursor": {
       "type": "object",
@@ -664,7 +664,7 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "The last sequence number the client has seen."
+          "description": "The position of the last event the client has seen."
         }
       },
       "required": [

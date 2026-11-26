@@ -51,7 +51,7 @@ Tells every client that something happened.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `seq` | integer from 1 to 9,007,199,254,740,991 (the largest safe integer) | yes | The event's number in the stream. |
+| `seq` | integer from 1 to 9,007,199,254,740,991 (the largest safe integer) | yes | The event's position in the stream. |
 | `name` | `"notice"` or `"bot.event"` | yes | The kind of event. |
 | `payload` | object | yes | What happened. |
 
@@ -125,11 +125,11 @@ A position in an event stream.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `stream` | [`StreamId`](#streamid) | yes | The stream that the position is in. |
-| `seq` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | The last sequence number the client has seen. |
+| `seq` | integer from 0 to 9,007,199,254,740,991 (the largest safe integer) | yes | The position of the last event the client has seen. |
 
 ### `StreamId`
 
-Names one event stream. A server that restarts starts a new stream.
+Names one event stream. A server's stream is its server ID, which a restart keeps.
 
 It is a string matching `^[A-Za-z0-9_-]{1,64}$`.
 

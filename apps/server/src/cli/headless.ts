@@ -114,7 +114,7 @@ export const headless = (
     return yield* withStore(options.stateDir, (db) =>
       Effect.gen(function* () {
         const history = yield* openEventStore(db, readServerId(db), { logger });
-        yield* Layer.build(serveHttp({ address, port }, db));
+        yield* Layer.build(serveHttp({ address, port }, db, history));
         logger.info("server started", { version, address, port });
         if (fds === undefined) {
           logger.info("plugins are off: no plugin runner pipe was given");

@@ -5,6 +5,7 @@ export {
   type EventStoreOptions,
   type NewEvent,
 } from "./event-store";
+export { eventFrame, follow, replayPage } from "./follow";
 export { persistBotEvents } from "./persist";
 export {
   decodeEvent,
