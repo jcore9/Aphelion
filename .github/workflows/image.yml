@@ -1,0 +1,146 @@
+# Builds the Aphelion image for x86-64 and arm64 from deploy/Dockerfile.
+# release.yml calls it with push: true when release-please makes a release.
+# On pull requests it builds both images and stops, so nothing is published.
+# docs/guides/releasing.md explains where the digest goes (decision 0063).
+name: Image
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Release version without the leading v, for example 0.1.0-alpha.2
+        type: string
+        required: true
+      push:
+        description: Publish the image to ghcr.io and attach its digest to the release
+        type: boolean
+        required: true
+  pull_request:
+    paths:
+      - .github/workflows/image.yml
+      - deploy/Dockerfile
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/jcore9/aphelion
+
+jobs:
+  build-x86-64:
+    name: build x86-64
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: inputs.push
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64
+          provenance: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ inputs.push }}
+
+  build-arm64:
+    name: build arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: inputs.push
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/arm64
+          provenance: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ inputs.push }}
+
+  publish:
+    name: publish one image
+    if: inputs.push
+    needs: [build-x86-64, build-arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      reference: ${{ steps.join.outputs.reference }}
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: join
+        env:
+          VERSION: ${{ inputs.version }}
+          X86_64: ${{ needs.build-x86-64.outputs.digest }}
+          ARM64: ${{ needs.build-arm64.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "$IMAGE:$VERSION" --tag "$IMAGE:latest" \
+            "$IMAGE@$X86_64" "$IMAGE@$ARM64"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}')
+          [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "unexpected digest: $digest" >&2; exit 1; }
+          echo "reference=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+
+  attach-digest:
+    name: attach digest to the release
+    if: inputs.push
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          REFERENCE: ${{ needs.publish.outputs.reference }}
+        run: |
+          set -euo pipefail
+          echo "$REFERENCE" > aphelion-image.sha256
+          gh release upload "v$VERSION" aphelion-image.sha256 --repo "$REPO" --clobber
+          {
+            echo "## Image $VERSION"
+            echo
+            echo "Digest, also attached to the release as \`aphelion-image.sha256\`:"
+            echo
+            echo "\`\`\`"
+            echo "$REFERENCE"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
