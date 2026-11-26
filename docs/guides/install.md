@@ -152,14 +152,14 @@ The broker refuses to start if the key doesn't match a store it finds. The log t
 
 ## Back up and restore
 
-A backup is one archive file that holds the contents of Aphelion's six Docker volumes. It doesn't hold the bootstrap key, or the host setup that [Install](#install) makes again, such as `deploy/.env` and the service. You restore it on a new host before the first start. To try the whole drill with test data first, see [Rehearse with test data](#rehearse-with-test-data).
+A backup is one archive file that holds the contents of Aphelion's six Docker volumes. It doesn't hold the bootstrap key, or the host setup that [Install](#install) makes again, such as `deploy/.env` and the service. It does hold every bot's saved conversation, because the database does. Keep the archive as private as the server. You restore it on a new host before the first start. To try the whole drill with test data first, see [Rehearse with test data](#rehearse-with-test-data).
 
 A **volume** is a folder that Docker keeps for the container. Aphelion has six. A real install names them `aphelion_config`, `aphelion_state` and so on. Compose is the tool that reads `deploy/compose.yaml`. It names the project `aphelion` and puts the project name in front of each volume.
 
 | Volume | Holds |
 | --- | --- |
 | `config` | The config files |
-| `state` | The database: devices, plugin approvals and the audit log |
+| `state` | The database: devices, plugin approvals, the audit log and the bots' saved conversations |
 | `bots` | The bot folders |
 | `secrets` | The encrypted secrets store |
 | `plugin-data` | Data that plugins store |

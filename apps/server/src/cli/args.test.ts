@@ -34,6 +34,7 @@ describe("accepted command lines", () => {
         configDir: defaultConfigDir,
         stateDir: defaultStateDir,
         pluginRunnerFds: undefined,
+        botRunnerFds: undefined,
         pluginDev: undefined,
       },
     ],
@@ -44,6 +45,7 @@ describe("accepted command lines", () => {
         configDir: "/c",
         stateDir: "/s",
         pluginRunnerFds: undefined,
+        botRunnerFds: undefined,
         pluginDev: undefined,
       },
     ],
@@ -54,6 +56,18 @@ describe("accepted command lines", () => {
         configDir: defaultConfigDir,
         stateDir: defaultStateDir,
         pluginRunnerFds: { replies: 3, requests: 4 },
+        botRunnerFds: undefined,
+        pluginDev: undefined,
+      },
+    ],
+    [
+      ["--headless", "--plugin-runner-fds", "3,4", "--bot-runner-fds", "5,6"],
+      {
+        kind: "headless",
+        configDir: defaultConfigDir,
+        stateDir: defaultStateDir,
+        pluginRunnerFds: { replies: 3, requests: 4 },
+        botRunnerFds: { replies: 5, requests: 6 },
         pluginDev: undefined,
       },
     ],
@@ -70,6 +84,7 @@ describe("accepted command lines", () => {
         configDir: defaultConfigDir,
         stateDir: defaultStateDir,
         pluginRunnerFds: { replies: 3, requests: 4 },
+        botRunnerFds: undefined,
         pluginDev: "/opt/aphelion/dev-plugin",
       },
     ],
@@ -308,6 +323,14 @@ describe("refused command lines", () => {
     [
       ["--headless", "--plugin-runner-fds", "3,3"],
       "--plugin-runner-fds must name two different descriptors",
+    ],
+    [
+      ["--headless", "--bot-runner-fds", "5"],
+      "--bot-runner-fds must be two file descriptor numbers, such as 3,4",
+    ],
+    [
+      ["--headless", "--plugin-runner-fds", "3,4", "--bot-runner-fds", "4,5"],
+      "--bot-runner-fds must name other descriptors than --plugin-runner-fds",
     ],
     [
       ["--headless", "--plugin-dev", "dev-plugin"],

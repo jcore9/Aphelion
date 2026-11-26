@@ -14,7 +14,7 @@ import {
   switchedOffPlugins,
   type ApprovedVersion,
 } from "../plugins/approvals";
-import { openStore, type Database } from "../store";
+import { openStore, readServerId, readStreamId, type Database } from "../store";
 import { finishRestore } from ".";
 
 function openTemp(): Database {
@@ -155,4 +155,15 @@ test("a failure partway through leaves devices and plugins as they were, so a re
   db.exec("DROP TRIGGER fail_restore_audit");
   expect(finishRestore(db)).toEqual({ switchedOff: ["weather"] });
   expect(authorized(db, laptop.token)).toBe(false);
+});
+
+test("finishing a restore gives the server a new stream ID and keeps its server ID", () => {
+  const db = openTemp();
+  const server = readServerId(db);
+  const stream = readStreamId(db);
+
+  finishRestore(db);
+
+  expect(readServerId(db)).toBe(server);
+  expect(readStreamId(db)).not.toBe(stream);
 });

@@ -7,12 +7,14 @@ export const helpText = `Aphelion server and command line
 Usage:
   aphelion --headless [--config-dir DIR] [--state-dir DIR]
                       [--plugin-runner-fds REPLIES,REQUESTS]
+                      [--bot-runner-fds REPLIES,REQUESTS]
                       [--plugin-dev FOLDER]
       Start the server. The container runs this. With --plugin-runner-fds,
       the server reads the plugin runner's replies on descriptor REPLIES,
       writes its requests on REQUESTS, and starts every installed plugin.
-      With --plugin-dev, the server also lets plugin dev reload the approved
-      plugin in FOLDER.
+      With --bot-runner-fds, it does the same with the bot runner and starts
+      every bot in bots.yaml. With --plugin-dev, the server also lets plugin
+      dev reload the approved plugin in FOLDER.
 
   aphelion config check [--config-dir DIR] [--state-dir DIR] [--compose FILE]
       Check the config files, the modes of both folders and, with --compose,

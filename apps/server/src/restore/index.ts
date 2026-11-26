@@ -1,7 +1,7 @@
 import { appendAudit } from "../audit";
 import { revokeAllDevices } from "../devices";
 import { switchedOffPlugins, switchOffPlugins } from "../plugins/approvals";
-import type { Database } from "../store";
+import { renewStreamId, type Database } from "../store";
 
 export const restoreAction = "restore.finish";
 
@@ -12,6 +12,7 @@ export function finishRestore(
   now: Date = new Date(),
 ): RestoreFinish {
   return db.transaction(() => {
+    renewStreamId(db);
     const devices = revokeAllDevices(db, now);
     const plugins = switchOffPlugins(db).sort();
     appendAudit(db, {
