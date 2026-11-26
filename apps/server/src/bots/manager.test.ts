@@ -307,4 +307,23 @@ describe("the bot manager", () => {
         expect(fake.runs).toEqual([]);
       }).pipe(Effect.scoped),
   );
+
+  it.live("names the adapter bundle when the bot runner can't start it", () =>
+    Effect.gen(function* () {
+      const { logs, manager, reach } = yield* system({
+        adapter: () => fakeAdapter([]),
+        refuses: "the adapter bundle isn't there",
+      });
+      yield* manager.start("chief");
+      yield* reach("crashed");
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          msg: "the bot runner couldn't start the bot",
+          bot: "chief",
+          adapter: "/adapters/fake/adapter.js",
+          reason: "the adapter bundle isn't there",
+        }),
+      );
+    }).pipe(Effect.scoped),
+  );
 });

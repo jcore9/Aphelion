@@ -297,6 +297,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               }
               logger.warn("the bot runner couldn't start the bot", {
                 bot,
+                adapter: slot.adapter,
                 stage: reply.stage,
                 reason: reply.reason,
               });

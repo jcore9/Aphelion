@@ -12,6 +12,7 @@ export interface FakeBot {
   readonly options?: RunAdapterOptions;
   readonly stopsReading?: boolean;
   readonly launchGate?: Promise<void>;
+  readonly refuses?: string;
 }
 
 export interface FakeRun {
@@ -145,6 +146,9 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
         const bot = bots[spec.bot];
         if (bot === undefined) {
           return yield* new SpawnFailed({ reason: "no such fake bot" });
+        }
+        if (bot.refuses !== undefined) {
+          return yield* new SpawnFailed({ reason: bot.refuses });
         }
         const gate = bot.launchGate;
         if (gate) yield* Effect.promise(() => gate);
