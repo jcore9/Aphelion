@@ -1,11 +1,13 @@
 FROM oven/bun:1.4.5@sha256:3aa040e5445efa09d75bb428a64ba50db13e2b3ac9b6b0c7f145615f62b2ee18 AS build
 WORKDIR /src
 COPY . .
-RUN bun install --frozen-lockfile --filter @aphelion/server \
+RUN bun install --frozen-lockfile --omit=optional --filter @aphelion/server --filter @aphelion/claude-adapter \
  && cd apps/server \
  && bun run build \
  && bun run build:broker \
- && bun run build:plugin-runner
+ && bun run build:plugin-runner \
+ && cd ../../packages/claude-adapter \
+ && bun run build
 
 FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
 RUN apt-get update \
@@ -27,10 +29,12 @@ RUN apt-get update \
  && install -d -o aphelion-plugins -g aphelion-plugins -m 0700 /var/lib/aphelion-plugins \
  && install -d -o harness -g harness -m 0755 /opt/aphelion/plugins \
  && install -d -m 0755 /usr/local/lib/aphelion \
+ && install -d -m 0755 /usr/local/lib/aphelion/adapters/claude \
  && find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
 COPY --from=build --chmod=0755 /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=build --chmod=0755 /src/apps/server/dist/aphelion /src/apps/server/dist/aphelion-secrets /usr/local/bin/
 COPY --from=build --chmod=0644 /src/apps/server/dist/plugin-runner.js /usr/local/lib/aphelion/
+COPY --from=build --chmod=0644 /src/packages/claude-adapter/dist/adapter.js /src/packages/claude-adapter/dist/aphelion-plugin.json /usr/local/lib/aphelion/adapters/claude/
 COPY --chown=harness:harness --chmod=0640 docs/reference/config/example/*.yaml /etc/aphelion/
 COPY --chmod=0755 deploy/image/launch /usr/local/lib/aphelion/launch
 EXPOSE 7400
