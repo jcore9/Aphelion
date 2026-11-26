@@ -3,9 +3,19 @@ import {
   type BotAdapter,
   type RunAdapterOptions,
 } from "@aphelion/plugin-sdk";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Exit, Layer, Scope, Stream } from "effect";
+import type { Logger } from "../log";
+import { memoryLinkPair, type Framing } from "../plugins/link";
 import { SpawnFailed, type ProcessExit } from "../plugins/processes";
 import { BotProcesses, type BotProcess, type BotSpec } from "./processes";
+import { runBotRunner } from "./runner";
+import {
+  maxFrameBytes,
+  runnerReplySchema,
+  runnerRequestSchema,
+  type RunnerReply,
+  type RunnerRequest,
+} from "./runner-protocol";
 import { SessionRefs, type SavedSession } from "./session-refs";
 
 export interface FakeBot {
@@ -225,3 +235,33 @@ export const memorySessionRefs = Layer.sync(SessionRefs, () => {
       }),
   });
 });
+
+const framing = <T>(schema: Framing<T>["schema"]): Framing<T> => ({
+  schema,
+  maxBytes: maxFrameBytes,
+  onDrop: () => Effect.void,
+});
+
+export const fakeRunnerLink = (
+  fake: ReturnType<typeof fakeBotProcesses>,
+  logger: Logger,
+) =>
+  Effect.gen(function* () {
+    const { a, b } = yield* memoryLinkPair<RunnerReply, RunnerRequest>(
+      framing(runnerReplySchema),
+      framing(runnerRequestSchema),
+    );
+    const runnerScope = yield* Scope.make();
+    yield* Effect.addFinalizer(() => Scope.close(runnerScope, Exit.void));
+    yield* runBotRunner(b, {
+      home: "/var/lib/aphelion-bots",
+      shutdownGrace: "200 millis",
+      writeDeadline: "1 second",
+      logger,
+    }).pipe(
+      Effect.provide(fake.layer),
+      Scope.provide(runnerScope),
+      Effect.forkIn(runnerScope),
+    );
+    return a;
+  });

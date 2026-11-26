@@ -14,6 +14,7 @@ export {
 } from "./follow";
 export { persistBotEvents } from "./persist";
 export { closeDanglingTurns } from "./repair";
+export { runBots } from "./run-bots";
 export {
   decodeEvent,
   eventFormat,

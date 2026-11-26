@@ -1,17 +1,13 @@
 import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
-import {
-  BotManager,
-  botManagerLayer,
-  type BotDefinition,
-} from "../bots/manager";
+import type { BotDefinition } from "../bots/manager";
 import { botRunnerPipeLink } from "../bots/runner-pipe";
 import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
 import { formatIssue } from "../config";
 import {
   closeDanglingTurns,
   openEventStore,
-  persistBotEvents,
+  runBots,
   type EventStore,
 } from "../history";
 import { serveHttp } from "../http";
@@ -76,19 +72,15 @@ const startBots = (
   history: EventStore,
 ) =>
   Effect.gen(function* () {
-    const services = yield* Layer.build(
-      botManagerLayer({ bots, logger }).pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            botRunnerPipeLink(fds, logger),
-            sqliteSessionRefs(db, history.serverId),
-          ),
-        ),
+    const links = yield* Layer.build(
+      Layer.mergeAll(
+        botRunnerPipeLink(fds, logger),
+        sqliteSessionRefs(db, history.serverId),
       ),
     );
-    const manager = Context.get(services, BotManager);
-    yield* persistBotEvents(manager.subscribe, history);
-    for (const bot of bots) yield* manager.start(bot.name);
+    yield* runBots({ bots, logger }, history).pipe(
+      Effect.provideContext(links),
+    );
   });
 
 export const headless = (

@@ -13,12 +13,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
-import { Context, Effect, Exit, Layer, Scope, Stream } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import type { RestartPolicy } from "../plugins/lifecycle";
 import { openStore, readServerId } from "../store";
-import { memoryLinkPair, type Framing } from "../plugins/link";
 import {
   BotManager,
   botManagerLayer,
@@ -27,27 +26,14 @@ import {
   type BotEvent,
   type BotState,
 } from "./manager";
-import { runBotRunner } from "./runner";
-import {
-  maxFrameBytes,
-  runnerReplySchema,
-  runnerRequestSchema,
-  type RunnerReply,
-  type RunnerRequest,
-} from "./runner-protocol";
 import { SessionRefs } from "./session-refs";
 import { sqliteSessionRefs } from "./sqlite-session-refs";
 import {
   fakeBotProcesses,
+  fakeRunnerLink,
   memorySessionRefs,
   type FakeBot,
 } from "./test-fixture";
-
-const framing = <T>(schema: Framing<T>["schema"]): Framing<T> => ({
-  schema,
-  maxBytes: maxFrameBytes,
-  onDrop: () => Effect.void,
-});
 
 const policy: RestartPolicy = {
   launchMs: 5_000,
@@ -74,22 +60,7 @@ const system = (
     const logger = createLogger({
       write: (line) => logs.push(JSON.parse(line) as Record<string, unknown>),
     });
-    const { a, b } = yield* memoryLinkPair<RunnerReply, RunnerRequest>(
-      framing(runnerReplySchema),
-      framing(runnerRequestSchema),
-    );
-    const runnerScope = yield* Scope.make();
-    yield* Effect.addFinalizer(() => Scope.close(runnerScope, Exit.void));
-    yield* runBotRunner(b, {
-      home: "/var/lib/aphelion-bots",
-      shutdownGrace: "200 millis",
-      writeDeadline: "1 second",
-      logger,
-    }).pipe(
-      Effect.provide(fake.layer),
-      Scope.provide(runnerScope),
-      Effect.forkIn(runnerScope),
-    );
+    const link = yield* fakeRunnerLink(fake, logger);
     const services = yield* Layer.build(
       botManagerLayer({
         bots: [{ name: "chief", provider, folder }],
@@ -98,7 +69,7 @@ const system = (
         adapters: { fake: "/adapters/fake/adapter.js" },
       }).pipe(
         Layer.provideMerge(sessionLayer),
-        Layer.provide(Layer.succeed(BotRunnerLink, a)),
+        Layer.provide(Layer.succeed(BotRunnerLink, link)),
       ),
     );
     const refs = Context.get(services, SessionRefs);

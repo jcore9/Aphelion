@@ -1,4 +1,4 @@
-import { Effect, PubSub, type Scope } from "effect";
+import { Effect, Fiber, PubSub, type Scope } from "effect";
 import type { BotEvent } from "../bots/manager";
 import type { EventStore } from "./event-store";
 
@@ -8,11 +8,26 @@ export const persistBotEvents = (
 ) =>
   Effect.gen(function* () {
     const subscription = yield* subscribe;
-    yield* PubSub.take(subscription).pipe(
-      Effect.flatMap(({ bot, envelope }) =>
-        store.record({ bot, turn: envelope.turn, event: envelope.event }),
+    const save = ({ bot, envelope }: BotEvent) =>
+      store.record({ bot, turn: envelope.turn, event: envelope.event });
+    const worker = yield* Effect.uninterruptibleMask((restore) =>
+      restore(PubSub.take(subscription)).pipe(
+        Effect.flatMap(save),
+        Effect.forever,
       ),
-      Effect.forever,
-      Effect.forkScoped,
+    ).pipe(Effect.forkScoped);
+    yield* Effect.addFinalizer(() =>
+      Fiber.interrupt(worker).pipe(
+        Effect.andThen(PubSub.remaining(subscription)),
+        Effect.flatMap((queued) =>
+          queued === 0
+            ? Effect.void
+            : PubSub.takeAll(subscription).pipe(
+                Effect.flatMap((events) =>
+                  Effect.forEach(events, save, { discard: true }),
+                ),
+              ),
+        ),
+      ),
     );
   });
