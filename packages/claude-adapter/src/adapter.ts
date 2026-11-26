@@ -73,6 +73,7 @@ interface Live {
 
 interface ActiveTurn {
   readonly input: TurnInput;
+  readonly signal: AbortSignal;
   readonly live: Live;
   readonly inbox: Channel<Item>;
   readonly denied: Set<string>;
@@ -99,11 +100,8 @@ const refusal: PermissionResult = {
   message: "Aphelion denied this tool call.",
 };
 
-const unannouncedReasons = new Set<PermissionDecision["reason"]>([
-  "shutdown",
+const silentReasons = new Set<PermissionDecision["reason"]>([
   "invalid-request",
-  "turn-ended",
-  "cancelled",
   "duplicate-request",
 ]);
 
@@ -187,12 +185,13 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               request: requestId,
             });
             if (!request) return refusal;
+            const announces = !turn.signal.aborted;
             const decision = await unlessAborted(
               turn.input.decide(request),
               signal,
             );
             if (decision?.decision === "allow") return { behavior: "allow" };
-            if (decision && !unannouncedReasons.has(decision.reason)) {
+            if (decision && announces && !silentReasons.has(decision.reason)) {
               turn.denied.add(toolUseID);
             }
             return refusal;
@@ -283,23 +282,30 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         yield { type: "error", code };
       }
 
+      function* stopUnexpected(turn: ActiveTurn): Generator<AdapterEvent> {
+        context.log(
+          `the CLI didn't start as Claude Code ${claudeCodeVersion} in default permission mode, so the adapter stopped it`,
+        );
+        kill(turn.live);
+        yield* error(turn, "vendor");
+        yield turnEnd("error");
+      }
+
       function* translate(
         turn: ActiveTurn,
         message: ClaudeMessage,
         cancelling: boolean,
       ): Generator<AdapterEvent, boolean> {
         switch (message.kind) {
+          case "unreadable-init":
+            yield* stopUnexpected(turn);
+            return true;
           case "init": {
             if (
               message.permissionMode !== "default" ||
               message.version !== claudeCodeVersion
             ) {
-              context.log(
-                `the CLI didn't start as Claude Code ${claudeCodeVersion} in default permission mode, so the adapter stopped it`,
-              );
-              kill(turn.live);
-              yield* error(turn, "vendor");
-              yield turnEnd("error");
+              yield* stopUnexpected(turn);
               return true;
             }
             const ref = claudeRef(message.session);
@@ -378,6 +384,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         }
         const turn: ActiveTurn = {
           input,
+          signal,
           live: owner,
           inbox: channel(),
           denied: new Set(),

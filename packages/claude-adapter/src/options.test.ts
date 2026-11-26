@@ -79,6 +79,13 @@ describe("queryOptions", () => {
     });
   });
 
+  it("delivers every prompt as written, with no file mentions or slash commands", () => {
+    expect(build().verbatimPrompts).toBe(true);
+    expect(build("4f1e2d3c-0000-4000-8000-000000000001").verbatimPrompts).toBe(
+      true,
+    );
+  });
+
   it("offers the file and shell tools and removes web and sub-agents", () => {
     const options = build();
     expect(options.tools).toEqual([

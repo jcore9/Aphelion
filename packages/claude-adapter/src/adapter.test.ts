@@ -531,6 +531,63 @@ describe("how a turn ends", () => {
       expect(checkStream(run.events)).toEqual([]);
     }
   });
+
+  it("stops a CLI whose init doesn't say its mode or version", async () => {
+    const { permissionMode, ...noMode } = sdk.init();
+    const { claude_code_version, ...noVersion } = sdk.init();
+    expect([permissionMode, claude_code_version]).toEqual([
+      "default",
+      "2.1.330",
+    ]);
+    for (const init of [
+      noMode,
+      noVersion,
+      { ...sdk.init(), claude_code_version: 2.1 },
+    ]) {
+      const { adapter, scripted } = setup([
+        [
+          { send: init },
+          { send: sdk.text("too late") },
+          { send: sdk.result() },
+        ],
+      ]);
+      const run = await runTurn(adapter);
+
+      expect(eventsOf(run)).toEqual([
+        { type: "error", code: "vendor" },
+        { type: "turn.end", reason: "error" },
+      ]);
+      expect(scripted.runs[0]?.options.abortController?.signal.aborted).toBe(
+        true,
+      );
+      expect(checkStream(run.events)).toEqual([]);
+    }
+  });
+
+  it("ignores a system message that isn't an init", async () => {
+    const { adapter } = setup([
+      [
+        { send: sdk.init() },
+        {
+          send: {
+            type: "system",
+            subtype: "status",
+            session_id: sdk.sessionId,
+          },
+        },
+        { send: sdk.text("Hello") },
+        { send: sdk.result() },
+      ],
+    ]);
+    const run = await runTurn(adapter);
+
+    expect(eventsOf(run)).toContainEqual({ type: "text.delta", text: "Hello" });
+    expect(eventsOf(run).at(-1)).toEqual({
+      type: "turn.end",
+      reason: "completed",
+    });
+    expect(checkStream(run.events)).toEqual([]);
+  });
 });
 
 describe("when the CLI stops", () => {
@@ -599,6 +656,7 @@ describe("opening a session", () => {
       cwd: "/work",
       permissionMode: "default",
       settingSources: [],
+      verbatimPrompts: true,
     });
     expect(options).not.toHaveProperty("allowedTools");
     expect(options?.env).toEqual({
@@ -830,9 +888,68 @@ describe("cancel", () => {
     expect(scripted.answers).toEqual([
       { behavior: "deny", message: "Aphelion denied this tool call." },
     ]);
+    expect(harness.events.map(({ event }) => event)).toContainEqual({
+      type: "permission.decision",
+      request: "req-7",
+      decision: "deny",
+      by: "default",
+      reason: "cancelled",
+    });
+    expect(harness.events.map(({ event }) => event)).toContainEqual({
+      type: "tool.end",
+      call: "toolu_07",
+      outcome: "denied",
+    });
     expect(harness.events.at(-1)?.event).toEqual({
       type: "turn.end",
       reason: "cancelled",
+    });
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+
+  it("ends a call asked after the cancel as an error, since no decision was announced", async () => {
+    const { adapter, scripted } = setup([
+      [
+        { send: sdk.init() },
+        { send: sdk.toolUse("toolu_08", "Write", { file_path: "/work/a" }) },
+        { waitForInterrupt: true },
+        {
+          ask: {
+            tool: "Write",
+            input: { file_path: "/work/a" },
+            toolUseID: "toolu_08",
+            requestId: "req-8",
+          },
+        },
+        { send: sdk.toolResult("toolu_08", true) },
+        {
+          send: sdk.result({
+            subtype: "error_during_execution",
+            is_error: true,
+            terminal_reason: "aborted_tools",
+          }),
+        },
+      ],
+    ]);
+    const harness = startAdapter(adapter, { decider: allow });
+    await harness.initialize();
+    await harness.startTurn("t1", "one");
+    await harness.untilEvent(({ event }) => event.type === "tool.start");
+    await harness.cancel("t1");
+    await untilTurnEnd(harness, "t1");
+    await harness.shutdown();
+
+    const events = harness.events.map(({ event }) => event);
+    expect(scripted.answers).toEqual([
+      { behavior: "deny", message: "Aphelion denied this tool call." },
+    ]);
+    expect(events.some(({ type }) => type.startsWith("permission."))).toBe(
+      false,
+    );
+    expect(events).toContainEqual({
+      type: "tool.end",
+      call: "toolu_08",
+      outcome: "error",
     });
     expect(checkStream(harness.events)).toEqual([]);
   });

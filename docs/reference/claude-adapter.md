@@ -45,11 +45,20 @@ A **query** is one running Claude Code process that the SDK talks to. The adapte
 | `disallowedTools` | `WebFetch`, `WebSearch` and `Agent` |
 | `allowedTools` | Never set. A tool on that list runs without asking `canUseTool`. |
 | `settingSources` | `[]`, so Claude Code reads no user or project settings files |
+| `verbatimPrompts` | `true`, so each prompt reaches Claude Code exactly as typed. See [Prompts are passed as typed](#prompts-are-passed-as-typed). |
 | `includePartialMessages` | `true`, so text arrives in small pieces |
 | `resume` | The session to resume, when there is one |
 | `env` | Built from the allow list below |
 | `stderr` | Counts the lines Claude Code writes to its error output, and keeps none of them |
 | `executable` | `bun` |
+
+### Prompts are passed as typed
+
+Claude Code normally treats some prompt text as instructions to itself. A prompt that starts with `/` runs a slash command, and `@path` attaches that file to the prompt. Both happen inside Claude Code before any tool call, so Aphelion never sees a permission request for them. A slash command such as `/add-dir` could widen the folders Claude Code may read, and an `@` mention reads a file without asking.
+
+With `verbatimPrompts` set, Claude Code sends the prompt to the model as plain text. `/commands` and `@file` mentions don't work in a bot.
+
+The cost: Claude Code also skips the context it would normally attach at the start of a turn, such as the `CLAUDE.md` files it finds in the folder tree. It attaches most of that context after the turn's first tool call instead.
 
 ### The environment Claude Code gets
 
@@ -61,10 +70,10 @@ No key passes. An `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OA
 
 | SDK message | Event |
 | --- | --- |
-| `system` with subtype `init` | `session`, the first time and again when the id changes |
+| `system` with subtype `init` | `session`, the first time and again when the id changes. An `init` with another permission mode or Claude Code version, or one with no readable mode or version, stops the query and ends the turn with `error` (`vendor`). |
 | A `text_delta` in a `stream_event` | `text.delta`, split into pieces of at most 16 KiB |
 | A `tool_use` block in an `assistant` message | `tool.start`, once per call id, with the kind from the table below |
-| A `tool_result` block in a `user` message | `tool.end` with `ok`, or `error` when Claude Code marks the result as an error, or `denied` when this turn's `decide` denied that call |
+| A `tool_result` block in a `user` message | `tool.end` with `ok`, or `error` when Claude Code marks the result as an error, or `denied` when this turn's `decide` denied that call and the runtime announced the deny with a `permission.decision` event |
 | `result` with subtype `success` | `usage`, then `turn.end` with `completed`, or `refused` when the stop reason is `refusal` |
 | `result` that hit a limit: `error_max_turns`, `error_max_budget_usd`, or the end reason `max_turns`, `budget_exhausted`, `blocking_limit` or `prompt_too_long` | `usage`, then `turn.end` with `limit` |
 | `result` with the end reason `aborted_streaming` or `aborted_tools` after a cancel | `turn.end` with `cancelled` |
@@ -111,7 +120,7 @@ Claude Code carries on after a deny, so a turn never ends with `denied`. A tool 
 
 ## Cancel
 
-When the runtime aborts the turn's signal, the adapter asks Claude Code to interrupt and waits up to 3 seconds for the turn's result. Then it ends the turn with `cancelled`, and the query stays open for the next turn. If no result comes in time, the adapter aborts the query and ends the turn with `cancelled`. The next turn then starts a new query that resumes the session. A tool call that waits for a decision is denied.
+When the runtime aborts the turn's signal, the adapter asks Claude Code to interrupt and waits up to 3 seconds for the turn's result. Then it ends the turn with `cancelled`, and the query stays open for the next turn. If no result comes in time, the adapter aborts the query and ends the turn with `cancelled`. The next turn then starts a new query that resumes the session. A tool call that waits for a decision is denied, and the runtime announces that deny, so the call ends with `denied`. A tool call that asks after the cancel is denied without an announcement, so it ends with `error`.
 
 ## Logs
 

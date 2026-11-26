@@ -70,6 +70,7 @@ export function queryOptions(input: QueryOptionsInput): Options {
     tools: [...enabledTools],
     disallowedTools: [...disabledTools],
     settingSources: [],
+    verbatimPrompts: true,
     includePartialMessages: true,
     env: { ...input.env },
     stderr: input.stderr,

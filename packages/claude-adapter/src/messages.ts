@@ -80,6 +80,8 @@ const authFailure = z.object({
 
 const typed = z.object({ type: z.string() });
 
+const initSubtype = z.object({ subtype: z.literal("init") });
+
 export interface ToolCall {
   readonly id: string;
   readonly name: string;
@@ -107,6 +109,7 @@ export type ClaudeMessage =
       readonly permissionMode: string;
       readonly version: string;
     }
+  | { readonly kind: "unreadable-init" }
   | { readonly kind: "text"; readonly text: string }
   | {
       readonly kind: "assistant";
@@ -154,7 +157,9 @@ export function parseMessage(raw: unknown): ClaudeMessage {
             permissionMode: init.data.permissionMode,
             version: init.data.claude_code_version,
           }
-        : other;
+        : initSubtype.safeParse(raw).success
+          ? { kind: "unreadable-init" }
+          : other;
     }
     case "stream_event": {
       const delta = textDelta.safeParse(raw);
