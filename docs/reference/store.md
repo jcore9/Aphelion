@@ -68,7 +68,6 @@ Bun opens a `file:` name as an ordinary file today, so the last rule is a precau
 | 4 | `plugin-grants` | The `plugin_grants` table of approved plugin permissions ([permissions](plugins.md#permissions)) |
 | 5 | `plugin-installs` | The `plugin_installs` table: one row per approved plugin, with its folder and manifest digest. The server starts each one at boot. The migration adds a row for each plugin that already had grants. A plugin approved earlier with no permissions needs `aphelion plugin install` again. |
 | 6 | `plugin-versions` | Replaces the plugin tables. `plugin_versions` has one row per approved version of a plugin, with its source (`folder` or `release`), folder, files digest and repository. `plugin_installs` names each plugin's current version and the one before it. `plugin_grants` holds the grants of each version. The migration drops the earlier approvals, so every installed plugin needs `aphelion plugin install` again ([permissions](plugins.md#permissions)). |
-
 | 7 | `plugin-enabled` | Adds `plugin_installs.enabled`, `1` by default. A plugin with `0` has no approval and no grants, and [`restore finish`](cli.md#aphelion-restore-finish) sets it for every plugin ([the on and off switch](plugins.md#the-on-and-off-switch)). Every installed plugin stays on when the migration runs. |
 
 ## Rules

@@ -56,32 +56,11 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
 5. Make a recovery copy of the bootstrap key, as [Keep a recovery copy of the bootstrap key](#keep-a-recovery-copy-of-the-bootstrap-key) describes. Do it before you store any secret. If the host's disk fails, this copy is the only way to read the store on a new host.
 
-6. Finish the restore. This revokes every device token in the restored database and switches every plugin off, so the server starts with nobody enrolled and no plugin running. A backup can be old, and a device you removed since then comes back with it. The command runs in a throwaway container, as step 5 does, and doesn't need the bootstrap key.
-
-   ```sh
-   sudo docker run --rm --pull never --network none --entrypoint "" --user harness \
-     -v aphelion_state:/var/lib/aphelion \
-     aphelion:local \
-     aphelion restore finish
-   ```
-
-   It prints one line for each plugin, with the command that switches it on, and then the command that enrolls a device. For the test data you should see:
-
-   ```text
-   Restore finished. Every device token is revoked.
-   Plugin aphelion-test-plugin is switched off. Switch it on: aphelion plugin enable aphelion-test-plugin
-   Enroll a device: aphelion device add NAME
-   ```
-
-   Running it again prints the same lines and revokes every device again, including any you enrolled in between. Enroll that device again afterwards.
-
-7. Start the service.
+6. Start the service.
 
    ```sh
    sudo systemctl start aphelion
    ```
-
-Then enroll a device and switch each plugin back on with the commands from step 6 ([Check the restore](#check-the-restore) shows them).
 
 7. From another device on the tailnet, check that the server answers. Replace the address with the host's tailnet address.
 
@@ -300,11 +279,34 @@ Start from a host that has the bootstrap key in `/etc/credstore.encrypted/apheli
      tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data
    ```
 
-6. Start the service.
+6. Finish the restore. This revokes every device token in the restored database and switches every plugin off, so the server starts with nobody enrolled and no plugin running. A backup can be old, and a device you removed since then comes back with it. The command runs in a throwaway container, like step 5, and doesn't need the bootstrap key.
+
+   ```sh
+   sudo docker run --rm --pull never --network none --entrypoint "" --user harness \
+     -v aphelion_state:/var/lib/aphelion \
+     aphelion:local \
+     aphelion restore finish
+   ```
+
+   It prints one line for each plugin, with the command that switches it on, and then the command that enrolls a device. For the test data you should see:
+
+   ```text
+   Restore finished. Every device token is revoked.
+   Plugin aphelion-test-plugin is switched off. Switch it on: aphelion plugin enable aphelion-test-plugin
+   Enroll a device: aphelion device add NAME
+   ```
+
+   Running it again prints the same lines and revokes every device again, including any you enrolled in between. Enroll that device again afterwards.
+
+   Don't start the service until this step prints `Restore finished`. If it fails, the restored tokens and plugins are still live, so fix the cause and run it again first.
+
+7. Start the service.
 
    ```sh
    sudo systemctl start aphelion
    ```
+
+Then enroll a device and switch each plugin back on with the commands from step 6 ([Check the restore](#check-the-restore) shows them).
 
 If the key doesn't match the restored `secrets` volume, the container exits and systemd tries again every 10 seconds. `sudo journalctl -u aphelion` shows `The bootstrap key does not match this secrets store`. The key and the archive came from different installs. Stop the service with `sudo systemctl stop aphelion`, put the right key in place with [Restore on new hardware](#restore-on-new-hardware) steps 2 to 4, and start it again. The volumes stay as they are.
 
