@@ -49,7 +49,9 @@ export function apiKeyFromInput(input: Uint8Array): ApiKeyInput {
     }
     const bytes = input.subarray(0, end);
     if (bytes.some((byte) => byte < 0x21 || byte > 0x7e)) {
-      return refused("The API key has a line break or a control character.");
+      return refused(
+        "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+      );
     }
     return {
       ok: true,

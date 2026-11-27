@@ -36,16 +36,46 @@ describe("apiKeyFromInput", () => {
   it.each([
     ["", "The API key is empty."],
     ["\n", "The API key is empty."],
-    [`${fake}\n\n`, "The API key has a line break or a control character."],
-    [`${fake}\nsecond`, "The API key has a line break or a control character."],
-    [`${fake}\t`, "The API key has a line break or a control character."],
-    [`${fake}\u007f`, "The API key has a line break or a control character."],
-    [`${fake} `, "The API key has a line break or a control character."],
-    [`sk fake`, "The API key has a line break or a control character."],
-    [`${fake}\u0085`, "The API key has a line break or a control character."],
-    [`${fake}\u009b`, "The API key has a line break or a control character."],
-    [`${fake}\u00e9`, "The API key has a line break or a control character."],
-    [`${fake}\u200b`, "The API key has a line break or a control character."],
+    [
+      `${fake}\n\n`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `${fake}\nsecond`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `${fake}\t`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `${fake}\u007f`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `${fake} `,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `sk fake`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `${fake}\u0085`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `${fake}\u009b`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `${fake}\u00e9`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
+    [
+      `${fake}\u200b`,
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
+    ],
     ["k".repeat(513), "The API key is longer than 512 bytes."],
   ])("refuses %j without repeating it", (text, reason) => {
     const result = apiKeyFromInput(input(text));
@@ -56,7 +86,8 @@ describe("apiKeyFromInput", () => {
   it("refuses bytes that aren't printable ASCII", () => {
     expect(apiKeyFromInput(new Uint8Array([0x6b, 0xff, 0x6b]))).toEqual({
       ok: false,
-      reason: "The API key has a line break or a control character.",
+      reason:
+        "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
     });
   });
 

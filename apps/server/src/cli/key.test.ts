@@ -240,7 +240,7 @@ describe("aphelion key add", () => {
     ["", "The API key is empty."],
     [
       `${fake}\n${other}\n`,
-      "The API key has a line break or a control character.",
+      "The API key can only have letters, digits and punctuation, with no spaces or line breaks.",
     ],
     ["k".repeat(600), "The API key is longer than 512 bytes."],
   ])(
