@@ -50,7 +50,9 @@ describe("command admission", () => {
   it.effect("frees the place of a command that failed or was interrupted", () =>
     Effect.gen(function* () {
       const admission = createAdmission({ maxInFlight: 1 });
-      yield* Effect.exit(admission.guard(laptop, "read", () => Effect.die("boom")));
+      yield* Effect.exit(
+        admission.guard(laptop, "read", () => Effect.die("boom")),
+      );
       const stuck = yield* Effect.forkChild(
         admission.guard(laptop, "read", () => Effect.never),
       );

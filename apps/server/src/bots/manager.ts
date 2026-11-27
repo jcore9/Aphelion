@@ -129,7 +129,7 @@ type SlotInput =
       readonly done: Deferred.Deferred<TurnOutcome>;
     }
   | { readonly type: "cancel"; readonly turn: TurnId }
-  | { readonly type: "expire"; readonly turn: TurnId }
+  | { readonly type: "recover"; readonly run: number }
   | ({ readonly type: "wait" } & Waiter);
 
 interface Slot {
@@ -139,6 +139,8 @@ interface Slot {
   state: LifecycleState;
   turn: TurnId | undefined;
   resume: SessionRef | null;
+  recovering: boolean;
+  restart: boolean;
   stderrLines: number;
   readonly turns: Map<TurnId, Deferred.Deferred<TurnOutcome>[]>;
   readonly expired: Set<TurnId>;
@@ -219,7 +221,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
 
       const settleTurn = (slot: Slot, turn: TurnId, outcome: TurnOutcome) =>
         Effect.gen(function* () {
-          const waiting = slot.turns.get(turn) ?? [];
+          const waiting = slot.turns.get(turn);
+          if (waiting === undefined) return;
           slot.turns.delete(turn);
           if (outcome !== "accepted" && options.turns !== undefined) {
             yield* options.turns.end(turn, "refused");
@@ -279,14 +282,27 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }
         });
 
-      const apply = (slot: Slot, event: LifecycleEvent) =>
+      const apply = (slot: Slot, event: LifecycleEvent): Effect.Effect<void> =>
         Effect.gen(function* () {
           const before = slot.state;
           const next = step(before, event, policy);
           slot.state = next.state;
+          const restarting =
+            slot.restart &&
+            next.state.state === "stopped" &&
+            next.state.reason === "requested";
           if (next.state.state !== "running") {
             slot.turn = undefined;
             slot.expired.clear();
+          }
+          if (
+            next.state.state === "running"
+              ? before.state !== "running"
+              : next.state.state !== "starting" &&
+                next.state.state !== "stopping" &&
+                !restarting
+          ) {
+            slot.recovering = false;
           }
           if (next.state.state !== before.state) {
             logger.info("bot state changed", {
@@ -312,6 +328,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             },
           );
           yield* settleWaiters(slot);
+          if (restarting) {
+            slot.restart = false;
+            yield* apply(slot, { type: "start" });
+          }
         });
 
       const onReply = (slot: Slot, reply: RunnerReply) =>
@@ -354,15 +374,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 run: reply.run,
               });
             case "turn.accepted":
-              if (slot.expired.delete(reply.turn)) {
-                if (reply.run !== slot.state.run) return;
-                return yield* link.send({
-                  type: "turn.cancel",
-                  bot,
-                  run: reply.run,
-                  turn: reply.turn,
-                });
-              }
+              if (slot.expired.has(reply.turn)) return;
               if (reply.run === slot.state.run) slot.turn = reply.turn;
               yield* settleTurn(slot, reply.turn, "accepted");
               return yield* settleWaiters(slot);
@@ -441,6 +453,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               slot.waiters.add(input);
               return yield* settleWaiters(slot);
             case "turn": {
+              if (slot.expired.has(input.turn)) return;
+              if (slot.recovering) return yield* refuse(input, "busy");
               if (slot.state.state !== "running") {
                 return yield* refuse(input, "not-running");
               }
@@ -456,10 +470,19 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 text: input.text,
               });
             }
-            case "expire":
-              if (!slot.turns.has(input.turn)) return;
-              slot.expired.add(input.turn);
-              return yield* settleTurn(slot, input.turn, "no-answer");
+            case "recover":
+              if (
+                slot.state.state !== "running" ||
+                slot.state.run !== input.run
+              ) {
+                return;
+              }
+              slot.restart = true;
+              return yield* apply(slot, { type: "stop" });
+            case "stop":
+              slot.restart = false;
+              slot.recovering = false;
+              return yield* apply(slot, input);
             case "cancel":
               if (slot.state.state !== "running" || slot.turn !== input.turn)
                 return;
@@ -506,6 +529,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             state: installed,
             turn: undefined,
             resume: null,
+            recovering: false,
+            restart: false,
             stderrLines: 0,
             turns: new Map(),
             expired: new Set(),
@@ -554,6 +579,32 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           yield* waitFor(name, (state) => stoppedStates.has(state.state));
         });
 
+      const expire = (
+        slot: Slot,
+        turn: TurnId,
+        done: Deferred.Deferred<TurnOutcome>,
+      ) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const run = slot.state.run;
+            const expired = yield* Effect.sync(() => {
+              if (!Deferred.doneUnsafe(done, Effect.succeed("no-answer"))) {
+                return false;
+              }
+              slot.turns.delete(turn);
+              slot.expired.add(turn);
+              slot.recovering = true;
+              return true;
+            });
+            if (!expired) return yield* Deferred.await(done);
+            if (options.turns !== undefined) {
+              yield* options.turns.end(turn, "refused");
+            }
+            yield* Queue.offer(slot.mailbox, { type: "recover", run });
+            return "no-answer" as const;
+          }),
+        );
+
       const startTurn = (name: string, text: string) =>
         Effect.gen(function* () {
           const turn = turnId.parse(randomUUIDv7());
@@ -563,6 +614,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           if (!turnStartParams.safeParse({ turn, text }).success) {
             return { turn, outcome: "too-long" as const };
           }
+          if (slot.recovering) return { turn, outcome: "busy" as const };
           const done = yield* Deferred.make<TurnOutcome>();
           const dispatched = yield* Effect.uninterruptible(
             Effect.gen(function* () {
@@ -588,8 +640,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             ),
           );
           if (Option.isSome(answered)) return { turn, outcome: answered.value };
-          yield* Queue.offer(slot.mailbox, { type: "expire", turn });
-          return { turn, outcome: yield* Deferred.await(done) };
+          return { turn, outcome: yield* expire(slot, turn, done) };
         });
 
       yield* Effect.addFinalizer(() =>

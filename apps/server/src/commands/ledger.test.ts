@@ -613,7 +613,9 @@ describe("the command ledger when a result can't be saved", () => {
           code: "storage-failed",
         });
         expect(
-          lines.some((line) => line["msg"] === "saving a command's result failed"),
+          lines.some(
+            (line) => line["msg"] === "saving a command's result failed",
+          ),
         ).toBe(true);
       }),
   );

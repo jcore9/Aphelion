@@ -13,7 +13,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
-import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect";
+import {
+  Cause,
+  Context,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Queue,
+  Stream,
+} from "effect";
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import type { RestartPolicy } from "../plugins/lifecycle";
@@ -120,27 +129,43 @@ const sessionTurn: FakeScript[number] = [
 const uuidV7 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-const silentStarts = Effect.gen(function* () {
-  const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
-  const sent: RunnerRequest[] = [];
-  const shape = (link: Context.Service.Shape<typeof BotRunnerLink>) => {
-    Effect.runFork(
-      Queue.take(link.incoming).pipe(
-        Effect.flatMap((reply) => Queue.offer(incoming, reply)),
-        Effect.forever,
-        Effect.ignore,
-      ),
-    );
-    return {
-      incoming,
-      send: (message: RunnerRequest) => {
-        sent.push(message);
-        return message.type === "turn.start" ? Effect.void : link.send(message);
-      },
+const silentStarts = (
+  swallow = Number.POSITIVE_INFINITY,
+  gate?: Deferred.Deferred<undefined>,
+) =>
+  Effect.gen(function* () {
+    const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+    const sent: RunnerRequest[] = [];
+    let starts = 0;
+    const shape = (link: Context.Service.Shape<typeof BotRunnerLink>) => {
+      Effect.runFork(
+        Queue.take(link.incoming).pipe(
+          Effect.flatMap((reply) => Queue.offer(incoming, reply)),
+          Effect.forever,
+          Effect.ignore,
+        ),
+      );
+      return {
+        incoming,
+        send: (message: RunnerRequest) => {
+          sent.push(message);
+          if (message.type !== "turn.start") return link.send(message);
+          starts += 1;
+          const swallowed = starts <= swallow;
+          const held = gate === undefined ? Effect.void : Deferred.await(gate);
+          return held.pipe(
+            Effect.andThen(swallowed ? Effect.void : link.send(message)),
+          );
+        },
+      };
     };
-  };
-  return { incoming, sent, shape };
-});
+    return { incoming, sent, shape };
+  });
+
+const eventually = (until: () => boolean) =>
+  Effect.gen(function* () {
+    while (!until()) yield* Effect.sleep("10 millis");
+  }).pipe(Effect.timeout("5 seconds"), Effect.orDie);
 
 const ledgerCalls = () => {
   const calls: string[] = [];
@@ -162,7 +187,7 @@ describe("a turn start that the adapter hasn't answered", () => {
   it.live("makes another prompt wait as busy, not start a second turn", () =>
     Effect.gen(function* () {
       const { calls, turns } = ledgerCalls();
-      const { sent, shape } = yield* silentStarts;
+      const { sent, shape } = yield* silentStarts();
       const { manager, reach } = yield* system(
         recording([sessionTurn]).bot,
         () => Effect.void,
@@ -192,11 +217,65 @@ describe("a turn start that the adapter hasn't answered", () => {
   );
 
   it.live(
-    "ends the turn as refused when the deadline passes, and takes the next prompt",
+    "ends the turn as refused at the deadline, keeps the bot busy while its run restarts with resume, then takes the next prompt",
     () =>
       Effect.gen(function* () {
         const { calls, turns } = ledgerCalls();
-        const { sent, shape } = yield* silentStarts;
+        const { sent, shape } = yield* silentStarts(1);
+        const { manager, reach } = yield* system(
+          recording([sessionTurn]).bot,
+          (refs) =>
+            refs.set("chief", {
+              ref: sessionRef.parse("s-old"),
+              folder,
+              provider: "fake",
+            }),
+          "fake",
+          memorySessionRefs,
+          turns,
+          shape,
+          { turnAcceptDeadlineMs: 60 },
+        );
+        yield* manager.start("chief");
+        yield* reach("running");
+
+        const first = yield* manager.startTurn("chief", "first");
+        const during = yield* manager.startTurn("chief", "second");
+
+        expect(first.outcome).toBe("no-answer");
+        expect(during.outcome).toBe("busy");
+        expect(calls.slice(0, 2)).toEqual([
+          `open ${first.turn}`,
+          `end ${first.turn} refused`,
+        ]);
+
+        yield* eventually(() =>
+          sent.some(({ type, run }) => type === "start" && run === 2),
+        );
+        expect(sent.filter(({ type }) => type === "stop")).toEqual([
+          { type: "stop", bot: "chief", run: 1 },
+        ]);
+        expect(
+          sent.find(({ type, run }) => type === "start" && run === 2),
+        ).toMatchObject({
+          resume: "s-old",
+        });
+        yield* reach("running");
+        const next = yield* manager.startTurn("chief", "third");
+        expect(next.outcome).toBe("accepted");
+        expect(sent.filter(({ type }) => type === "turn.start")).toHaveLength(
+          2,
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "answers at the deadline even when the runner write is stuck, and refuses new prompts as busy",
+    () =>
+      Effect.gen(function* () {
+        const { turns } = ledgerCalls();
+        const gate = yield* Deferred.make<undefined>();
+        const { sent, shape } = yield* silentStarts(1, gate);
         const { manager, reach } = yield* system(
           recording([sessionTurn]).bot,
           () => Effect.void,
@@ -209,30 +288,33 @@ describe("a turn start that the adapter hasn't answered", () => {
         yield* manager.start("chief");
         yield* reach("running");
 
-        const first = yield* manager.startTurn("chief", "first");
-        const next = yield* manager
+        const first = yield* manager
+          .startTurn("chief", "first")
+          .pipe(Effect.timeout("1 second"), Effect.orDie);
+        const during = yield* manager
           .startTurn("chief", "second")
-          .pipe(Effect.forkScoped);
-        yield* Effect.sleep("30 millis");
+          .pipe(Effect.timeout("1 second"), Effect.orDie);
 
         expect(first.outcome).toBe("no-answer");
-        expect(calls.slice(0, 2)).toEqual([
-          `open ${first.turn}`,
-          `end ${first.turn} refused`,
-        ]);
-        expect(sent.filter(({ type }) => type === "turn.start")).toHaveLength(
-          2,
+        expect(during.outcome).toBe("busy");
+
+        yield* Deferred.succeed(gate, undefined);
+        yield* eventually(() =>
+          sent.some(({ type, run }) => type === "start" && run === 2),
         );
-        yield* Fiber.interrupt(next);
+        yield* reach("running");
+        expect((yield* manager.startTurn("chief", "third")).outcome).toBe(
+          "accepted",
+        );
       }).pipe(Effect.scoped),
   );
 
   it.live(
-    "tells the runner to cancel a turn the adapter accepts after the deadline",
+    "ignores an accept from the run it restarted, and tells the runner nothing",
     () =>
       Effect.gen(function* () {
         const { turns } = ledgerCalls();
-        const { incoming, sent, shape } = yield* silentStarts;
+        const { incoming, sent, shape } = yield* silentStarts(1);
         const { manager, reach } = yield* system(
           recording([sessionTurn]).bot,
           () => Effect.void,
@@ -246,6 +328,10 @@ describe("a turn start that the adapter hasn't answered", () => {
         yield* reach("running");
         const late = yield* manager.startTurn("chief", "slow");
         expect(late.outcome).toBe("no-answer");
+        yield* eventually(() =>
+          sent.some(({ type, run }) => type === "start" && run === 2),
+        );
+        yield* reach("running");
 
         yield* Queue.offer(incoming, {
           type: "turn.accepted",
@@ -255,9 +341,7 @@ describe("a turn start that the adapter hasn't answered", () => {
         });
         yield* Effect.sleep("30 millis");
 
-        expect(sent.filter(({ type }) => type === "turn.cancel")).toEqual([
-          { type: "turn.cancel", bot: "chief", run: 1, turn: late.turn },
-        ]);
+        expect(sent.filter(({ type }) => type === "turn.cancel")).toEqual([]);
         expect(yield* manager.status("chief")).toEqual({ state: "running" });
       }).pipe(Effect.scoped),
   );
