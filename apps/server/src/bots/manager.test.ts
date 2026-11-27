@@ -1042,6 +1042,371 @@ describe("a turn start that the adapter hasn't answered", () => {
         ).toEqual({ ok: false, code: "bot-not-running" });
       }).pipe(Effect.scoped),
   );
+
+  it.live(
+    "completes teardown, signals failure, settles pending turns, and closes the scope when a mailbox worker exits on a bot_sessions write failure before the runner queue closes",
+    () =>
+      Effect.gen(function* () {
+        const dir = mkdtempSync(join(tmpdir(), "aphelion-s18-"));
+        const db = openStore(join(dir, "aphelion.db"));
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            db.close();
+            rmSync(dir, { recursive: true, force: true });
+          }),
+        );
+        db.run(`
+          CREATE TRIGGER fail_bot_sessions_insert
+          BEFORE INSERT ON bot_sessions
+          BEGIN
+            SELECT RAISE(ABORT, 'forced bot_sessions insert failure');
+          END
+        `);
+        const logger = createLogger({ write: () => undefined });
+        const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+        const dispatched = yield* Deferred.make<undefined>();
+        const runnerFailed = yield* Deferred.make<undefined>();
+        const link: Context.Service.Shape<typeof BotRunnerLink> = {
+          incoming,
+          send: (message) =>
+            Effect.gen(function* () {
+              if (message.type === "start") {
+                yield* Queue.offer(incoming, {
+                  type: "spawned",
+                  bot: message.bot,
+                  run: message.run,
+                });
+                yield* Queue.offer(incoming, {
+                  type: "started",
+                  bot: message.bot,
+                  run: message.run,
+                });
+                return;
+              }
+              if (message.type === "turn.start") {
+                yield* Deferred.succeed(dispatched, undefined);
+              }
+            }),
+        };
+        const services = yield* Layer.build(
+          Layer.mergeAll(
+            Layer.succeed(BotRunnerLink, link),
+            sqliteSessionRefs(db, readServerId(db)),
+          ),
+        );
+        const app = yield* Scope.make();
+        const { history, ledger, bots } = yield* Effect.gen(function* () {
+          const history = yield* openEventStore(db, readServerId(db), {
+            logger,
+          });
+          const ledger = yield* openCommandLedger(db, logger);
+          const bots = yield* runBots(
+            {
+              bots: [{ name: "chief", provider: "fake", folder }],
+              logger,
+              policy,
+              adapters: { fake: "/adapters/fake/adapter.js" },
+              stopDeadlineMs: 500,
+              turnAcceptDeadlineMs: 5_000,
+              onChannelFailed: () =>
+                Deferred.succeed(runnerFailed, undefined).pipe(Effect.asVoid),
+            },
+            history,
+          ).pipe(Effect.provideContext(services));
+          return { history, ledger, bots };
+        }).pipe(Scope.provide(app));
+
+        yield* bots
+          .waitFor("chief", (state) => state.state === "running")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+
+        const device = deviceId.parse("0123456789abcdef");
+        const admission = createAdmission();
+        const context = { bots, ledger, admission, logger, history };
+        const promptFrame = (id: string, text: string) =>
+          ({
+            v: version,
+            type: "command",
+            id: commandId.parse(id),
+            name: "bot.prompt",
+            payload: { bot: "chief", text },
+          }) as const;
+
+        yield* dispatch(
+          context,
+          device,
+          promptFrame("cmd-dispatched", "first"),
+        ).pipe(Effect.forkScoped);
+        yield* Deferred.await(dispatched).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.orDie,
+        );
+
+        yield* Queue.offer(incoming, {
+          type: "event",
+          bot: "chief",
+          run: 1,
+          envelope: {
+            seq: 1,
+            turn: null,
+            event: { type: "session", ref: sessionRef.parse("s-fail") },
+          },
+        });
+        yield* Effect.sleep("40 millis");
+
+        yield* dispatch(
+          context,
+          device,
+          promptFrame("cmd-queued", "second"),
+        ).pipe(Effect.forkScoped);
+        yield* Effect.sleep("20 millis");
+
+        yield* Queue.end(incoming);
+
+        const failedSignal = yield* Deferred.await(runnerFailed).pipe(
+          Effect.timeoutOption("1 second"),
+        );
+        const closing = yield* Effect.forkDetach(Scope.close(app, Exit.void));
+        const closed = yield* Fiber.await(closing).pipe(
+          Effect.timeoutOption("1 second"),
+        );
+
+        expect(failedSignal._tag).toBe("Some");
+        expect(closed._tag).toBe("Some");
+        expect(
+          db.all("SELECT id, state, result FROM commands ORDER BY id"),
+        ).toEqual([
+          { id: "cmd-dispatched", state: "failed", result: "bot-not-running" },
+          { id: "cmd-queued", state: "failed", result: "bot-not-running" },
+        ]);
+        expect(db.all("SELECT end_reason FROM turns")).toEqual([
+          { end_reason: "refused" },
+          { end_reason: "refused" },
+        ]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "stops and joins a hung mailbox worker at the drain deadline, settles its pending turns, and does not replay another bot's drained events",
+    () =>
+      Effect.gen(function* () {
+        const dir = mkdtempSync(join(tmpdir(), "aphelion-s18-deadline-"));
+        const db = openStore(join(dir, "aphelion.db"));
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            db.close();
+            rmSync(dir, { recursive: true, force: true });
+          }),
+        );
+        const logger = createLogger({ write: () => undefined });
+        const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+        const alphaDispatched = yield* Deferred.make<undefined>();
+        const alphaStuck = yield* Deferred.make<undefined>();
+        const runnerFailed = yield* Deferred.make<undefined>();
+        let alphaInterrupted = false;
+        const link: Context.Service.Shape<typeof BotRunnerLink> = {
+          incoming,
+          send: (message) =>
+            Effect.gen(function* () {
+              if (message.type === "start") {
+                yield* Queue.offer(incoming, {
+                  type: "spawned",
+                  bot: message.bot,
+                  run: message.run,
+                });
+                yield* Queue.offer(incoming, {
+                  type: "started",
+                  bot: message.bot,
+                  run: message.run,
+                });
+                return;
+              }
+              if (message.type === "turn.start" && message.bot === "alpha") {
+                yield* Deferred.succeed(alphaDispatched, undefined);
+                return;
+              }
+              if (message.type === "turn.start" && message.bot === "beta") {
+                yield* Queue.offer(incoming, {
+                  type: "turn.accepted",
+                  bot: message.bot,
+                  run: message.run,
+                  turn: message.turn,
+                });
+              }
+            }),
+        };
+        const hangingRefs = Layer.succeed(
+          SessionRefs,
+          SessionRefs.of({
+            get: () => Effect.succeed(undefined),
+            set: (bot) =>
+              bot === "alpha"
+                ? Deferred.succeed(alphaStuck, undefined).pipe(
+                    Effect.andThen(Effect.never),
+                    Effect.onInterrupt(() =>
+                      Effect.sync(() => {
+                        alphaInterrupted = true;
+                      }),
+                    ),
+                  )
+                : Effect.void,
+            clear: () => Effect.void,
+          }),
+        );
+        const services = yield* Layer.build(
+          Layer.mergeAll(Layer.succeed(BotRunnerLink, link), hangingRefs),
+        );
+        const app = yield* Scope.make();
+        const { history, ledger, bots } = yield* Effect.gen(function* () {
+          const history = yield* openEventStore(db, readServerId(db), {
+            logger,
+          });
+          const ledger = yield* openCommandLedger(db, logger);
+          const bots = yield* runBots(
+            {
+              bots: [
+                {
+                  name: "alpha",
+                  provider: "fake",
+                  folder: "/var/lib/aphelion-bots/alpha",
+                },
+                {
+                  name: "beta",
+                  provider: "fake",
+                  folder: "/var/lib/aphelion-bots/beta",
+                },
+              ],
+              logger,
+              policy,
+              adapters: { fake: "/adapters/fake/adapter.js" },
+              drainDeadlineMs: 80,
+              stopDeadlineMs: 1_000,
+              turnAcceptDeadlineMs: 5_000,
+              onChannelFailed: () =>
+                Deferred.succeed(runnerFailed, undefined).pipe(Effect.asVoid),
+            },
+            history,
+          ).pipe(Effect.provideContext(services));
+          return { history, ledger, bots };
+        }).pipe(Scope.provide(app));
+
+        yield* bots
+          .waitFor("alpha", (state) => state.state === "running")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+        yield* bots
+          .waitFor("beta", (state) => state.state === "running")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+
+        const betaTurn = yield* bots.startTurn("beta", "finish");
+        expect(betaTurn.outcome).toBe("accepted");
+
+        const device = deviceId.parse("0123456789abcdef");
+        const admission = createAdmission();
+        const context = { bots, ledger, admission, logger, history };
+        const promptFrame = (id: string, bot: string, text: string) =>
+          ({
+            v: version,
+            type: "command",
+            id: commandId.parse(id),
+            name: "bot.prompt",
+            payload: { bot, text },
+          }) as const;
+
+        yield* dispatch(
+          context,
+          device,
+          promptFrame("cmd-alpha-dispatched", "alpha", "first"),
+        ).pipe(Effect.forkScoped);
+        yield* Deferred.await(alphaDispatched).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.orDie,
+        );
+
+        yield* Queue.offer(incoming, {
+          type: "event",
+          bot: "alpha",
+          run: 1,
+          envelope: {
+            seq: 1,
+            turn: null,
+            event: { type: "session", ref: sessionRef.parse("s-hang") },
+          },
+        });
+        yield* Deferred.await(alphaStuck).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.orDie,
+        );
+
+        yield* dispatch(
+          context,
+          device,
+          promptFrame("cmd-alpha-queued", "alpha", "second"),
+        ).pipe(Effect.forkScoped);
+        yield* Queue.offer(incoming, {
+          type: "event",
+          bot: "beta",
+          run: 1,
+          envelope: {
+            seq: 1,
+            turn: betaTurn.turn,
+            event: { type: "text.delta", text: "done" },
+          },
+        });
+        yield* Queue.offer(incoming, {
+          type: "event",
+          bot: "beta",
+          run: 1,
+          envelope: {
+            seq: 2,
+            turn: betaTurn.turn,
+            event: { type: "turn.end", reason: "completed" },
+          },
+        });
+        yield* Effect.sleep("20 millis");
+
+        yield* Queue.end(incoming);
+
+        const failedSignal = yield* Deferred.await(runnerFailed).pipe(
+          Effect.timeoutOption("1 second"),
+        );
+        const closing = yield* Effect.forkDetach(Scope.close(app, Exit.void));
+        const closed = yield* Fiber.await(closing).pipe(
+          Effect.timeoutOption("1 second"),
+        );
+
+        expect(failedSignal._tag).toBe("Some");
+        expect(closed._tag).toBe("Some");
+        expect(alphaInterrupted).toBe(true);
+        expect(
+          db.all("SELECT id, state, result FROM commands ORDER BY id"),
+        ).toEqual([
+          {
+            id: "cmd-alpha-dispatched",
+            state: "failed",
+            result: "bot-not-running",
+          },
+          {
+            id: "cmd-alpha-queued",
+            state: "failed",
+            result: "bot-not-running",
+          },
+        ]);
+        expect(
+          db
+            .all("SELECT bot, turn, kind FROM events ORDER BY position")
+            .map((row) => [row["bot"], row["turn"], row["kind"]]),
+        ).toEqual([
+          ["alpha", null, "session"],
+          ["beta", betaTurn.turn, "text.delta"],
+          ["beta", betaTurn.turn, "turn.end"],
+        ]);
+        expect(
+          db.all("SELECT id, end_reason FROM turns WHERE id = ?", [
+            betaTurn.turn,
+          ]),
+        ).toEqual([{ id: betaTurn.turn, end_reason: "completed" }]);
+      }).pipe(Effect.scoped),
+  );
 });
 
 describe("the bot manager", () => {

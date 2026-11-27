@@ -149,13 +149,16 @@ interface Slot {
   readonly bot: BotDefinition;
   readonly adapter: string;
   readonly mailbox: Queue.Queue<SlotInput>;
+  worker: Fiber.Fiber<void> | undefined;
   state: LifecycleState;
   turn: TurnId | undefined;
   resume: SessionRef | null;
   recovering: boolean;
   restart: boolean;
+  stopped: boolean;
   stderrLines: number;
   readonly turns: Map<TurnId, TurnRequest>;
+  readonly pending: Set<TurnRequest>;
   readonly expired: Set<TurnId>;
   readonly waiters: Set<Waiter>;
 }
@@ -196,6 +199,7 @@ export interface BotManagerOptions {
   readonly policy?: RestartPolicy;
   readonly adapters?: Readonly<Record<string, string>>;
   readonly stopDeadlineMs?: number;
+  readonly drainDeadlineMs?: number;
   readonly turnAcceptDeadlineMs?: number;
   readonly writeDeadlineMs?: number;
   readonly onChannelFailed?: () => Effect.Effect<void>;
@@ -203,6 +207,7 @@ export interface BotManagerOptions {
 
 export const turnAcceptDeadlineMs = 30_000;
 export const runnerWriteDeadlineMs = 10_000;
+export const channelDrainDeadlineMs = 5_000;
 export const runnerChannelFailedMessage =
   "a write to the bot runner timed out, so the channel is closed";
 const incomingDrainDeadlineMs = 200;
@@ -233,6 +238,11 @@ export const botManagerLayer = (options: BotManagerOptions) =>
         graceMs: 10_000,
       };
       const adapters = options.adapters ?? adapterBundles;
+      const stopDeadlineMs = options.stopDeadlineMs ?? 15_000;
+      const drainDeadlineMs = Math.min(
+        options.drainDeadlineMs ?? channelDrainDeadlineMs,
+        stopDeadlineMs,
+      );
       const writeDeadlineMs = options.writeDeadlineMs ?? runnerWriteDeadlineMs;
       const definitions = new Map(options.bots.map((bot) => [bot.name, bot]));
       const slots = new Map<string, Slot>();
@@ -263,20 +273,83 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           { discard: true },
         );
 
-      const settleTurn = (slot: Slot, turn: TurnId, outcome: TurnOutcome) =>
+      const finishTurn = (
+        slot: Slot,
+        request: TurnRequest,
+        outcome: TurnOutcome,
+      ) =>
         Effect.gen(function* () {
-          const pending = yield* Effect.sync(() => {
-            const request = slot.turns.get(turn);
-            if (request === undefined || request.settling) return undefined;
-            slot.turns.delete(turn);
+          const claimed = yield* Effect.sync(() => {
+            if (request.settling || request.expired) return false;
             request.settling = true;
-            return request;
+            slot.turns.delete(request.turn);
+            slot.pending.delete(request);
+            return true;
           });
-          if (pending === undefined) return;
-          if (outcome !== "accepted" && options.turns !== undefined) {
-            yield* options.turns.end(turn, "refused");
+          if (!claimed) return;
+          yield* (
+            outcome !== "accepted" && options.turns !== undefined
+              ? options.turns.end(request.turn, "refused")
+              : Effect.void
+          ).pipe(
+            Effect.ensuring(
+              Deferred.succeed(request.done, outcome).pipe(Effect.asVoid),
+            ),
+          );
+        });
+
+      const settleTurn = (slot: Slot, turn: TurnId, outcome: TurnOutcome) =>
+        Effect.suspend(() => {
+          const request = slot.turns.get(turn);
+          return request === undefined
+            ? Effect.void
+            : finishTurn(slot, request, outcome);
+        });
+
+      const drainSlot = (slot: Slot) =>
+        Effect.gen(function* () {
+          if (slot.worker === undefined) return;
+          const drained = yield* Deferred.make<undefined>();
+          yield* Queue.offer(slot.mailbox, {
+            type: "drain",
+            done: drained,
+          });
+          yield* Effect.raceFirst(
+            Deferred.await(drained).pipe(Effect.asVoid),
+            Fiber.await(slot.worker).pipe(Effect.asVoid),
+          );
+        });
+
+      const stopWorker = (slot: Slot) =>
+        slot.worker === undefined
+          ? Effect.void
+          : Fiber.interrupt(slot.worker).pipe(Effect.asVoid);
+
+      const finalizeSlot = (slot: Slot) =>
+        Effect.gen(function* () {
+          slot.restart = false;
+          slot.recovering = false;
+          slot.turn = undefined;
+          slot.state = {
+            state: "stopped",
+            run: slot.state.run,
+            reason: "requested",
+          };
+          slot.stopped = true;
+          const remaining = yield* Queue.clear(slot.mailbox);
+          for (const item of remaining) {
+            if (item.type === "wait") {
+              slot.waiters.add(item);
+            } else if (item.type === "drain") {
+              yield* Deferred.succeed(item.done, undefined);
+            }
           }
-          yield* Deferred.succeed(pending.done, outcome);
+          for (const request of [...slot.pending]) {
+            yield* finishTurn(slot, request, "not-running").pipe(
+              Effect.catchCause(() => Effect.void),
+            );
+          }
+          yield* settleWaiters(slot);
         });
 
       const teardownChannel = (
@@ -303,19 +376,19 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 });
               }
             }
-            yield* Effect.forEach(
-              [...slots.values()],
-              (slot) =>
-                Effect.gen(function* () {
-                  const drained = yield* Deferred.make<undefined>();
-                  yield* Queue.offer(slot.mailbox, {
-                    type: "drain",
-                    done: drained,
-                  });
-                  yield* Deferred.await(drained);
-                }),
-              { concurrency: "unbounded", discard: true },
-            );
+            const activeSlots = [...slots.values()];
+            yield* Effect.forEach(activeSlots, drainSlot, {
+              concurrency: "unbounded",
+              discard: true,
+            }).pipe(Effect.timeoutOption(drainDeadlineMs), Effect.asVoid);
+            yield* Effect.forEach(activeSlots, stopWorker, {
+              concurrency: "unbounded",
+              discard: true,
+            });
+            yield* Effect.forEach(activeSlots, finalizeSlot, {
+              concurrency: "unbounded",
+              discard: true,
+            });
             if (!shuttingDown && options.onChannelFailed !== undefined) {
               yield* options.onChannelFailed();
             }
@@ -587,20 +660,6 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }
         });
 
-      const refuse = (input: TurnRequest, outcome: TurnRefusal) =>
-        Effect.gen(function* () {
-          const claimed = yield* Effect.sync(() => {
-            if (input.settling || input.expired) return false;
-            input.settling = true;
-            return true;
-          });
-          if (!claimed) return;
-          if (options.turns !== undefined) {
-            yield* options.turns.end(input.turn, "refused");
-          }
-          yield* Deferred.succeed(input.done, outcome);
-        });
-
       const handle = (slot: Slot, input: SlotInput) =>
         Effect.gen(function* () {
           if (channelFailed) {
@@ -612,7 +671,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 return yield* settleWaiters(slot);
               case "turn":
                 if (input.expired) return;
-                return yield* refuse(input, "not-running");
+                return yield* finishTurn(slot, input, "not-running");
               case "drain":
                 slot.restart = false;
                 slot.recovering = false;
@@ -659,7 +718,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 return "send" as const;
               });
               if (action === "skip") return;
-              if (action !== "send") return yield* refuse(input, action);
+              if (action !== "send")
+                return yield* finishTurn(slot, input, action);
               return yield* sendToRunner({
                 type: "turn.start",
                 bot: slot.bot.name,
@@ -703,22 +763,25 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             bot: definition,
             adapter,
             mailbox: yield* Queue.unbounded<SlotInput>(),
+            worker: undefined,
             state: installed,
             turn: undefined,
             resume: null,
             recovering: false,
             restart: false,
+            stopped: false,
             stderrLines: 0,
             turns: new Map(),
+            pending: new Set(),
             expired: new Set(),
             waiters: new Set(),
           };
-          slots.set(definition.name, slot);
-          yield* Queue.take(slot.mailbox).pipe(
+          slot.worker = yield* Queue.take(slot.mailbox).pipe(
             Effect.flatMap((input) => handle(slot, input)),
             Effect.forever,
             Effect.forkIn(work),
           );
+          slots.set(definition.name, slot);
           return slot;
         });
 
@@ -745,7 +808,16 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const slot = slots.get(name);
           if (slot === undefined) return undefined;
           const done = yield* Deferred.make<BotState>();
-          yield* Queue.offer(slot.mailbox, { type: "wait", until, done });
+          const immediate = yield* Effect.sync(() => {
+            if (slot.stopped) {
+              const current = stateOf(slot);
+              return until(current) ? current : undefined;
+            }
+            Queue.offerUnsafe(slot.mailbox, { type: "wait", until, done });
+            return undefined;
+          });
+          if (immediate !== undefined) return immediate;
+          if (slot.stopped) return yield* Effect.never;
           return yield* Deferred.await(done);
         });
 
@@ -754,7 +826,17 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const slot = slots.get(name);
           if (slot === undefined || channelFailed) return;
           yield* Queue.offer(slot.mailbox, { type: "stop" });
-          yield* waitFor(name, (state) => stoppedStates.has(state.state));
+          const waited = waitFor(name, (state) =>
+            stoppedStates.has(state.state),
+          ).pipe(Effect.asVoid);
+          if (slot.worker === undefined) {
+            yield* waited;
+            return;
+          }
+          yield* Effect.raceFirst(
+            waited,
+            Fiber.await(slot.worker).pipe(Effect.asVoid),
+          );
         });
 
       const expire = (slot: Slot, pending: TurnRequest) =>
@@ -764,6 +846,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               if (pending.settling) return "settled" as const;
               pending.settling = true;
               pending.expired = true;
+              slot.pending.delete(pending);
               const run = pending.dispatchedRun;
               if (run === undefined) return "not-dispatched" as const;
               slot.turns.delete(pending.turn);
@@ -817,6 +900,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               }
               const queued = yield* Effect.sync(() => {
                 if (channelFailed) return false;
+                slot.pending.add(turnRequest);
                 Queue.offerUnsafe(slot.mailbox, turnRequest);
                 return true;
               });
@@ -846,14 +930,11 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             yield* Effect.forEach([...slots.keys()], stop, {
               concurrency: "unbounded",
               discard: true,
-            }).pipe(
-              Effect.timeoutOption(options.stopDeadlineMs ?? 15_000),
-              Effect.asVoid,
-            );
+            }).pipe(Effect.timeoutOption(stopDeadlineMs), Effect.asVoid);
           }
           if (channelFailed) {
             yield* Deferred.await(channelTeardownDone).pipe(
-              Effect.timeoutOption(options.stopDeadlineMs ?? 15_000),
+              Effect.timeoutOption(stopDeadlineMs),
               Effect.asVoid,
             );
           }
