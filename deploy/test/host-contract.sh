@@ -1358,7 +1358,9 @@ case $sub in
     esac
     exit 1 ;;
   symbolic-ref)
-    [[ -e /opt/aphelion/.git/branch ]] && echo "refs/heads/$(cat /opt/aphelion/.git/branch)" || exit 1 ;;
+    [[ -e /opt/aphelion/.git/branch ]] || exit 1
+    echo "refs/heads/$(cat /opt/aphelion/.git/branch)"
+    exit 0 ;;
   status)
     [[ -z ${FAKE_STATUS_FAIL:-} ]] || { echo "fatal: not a git repository" >&2; exit 128; }
     cat /opt/aphelion/.git/dirty 2>/dev/null || true
