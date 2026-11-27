@@ -1,5 +1,5 @@
 import { text } from "node:stream/consumers";
-import type { Readable, Writable } from "node:stream";
+import { addAbortSignal, type Readable, type Writable } from "node:stream";
 import { Context, Effect, Layer } from "effect";
 import {
   apiKeyFromInput,
@@ -67,15 +67,26 @@ class KeyBuffer {
   }
 }
 
-async function readPipe(stream: Readable): Promise<Uint8Array> {
+const stopped = () => new Error("Stopped. No API key was read.");
+
+async function readPipe(
+  stream: Readable,
+  signal: AbortSignal | undefined,
+): Promise<Uint8Array> {
   const buffer = new KeyBuffer();
-  for await (const chunk of stream) {
-    if (!(chunk instanceof Uint8Array)) {
-      throw new Error("standard input gave text, not bytes");
+  if (signal) addAbortSignal(signal, stream);
+  try {
+    for await (const chunk of stream) {
+      if (!(chunk instanceof Uint8Array)) {
+        throw new Error("standard input gave text, not bytes");
+      }
+      buffer.add(chunk);
+      chunk.fill(0);
+      if (buffer.full) break;
     }
-    buffer.add(chunk);
-    chunk.fill(0);
-    if (buffer.full) break;
+  } catch (error) {
+    buffer.take().fill(0);
+    throw error;
   }
   return buffer.take();
 }
@@ -84,12 +95,15 @@ function readTerminal(
   stream: KeyStream,
   prompt: string,
   write: (text: string) => void,
+  signal: AbortSignal | undefined,
 ): Promise<Uint8Array> {
   const buffer = new KeyBuffer();
   return new Promise<Uint8Array>((resolve, reject) => {
     const finish = (error?: Error) => {
       stream.off("data", onData);
       stream.off("end", onEnd);
+      stream.off("error", finish);
+      signal?.removeEventListener("abort", onAbort);
       stream.setRawMode?.(false);
       stream.pause();
       write("\n");
@@ -104,6 +118,9 @@ function readTerminal(
     const onEnd = () => {
       finish();
     };
+    const onAbort = () => {
+      finish(stopped());
+    };
     const onData = (chunk: Uint8Array) => {
       try {
         for (const byte of chunk) {
@@ -112,7 +129,7 @@ function readTerminal(
             return;
           }
           if (byte === 0x03) {
-            finish(new Error("Stopped. No API key was read."));
+            finish(stopped());
             return;
           }
           if (byte === 0x7f || byte === 0x08) {
@@ -125,10 +142,16 @@ function readTerminal(
         chunk.fill(0);
       }
     };
+    if (signal?.aborted) {
+      reject(stopped());
+      return;
+    }
     stream.setRawMode?.(true);
     write(prompt);
     stream.on("data", onData);
     stream.on("end", onEnd);
+    stream.on("error", finish);
+    signal?.addEventListener("abort", onAbort);
     stream.resume();
   });
 }
@@ -137,10 +160,11 @@ export function readKeyBytes(
   stream: KeyStream,
   prompt: string,
   write: (text: string) => void,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   return stream.isTTY === true
-    ? readTerminal(stream, prompt, write)
-    : readPipe(stream);
+    ? readTerminal(stream, prompt, write, signal)
+    : readPipe(stream, signal);
 }
 
 const asError = (error: unknown) =>
@@ -154,11 +178,18 @@ export const processIo = Layer.sync(CliIo, () => ({
     catch: asError,
   }),
   readApiKey: (prompt: string) =>
-    Effect.tryPromise({
-      try: () =>
-        readKeyBytes(process.stdin, prompt, (line) => {
-          process.stderr.write(line);
-        }),
-      catch: asError,
-    }).pipe(Effect.map(apiKeyFromInput)),
+    Effect.interruptible(
+      Effect.tryPromise({
+        try: (signal) =>
+          readKeyBytes(
+            process.stdin,
+            prompt,
+            (line) => {
+              process.stderr.write(line);
+            },
+            signal,
+          ),
+        catch: asError,
+      }),
+    ).pipe(Effect.map(apiKeyFromInput)),
 }));

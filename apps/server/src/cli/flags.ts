@@ -21,7 +21,6 @@ export const options = {
   pluginRunnerFds: "plugin-runner-fds",
   botRunnerFds: "bot-runner-fds",
   pluginDev: "plugin-dev",
-  testUrl: "test-url",
 } as const;
 
 export const operands = {

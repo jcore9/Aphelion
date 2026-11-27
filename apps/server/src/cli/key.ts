@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Command, Flag } from "effect/cli";
+import { Command } from "effect/cli";
 import { z } from "zod";
 import { appendAudit, type Outcome } from "../audit";
 import {
@@ -11,17 +11,10 @@ import {
   type CheckResult,
 } from "../secrets/api-key";
 import { BrokerError, type BrokerClient } from "../secrets/broker-client";
+import type { Secret } from "../secrets/secret";
 import { withStore } from "./device";
 import { failed } from "./failure";
-import {
-  checkedArgument,
-  checkedFlag,
-  operands,
-  optionalFlag,
-  options as flagNames,
-  stateDirFlag,
-  type Handler,
-} from "./flags";
+import { checkedArgument, operands, stateDirFlag, type Handler } from "./flags";
 import { CliIo } from "./io";
 
 type Action = "key.add" | "key.replace" | "key.remove" | "key.test";
@@ -96,6 +89,17 @@ const brokerFailures =
       ),
     );
 
+const usingSecret = <T, E, R, A, E2, R2>(
+  acquire: Effect.Effect<T, E, R>,
+  secretOf: (value: T) => Secret | undefined,
+  use: (value: T) => Effect.Effect<A, E2, R2>,
+) =>
+  Effect.acquireUseRelease(acquire, use, (value) =>
+    Effect.sync(() => {
+      secretOf(value)?.wipe();
+    }),
+  );
+
 const notStored = (tool: ApiKeyTool) =>
   `No API key is stored for ${tool}. Add one with: aphelion key add ${tool}`;
 
@@ -131,23 +135,15 @@ const storeKey = (
         notStored(tool),
       );
     }
-    const input = yield* io.readApiKey(
-      `API key for ${tool} (an ${providers[tool].vendor} API key): `,
-    );
-    if (!input.ok) {
-      return yield* refuse(
-        options,
-        action,
-        { result: "input refused" },
-        input.reason,
-      );
-    }
-    yield* fromBroker(() => broker.write(apiKeyRef(tool), input.key)).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          input.key.wipe();
-        }),
+    yield* usingSecret(
+      io.readApiKey(
+        `API key for ${tool} (an ${providers[tool].vendor} API key): `,
       ),
+      (input) => (input.ok ? input.key : undefined),
+      (input): Effect.Effect<void, Error, CliIo> =>
+        input.ok
+          ? fromBroker(() => broker.write(apiKeyRef(tool), input.key))
+          : refuse(options, action, { result: "input refused" }, input.reason),
     );
     const [result, done] =
       action === "key.add" ? ["stored", "Stored"] : ["replaced", "Replaced"];
@@ -211,14 +207,21 @@ const testOutcome = (tool: ApiKeyTool, result: CheckResult) => {
 };
 
 export const keyTest = (
-  options: KeyOptions & { readonly testUrl?: string | undefined },
+  options: KeyOptions,
   broker: BrokerClient,
-  timeoutMs?: number,
+  check: Parameters<typeof checkApiKey>[2] = {},
 ) =>
   Effect.gen(function* () {
     const { tool } = options;
-    const key = yield* fromBroker(() => broker.read(apiKeyRef(tool)));
-    if (key === undefined) {
+    const result = yield* usingSecret(
+      fromBroker(() => broker.read(apiKeyRef(tool))),
+      (key) => key,
+      (key) =>
+        key === undefined
+          ? Effect.succeed(undefined)
+          : Effect.promise(() => checkApiKey(tool, key, check)),
+    );
+    if (result === undefined) {
       return yield* refuse(
         options,
         "key.test",
@@ -226,18 +229,6 @@ export const keyTest = (
         notStored(tool),
       );
     }
-    const result = yield* Effect.promise(() =>
-      checkApiKey(tool, key, {
-        ...(options.testUrl === undefined ? {} : { baseUrl: options.testUrl }),
-        ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      }),
-    ).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          key.wipe();
-        }),
-      ),
-    );
     const { detail, line } = testOutcome(tool, result);
     if (result.kind === "accepted") {
       yield* succeed(options, "key.test", detail, line);
@@ -257,20 +248,6 @@ const apiKeyTool = z
 const toolArgument = (
   command: "key add" | "key replace" | "key test" | "key remove",
 ) => checkedArgument(operands[command], "tool name", apiKeyTool);
-
-const loopbackUrl = z
-  .string()
-  .regex(/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/, {
-    error: "must be http://127.0.0.1:PORT",
-  });
-
-const testUrlFlag = optionalFlag(
-  checkedFlag(flagNames.testUrl, loopbackUrl).pipe(
-    Flag.withDescription(
-      "For Aphelion's own tests: send the check to a fake provider at http://127.0.0.1:PORT",
-    ),
-  ),
-);
 
 export const keyAddCommand = (handler: Handler<KeyOptions>) =>
   Command.make(
@@ -294,16 +271,10 @@ export const keyReplaceCommand = (handler: Handler<KeyOptions>) =>
     ),
   );
 
-export const keyTestCommand = (
-  handler: Handler<KeyOptions & { readonly testUrl: string | undefined }>,
-) =>
+export const keyTestCommand = (handler: Handler<KeyOptions>) =>
   Command.make(
     "test",
-    {
-      stateDir: stateDirFlag,
-      tool: toolArgument("key test"),
-      testUrl: testUrlFlag,
-    },
+    { stateDir: stateDirFlag, tool: toolArgument("key test") },
     handler,
   ).pipe(
     Command.withDescription(

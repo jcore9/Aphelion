@@ -33,6 +33,28 @@ describe("readKeyBytes from a pipe", () => {
     const bytes = await readKeyBytes(stream, "API key: ", () => undefined);
     expect(bytes.length).toBe(keyInputLimit);
   });
+
+  it("passes on an error from the stream", async () => {
+    const stream = new PassThrough();
+    const reading = readKeyBytes(stream, "API key: ", () => undefined);
+    stream.write("sk-fake");
+    stream.destroy(new Error("the pipe broke"));
+    await expect(reading).rejects.toThrow("the pipe broke");
+  });
+
+  it("stops when the signal aborts", async () => {
+    const stream = new PassThrough();
+    const stop = new AbortController();
+    const reading = readKeyBytes(
+      stream,
+      "API key: ",
+      () => undefined,
+      stop.signal,
+    );
+    stream.write("sk-fake");
+    stop.abort();
+    await expect(reading).rejects.toThrow();
+  });
 });
 
 describe("readKeyBytes from a terminal", () => {
@@ -61,5 +83,44 @@ describe("readKeyBytes from a terminal", () => {
     const reading = readKeyBytes(stream, "API key: ", () => undefined);
     stream.write("sk-fake\u0004");
     expect(text(await reading)).toBe("sk-fake");
+  });
+
+  it("turns echo back on when the stream fails", async () => {
+    const { stream, modes } = terminal();
+    const prompts: string[] = [];
+    const reading = readKeyBytes(stream, "API key: ", (line) => {
+      prompts.push(line);
+    });
+    stream.write("sk-fake");
+    stream.destroy(new Error("the terminal went away"));
+    await expect(reading).rejects.toThrow("the terminal went away");
+    expect(modes).toEqual([true, false]);
+    expect(prompts).toEqual(["API key: ", "\n"]);
+  });
+
+  it("stops and turns echo back on when the signal aborts", async () => {
+    const { stream, modes } = terminal();
+    const stop = new AbortController();
+    const reading = readKeyBytes(
+      stream,
+      "API key: ",
+      () => undefined,
+      stop.signal,
+    );
+    stream.write("sk-fake");
+    await new Promise((resolve) => setImmediate(resolve));
+    stop.abort();
+    await expect(reading).rejects.toThrow("Stopped. No API key was read.");
+    expect(modes).toEqual([true, false]);
+    expect(stream.listenerCount("data")).toBe(0);
+    expect(stream.listenerCount("error")).toBe(0);
+  });
+
+  it("stops when the stream ends", async () => {
+    const { stream, modes } = terminal();
+    const reading = readKeyBytes(stream, "API key: ", () => undefined);
+    stream.end("sk-fake");
+    expect(text(await reading)).toBe("sk-fake");
+    expect(modes).toEqual([true, false]);
   });
 });

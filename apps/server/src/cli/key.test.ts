@@ -4,10 +4,14 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateIdentity } from "age-encryption";
-import { Cause, Effect, Exit, Layer } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { apiKeyFromInput } from "../secrets/api-key";
-import { brokerClient, type BrokerClient } from "../secrets/broker-client";
+import { apiKeyFromInput, type ApiKeyInput } from "../secrets/api-key";
+import {
+  BrokerError,
+  brokerClient,
+  type BrokerClient,
+} from "../secrets/broker-client";
 import { handleBrokerRequest } from "../secrets/broker-handler";
 import { openLocalStore } from "../secrets/local-store";
 import { Secret } from "../secrets/secret";
@@ -29,6 +33,7 @@ let provider: Server;
 let answer: () => number;
 let seen: IncomingHttpHeaders[];
 let printed: string[];
+let secrets: Secret[];
 
 const listen = (server: Server, where: string | number) =>
   new Promise<void>((resolve) => {
@@ -58,7 +63,8 @@ beforeEach(async () => {
     void handleBrokerRequest(request, response, store);
   });
   await listen(brokerServer, socket);
-  broker = brokerClient(socket);
+  secrets = [];
+  broker = watch(brokerClient(socket));
   answer = () => 200;
   seen = [];
   provider = createServer((request, response) => {
@@ -79,6 +85,7 @@ afterEach(async () => {
       readFile(join(storeDir, file), "latin1"),
     ),
   );
+  expect(secrets.filter((secret) => !secret.wiped)).toEqual([]);
   for (const text of [...printed, ...rows, ...store]) {
     expect(text).not.toContain(fake);
     expect(text).not.toContain(other);
@@ -104,6 +111,34 @@ function audit() {
   }
 }
 
+function watch(client: BrokerClient): BrokerClient {
+  return {
+    ...client,
+    read: async (ref) => {
+      const secret = await client.read(ref);
+      if (secret !== undefined) secrets.push(secret);
+      return secret;
+    },
+  };
+}
+
+const typed = (input: string) => {
+  const result = apiKeyFromInput(new TextEncoder().encode(input));
+  if (result.ok) secrets.push(result.key);
+  return result;
+};
+
+type ReadApiKey = (prompt: string) => Effect.Effect<ApiKeyInput, Error>;
+
+function testIo(out: string[], err: string[], readApiKey: ReadApiKey) {
+  return Layer.succeed(CliIo, {
+    out: (line) => Effect.sync(() => void out.push(line)),
+    err: (line) => Effect.sync(() => void err.push(line)),
+    stdin: Effect.die("key commands read the key with readApiKey"),
+    readApiKey,
+  });
+}
+
 async function capture(
   program: Effect.Effect<unknown, unknown, CliIo>,
   input?: string,
@@ -111,17 +146,13 @@ async function capture(
   const out: string[] = [];
   const err: string[] = [];
   const prompts: string[] = [];
-  const io = Layer.succeed(CliIo, {
-    out: (line) => Effect.sync(() => void out.push(line)),
-    err: (line) => Effect.sync(() => void err.push(line)),
-    stdin: Effect.die("key commands read the key with readApiKey"),
-    readApiKey: (prompt) =>
-      Effect.sync(() => {
-        prompts.push(prompt);
-        if (input === undefined) throw new Error("read a key it shouldn't");
-        return apiKeyFromInput(new TextEncoder().encode(input));
-      }),
-  });
+  const io = testIo(out, err, (prompt) =>
+    Effect.sync(() => {
+      prompts.push(prompt);
+      if (input === undefined) throw new Error("read a key it shouldn't");
+      return typed(input);
+    }),
+  );
   const exit = await Effect.runPromiseExit(program.pipe(Effect.provide(io)));
   let code = 0;
   if (Exit.isFailure(exit)) {
@@ -140,8 +171,24 @@ const replace = (input?: string) =>
 const remove = () => capture(keyRemove({ stateDir, tool: "claude" }, broker));
 const check = (tool: "claude" | "codex" = "claude", timeoutMs?: number) =>
   capture(
-    keyTest({ stateDir, tool, testUrl: providerUrl() }, broker, timeoutMs),
+    keyTest({ stateDir, tool }, broker, {
+      baseUrl: providerUrl(),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    }),
   );
+
+async function interrupted(
+  program: Effect.Effect<unknown, unknown, CliIo>,
+  readApiKey: ReadApiKey,
+  started: () => boolean,
+) {
+  const fiber = Effect.runFork(
+    program.pipe(Effect.provide(testIo([], [], readApiKey))),
+  );
+  while (!started()) await new Promise((resolve) => setTimeout(resolve, 5));
+  await Effect.runPromise(Fiber.interrupt(fiber));
+  return fiber.pollUnsafe();
+}
 
 const stored = async () => {
   const secret = await broker.read("local://apikey/claude");
@@ -212,6 +259,69 @@ describe("aphelion key add", () => {
     },
   );
 
+  it("wipes the key it read once it stored it", async () => {
+    await add(fake);
+    expect(secrets).toHaveLength(1);
+    expect(secrets[0]?.wiped).toBe(true);
+  });
+
+  it("refuses with the broker's line, and wipes the key, when the write fails", async () => {
+    const failing: BrokerClient = {
+      ...broker,
+      write: () =>
+        Promise.reject(new BrokerError("the secrets broker answered HTTP 500")),
+    };
+    const result = await capture(
+      keyAdd({ stateDir, tool: "claude" }, failing),
+      fake,
+    );
+    expect(result.code).toBe(1);
+    expect(result.err).toEqual(["the secrets broker answered HTTP 500"]);
+    expect(secrets).toHaveLength(1);
+    expect(audit().at(-1)).toMatchObject({
+      action: "key.add",
+      outcome: "failed",
+      detail: { tool: "claude", result: "broker error" },
+    });
+  });
+
+  it("wipes the key when it's stopped while the broker writes", async () => {
+    let writing = false;
+    const stuck: BrokerClient = {
+      ...broker,
+      write: () => {
+        writing = true;
+        return new Promise<never>(() => undefined);
+      },
+    };
+    const exit = await interrupted(
+      keyAdd({ stateDir, tool: "claude" }, stuck),
+      () => Effect.sync(() => typed(fake)),
+      () => writing,
+    );
+    expect(exit !== undefined && Exit.hasInterrupts(exit)).toBe(true);
+    expect(secrets).toHaveLength(1);
+  });
+
+  it("wipes the key when it's stopped just as the read ends", async () => {
+    let read = false;
+    const exit = await interrupted(
+      keyAdd({ stateDir, tool: "claude" }, broker),
+      () =>
+        Effect.withFiber((fiber) =>
+          Effect.sync(() => {
+            read = true;
+            const result = typed(fake);
+            fiber.interruptUnsafe();
+            return result;
+          }),
+        ),
+      () => read,
+    );
+    expect(exit !== undefined && Exit.hasInterrupts(exit)).toBe(true);
+    expect(secrets).toHaveLength(1);
+  });
+
   it("names the vendor in the prompt for each tool", async () => {
     expect((await add(fake, "codex" as "claude")).prompts).toEqual([
       "API key for codex (an OpenAI API key): ",
@@ -231,11 +341,31 @@ describe("aphelion key replace", () => {
       prompts: ["API key for claude (an Anthropic API key): "],
     });
     expect(await stored()).toBe(other);
+    expect(secrets.length).toBeGreaterThanOrEqual(3);
     expect(audit().at(-1)).toMatchObject({
       action: "key.replace",
       outcome: "succeeded",
       detail: { tool: "claude", result: "replaced" },
     });
+  });
+
+  it("wipes the new key when it's stopped while the broker writes", async () => {
+    await add(fake);
+    let writing = false;
+    const stuck: BrokerClient = {
+      ...broker,
+      write: () => {
+        writing = true;
+        return new Promise<never>(() => undefined);
+      },
+    };
+    const exit = await interrupted(
+      keyReplace({ stateDir, tool: "claude" }, stuck),
+      () => Effect.sync(() => typed(other)),
+      () => writing,
+    );
+    expect(exit !== undefined && Exit.hasInterrupts(exit)).toBe(true);
+    expect(await stored()).toBe(fake);
   });
 
   it("refuses when no key is stored, before it reads a key", async () => {
@@ -293,6 +423,7 @@ describe("aphelion key test", () => {
       prompts: [],
     });
     expect(seen[0]?.["x-api-key"]).toBe(fake);
+    expect(secrets.length).toBeGreaterThanOrEqual(2);
     expect(audit().at(-1)).toMatchObject({
       action: "key.test",
       outcome: "succeeded",
@@ -346,6 +477,18 @@ describe("aphelion key test", () => {
     expect(audit().at(-1)).toMatchObject({
       detail: { tool: "claude", result: "unreachable" },
     });
+  });
+
+  it("wipes the key when it's stopped while the provider answers", async () => {
+    await add(fake);
+    answer = () => 0;
+    const exit = await interrupted(
+      keyTest({ stateDir, tool: "claude" }, broker, { baseUrl: providerUrl() }),
+      () => Effect.die("key test reads no key"),
+      () => seen.length > 0,
+    );
+    expect(exit !== undefined && Exit.hasInterrupts(exit)).toBe(true);
+    expect(secrets).toHaveLength(2);
   });
 
   it("exits 1 without asking the provider when no key is stored", async () => {

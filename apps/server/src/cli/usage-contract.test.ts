@@ -68,7 +68,6 @@ const usageErrors: readonly (readonly string[])[] = [
   ["key", "remove", canary],
   ["key", "remove", "codex", canary],
   ["key", "test", "grok", "--test-url", canary],
-  ["key", "test", "grok", "--test-url", "https://api.x.ai"],
   ["key", "add", "--state-dir", canary, "--state-dir", canary],
   ["--headless", "--plugin-runner-fds", canary],
   ["--headless", "--bot-runner-fds", canary],

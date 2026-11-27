@@ -226,21 +226,7 @@ describe("accepted command lines", () => {
     ],
     [
       ["key", "test", "claude"],
-      {
-        kind: "key test",
-        stateDir: defaultStateDir,
-        tool: "claude",
-        testUrl: undefined,
-      },
-    ],
-    [
-      ["key", "test", "grok", "--test-url", "http://127.0.0.1:8098"],
-      {
-        kind: "key test",
-        stateDir: defaultStateDir,
-        tool: "grok",
-        testUrl: "http://127.0.0.1:8098",
-      },
+      { kind: "key test", stateDir: defaultStateDir, tool: "claude" },
     ],
     [
       ["plugin", "dev", "/opt/aphelion/dev-plugin"],
@@ -443,12 +429,8 @@ describe("refused command lines", () => {
     [["key", "add", "claude", "x"], '"key add" takes one tool name, but got 2'],
     [["key", "test", "gemini"], "the tool name must be claude, codex or grok"],
     [
-      ["key", "test", "claude", "--test-url", "https://api.anthropic.com"],
-      "--test-url must be http://127.0.0.1:PORT",
-    ],
-    [
-      ["key", "add", "claude", "--test-url", "http://127.0.0.1:8098"],
-      '--test-url isn\'t an option of "key add"',
+      ["key", "test", "claude", "--test-url", "http://127.0.0.1:8098"],
+      "unknown option --test-url",
     ],
     [
       ["tool", "check", "--tools-dir", "/t"],
