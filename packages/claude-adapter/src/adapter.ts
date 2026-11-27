@@ -29,12 +29,13 @@ import {
   parseMessage,
   resultOutcome,
   type ClaudeMessage,
+  type Plugin,
   type ToolCall,
 } from "./messages.ts";
 import {
   claudeCodeVersion,
   claudeEnv,
-  enabledTools,
+  givenTools,
   queryOptions,
   type ParentEnv,
 } from "./options.ts";
@@ -69,7 +70,8 @@ type ErrorCode = Extract<AdapterEvent, { type: "error" }>["code"];
 type TurnEndReason = Extract<AdapterEvent, { type: "turn.end" }>["reason"];
 
 type Item =
-  | { readonly kind: "message"; readonly raw: unknown }
+  | { readonly kind: "message"; readonly message: ClaudeMessage }
+  | { readonly kind: "refused" }
   | { readonly kind: "ended" }
   | { readonly kind: "failed"; readonly error: unknown };
 
@@ -150,11 +152,27 @@ const turnEnd = (reason: TurnEndReason): AdapterEvent => ({
 const lineCount = (data: string) =>
   data.split("\n").filter((line) => line !== "").length;
 
-const givenTools = new Set<string>(enabledTools);
-
-const builtInPlugin = "builtin";
+const builtIn = (plugin: Plugin) =>
+  plugin.path === "builtin" && plugin.name.startsWith("cc-plugin-");
 
 const unexpected = `the CLI didn't start as Claude Code ${claudeCodeVersion} in default permission mode`;
+
+const initProblem = (message: ClaudeMessage): string | undefined => {
+  if (message.kind === "unreadable-init") return unexpected;
+  if (message.kind !== "init") return undefined;
+  if (
+    message.permissionMode !== "default" ||
+    message.version !== claudeCodeVersion
+  ) {
+    return unexpected;
+  }
+  const tools = message.tools.filter((tool) => !givenTools.has(tool)).length;
+  const plugins = message.plugins.filter((plugin) => !builtIn(plugin)).length;
+  if (tools === 0 && message.mcpServers === 0 && plugins === 0) {
+    return undefined;
+  }
+  return `the session reported ${String(tools)} tools, ${String(message.mcpServers)} MCP servers and ${String(plugins)} plugins that Aphelion didn't give it`;
+};
 
 export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
   const interruptWaitMs = options.interruptWaitMs ?? 3000;
@@ -187,13 +205,15 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
 
       const canUseTool =
         (abort: AbortController): CanUseTool =>
-        async (tool, input, { signal, toolUseID, requestId }) => {
+        async (tool, input, { signal, toolUseID, requestId, mcpServer }) => {
           try {
             const turn = active;
             if (turn?.live.abort !== abort) return refusal;
-            if (!(await unlessAborted(turn.live.trust.checked, signal))) {
+            if (!givenTools.has(tool) || mcpServer !== undefined) {
               return refusal;
             }
+            const { trust } = turn.live;
+            if (!(await trust.until(signal))) return refusal;
             const request = permissionRequestFor({
               tool,
               input,
@@ -205,6 +225,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               turn.input.decide(request),
               signal,
             );
+            if (trust.revoked) return refusal;
             if (decision?.decision === "allow") return { behavior: "allow" };
             if (decision?.announced) {
               turn.denied.add(toolUseID);
@@ -215,11 +236,32 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           }
         };
 
+      const admit = (owner: Live, message: ClaudeMessage) => {
+        const problem = initProblem(message);
+        if (problem !== undefined) {
+          context.log(`${problem}, so the adapter stopped it`);
+          kill(owner);
+          deliver(owner, { kind: "refused" });
+          return false;
+        }
+        if (message.kind === "init") {
+          if (message.skills > 0) {
+            context.log(
+              `the session reported ${String(message.skills)} skills`,
+            );
+          }
+          if (active?.live === owner) owner.trust.grant();
+        }
+        return true;
+      };
+
       const pump = async (owner: Live, stderrLines: () => number) => {
         let last: Item;
         try {
           for await (const raw of owner.query) {
-            deliver(owner, { kind: "message", raw });
+            const message = parseMessage(raw);
+            if (!admit(owner, message)) break;
+            deliver(owner, { kind: "message", message });
           }
           last = { kind: "ended" };
         } catch (error) {
@@ -232,7 +274,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         if (lines > 0) {
           context.log(`the CLI wrote ${String(lines)} lines to stderr`);
         }
-        owner.trust.settle(false);
+        owner.trust.revoke();
         if (live === owner) live = undefined;
         deliver(owner, last);
       };
@@ -274,7 +316,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
       };
 
       const kill = (owner: Live) => {
-        owner.trust.settle(false);
+        owner.trust.revoke();
         owner.abort.abort();
         if (live === owner) live = undefined;
       };
@@ -302,44 +344,13 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         yield { type: "error", code };
       }
 
-      function* stop(turn: ActiveTurn, why: string): Generator<AdapterEvent> {
-        context.log(`${why}, so the adapter stopped it`);
-        kill(turn.live);
-        yield* error(turn, "vendor");
-        yield turnEnd("error");
-      }
-
       function* translate(
         turn: ActiveTurn,
         message: ClaudeMessage,
         cancelling: boolean,
       ): Generator<AdapterEvent, boolean> {
         switch (message.kind) {
-          case "unreadable-init":
-            yield* stop(turn, unexpected);
-            return true;
           case "init": {
-            if (
-              message.permissionMode !== "default" ||
-              message.version !== claudeCodeVersion
-            ) {
-              yield* stop(turn, unexpected);
-              return true;
-            }
-            const tools = message.tools.filter(
-              (tool) => !givenTools.has(tool),
-            ).length;
-            const plugins = message.pluginPaths.filter(
-              (path) => path !== builtInPlugin,
-            ).length;
-            if (tools > 0 || message.mcpServers > 0 || plugins > 0) {
-              yield* stop(
-                turn,
-                `the session reported ${String(tools)} tools, ${String(message.mcpServers)} MCP servers and ${String(plugins)} plugins that Aphelion didn't give it`,
-              );
-              return true;
-            }
-            turn.live.trust.settle(true);
             const ref = claudeRef(message.session);
             if (ref && ref !== announced) {
               announced = ref;
@@ -395,6 +406,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           case "error":
             yield* error(turn, message.code);
             return false;
+          case "unreadable-init":
           case "other":
             return false;
         }
@@ -422,6 +434,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           denied: new Set(),
           errorSent: false,
         };
+        owner.trust.reset();
         active = turn;
         const cancel = whenAborted(signal, "cancel" as const);
         let deadline: Wait<"deadline"> | undefined;
@@ -448,11 +461,17 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
             const item = turn.inbox.take();
             if (item === undefined) continue;
             if (item.kind === "message") {
-              const message = parseMessage(item.raw);
-              if (yield* translate(turn, message, deadline !== undefined)) {
+              if (
+                yield* translate(turn, item.message, deadline !== undefined)
+              ) {
                 return;
               }
               continue;
+            }
+            if (item.kind === "refused") {
+              yield* error(turn, "vendor");
+              yield turnEnd("error");
+              return;
             }
             if (deadline) {
               yield turnEnd("cancelled");

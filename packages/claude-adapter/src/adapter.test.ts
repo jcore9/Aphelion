@@ -13,7 +13,7 @@ import {
   startAdapter,
   type AdapterHarness,
 } from "@aphelion/plugin-sdk/testing";
-import type { HookCallback } from "@anthropic-ai/claude-agent-sdk";
+import type { HookCallback, Options } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 import { claudeAdapter } from "./adapter.ts";
 import {
@@ -22,6 +22,7 @@ import {
   sdk,
   type ScriptStep,
 } from "./scripted-query.ts";
+import { settlesWithin, whenAborted } from "./timing.ts";
 
 const fakeKey = "sk-ant-api03-fake-0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -648,20 +649,82 @@ describe("when the session has more than the adapter gave it", () => {
     },
   };
 
-  const askHook = (hook: HookCallback) =>
+  const askHook = (
+    hook: HookCallback,
+    call: {
+      tool?: string;
+      mcpServer?: { name: string; source: string };
+      signal?: AbortSignal;
+    } = {},
+  ) =>
     hook(
       {
         hook_event_name: "PreToolUse",
         session_id: sdk.sessionId,
         transcript_path: "/home/bot/.claude/projects/x.jsonl",
         cwd: "/work",
-        tool_name: "Read",
+        tool_name: call.tool ?? "Read",
         tool_input: { file_path: "/work/notes.md" },
         tool_use_id: "toolu_09",
+        ...(call.mcpServer ? { mcp_server: call.mcpServer } : {}),
       },
       "toolu_09",
-      { signal: new AbortController().signal },
+      { signal: call.signal ?? new AbortController().signal },
     );
+
+  const askCanUseTool = (
+    options: Options | undefined,
+    call: {
+      tool?: string;
+      mcpServer?: { name: string; source: string };
+      signal?: AbortSignal;
+    } = {},
+  ) => {
+    const canUseTool = options?.canUseTool;
+    if (!canUseTool) throw new Error("no canUseTool");
+    return canUseTool(
+      call.tool ?? "Read",
+      { file_path: "/work/notes.md" },
+      {
+        signal: call.signal ?? new AbortController().signal,
+        toolUseID: "toolu_10",
+        requestId: "req-10",
+        ...(call.mcpServer ? { mcpServer: call.mcpServer } : {}),
+      },
+    );
+  };
+
+  const held = () => {
+    const reached = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const step: ScriptStep = {
+      hold: {
+        reached: () => {
+          reached.resolve(undefined);
+        },
+        release: release.promise,
+      },
+    };
+    return {
+      step,
+      reached: reached.promise,
+      release: () => {
+        release.resolve(undefined);
+      },
+    };
+  };
+
+  const pending = async (work: Promise<unknown>) =>
+    !(await settlesWithin(work, 20));
+
+  const allowed = { behavior: "allow" };
+
+  const denied = {
+    behavior: "deny",
+    message: "Aphelion denied this tool call.",
+  };
+
+  const dirtyInit = sdk.init({ tools: [...sevenTools, "mcp__example__tool"] });
 
   const refused = [
     {
@@ -687,6 +750,13 @@ describe("when the session has more than the adapter gave it", () => {
             path: "/home/bot/.claude/plugins/synced/example-plugin",
           },
         ],
+      }),
+      log: "the session reported 0 tools, 0 MCP servers and 1 plugins that Aphelion didn't give it, so the adapter stopped it",
+    },
+    {
+      name: "a plugin at the built-in path whose name isn't a built-in's",
+      init: sdk.init({
+        plugins: [{ name: "example-plugin", path: "builtin" }],
       }),
       log: "the session reported 0 tools, 0 MCP servers and 1 plugins that Aphelion didn't give it, so the adapter stopped it",
     },
@@ -725,6 +795,19 @@ describe("when the session has more than the adapter gave it", () => {
       ]);
       expect(scripted.answers).not.toContainEqual({ behavior: "allow" });
     }
+  });
+
+  it("stops a session whose init names no plugin", async () => {
+    const { adapter, scripted } = allowingAdapter([
+      turnWith(sdk.init({ plugins: [{ path: "builtin" }] })),
+    ]);
+    const run = await runTurn(adapter, { decider: allow });
+
+    expect(eventsOf(run)).toEqual([
+      { type: "error", code: "vendor" },
+      { type: "turn.end", reason: "error" },
+    ]);
+    expect(scripted.answers).not.toContainEqual({ behavior: "allow" });
   });
 
   it("holds a tool call that comes before the init until the adapter has checked it", async () => {
@@ -776,6 +859,8 @@ describe("when the session has more than the adapter gave it", () => {
     const run = await runTurn(adapter, { decider: allow });
 
     expect(scripted.answers).toEqual([{ behavior: "allow" }]);
+    expect(run.logs).toContain("the session reported 1 skills");
+    expect(run.logs.join("\n")).not.toContain("example");
     expect(eventsOf(run)).toContainEqual({
       type: "tool.end",
       call: "toolu_01",
@@ -786,6 +871,204 @@ describe("when the session has more than the adapter gave it", () => {
       reason: "completed",
     });
     expect(checkStream(run.events)).toEqual([]);
+  });
+
+  describe("trust lasts one turn", () => {
+    it("holds canUseTool before the init until the adapter has checked it", async () => {
+      for (const [init, answer] of [
+        [sdk.init(), allowed],
+        [dirtyInit, denied],
+      ] as const) {
+        const gate = held();
+        const { adapter, scripted } = allowingAdapter([
+          [gate.step, { send: init }, { send: sdk.result() }],
+        ]);
+        const harness = startAdapter(adapter, { decider: allow });
+        await harness.initialize();
+        await harness.startTurn("t1", "hi");
+        await gate.reached;
+        const early = askCanUseTool(scripted.runs[0]?.options);
+
+        expect(await pending(early)).toBe(true);
+        gate.release();
+        expect(await early).toEqual(answer);
+        await untilTurnEnd(harness, "t1");
+        await harness.shutdown();
+      }
+    });
+
+    it("holds a second turn's tool calls until that turn's init is checked", async () => {
+      for (const [init, hookAnswer, answer] of [
+        [sdk.init(), {}, allowed],
+        [dirtyInit, blocked, denied],
+      ] as const) {
+        const gate = held();
+        const { adapter, scripted } = allowingAdapter([
+          [{ send: sdk.init() }, { send: sdk.result() }],
+          [gate.step, { send: init }, { send: sdk.result() }],
+        ]);
+        const harness = startAdapter(adapter, { decider: allow });
+        await harness.initialize();
+        await harness.startTurn("t1", "one");
+        await untilTurnEnd(harness, "t1");
+        await harness.startTurn("t2", "two");
+        await gate.reached;
+        const options = scripted.runs[0]?.options;
+        const fromHook = askHook(hookOf(options));
+        const fromCanUseTool = askCanUseTool(options);
+
+        expect(await pending(fromHook)).toBe(true);
+        expect(await pending(fromCanUseTool)).toBe(true);
+        gate.release();
+        expect(await fromHook).toEqual(hookAnswer);
+        expect(await fromCanUseTool).toEqual(answer);
+        await untilTurnEnd(harness, "t2");
+        await harness.shutdown();
+      }
+    });
+
+    it("denies every call after a later init reports more, in the same turn or the next", async () => {
+      for (const turns of [
+        [[{ send: sdk.init() }, { send: dirtyInit }, { send: sdk.result() }]],
+        [
+          [{ send: sdk.init() }, { send: sdk.result() }],
+          [{ send: dirtyInit }, { send: sdk.result() }],
+        ],
+      ]) {
+        const { adapter, scripted } = allowingAdapter(turns);
+        const harness = startAdapter(adapter, { decider: allow });
+        await harness.initialize();
+        for (const [index] of turns.entries()) {
+          await harness.startTurn(`t${String(index)}`, "hi");
+          await untilTurnEnd(harness, `t${String(index)}`);
+        }
+        const options = scripted.runs[0]?.options;
+
+        expect(harness.events.at(-1)?.event).toEqual({
+          type: "turn.end",
+          reason: "error",
+        });
+        expect(options?.abortController?.signal.aborted).toBe(true);
+        expect(await askHook(hookOf(options))).toEqual(blocked);
+        await harness.shutdown();
+      }
+    });
+
+    it("stops the CLI when an init between turns reports more", async () => {
+      const gate = held();
+      const { adapter, scripted } = allowingAdapter([
+        [
+          { send: sdk.init() },
+          { send: sdk.result() },
+          gate.step,
+          { send: dirtyInit },
+          { hang: true },
+        ],
+        [{ send: sdk.init() }, { send: sdk.result() }],
+      ]);
+      const harness = startAdapter(adapter, { decider: allow });
+      await harness.initialize();
+      await harness.startTurn("t1", "one");
+      await untilTurnEnd(harness, "t1");
+      await gate.reached;
+      const signal = scripted.runs[0]?.options.abortController?.signal;
+      if (!signal) throw new Error("no abort signal");
+      const stopped = whenAborted(signal, true).done;
+      gate.release();
+
+      expect(await settlesWithin(stopped, 1000)).toBe(true);
+      expect(await askHook(hookOf(scripted.runs[0]?.options))).toEqual(blocked);
+      expect(harness.logs).toContain(
+        "the session reported 1 tools, 0 MCP servers and 0 plugins that Aphelion didn't give it, so the adapter stopped it",
+      );
+      await harness.startTurn("t2", "two");
+      await untilTurnEnd(harness, "t2");
+
+      expect(scripted.runs).toHaveLength(2);
+      expect(harness.events.at(-1)?.event).toEqual({
+        type: "turn.end",
+        reason: "completed",
+      });
+      await harness.shutdown();
+    });
+
+    it("ends a call's wait for the init when the call's signal aborts", async () => {
+      const gate = held();
+      const { adapter, scripted } = allowingAdapter([
+        [gate.step, { send: sdk.init() }, { send: sdk.result() }],
+      ]);
+      const harness = startAdapter(adapter, { decider: allow });
+      await harness.initialize();
+      await harness.startTurn("t1", "hi");
+      await gate.reached;
+      const options = scripted.runs[0]?.options;
+      const hookCall = new AbortController();
+      const canUseToolCall = new AbortController();
+      const fromHook = askHook(hookOf(options), { signal: hookCall.signal });
+      const fromCanUseTool = askCanUseTool(options, {
+        signal: canUseToolCall.signal,
+      });
+      hookCall.abort();
+      canUseToolCall.abort();
+
+      expect(await settlesWithin(fromHook, 1000)).toBe(true);
+      expect(await settlesWithin(fromCanUseTool, 1000)).toBe(true);
+      expect(await fromHook).toEqual(blocked);
+      expect(await fromCanUseTool).toEqual(denied);
+      gate.release();
+      await untilTurnEnd(harness, "t1");
+      await harness.shutdown();
+    });
+
+    it("blocks a hook waiting for the init when the CLI exits without one", async () => {
+      const gate = held();
+      const { adapter, scripted } = allowingAdapter([
+        [gate.step, { exit: true }],
+      ]);
+      const harness = startAdapter(adapter, { decider: allow });
+      await harness.initialize();
+      await harness.startTurn("t1", "hi");
+      await gate.reached;
+      const early = askHook(hookOf(scripted.runs[0]?.options));
+
+      expect(await pending(early)).toBe(true);
+      gate.release();
+      expect(await early).toEqual(blocked);
+      await untilTurnEnd(harness, "t1");
+      await harness.shutdown();
+    });
+  });
+
+  describe("each tool call", () => {
+    const outside = [
+      { name: "a tool outside the seven", call: { tool: "ExampleTool" } },
+      {
+        name: "a call served by an MCP server",
+        call: { mcpServer: { name: "example", source: "claudeai" } },
+      },
+    ];
+
+    for (const entry of outside) {
+      it(`denies ${entry.name} from the hook and from canUseTool`, async () => {
+        const gate = held();
+        const { adapter, scripted } = allowingAdapter([
+          [{ send: sdk.init() }, gate.step, { send: sdk.result() }],
+        ]);
+        const harness = startAdapter(adapter, { decider: allow });
+        await harness.initialize();
+        await harness.startTurn("t1", "hi");
+        await gate.reached;
+        const options = scripted.runs[0]?.options;
+
+        expect(await askHook(hookOf(options), entry.call)).toEqual(blocked);
+        expect(await askCanUseTool(options, entry.call)).toEqual(denied);
+        expect(await askHook(hookOf(options))).toEqual({});
+        expect(await askCanUseTool(options)).toEqual(allowed);
+        gate.release();
+        await untilTurnEnd(harness, "t1");
+        await harness.shutdown();
+      });
+    }
   });
 });
 

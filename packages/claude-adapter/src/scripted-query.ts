@@ -19,6 +19,12 @@ export type ScriptStep =
     }
   | { readonly waitForInterrupt: true }
   | { readonly hang: true }
+  | {
+      readonly hold: {
+        readonly reached: () => void;
+        readonly release: Promise<unknown>;
+      };
+    }
   | { readonly exit: true }
   | { readonly throws: unknown };
 
@@ -96,6 +102,9 @@ export function scriptedQuery(
             await Promise.race([interrupted.promise, aborted]);
           } else if ("hang" in step) {
             await aborted;
+          } else if ("hold" in step) {
+            step.hold.reached();
+            await Promise.race([step.hold.release, aborted]);
           } else if ("exit" in step) {
             return;
           } else {
@@ -132,7 +141,7 @@ export const sdk = {
       tools: string[];
       mcp_servers: { name: string; status: string; source?: string }[];
       skills: string[];
-      plugins: { name: string; path: string; source?: string }[];
+      plugins: { name?: string; path: string; source?: string }[];
     }> = {},
   ) => ({
     type: "system",

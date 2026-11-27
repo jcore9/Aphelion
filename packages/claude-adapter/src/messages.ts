@@ -15,7 +15,8 @@ const initMessage = z.object({
   claude_code_version: z.string(),
   tools: z.array(z.string()),
   mcp_servers: z.array(z.unknown()),
-  plugins: z.array(z.object({ path: z.string() })),
+  skills: z.array(z.string()).optional(),
+  plugins: z.array(z.object({ name: z.string(), path: z.string() })),
 });
 
 const textDelta = z.object({
@@ -90,6 +91,11 @@ export interface ToolCall {
   readonly name: string;
 }
 
+export interface Plugin {
+  readonly name: string;
+  readonly path: string;
+}
+
 export interface ToolResult {
   readonly id: string;
   readonly isError: boolean;
@@ -113,7 +119,8 @@ export type ClaudeMessage =
       readonly version: string;
       readonly tools: readonly string[];
       readonly mcpServers: number;
-      readonly pluginPaths: readonly string[];
+      readonly skills: number;
+      readonly plugins: readonly Plugin[];
     }
   | { readonly kind: "unreadable-init" }
   | { readonly kind: "text"; readonly text: string }
@@ -164,7 +171,8 @@ export function parseMessage(raw: unknown): ClaudeMessage {
             version: init.data.claude_code_version,
             tools: init.data.tools,
             mcpServers: init.data.mcp_servers.length,
-            pluginPaths: init.data.plugins.map((plugin) => plugin.path),
+            skills: init.data.skills?.length ?? 0,
+            plugins: init.data.plugins,
           }
         : initSubtype.safeParse(raw).success
           ? { kind: "unreadable-init" }
