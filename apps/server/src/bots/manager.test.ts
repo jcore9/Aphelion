@@ -25,6 +25,7 @@ import {
   BotRunnerLink,
   cgroupsUnsafe,
   resumeFailed,
+  stopFailed,
   runnerNotices,
   type BotEvent,
   type BotState,
@@ -619,6 +620,39 @@ describe("the bot manager", () => {
         }),
       );
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps a bot stopping while its processes can't be removed, and retries the stop after the grace period",
+    () =>
+      Effect.gen(function* () {
+        const chief = recording([sessionTurn]);
+        const { fake, logs, manager, reach } = yield* system({
+          ...chief.bot,
+          killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+        });
+        yield* manager.start("chief");
+        yield* reach("running");
+        const stopping = yield* manager.stop("chief").pipe(Effect.forkScoped);
+        for (
+          let tries = 0;
+          tries < 100 && fake.killAttempts.length < 1;
+          tries++
+        ) {
+          yield* Effect.sleep("10 millis");
+        }
+        yield* Effect.sleep("200 millis");
+        expect(yield* manager.status("chief")).toEqual({ state: "stopping" });
+        expect(yield* manager.startTurn("chief", "hi")).toMatchObject({
+          outcome: "not-running",
+        });
+        expect(logs).toContainEqual(
+          expect.objectContaining({ msg: stopFailed, bot: "chief" }),
+        );
+        yield* Fiber.join(stopping).pipe(Effect.timeout("5 seconds"));
+        expect(yield* manager.status("chief")).toEqual({ state: "stopped" });
+        expect(fake.killAttempts).toEqual(["chief", "chief"]);
+      }).pipe(Effect.scoped),
   );
 
   it.live(

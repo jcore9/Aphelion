@@ -44,6 +44,9 @@ export const adapterKeys: Readonly<Record<string, string>> = {
 export const cgroupsUnsafe =
   "bots can't start, because the cgroup check failed";
 
+export const stopFailed =
+  "the bot's processes couldn't be removed, so the bot stays stopping and the server tries again";
+
 export const resumeFailed =
   "the saved session could not be resumed, so the bot started a new one";
 
@@ -406,6 +409,20 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               });
             case "stopped":
               return yield* apply(slot, { type: "killed", run: reply.run });
+            case "stop-failed":
+              logger.error(stopFailed, { bot, run: reply.run });
+              if (
+                slot.state.state !== "stopping" ||
+                reply.run !== slot.state.run
+              ) {
+                return;
+              }
+              return yield* run(slot, {
+                type: "arm",
+                run: reply.run,
+                deadline: "grace",
+                ms: policy.graceMs,
+              });
           }
         });
 

@@ -43,6 +43,7 @@ import { streamTracker, type StreamTracker } from "./stream";
 export interface BotRunnerOptions {
   readonly shutdownGrace: Duration.Input;
   readonly writeDeadline: Duration.Input;
+  readonly handshakeDeadline: Duration.Input;
   readonly logger: Logger;
 }
 
@@ -54,6 +55,9 @@ export const killFailed =
   "the cgroup supervisor couldn't remove the bot's processes, so the bot stays stopped";
 
 export const wedgedReason = "the bot's last processes couldn't be removed";
+
+export const handshakeExpired =
+  "the replacement adapter didn't answer initialize in time, so the runner killed it";
 
 const initializeResult = z.object({ provider: z.string() });
 
@@ -69,7 +73,8 @@ type Phase =
   | "cancelling"
   | "killing"
   | "lost"
-  | "stopping";
+  | "stopping"
+  | "unkilled";
 
 interface Slot {
   readonly start: StartRequest;
@@ -116,10 +121,11 @@ type LoopEvent =
     })
   | (Tag & { readonly type: "exited"; readonly exit: ProcessExit })
   | (Tag & { readonly type: "stuck" })
+  | (Tag & { readonly type: "handshake-expired" })
   | (Tag & { readonly type: "stdout-closed" })
   | (Tag & { readonly type: "cancel-done" })
   | (Tag & { readonly type: "killed"; readonly ok: boolean })
-  | (Tag & { readonly type: "ended" });
+  | (Tag & { readonly type: "ended"; readonly ok: boolean });
 
 const tagOf = (slot: Slot): Tag => ({
   bot: slot.start.bot,
@@ -173,7 +179,12 @@ export const runBotRunner = (
 
     const kill = (bot: string, process: BotProcess) =>
       process.kill.pipe(
-        Effect.as(true),
+        Effect.andThen(
+          Effect.sync(() => {
+            wedged.delete(bot);
+            return true;
+          }),
+        ),
         Effect.catchTag("KillFailed", ({ reason }) =>
           Effect.sync(() => {
             options.logger.error(killFailed, { bot, reason });
@@ -331,12 +342,12 @@ export const runBotRunner = (
             Effect.timeout(grace),
             Effect.ignore,
           );
-          if (process) yield* kill(tag.bot, process);
+          const ok = process ? yield* kill(tag.bot, process) : true;
           yield* Deferred.await(gone).pipe(
             Effect.timeout("5 seconds"),
             Effect.ignore,
           );
-          yield* Queue.offer(events, { type: "ended", ...tag });
+          yield* Queue.offer(events, { type: "ended", ...tag, ok });
         }),
       );
 
@@ -384,8 +395,8 @@ export const runBotRunner = (
           stage: "spawn",
           reason,
         });
-      if (existing !== undefined) return yield* refuse("already running");
       if (wedged.has(start.bot)) return yield* refuse(wedgedReason);
+      if (existing !== undefined) return yield* refuse("already running");
       const slot: Slot = {
         start,
         phase: "launching",
@@ -428,6 +439,12 @@ export const runBotRunner = (
         yield* link.send({ type: "stopped", ...frameOf(slot) });
       }
       if (slot.next !== undefined) yield* begin(slot.next);
+    });
+
+    const settle = Effect.fnUntraced(function* (slot: Slot, ok: boolean) {
+      if (ok || slot.stopReplies === 0) return yield* close(slot);
+      slot.phase = "unkilled";
+      yield* link.send({ type: "stop-failed", ...frameOf(slot) });
     });
 
     const reap = Effect.fnUntraced(function* (slot: Slot, exit: ProcessExit) {
@@ -578,7 +595,17 @@ export const runBotRunner = (
             return;
           }
           slot.phase = "initializing";
-          if (!slot.restarting) {
+          if (slot.restarting) {
+            const tag = tagOf(slot);
+            yield* FiberSet.run(
+              work,
+              Effect.sleep(options.handshakeDeadline).pipe(
+                Effect.andThen(
+                  Queue.offer(events, { type: "handshake-expired", ...tag }),
+                ),
+              ),
+            );
+          } else {
             yield* link.send({ type: "spawned", ...frameOf(slot) });
           }
           return yield* call(
@@ -623,7 +650,8 @@ export const runBotRunner = (
           const slot = current(event);
           if (slot === undefined) return;
           yield* abandon(slot);
-          if (["stopping", "lost", "killing"].includes(slot.phase)) return;
+          if (["stopping", "lost", "killing", "unkilled"].includes(slot.phase))
+            return;
           return yield* loseProcess(slot);
         }
         case "exited": {
@@ -631,15 +659,22 @@ export const runBotRunner = (
           if (slot === undefined) return;
           yield* abandon(slot);
           yield* Queue.shutdown(slot.inbox);
-          if (slot.phase === "stopping" || slot.phase === "killing") return;
+          if (["stopping", "killing", "unkilled"].includes(slot.phase)) return;
           return yield* reap(slot, event.exit);
         }
         case "stuck": {
           const slot = current(event);
           if (slot === undefined) return;
-          if (["stopping", "lost", "killing"].includes(slot.phase)) return;
+          if (["stopping", "lost", "killing", "unkilled"].includes(slot.phase))
+            return;
           yield* notice(slot, "stopped-reading");
           return yield* loseProcess(slot);
+        }
+        case "handshake-expired": {
+          const slot = current(event);
+          if (slot?.phase !== "initializing" || !slot.restarting) return;
+          options.logger.warn(handshakeExpired, { bot: event.bot });
+          return yield* reap(slot, { code: null, signal: null });
         }
         case "cancel-done": {
           const slot = current(event);
@@ -661,7 +696,7 @@ export const runBotRunner = (
         case "killed": {
           const slot = current(event);
           if (slot === undefined) return;
-          if (slot.phase === "stopping") return yield* close(slot);
+          if (slot.phase === "stopping") return yield* settle(slot, event.ok);
           if (slot.phase !== "killing") return;
           if (!event.ok) {
             slots.delete(event.bot);
@@ -684,7 +719,7 @@ export const runBotRunner = (
         case "ended": {
           const slot = current(event);
           if (slot?.phase !== "stopping") return;
-          return yield* close(slot);
+          return yield* settle(slot, event.ok);
         }
         case "turn.start": {
           const slot = named(event.bot, event.run);
@@ -754,6 +789,11 @@ export const runBotRunner = (
             return yield* stopped;
           }
           slot.stopReplies++;
+          if (slot.phase === "unkilled") {
+            slot.phase = "stopping";
+            yield* finish(slot, 0);
+            return;
+          }
           if (slot.phase === "stopping") return;
           const before = slot.phase;
           slot.phase = "stopping";

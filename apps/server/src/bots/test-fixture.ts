@@ -31,7 +31,8 @@ export interface FakeBot {
   readonly launchGate?: Promise<void>;
   readonly refuses?: string;
   readonly floods?: { readonly line: string; pulled: number };
-  readonly killFails?: string;
+  readonly killFails?: { readonly reason: string; times: number };
+  readonly silent?: (launch: number) => boolean;
   readonly unsafe?: { readonly step: string; readonly errno: string };
 }
 
@@ -134,8 +135,10 @@ function flood(spec: NonNullable<FakeBot["floods"]>) {
 export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
   const runs: FakeRun[] = [];
   const killCalls: string[] = [];
+  const killAttempts: string[] = [];
 
   const launch = (spec: BotSpec, bot: FakeBot): BotProcess => {
+    const launches = runs.filter((run) => run.spec.bot === spec.bot).length;
     const input = inbox();
     const stdout = bot.floods ? flood(bot.floods) : pipe();
     const stderr = pipe();
@@ -154,20 +157,23 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
       input.end();
       resolveExit(exit);
     };
-    runAdapter(
-      bot.adapter(),
-      {
-        input,
-        write: (line) => {
-          if (alive) stdout.line(line);
-          return Promise.resolve();
-        },
-        log: (message) => {
-          if (alive) stderr.line(message);
-        },
-      },
-      bot.options,
-    ).then(
+    const adapted = bot.silent?.(launches)
+      ? new Promise<void>(() => undefined)
+      : runAdapter(
+          bot.adapter(),
+          {
+            input,
+            write: (line) => {
+              if (alive) stdout.line(line);
+              return Promise.resolve();
+            },
+            log: (message) => {
+              if (alive) stderr.line(message);
+            },
+          },
+          bot.options,
+        );
+    void adapted.then(
       () => {
         end({ code: 0, signal: null });
       },
@@ -207,8 +213,11 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
       kill: Effect.suspend(() => {
         if (!killed) killCalls.push(spec.bot);
         killed = true;
-        if (bot.killFails !== undefined) {
-          return Effect.fail(new KillFailed({ reason: bot.killFails }));
+        killAttempts.push(spec.bot);
+        const fails = bot.killFails;
+        if (fails !== undefined && fails.times > 0) {
+          fails.times -= 1;
+          return Effect.fail(new KillFailed({ reason: fails.reason }));
         }
         end({ code: null, signal: "SIGKILL" });
         return Effect.void;
@@ -237,7 +246,7 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
 
   const latest = (bot: string) => runs.findLast((run) => run.spec.bot === bot);
 
-  return { layer, runs, killCalls, latest };
+  return { layer, runs, killCalls, killAttempts, latest };
 }
 
 export const memorySessionRefs = Layer.sync(SessionRefs, () => {
@@ -275,6 +284,7 @@ export const fakeRunnerLink = (
     yield* runBotRunner(b, {
       shutdownGrace: "200 millis",
       writeDeadline: "1 second",
+      handshakeDeadline: "1 second",
       logger,
     }).pipe(
       Effect.provide(fake.layer),

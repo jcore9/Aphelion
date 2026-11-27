@@ -72,6 +72,7 @@ const runner = (bots: Readonly<Record<string, FakeBot>>) =>
     yield* runBotRunner(b, {
       shutdownGrace: "200 millis",
       writeDeadline: "200 millis",
+      handshakeDeadline: "300 millis",
       logger: createLogger({
         write: (line) => {
           logs.push(JSON.parse(line) as Record<string, unknown>);
@@ -631,17 +632,24 @@ describe("the bot runner", () => {
   );
 
   it.live(
-    "keeps a bot stopped when its processes can't be removed, and logs one fixed line",
+    "doesn't acknowledge a stop whose kill failed, keeps refusing turns and starts, and retries the kill on the next stop",
     () =>
       Effect.gen(function* () {
-        const alpha = scripted([]);
-        const { fake, logs, until, send } = yield* runner({
-          alpha: { ...alpha.bot, killFails: "populated: ETIMEDOUT" },
+        const alpha = scripted([reply]);
+        const { fake, frames, logs, until, send } = yield* runner({
+          alpha: {
+            ...alpha.bot,
+            killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+          },
         });
         yield* send(startFrame("alpha"));
         yield* until(is("started"));
         yield* send({ type: "stop", bot: "alpha", run: 1 });
-        yield* until(is("stopped"));
+        expect(yield* until(is("stop-failed"))).toEqual({
+          type: "stop-failed",
+          bot: "alpha",
+          run: 1,
+        });
         expect(logs).toContainEqual(
           expect.objectContaining({
             msg: killFailed,
@@ -649,13 +657,77 @@ describe("the bot runner", () => {
             reason: "populated: ETIMEDOUT",
           }),
         );
+        yield* send({
+          type: "turn.start",
+          bot: "alpha",
+          run: 1,
+          turn: "t1",
+          text: "hi",
+        });
+        expect(yield* until(is("turn.refused"))).toMatchObject({
+          turn: "t1",
+          reason: "not-running",
+        });
         yield* send(startFrame("alpha", 2));
         expect(yield* until(is("start-failed"))).toMatchObject({
           run: 2,
           stage: "spawn",
           reason: wedgedReason,
         });
-        expect(fake.runs).toHaveLength(1);
+        expect(frames.filter(is("stopped"))).toEqual([]);
+        expect(frames.filter(is("exited"))).toEqual([]);
+        yield* send({ type: "stop", bot: "alpha", run: 1 });
+        yield* until(is("stopped"));
+        expect(fake.killAttempts).toEqual(["alpha", "alpha"]);
+        yield* send(startFrame("alpha", 3));
+        expect(yield* until(is("started"))).toMatchObject({ run: 3 });
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "kills a replacement adapter that never answers initialize, and reports the bot exited",
+    () =>
+      Effect.gen(function* () {
+        const alpha: FakeBot = {
+          adapter: () =>
+            fakeAdapter([
+              [
+                { emit: { type: "session", ref: sessionRef.parse("s-1") } },
+                { emit: { type: "text.delta", text: "working" } },
+                { waitForAbort: true },
+              ],
+            ]),
+          silent: (launch) => launch > 0,
+        };
+        const { fake, until, send } = yield* runner({ alpha });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        yield* send({
+          type: "turn.start",
+          bot: "alpha",
+          run: 1,
+          turn: "t1",
+          text: "go",
+        });
+        yield* until(
+          (frame) =>
+            frame.type === "event" &&
+            frame.envelope.event.type === "text.delta",
+        );
+        yield* send({ type: "turn.cancel", bot: "alpha", run: 1, turn: "t1" });
+        expect(yield* until(is("exited"))).toEqual({
+          type: "exited",
+          bot: "alpha",
+          run: 1,
+          code: null,
+          signal: null,
+        });
+        expect(fake.runs).toHaveLength(2);
+        expect(fake.runs[1]?.received.map((line) => line.method)).toEqual([
+          "initialize",
+        ]);
+        expect(fake.runs[1]?.alive()).toBe(false);
+        expect(fake.killAttempts).toEqual(["alpha", "alpha"]);
       }).pipe(Effect.scoped),
   );
 

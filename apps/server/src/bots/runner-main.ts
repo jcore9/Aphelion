@@ -8,6 +8,7 @@ import {
   supervisorRequestSchema,
 } from "../cgroups/protocol";
 import { createLogger } from "../log";
+import { defaultRestartPolicy } from "../plugins/lifecycle";
 import { pipeLink } from "../plugins/link";
 import { fdPipeLink, type RunnerPipeFds } from "../plugins/runner-pipe";
 import { runBotRunner } from "./runner";
@@ -69,6 +70,7 @@ export async function serveBotRunner(supervisor: RunnerPipeFds): Promise<void> {
     yield* runBotRunner(link, {
       shutdownGrace: "5 seconds",
       writeDeadline: "5 seconds",
+      handshakeDeadline: defaultRestartPolicy.handshakeMs,
       logger,
     });
   }).pipe(Effect.provide(processes), Effect.scoped);

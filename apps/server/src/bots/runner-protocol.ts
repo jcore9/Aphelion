@@ -93,6 +93,7 @@ export const runnerReplySchema = z.discriminatedUnion("type", [
     signal: z.string().max(32).nullable(),
   }),
   z.strictObject({ type: z.literal("stopped"), bot, run }),
+  z.strictObject({ type: z.literal("stop-failed"), bot, run }),
 ]);
 
 export type RunnerRequest = z.infer<typeof runnerRequestSchema>;

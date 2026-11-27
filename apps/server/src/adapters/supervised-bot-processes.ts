@@ -1,5 +1,13 @@
 import { randomUUIDv7 } from "node:crypto";
-import { Cause, Deferred, Effect, Layer, Queue, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Layer,
+  Queue,
+  Semaphore,
+  Stream,
+} from "effect";
 import {
   BotProcesses,
   CgroupsUnsafe,
@@ -23,7 +31,7 @@ interface Pipes {
 interface Waiting {
   readonly started: Deferred.Deferred<Pipes, SpawnFailed>;
   readonly exited: Deferred.Deferred<ProcessExit>;
-  readonly killed: Deferred.Deferred<undefined, KillFailed>;
+  killed: Deferred.Deferred<undefined, KillFailed>;
 }
 
 const bytes = (stream: ReadableStream<Uint8Array>) =>
@@ -48,6 +56,7 @@ export const supervisedBotProcesses = (
       }
       const readiness = yield* Deferred.make<CgroupsUnsafe | undefined>();
       const runs = new Map<string, Waiting>();
+      let lost = false;
 
       const dispatch = (reply: SupervisorReply) =>
         Effect.gen(function* () {
@@ -101,6 +110,7 @@ export const supervisedBotProcesses = (
         Effect.forever,
         Effect.catchIf(Cause.isDone, () =>
           Effect.gen(function* () {
+            lost = true;
             logger.error(
               "the bot runner lost its pipe to the cgroup supervisor",
             );
@@ -139,18 +149,21 @@ export const supervisedBotProcesses = (
           };
           runs.set(run, waiting);
           let close: () => void = () => undefined;
-          const kill = yield* Effect.cached(
+          let removed = false;
+          const killing = yield* Semaphore.make(1);
+          const kill = killing.withPermit(
             Effect.gen(function* () {
+              if (removed) return;
+              if (lost) {
+                return yield* new KillFailed({ reason: supervisorGone });
+              }
+              waiting.killed = yield* Deferred.make<undefined, KillFailed>();
               yield* link.send({ type: "kill", run });
               yield* Deferred.await(waiting.killed);
-            }).pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  close();
-                  runs.delete(run);
-                }),
-              ),
-            ),
+              removed = true;
+              close();
+              runs.delete(run);
+            }),
           );
           yield* link.send({
             type: "start",
