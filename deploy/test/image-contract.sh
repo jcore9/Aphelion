@@ -730,6 +730,30 @@ shown=$(host_aphelion status 2>&1) || status=$?
   fail "status printed something else (exit $status): $shown"
 pass "status shows the running service, container and health, and no AI tool"
 
+docker exec "$container" rm -f /tmp/runs-watch /tmp/runs-watch.stop
+docker exec --detach --user aphelion-runner "$container" bash -c '
+  until [[ -e /tmp/runs-watch.stop ]]; do
+    for dir in /run/aphelion-runs/*; do
+      probe=0
+      for pid in $(cat "/sys/fs/cgroup/bots/work/${dir##*/}/cgroup.procs" 2>/dev/null); do
+        [[ $(tr "\0" " " <"/proc/$pid/cmdline" 2>/dev/null) == *cgroup-probe.js* ]] && probe=1
+      done
+      ((probe == 1)) || continue
+      for try in list open; do
+        if [[ $try == list ]]; then out=$(ls "$dir" 2>&1 >/dev/null); else out=$( (exec 3<>"$dir/stdout") 2>&1); fi
+        if [[ $? == 0 ]]; then echo "$try $dir ok"; elif [[ $out == *"Permission denied"* ]]; then echo "$try $dir denied"; fi
+      done >>/tmp/runs-watch
+    done
+  done'
+docker exec --user root "$container" /usr/local/lib/aphelion/launch --check-cgroups >/dev/null ||
+  fail "the start check failed while a runs-group process watched the run folders"
+docker exec --user root "$container" touch /tmp/runs-watch.stop
+sleep 0.5
+watched=$(docker exec "$container" cat /tmp/runs-watch 2>/dev/null || true)
+grep -q "^list .* denied$" <<<"$watched" || fail "the runs-group watcher never saw the probe's run folder: $watched"
+if grep " ok$" <<<"$watched"; then fail "a process in the aphelion-runs group reached the probe's run folder or pipes"; fi
+pass "a process in the aphelion-runs group can't list the probe's run folder or open its pipes"
+
 status=0
 checked=$(host_aphelion check 2>&1) || status=$?
 read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \2/p' <<<"$checked")

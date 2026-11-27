@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   chownSync,
   existsSync,
   mkdirSync,
@@ -10,10 +11,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
+import { z } from "zod";
 import type { Logger } from "../log";
 import {
   CgroupHost,
   HostFailed,
+  probeBot,
   type AdapterEntry,
   type RunPaths,
   type SupervisedChild,
@@ -76,15 +79,39 @@ const field = (status: string, name: string) =>
     .split(/\s+/)
     .filter((part) => part !== "") ?? [];
 
-async function firstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const decoder = new TextDecoder();
-  let text = "";
-  for await (const chunk of stream) {
-    text += decoder.decode(chunk, { stream: true });
-    const end = text.indexOf("\n");
-    if (end >= 0) return text.slice(0, end);
+export const maxProbeAnswerBytes = 64 * 1024;
+
+const probeAnswerSchema = z.strictObject({
+  allowed: z.array(z.string()).max(64),
+});
+
+async function firstLine(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<string> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error("the stream ended before a full line");
+      const end = value.indexOf(10);
+      chunks.push(end >= 0 ? value.subarray(0, end) : value);
+      size += end >= 0 ? end : value.byteLength;
+      if (size > maxBytes) throw new Error("the line is too long");
+      if (end >= 0) return new TextDecoder().decode(Buffer.concat(chunks));
+    }
+  } finally {
+    reader.releaseLock();
   }
-  return text;
+}
+
+export async function probeAnswer(
+  stream: ReadableStream<Uint8Array>,
+): Promise<readonly string[]> {
+  const line = await firstLine(stream, maxProbeAnswerBytes);
+  return probeAnswerSchema.parse(JSON.parse(line)).allowed;
 }
 
 export const bunCgroupHost = (options: BunCgroupHostOptions) =>
@@ -123,17 +150,14 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
           mkdirSync(paths.leaf);
         });
         yield* Effect.gen(function* () {
-          const group = yield* attempt("make-folder", () => {
-            const { gid } = statSync(options.runs);
-            mkdirSync(folder, { mode: 0o750 });
-            chownSync(folder, -1, gid);
-            return gid;
+          yield* attempt("make-folder", () => {
+            mkdirSync(folder, { mode: 0o700 });
           });
           const made = Bun.spawnSync(
             [
               "/usr/bin/mkfifo",
               "-m",
-              "0660",
+              "0600",
               paths.stdin,
               paths.stdout,
               paths.stderr,
@@ -141,34 +165,43 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
             { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
           );
           if (made.exitCode !== 0) return yield* failed("make-fifos", "mkfifo");
-          yield* attempt("make-fifos", () => {
-            for (const fifo of [paths.stdin, paths.stdout, paths.stderr]) {
-              chownSync(fifo, -1, group);
-            }
-          });
         }).pipe(Effect.tapError(() => Effect.ignore(removeRun(paths))));
         return paths;
       });
 
+    const share = (paths: RunPaths) =>
+      attempt("share", () => {
+        const { gid } = statSync(options.runs);
+        for (const fifo of [paths.stdin, paths.stdout, paths.stderr]) {
+          chownSync(fifo, -1, gid);
+          chmodSync(fifo, 0o660);
+        }
+        chownSync(paths.folder, -1, gid);
+        chmodSync(paths.folder, 0o750);
+      });
+
     const spawn = (paths: RunPaths, entry: AdapterEntry, bot: string) =>
-      attempt("spawn", () =>
-        Bun.spawn(
-          [options.entry, paths.leaf, paths.folder, entry.bundle, bot],
-          {
-            cwd: "/",
-            env: { ...entry.env },
-            stdin: "ignore",
-            stdout: "pipe",
-            stderr: "ignore",
-          },
+      (bot === probeBot ? Effect.void : share(paths)).pipe(
+        Effect.andThen(
+          attempt("spawn", () =>
+            Bun.spawn(
+              [options.entry, paths.leaf, paths.folder, entry.bundle, bot],
+              {
+                cwd: "/",
+                env: { ...entry.env },
+                stdin: "ignore",
+                stdout: "pipe",
+                stderr: "ignore",
+              },
+            ),
+          ),
         ),
-      ).pipe(
         Effect.map((child): SupervisedChild => {
           const exited = child.exited.then(() => ({
             code: child.exitCode,
             signal: child.signalCode === null ? null : String(child.signalCode),
           }));
-          const placed = firstLine(child.stdout).then(
+          const placed = firstLine(child.stdout, 64).then(
             (line) => line === "placed",
             () => false,
           );
@@ -259,13 +292,12 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
             await pipes.write(
               `${JSON.stringify({
                 tree,
+                leaf: paths.leaf,
                 folder: paths.folder,
                 fifos: [paths.stdin, paths.stdout, paths.stderr],
               })}\n`,
             );
-            return JSON.parse(await firstLine(pipes.stdout)) as {
-              readonly allowed: readonly string[];
-            };
+            return probeAnswer(pipes.stdout);
           },
           catch: () => new HostFailed({ step: "bot-denied", errno: "EPROTO" }),
         }).pipe(
@@ -280,11 +312,11 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
             }),
           ),
         );
-        if (answer.allowed.length > 0) {
+        if (answer.length > 0) {
           options.logger.error(
             "an aphelion-bot process reached the cgroup tree",
             {
-              allowed: answer.allowed.slice(0, 20),
+              allowed: answer.slice(0, 20),
             },
           );
           return yield* failed("bot-denied", "ok");
