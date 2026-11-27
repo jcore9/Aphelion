@@ -32,26 +32,27 @@ check_ufw() {
   fi
 }
 
-check_root_owned() {
-  local path=$1
-  if [[ $(stat -c '%u' "$path") != 0 ]] || (($(stat -c '%a' "$path" | sed 's/^/8#/') & 8#022)); then
-    stop "$path must be owned by root and writable only by root. Fix that, then run this again"
-  fi
+check_checkout_owned() {
+  local offender
+  offender=$(find "$root" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit) ||
+    stop "the installer can't read the files in $root"
+  [[ -z $offender ]] ||
+    stop "$offender must be owned by root and writable only by root, like everything in $root. Fix that, then run this again"
 }
 
 inspect_checkout() {
   [[ -e $root ]] || return 0
   [[ -d $root/.git ]] || stop "$root exists and isn't a clone of Aphelion. Move it away first"
-  check_root_owned "$root"
-  check_root_owned "$root/.git"
+  check_checkout_owned
   local origin dirty tag_commit
   origin=$(git -C "$root" remote get-url origin 2>/dev/null) || origin=""
   [[ $origin == "$repository_url" ]] ||
     stop "$root isn't a clone of $repository_url (its origin is ${origin:-unknown}). Move it away first"
-  dirty=$(git -C "$root" status --porcelain) ||
+  dirty=$(git --no-optional-locks -C "$root" status --porcelain) ||
     stop "git status failed in $root, so the installer can't tell whether it has local changes"
   [[ -z $dirty ]] || stop "$root has local changes. Keep or undo them, then run this again"
   previous=$(git -C "$root" rev-parse HEAD) || stop "git can't read the commit that $root is on"
+  previous_branch=$(git -C "$root" symbolic-ref -q --short HEAD) || previous_branch=""
   tag_commit=$(git -C "$root" rev-parse "refs/tags/$tag^{commit}" 2>/dev/null) || tag_commit=""
   if [[ -n $tag_commit && $tag_commit == "$previous" ]]; then
     at_tag=1
@@ -105,7 +106,7 @@ show_recovery_key() {
 }
 
 main() {
-  local tag="" start=1 address at_tag=0 previous="" moved=0 existed=0
+  local tag="" start=1 address at_tag=0 previous="" previous_branch="" moved=0 existed=0
   while (($#)); do
     case $1 in
       --tag)
@@ -139,7 +140,7 @@ main() {
   inspect_checkout
   if systemctl is-active --quiet aphelion; then
     ((start)) || stop "aphelion.service is running, so --no-start can't leave it stopped. Stop it first with: sudo systemctl stop aphelion"
-    if [[ -d $root/.git ]] && ((!at_tag)); then
+    if ((!at_tag)); then
       stop "aphelion.service is running, and $root isn't at $tag. Moving a running server to another release is the job of: sudo aphelion upgrade $tag (that command is still coming; until then follow Upgrade in the install guide)"
     fi
   fi
@@ -175,7 +176,11 @@ main() {
 
   if ! "$root/deploy/host/get-image" "$tag"; then
     if ((moved)); then
-      git -C "$root" -c advice.detachedHead=false checkout --quiet --detach "$previous"
+      if [[ -n $previous_branch ]]; then
+        git -C "$root" checkout --quiet "$previous_branch"
+      else
+        git -C "$root" -c advice.detachedHead=false checkout --quiet --detach "$previous"
+      fi
       echo "install: moved $root back to $previous, where it was before" >&2
     fi
     exit 1
