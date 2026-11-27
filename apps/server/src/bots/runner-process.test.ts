@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   closeSync,
   createReadStream,
@@ -7,9 +7,10 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  statSync,
   write,
 } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -17,7 +18,15 @@ import { checkStream } from "@aphelion/plugin-sdk/testing";
 import { expect, it } from "@effect/vitest";
 import { Effect, Queue } from "effect";
 import { describe } from "vitest";
-import { pipeLink } from "../plugins/link";
+import { freezeAndKill, read } from "../adapters/process-tree";
+import {
+  maxSupervisorFrameBytes,
+  supervisorReplySchema,
+  supervisorRequestSchema,
+  type SupervisorReply,
+  type SupervisorRequest,
+} from "../cgroups/protocol";
+import { pipeLink, type Link } from "../plugins/link";
 import { botEnvironment } from "./environment";
 import {
   maxFrameBytes,
@@ -44,6 +53,13 @@ import { fakeAdapter } from ${JSON.stringify(join(sdk, "testing.ts"))};
 const attempt = (read) => {
   try { read(); return "ok"; } catch (error) { return error.code; }
 };
+const runnerPid = readdirSync("/proc").find((name) => {
+  try {
+    return /^\\d+$/.test(name) && readFileSync("/proc/" + name + "/cmdline", "utf8").includes(${JSON.stringify(runnerMain)});
+  } catch {
+    return false;
+  }
+});
 const fds = readdirSync("/proc/self/fd").map((fd) => {
   try {
     const info = statSync("/proc/self/fd/" + fd);
@@ -57,8 +73,9 @@ const report = JSON.stringify({
   pid: process.pid,
   fds,
   env: process.env,
-  runnerFd: attempt(() => readlinkSync("/proc/" + process.ppid + "/fd/0")),
-  runnerEnviron: attempt(() => readFileSync("/proc/" + process.ppid + "/environ")),
+  cwd: process.cwd(),
+  runnerFd: attempt(() => readlinkSync("/proc/" + runnerPid + "/fd/0")),
+  runnerEnviron: attempt(() => readFileSync("/proc/" + runnerPid + "/environ")),
 });
 const adapter = fakeAdapter([
   [{ emit: { type: "text.delta", text: report } }, { emit: { type: "turn.end", reason: "completed" } }],
@@ -116,6 +133,79 @@ const fifo = (path: string) => {
   return { reader, writer, dev, ino };
 };
 
+const testSupervisor = (
+  link: Link<SupervisorRequest, SupervisorReply>,
+  base: string,
+  adapters: Readonly<Record<string, string>>,
+  home: string,
+) =>
+  Effect.gen(function* () {
+    const children = new Map<string, ChildProcess>();
+    const killRun = (child: ChildProcess | undefined) => {
+      const root = child?.pid === undefined ? undefined : read(child.pid);
+      freezeAndKill(() => (root ? [root] : []));
+    };
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        for (const child of children.values()) killRun(child);
+      }),
+    );
+    yield* link.send({ type: "ready" });
+    const handle = (request: SupervisorRequest) =>
+      Effect.promise(async () => {
+        if (request.type === "start") {
+          const folder = join(base, "runs", request.run);
+          await mkdir(folder, { recursive: true });
+          const paths = ["stdin", "stdout", "stderr"].map((name) =>
+            join(folder, name),
+          );
+          spawnSync("mkfifo", ["-m", "0600", ...paths]);
+          const child = spawn(
+            "sh",
+            [
+              "-c",
+              'exec 1>"$1/stdout" 2>"$1/stderr" 0<"$1/stdin"; unset PWD; exec "$2" --no-env-file --preload "$3" "$4" "$5" "$6"',
+              "sh",
+              folder,
+              process.execPath,
+              launcher,
+              adapters[request.adapter] ?? "",
+              request.bot,
+              request.folder,
+            ],
+            { stdio: "ignore", env: botEnvironment("claude", home) },
+          );
+          children.set(request.run, child);
+          child.once("exit", (code, signal) => {
+            void Effect.runPromise(
+              link.send({ type: "exited", run: request.run, code, signal }),
+            );
+          });
+          await Effect.runPromise(
+            link.send({
+              type: "started",
+              run: request.run,
+              stdin: paths[0] ?? "",
+              stdout: paths[1] ?? "",
+              stderr: paths[2] ?? "",
+            }),
+          );
+          return;
+        }
+        killRun(children.get(request.run));
+        for (const pid of sleepers()) process.kill(pid, "SIGKILL");
+        await Effect.runPromise(
+          link.send({ type: "killed", run: request.run }),
+        );
+      });
+    yield* Queue.take(link.incoming).pipe(
+      Effect.flatMap(handle),
+      Effect.forever,
+      Effect.ignore,
+      Effect.forkScoped,
+    );
+  });
+
 const startRunner = Effect.gen(function* () {
   const base = yield* Effect.promise(() =>
     mkdtemp(join(tmpdir(), "aphelion-bot-runner-")),
@@ -136,25 +226,49 @@ const startRunner = Effect.gen(function* () {
   });
   const requests = fifo(join(base, "requests"));
   const replies = fifo(join(base, "replies"));
+  const supRequests = fifo(join(base, "sup-requests"));
+  const supReplies = fifo(join(base, "sup-replies"));
   const home = join(base, "home");
   const runner = spawn(
     process.execPath,
-    [
-      runnerMain,
-      "--bun",
-      process.execPath,
-      "--launcher",
-      launcher,
-      "--home",
-      home,
-    ],
+    [runnerMain, "--supervisor-fds", "3,4"],
     {
-      stdio: [requests.reader, replies.writer, "inherit"],
+      stdio: [
+        requests.reader,
+        replies.writer,
+        "inherit",
+        supReplies.reader,
+        supRequests.writer,
+      ],
       env: { ...process.env, HTTPS_PROXY: "http://proxy.test:3128" },
     },
   );
-  closeSync(requests.reader);
-  closeSync(replies.writer);
+  for (const fd of [
+    requests.reader,
+    replies.writer,
+    supReplies.reader,
+    supRequests.writer,
+  ]) {
+    closeSync(fd);
+  }
+  const supervisorLink = yield* pipeLink(
+    Readable.toWeb(
+      createReadStream("", { fd: supRequests.reader }),
+    ) as ReadableStream<Uint8Array>,
+    (text) =>
+      new Promise((done) => {
+        write(supReplies.writer, text, () => {
+          done(undefined);
+        });
+      }),
+    {
+      schema: supervisorRequestSchema,
+      maxBytes: maxSupervisorFrameBytes,
+      onDrop: () => Effect.void,
+    },
+    supervisorReplySchema,
+  );
+  yield* testSupervisor(supervisorLink, base, adapters, home);
   yield* Effect.addFinalizer(() =>
     Effect.promise(
       () =>
@@ -199,14 +313,18 @@ const startRunner = Effect.gen(function* () {
       }
     }).pipe(Effect.timeout("20 seconds"), Effect.orDie);
   const send = (frame: RunnerRequest) => link.send(frame);
-  const start = (run: number, adapter: keyof typeof adapters = "plain") =>
+  const start = (
+    run: number,
+    adapter: keyof typeof adapters = "plain",
+    folder = join(home, "alpha"),
+  ) =>
     send({
       type: "start",
       bot: "alpha",
       run,
       provider: "claude",
-      adapter: adapters[adapter],
-      folder: join(base, "bots", "alpha"),
+      adapter,
+      folder,
       resume: null,
     });
   const turn = (run: number, id: string) =>
@@ -219,7 +337,19 @@ const startRunner = Effect.gen(function* () {
         text: "report",
       }),
     );
-  return { base, home, requests, replies, frames, until, start, turn, send };
+  return {
+    base,
+    home,
+    requests,
+    replies,
+    supRequests,
+    supReplies,
+    frames,
+    until,
+    start,
+    turn,
+    send,
+  };
 });
 
 const is = (type: RunnerReply["type"]) => (frame: RunnerReply) =>
@@ -235,7 +365,7 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
           const runner = yield* startRunner;
           yield* runner.start(1, "stubborn");
           yield* runner.until(is("started"));
-          expect(existsSync(join(runner.base, "bots", "alpha"))).toBe(true);
+          expect(existsSync(join(runner.home, "alpha"))).toBe(true);
           yield* runner.turn(1, "t1");
           const delta = yield* runner.until(
             (frame) =>
@@ -249,13 +379,18 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
             pid: number;
             fds: [number, number][];
             env: Record<string, string>;
+            cwd: string;
             runnerFd: string;
             runnerEnviron: string;
           };
           expect(report.env).toEqual(botEnvironment("claude", runner.home));
-          const pipes = [runner.requests, runner.replies].map(
-            ({ dev, ino }) => `${String(dev)}:${String(ino)}`,
-          );
+          expect(report.cwd).toBe(join(runner.home, "alpha"));
+          const pipes = [
+            runner.requests,
+            runner.replies,
+            runner.supRequests,
+            runner.supReplies,
+          ].map(({ dev, ino }) => `${String(dev)}:${String(ino)}`);
           const held = report.fds.map(
             ([dev, ino]) => `${String(dev)}:${String(ino)}`,
           );
@@ -283,6 +418,31 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
               (n) => n === 0,
             ),
           ).toBe(0);
+        }).pipe(Effect.scoped),
+      30_000,
+    );
+
+    it.live(
+      "creates a custom bot folder on a fresh volume and runs the adapter in it",
+      () =>
+        Effect.gen(function* () {
+          const runner = yield* startRunner;
+          const folder = join(runner.base, "volume", "bots", "alpha");
+          yield* runner.start(1, "plain", folder);
+          yield* runner.until(is("started"));
+          yield* runner.turn(1, "t1");
+          const delta = yield* runner.until(
+            (frame) =>
+              frame.type === "event" &&
+              frame.envelope.event.type === "text.delta",
+          );
+          const event = delta.type === "event" ? delta.envelope.event : null;
+          const { cwd } = JSON.parse(
+            event?.type === "text.delta" ? event.text : "{}",
+          ) as { cwd: string };
+          expect(cwd).toBe(folder);
+          expect((statSync(folder).mode & 0o777).toString(8)).toBe("750");
+          expect(existsSync(join(runner.home, "alpha"))).toBe(false);
         }).pipe(Effect.scoped),
       30_000,
     );

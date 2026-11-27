@@ -49,7 +49,7 @@ export const startServer = (
             },
           ],
           logger,
-          adapters: { fake: "/adapters/fake/adapter.js" },
+          adapters: { fake: "fake" },
           stopDeadlineMs: 5_000,
         },
         history,

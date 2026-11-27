@@ -269,7 +269,7 @@ cat >"$fakebin/docker" <<'FAKE'
 echo "docker $*" >>"${FAKE_CALLS:-/dev/null}"
 case " $* " in
   *" inspect "*"ReadonlyRootfs"*)
-    echo 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"]'
+    echo 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true","writable-cgroups=true"]'
     exit 0 ;;
   *" inspect "*"Mounts"*)
     echo '[]'

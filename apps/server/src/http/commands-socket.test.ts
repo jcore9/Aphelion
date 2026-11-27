@@ -77,7 +77,7 @@ const startServer = (dbPath: string, script: FakeScript) =>
             },
           ],
           logger,
-          adapters: { fake: "/adapters/fake/adapter.js" },
+          adapters: { fake: "fake" },
           stopDeadlineMs: 5_000,
         },
         history,

@@ -9,7 +9,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, KILL]
-    security_opt: ["no-new-privileges:true"]
+    security_opt: ["no-new-privileges:true", "writable-cgroups=true"]
     pids_limit: 1024
     mem_limit: ${APHELION_MEMORY:-4g}
     cpus: ${APHELION_CPUS:-2}
@@ -17,6 +17,7 @@ services:
       - /tmp:size=1g,mode=1777
       - /run:size=16m,mode=0755
       - /run/aphelion-secrets:size=1m,uid=10003,gid=10001,mode=2710
+      - /run/aphelion-runs:size=1m,uid=10005,gid=10007,mode=0750
     ports:
       - "${APHELION_TAILNET_ADDRESS:?set APHELION_TAILNET_ADDRESS in .env}:7400:7400"
     volumes:
