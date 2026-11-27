@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const send = (message) =>
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
@@ -63,7 +64,10 @@ function isolation() {
   walk("/sys/fs/cgroup/bots", paths);
   for (const path of paths) {
     if (statSync(path).isDirectory()) {
-      expect(`mkdir ${path}`, outcome(() => mkdirSync(join(path, "escape"))));
+      expect(
+        `mkdir ${path}`,
+        outcome(() => mkdirSync(join(path, "escape"))),
+      );
     } else {
       expect(
         `write ${path}`,
@@ -75,11 +79,20 @@ function isolation() {
     const pids = pidsRunning(`/usr/local/lib/aphelion/${role}`);
     if (pids.length === 0) reached.push(`no ${role} process`);
     for (const pid of pids) {
-      expect(`signal ${role}`, outcome(() => process.kill(pid, 0)));
-      expect(`stop ${role}`, outcome(() => process.kill(pid, "SIGSTOP")));
+      expect(
+        `signal ${role}`,
+        outcome(() => process.kill(pid, 0)),
+      );
+      expect(
+        `stop ${role}`,
+        outcome(() => process.kill(pid, "SIGSTOP")),
+      );
     }
   }
-  expect("list /run/aphelion-runs", outcome(() => readdirSync("/run/aphelion-runs")));
+  expect(
+    "list /run/aphelion-runs",
+    outcome(() => readdirSync("/run/aphelion-runs")),
+  );
   return reached;
 }
 
@@ -129,7 +142,7 @@ for await (const line of createInterface({ input: process.stdin })) {
           ref: `contract-${initialized.bot.id}-1`,
         });
         spawn("sh", ["-c", daemons], { stdio: "ignore", detached: true });
-        await new Promise((done) => setTimeout(done, 500));
+        await sleep(500);
         const pids = inLeaf();
         const stable = pids.filter(
           (pid) =>
