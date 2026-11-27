@@ -71,8 +71,8 @@ const refuse = (
   line: string,
 ) =>
   Effect.gen(function* () {
-    yield* record(options, action, "failed", detail);
     yield* (yield* CliIo).err(line);
+    yield* record(options, action, "failed", detail);
     return yield* failed;
   });
 

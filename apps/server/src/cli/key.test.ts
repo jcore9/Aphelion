@@ -358,6 +358,19 @@ describe("aphelion key test", () => {
   });
 });
 
+describe("an audit log that can't be written", () => {
+  it("still prints the refusal", async () => {
+    const result = await capture(
+      keyRemove(
+        { stateDir: join(root, "missing", "state"), tool: "claude" },
+        broker,
+      ),
+    );
+    expect(result.code).not.toBe(0);
+    expect(result.err[0]).toBe("No API key is stored for claude.");
+  });
+});
+
 describe("a broker that can't be reached", () => {
   it("fails with a fixed line and an audit row", async () => {
     const away = brokerClient(join(root, "missing.sock"));
