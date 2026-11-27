@@ -404,12 +404,18 @@ pass "install asks the broker's own parser about the bootstrap key, refuses one 
 
 status=0
 error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" status 2>&1 >/dev/null) || status=$?
-[[ $status == 2 && $error == "Run it with sudo: sudo aphelion status" ]] ||
+[[ $status == 2 && $error == "Run it with sudo, for example: sudo aphelion status" ]] ||
   fail "the command didn't refuse a user other than root with status 2: $status $error"
+nonroot_key=sk-ant-fake-nonroot-canary-0123456789abcdef
+status=0
+error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" key add claude "$nonroot_key" 2>&1 >/dev/null) || status=$?
+[[ $status == 2 && $error == "Run it with sudo, for example: sudo aphelion status" ]] ||
+  fail "the command repeated the words of a user other than root: $status $error"
+! grep -qF "$nonroot_key" /tmp/docker-calls 2>/dev/null || fail "a user other than root got a key to docker"
 help=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" --help) || fail "--help needs root"
 [[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* && $help == *"aphelion tool install NAME"* && $help == *"aphelion key add|replace NAME"* && $help == *"aphelion key test NAME"* && $help == *"aphelion key remove NAME"* ]] ||
   fail "--help doesn't list the commands: $help"
-pass "the command refuses a user other than root with status 2, and --help works for everyone"
+pass "the command refuses a user other than root with status 2 and a fixed line, and --help works for everyone"
 
 for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b" tool "tool frobnicate" "tool list extra" "tool install" "tool install a b" "tool remove" "tool remove a b" "tool update a b" "tool check a" "tool check now please" \
   key "key add" "key add a b" "key replace" "key test" "key test a b" "key remove" "key remove a b" "key frobnicate claude" \
@@ -552,14 +558,14 @@ key_input=$(mktemp)
 typed_in_terminal() {
   local typed=$1
   shift
-  { sleep 2; printf '%s\r' "$typed"; } |
+  { sleep 2; printf '%s' "$typed"; } |
     script --quiet --return --command "$(printf '%q ' env "PATH=$fakebin:$PATH" "$@")" /dev/null | tr -d '\r'
 }
 for subcommand in add replace; do
   reset_calls
   : >"$key_input"
   status=0
-  out=$(typed_in_terminal "$fake_key" FAKE_KEY_INPUT="$key_input" FAKE_KEY_EXIT=3 /opt/aphelion/deploy/host/aphelion key "$subcommand" claude 2>&1) || status=$?
+  out=$(typed_in_terminal "$fake_key"$'\r' FAKE_KEY_INPUT="$key_input" FAKE_KEY_EXIT=3 /opt/aphelion/deploy/host/aphelion key "$subcommand" claude 2>&1) || status=$?
   [[ $status == 3 && $out == *"API key for claude: "* && $out == *"ran key $subcommand claude"* ]] ||
     fail "key $subcommand didn't prompt, run the server's command and pass its output and exit code through ($status, $out)"
   [[ $out != *"$fake_key"* ]] || fail "key $subcommand showed the key on the terminal"
@@ -570,17 +576,52 @@ for subcommand in add replace; do
 done
 pass "key add and key replace read the key with the echo off and send it to the server's command on standard input, never on a command line"
 
+: >"$key_input"
+out=$(typed_in_terminal $'\t'"$fake_key "$'\r' FAKE_KEY_INPUT="$key_input" /opt/aphelion/deploy/host/aphelion key add claude 2>&1) ||
+  fail "key add failed on a key with a tab and a space ($out)"
+[[ $(cat "$key_input") == $'\t'"$fake_key " ]] ||
+  fail "key add changed the typed line before it sent it, so the server can't refuse the tab or the space"
+pass "key add sends the typed line as it is, with its spaces and tabs"
+
 reset_calls
 status=0
-out=$(as_root_aphelion key add claude </dev/null 2>&1) || status=$?
-[[ $status == 1 && $out == "aphelion: key add needs a terminal, so you can type the key without it showing. Run it in a shell on the host, not through a pipe or a script." ]] ||
-  fail "key add didn't refuse without a terminal ($status, $out)"
-! called "aphelion key" || fail "key add ran the server's command without a terminal"
+out=$(typed_in_terminal $'\004' /opt/aphelion/deploy/host/aphelion key add claude 2>&1) || status=$?
+[[ $status == 1 && $out == *"aphelion: Stopped. No API key was read." ]] ||
+  fail "key add didn't stop on Ctrl-D ($status, $out)"
+! called "aphelion key" || fail "key add ran the server's command after Ctrl-D"
+pass "key add stops on Ctrl-D without running the server's command"
+
+for subcommand in add replace; do
+  reset_calls
+  status=0
+  out=$(as_root_aphelion key "$subcommand" claude </dev/null 2>&1) || status=$?
+  [[ $status == 1 && $out == "aphelion: key $subcommand needs a terminal, so you can type the key without it showing. Run it in a shell on the host, not through a pipe or a script." ]] ||
+    fail "key $subcommand didn't refuse without a terminal ($status, $out)"
+  ! called "aphelion key" || fail "key $subcommand ran the server's command without a terminal"
+done
+reset_calls
 status=0
-out=$(FAKE_KEY_EXIT=2 with_terminal /opt/aphelion/deploy/host/aphelion key add opencode 2>&1) || status=$?
-[[ $status == 2 && $out == "ran key add opencode" ]] ||
-  fail "key add opencode didn't pass the server's refusal through without a prompt ($status, $out)"
-pass "key add refuses a run without a terminal, and lets the server refuse a tool that takes no key before any prompt"
+out=$(with_terminal /opt/aphelion/deploy/host/aphelion key add opencode 2>&1) || status=$?
+[[ $status == 2 && $out == "aphelion: the tool name can't be opencode, which has no single API key. Sign it in with: sudo aphelion sign-in opencode" ]] ||
+  fail "key add opencode didn't refuse on the host without a prompt ($status, $out)"
+! called "aphelion key" || fail "key add opencode ran the server's command"
+pass "key add and key replace refuse a run without a terminal, and key add refuses opencode before any prompt"
+
+for subcommand in add replace test remove; do
+  for words in "$fake_key" "claude $fake_key"; do
+    reset_calls
+    status=0
+    read -ra extra <<<"$words"
+    out=$(with_terminal /opt/aphelion/deploy/host/aphelion key "$subcommand" "${extra[@]}" 2>&1) || status=$?
+    [[ $status == 2 && $out != *"$fake_key"* ]] ||
+      fail "key $subcommand $words didn't refuse with status 2 without repeating the key ($status, $out)"
+    [[ $words != "$fake_key" || $out == "aphelion: the tool name must be claude, codex or grok" ]] ||
+      fail "key $subcommand with a key for a tool name printed something else: $out"
+    ! called "$fake_key" || fail "key $subcommand $words put the key on a docker command line: $(cat "$FAKE_CALLS")"
+    ! called "aphelion key" || fail "key $subcommand $words ran the server's command"
+  done
+done
+pass "a key in place of the tool name, or after it, is refused on the host with a fixed line and never reaches docker"
 
 for subcommand in test remove; do
   reset_calls
