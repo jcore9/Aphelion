@@ -36,7 +36,7 @@ export interface SupervisedChild {
   readonly pid: number;
   readonly placed: Effect.Effect<boolean>;
   readonly exited: Effect.Effect<ProcessExit>;
-  readonly abort?: Effect.Effect<void>;
+  readonly abort: Effect.Effect<void>;
 }
 
 export class HostFailed extends Data.TaggedError("HostFailed")<{
@@ -157,7 +157,7 @@ export const runSupervisor = (
           .pipe(Effect.tapError(() => Effect.ignore(host.removeRun(paths))));
         record.child = child;
         if (yield* child.placed) return { paths, child } satisfies Started;
-        if (child.abort) yield* child.abort;
+        yield* child.abort;
         yield* child.exited.pipe(Effect.timeout("5 seconds"), Effect.ignore);
         yield* Effect.ignore(host.removeRun(paths));
         return yield* new Refused({

@@ -92,6 +92,7 @@ const fakeHost = (options: HostOptions = {}) =>
             pid: 1000 + children.length,
             placed: Deferred.await(child.placed),
             exited: Deferred.await(child.exit),
+            abort: Effect.void,
           } satisfies SupervisedChild;
         }),
       kill: (paths) =>

@@ -14,6 +14,7 @@ import type { Logger } from "../log";
 import {
   CgroupHost,
   HostFailed,
+  type AdapterEntry,
   type RunPaths,
   type SupervisedChild,
 } from "../cgroups/supervisor";
@@ -139,14 +140,7 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
         return paths;
       });
 
-    const spawn = (
-      paths: RunPaths,
-      entry: {
-        readonly bundle: string;
-        readonly env: Readonly<Record<string, string>>;
-      },
-      bot: string,
-    ) =>
+    const spawn = (paths: RunPaths, entry: AdapterEntry, bot: string) =>
       attempt("spawn", () =>
         Bun.spawn(
           [options.entry, paths.leaf, paths.folder, entry.bundle, bot],
