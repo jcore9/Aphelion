@@ -51,7 +51,13 @@ const failingWrites = (db: Database, matching: string, failures: number) => {
       }
       db.run(sql, params);
     },
-    all: (sql, params) => db.all(sql, params),
+    all: (sql, params) => {
+      if (sql.includes(matching) && left.count > 0) {
+        left.count -= 1;
+        throw new Error("database is locked");
+      }
+      return db.all(sql, params);
+    },
     transaction: (fn) => db.transaction(fn),
     close: () => {
       db.close();
@@ -501,7 +507,7 @@ describe("the command ledger and the 24-hour limit", () => {
       const { lines, logger } = logs();
       const { wrapped, left } = failingWrites(
         db,
-        "DELETE FROM commands WHERE created_at",
+        "SELECT device, id FROM commands WHERE created_at",
         0,
       );
       const ledger = yield* openCommandLedger(wrapped, logger);
@@ -520,24 +526,95 @@ describe("the command ledger and the 24-hour limit", () => {
     }),
   );
 
+  it.effect("deletes old rows every hour while the server runs", () =>
+    Effect.gen(function* () {
+      const { db } = tempStore();
+      const ledger = yield* open(db);
+      yield* ledger.run(entry("done"), counting().apply);
+
+      yield* TestClock.adjust(day - Duration.toMillis(Duration.hours(1)));
+      expect(db.all("SELECT id FROM commands")).toEqual([{ id: "done" }]);
+
+      yield* TestClock.adjust(Duration.hours(1));
+      expect(db.all("SELECT id FROM commands")).toEqual([]);
+    }),
+  );
+
   it.effect(
-    "deletes old rows every hour while the server runs, and keeps a running row until it is 24 hours old",
+    "keeps the row of a command whose worker still runs past 24 hours, and saves its result",
     () =>
       Effect.gen(function* () {
         const { db } = tempStore();
         const ledger = yield* open(db);
-        yield* Effect.forkChild(ledger.run(entry("slow"), Effect.never));
-        yield* ledger.run(entry("done"), counting().apply);
+        const gate = yield* Deferred.make<undefined>();
+        const slow: Effect.Effect<Outcome> = Deferred.await(gate).pipe(
+          Effect.as({ ok: true, result: { turn: "t9" } } as const),
+        );
+        const caller = yield* Effect.forkChild(ledger.run(entry("slow"), slow));
         yield* Effect.yieldNow;
 
-        yield* TestClock.adjust(day - Duration.toMillis(Duration.hours(1)));
-        expect(db.all("SELECT id FROM commands ORDER BY id")).toEqual([
-          { id: "done" },
-          { id: "slow" },
+        yield* TestClock.adjust(day + Duration.toMillis(Duration.hours(2)));
+        expect(db.all("SELECT id, state FROM commands")).toEqual([
+          { id: "slow", state: "running" },
+        ]);
+
+        yield* Deferred.succeed(gate, undefined);
+        expect(yield* Fiber.join(caller)).toEqual({
+          ok: true,
+          result: { turn: "t9" },
+        });
+        expect(db.all("SELECT state, result FROM commands")).toEqual([
+          { state: "done", result: '{"turn":"t9"}' },
         ]);
 
         yield* TestClock.adjust(Duration.hours(1));
-        expect(db.all("SELECT id FROM commands ORDER BY id")).toEqual([]);
+        expect(db.all("SELECT id FROM commands")).toEqual([]);
+      }),
+  );
+
+  it.effect("deletes a running row past 24 hours when its worker is gone", () =>
+    Effect.gen(function* () {
+      const { db } = tempStore();
+      const before = yield* Scope.make();
+      const first = yield* open(db).pipe(Scope.provide(before));
+      yield* Effect.forkChild(first.run(entry("lost"), Effect.never));
+      yield* Effect.yieldNow;
+      yield* Scope.close(before, Exit.void);
+      db.run("UPDATE commands SET state = 'running'");
+      yield* open(db);
+
+      yield* TestClock.adjust(day + Duration.toMillis(Duration.hours(1)));
+
+      expect(db.all("SELECT id FROM commands")).toEqual([]);
+    }),
+  );
+});
+
+describe("the command ledger when a result can't be saved", () => {
+  it.effect(
+    "answers storage-failed when the update changes no row, and never success",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const { lines, logger } = logs();
+        const ledger = yield* openCommandLedger(db, logger);
+        const vanishes: Effect.Effect<Outcome> = Effect.sync(() => {
+          db.run("DELETE FROM commands");
+          return { ok: true, result: { turn: "t1" } };
+        });
+
+        const caller = yield* Effect.forkChild(
+          ledger.run(entry("c1"), vanishes),
+        );
+        yield* TestClock.adjust("10 seconds");
+
+        expect(yield* Fiber.join(caller)).toEqual({
+          ok: false,
+          code: "storage-failed",
+        });
+        expect(
+          lines.some((line) => line["msg"] === "saving a command's result failed"),
+        ).toBe(true);
       }),
   );
 });

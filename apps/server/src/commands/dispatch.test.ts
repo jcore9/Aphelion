@@ -466,6 +466,45 @@ describe("command admission in dispatch", () => {
   );
 
   it.effect(
+    "keeps a mutation's place until its result is saved, even when its dispatcher is interrupted",
+    () =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<undefined>();
+        const env = yield* setup("accepted", true, {
+          admission: createAdmission({ maxInFlight: 1 }),
+          hold: Deferred.await(gate),
+        });
+        const first = yield* Effect.forkChild(
+          env.send("bot.prompt", { bot: "chief", text: "a" }, "a"),
+        );
+        yield* TestClock.adjust("10 millis");
+        yield* Fiber.interrupt(first);
+
+        const refused = yield* env.send(
+          "bot.prompt",
+          { bot: "chief", text: "b" },
+          "b",
+        );
+        expect(refused).toMatchObject({ type: "error", code: "rate-limited" });
+        expect(env.db.all("SELECT id, state FROM commands")).toEqual([
+          { id: "a", state: "running" },
+        ]);
+
+        yield* Deferred.succeed(gate, undefined);
+        yield* TestClock.adjust("10 millis");
+        expect(env.db.all("SELECT id, state FROM commands")).toEqual([
+          { id: "a", state: "done" },
+        ]);
+        const next = yield* env.send(
+          "bot.prompt",
+          { bot: "chief", text: "c" },
+          "c",
+        );
+        expect(next.type).toBe("result");
+      }),
+  );
+
+  it.effect(
     "refuses the 61st mutation of a minute with rate-limited and claims no ledger row, but still reads",
     () =>
       Effect.gen(function* () {

@@ -4,6 +4,7 @@ export {
   mutationsPerMinute,
   type Admission,
   type AdmissionLimits,
+  type Permit,
 } from "./admission";
 export {
   changesState,

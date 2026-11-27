@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { DeviceId } from "../devices";
 import type { Logger } from "../log";
 import type { Database, Row } from "../store";
+import type { Permit } from "./admission";
 
 export type Outcome =
   | { readonly ok: true; readonly result: unknown }
@@ -24,6 +25,7 @@ export interface CommandLedger {
   readonly run: (
     entry: CommandEntry,
     apply: Effect.Effect<Outcome>,
+    permit?: Permit,
   ) => Effect.Effect<Outcome>;
 }
 
@@ -64,7 +66,19 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
 
     const purge = Effect.flatMap(Clock.currentTimeMillis, (at) =>
       Effect.sync(() => {
-        db.run("DELETE FROM commands WHERE created_at <= ?", [at - windowMs]);
+        db.transaction(() => {
+          const old = db.all(
+            "SELECT device, id FROM commands WHERE created_at <= ?",
+            [at - windowMs],
+          );
+          for (const { device, id } of old) {
+            if (running.has(`${String(device)}:${String(id)}`)) continue;
+            db.run("DELETE FROM commands WHERE device = ? AND id = ?", [
+              device ?? null,
+              id ?? null,
+            ]);
+          }
+        });
       }),
     );
 
@@ -131,17 +145,16 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
 
     const saveResult = (entry: CommandEntry, outcome: Outcome) =>
       Effect.try({
-        try: () => {
-          db.run(
-            "UPDATE commands SET state = ?, result = ? WHERE device = ? AND id = ?",
+        try: () =>
+          db.all(
+            "UPDATE commands SET state = ?, result = ? WHERE device = ? AND id = ? RETURNING 1 AS saved",
             [
               outcome.ok ? "done" : "failed",
               outcome.ok ? JSON.stringify(outcome.result) : outcome.code,
               entry.device,
               entry.id,
             ],
-          );
-        },
+          ).length,
         catch: (error) => (error instanceof Error ? error.name : "unknown"),
       });
 
@@ -150,10 +163,12 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
         for (const wait of [Duration.zero, ...resultWriteBackoff]) {
           yield* Effect.sleep(wait);
           const saved = yield* Effect.result(saveResult(entry, outcome));
-          if (saved._tag === "Success") return true;
+          if (saved._tag === "Success" && saved.success === 1) return true;
           logger.error("saving a command's result failed", {
-            error: saved.failure,
+            error:
+              saved._tag === "Success" ? "no row to update" : saved.failure,
           });
+          if (saved._tag === "Success") return false;
         }
         return false;
       });
@@ -177,11 +192,17 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
       entry: CommandEntry,
       done: Deferred.Deferred<Outcome>,
       apply: Effect.Effect<Outcome>,
+      held: Permit | undefined,
     ) =>
       apply.pipe(
         Effect.catchCause(() => Effect.succeed(failed("internal"))),
         Effect.flatMap((outcome) => settle(entry, done, outcome)),
         Effect.interruptible,
+        Effect.ensuring(
+          Effect.sync(() => {
+            held?.release();
+          }),
+        ),
         Effect.forkIn(scope),
         Effect.as(Deferred.await(done)),
       );
@@ -189,6 +210,7 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
     const begin = (
       entry: CommandEntry,
       apply: Effect.Effect<Outcome>,
+      permit: Permit | undefined,
       at: number,
     ): Effect.Effect<Effect.Effect<Outcome>> => {
       let claimed: Claim;
@@ -206,14 +228,20 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
         case "running":
           return Effect.succeed(Deferred.await(claimed.done));
         case "new":
-          return execute(entry, claimed.done, apply);
+          return execute(entry, claimed.done, apply, permit?.retain());
       }
     };
 
-    const run = (entry: CommandEntry, apply: Effect.Effect<Outcome>) =>
+    const run = (
+      entry: CommandEntry,
+      apply: Effect.Effect<Outcome>,
+      permit?: Permit,
+    ) =>
       Clock.currentTimeMillis.pipe(
         Effect.flatMap((at) =>
-          Effect.uninterruptible(Effect.suspend(() => begin(entry, apply, at))),
+          Effect.uninterruptible(
+            Effect.suspend(() => begin(entry, apply, permit, at)),
+          ),
         ),
         Effect.flatten,
       );

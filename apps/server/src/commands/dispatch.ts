@@ -12,7 +12,7 @@ import type { StartedTurn, TurnOutcome } from "../bots/manager";
 import type { DeviceId } from "../devices";
 import { clientEvent, type EventLog } from "../history";
 import type { Logger } from "../log";
-import type { Admission } from "./admission";
+import type { Admission, Permit } from "./admission";
 import type { CommandLedger, Outcome } from "./ledger";
 
 export interface BotCommands {
@@ -89,11 +89,12 @@ const execute = (
   { bots, ledger, history, logger }: CommandContext,
   device: DeviceId,
   frame: CommandFrame,
+  permit?: Permit,
 ): Effect.Effect<ServerFrame> => {
   const answer = (name: CommandFrame["name"], outcome: Outcome) =>
     reply(frame.id, name, outcome);
   const once = (apply: Effect.Effect<Outcome>) =>
-    ledger.run({ device, id: frame.id, name: frame.name }, apply);
+    ledger.run({ device, id: frame.id, name: frame.name }, apply, permit);
 
   switch (frame.name) {
     case "ping":
@@ -170,10 +171,10 @@ const admitted = (
   { admission }: CommandContext,
   device: DeviceId,
   frame: CommandFrame,
-  run: Effect.Effect<ServerFrame>,
+  run: (permit?: Permit) => Effect.Effect<ServerFrame>,
 ): Effect.Effect<ServerFrame> =>
   frame.name === "ping"
-    ? run
+    ? run()
     : admission
         .guard(device, changesState(frame) ? "mutation" : "read", run)
         .pipe(
@@ -186,7 +187,9 @@ export const dispatch = (
   frame: CommandFrame,
 ): Effect.Effect<ServerFrame> =>
   Effect.suspend(() =>
-    admitted(context, device, frame, execute(context, device, frame)),
+    admitted(context, device, frame, (permit) =>
+      execute(context, device, frame, permit),
+    ),
   ).pipe(
     Effect.catchCause(() =>
       Effect.sync(() => {

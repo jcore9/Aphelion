@@ -8,11 +8,16 @@ const rateWindowMs = Duration.toMillis(Duration.minutes(1));
 
 export type WorkKind = "read" | "mutation";
 
+export interface Permit {
+  readonly retain: () => Permit;
+  readonly release: () => void;
+}
+
 export interface Admission {
   readonly guard: <A>(
     device: DeviceId,
     kind: WorkKind,
-    work: Effect.Effect<A>,
+    work: (permit: Permit) => Effect.Effect<A>,
   ) => Effect.Effect<Option.Option<A>>;
 }
 
@@ -51,17 +56,37 @@ export const createAdmission = ({
     else inFlight.set(device, running);
   };
 
+  const permitFor = (device: DeviceId): Permit => {
+    let holders = 0;
+    const hold = (): Permit => {
+      let held = true;
+      holders += 1;
+      return {
+        retain: hold,
+        release: () => {
+          if (!held) return;
+          held = false;
+          holders -= 1;
+          if (holders === 0) leave(device);
+        },
+      };
+    };
+    return hold();
+  };
+
   return {
     guard: (device, kind, work) =>
       Effect.acquireUseRelease(
-        Effect.map(Clock.currentTimeMillis, (at) => enter(device, kind, at)),
-        (admitted) =>
-          admitted
-            ? Effect.map(work, Option.some)
-            : Effect.succeed(Option.none()),
-        (admitted) =>
+        Effect.map(Clock.currentTimeMillis, (at) =>
+          enter(device, kind, at) ? permitFor(device) : undefined,
+        ),
+        (permit) =>
+          permit === undefined
+            ? Effect.succeed(Option.none())
+            : Effect.map(work(permit), Option.some),
+        (permit) =>
           Effect.sync(() => {
-            if (admitted) leave(device);
+            permit?.release();
           }),
       ),
   };
