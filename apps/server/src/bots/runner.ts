@@ -9,6 +9,7 @@ import {
   rpcErrors,
   rpcMessageSchema,
   type RpcMessage,
+  type SessionRef,
   type TurnId,
 } from "@aphelion/plugin-sdk";
 import {
@@ -29,7 +30,6 @@ import { LineSplitter, type LinePiece } from "../plugins/lines";
 import type { Link } from "../plugins/link";
 import type { ProcessExit } from "../plugins/processes";
 import { logBudget, utf8Bytes } from "../plugins/runner";
-import { botEnvironment } from "./environment";
 import { BotProcesses, type BotProcess } from "./processes";
 import type {
   RunnerNotice,
@@ -41,13 +41,19 @@ import type {
 import { streamTracker, type StreamTracker } from "./stream";
 
 export interface BotRunnerOptions {
-  readonly home: string;
   readonly shutdownGrace: Duration.Input;
   readonly writeDeadline: Duration.Input;
   readonly logger: Logger;
 }
 
 export const maxQueuedOutputBytes = 4 * maxPluginLineBytes;
+
+export const cancelGrace = "6 seconds";
+
+export const killFailed =
+  "the cgroup supervisor couldn't remove the bot's processes, so the bot stays stopped";
+
+export const wedgedReason = "the bot's last processes couldn't be removed";
 
 const initializeResult = z.object({ provider: z.string() });
 
@@ -56,17 +62,34 @@ type Pending =
   | { readonly kind: "turn"; readonly turn: TurnId }
   | { readonly kind: "other" };
 
+type Phase =
+  | "launching"
+  | "initializing"
+  | "live"
+  | "cancelling"
+  | "killing"
+  | "lost"
+  | "stopping";
+
 interface Slot {
   readonly start: StartRequest;
-  phase: "launching" | "initializing" | "live" | "lost" | "stopping";
+  phase: Phase;
+  gen: number;
   process: BotProcess | undefined;
-  readonly inbox: Queue.Queue<string>;
-  readonly stream: StreamTracker;
-  readonly pending: Map<number, Pending>;
-  readonly gone: Deferred.Deferred<undefined>;
-  readonly budget: ReturnType<typeof logBudget>;
-  readonly queued: Semaphore.Semaphore;
+  inbox: Queue.Queue<string>;
+  pending: Map<number, Pending>;
+  gone: Deferred.Deferred<undefined>;
+  queued: Semaphore.Semaphore;
   nextId: number;
+  seqBase: number;
+  readonly stream: StreamTracker;
+  readonly budget: ReturnType<typeof logBudget>;
+  resume: SessionRef | null;
+  restarting: boolean;
+  cancel:
+    | { readonly turn: TurnId; readonly done: Deferred.Deferred<undefined> }
+    | undefined;
+  exit: ProcessExit | undefined;
   stopReplies: number;
   failure: string | undefined;
   next: StartRequest | undefined;
@@ -75,12 +98,17 @@ interface Slot {
 interface Tag {
   readonly bot: string;
   readonly run: number;
+  readonly gen: number;
 }
 
 type LoopEvent =
   | RunnerRequest
   | (Tag & { readonly type: "launched"; readonly process: BotProcess })
-  | (Tag & { readonly type: "launch-failed"; readonly reason: string })
+  | (Tag & {
+      readonly type: "launch-failed";
+      readonly stage: "spawn" | "cgroups";
+      readonly reason: string;
+    })
   | (Tag & {
       readonly type: "line";
       readonly piece: LinePiece;
@@ -89,9 +117,17 @@ type LoopEvent =
   | (Tag & { readonly type: "exited"; readonly exit: ProcessExit })
   | (Tag & { readonly type: "stuck" })
   | (Tag & { readonly type: "stdout-closed" })
+  | (Tag & { readonly type: "cancel-done" })
+  | (Tag & { readonly type: "killed"; readonly ok: boolean })
   | (Tag & { readonly type: "ended" });
 
 const tagOf = (slot: Slot): Tag => ({
+  bot: slot.start.bot,
+  run: slot.start.run,
+  gen: slot.gen,
+});
+
+const frameOf = (slot: Slot) => ({
   bot: slot.start.bot,
   run: slot.start.run,
 });
@@ -118,25 +154,31 @@ export const runBotRunner = (
   Effect.gen(function* () {
     const processes = yield* BotProcesses;
     const slots = new Map<string, Slot>();
+    const wedged = new Set<string>();
     const events = yield* Queue.unbounded<LoopEvent, Cause.Done>();
     const work = yield* FiberSet.make();
     const launches = yield* FiberSet.make();
 
     const current = (tag: Tag) => {
       const slot = slots.get(tag.bot);
-      return slot?.start.run === tag.run ? slot : undefined;
+      return slot?.start.run === tag.run && slot.gen === tag.gen
+        ? slot
+        : undefined;
     };
 
-    const stopAll = (bot: string) =>
-      processes.stopAll(bot).pipe(
-        Effect.flatMap(({ survivors }) =>
+    const named = (bot: string, run: number) => {
+      const slot = slots.get(bot);
+      return slot?.start.run === run ? slot : undefined;
+    };
+
+    const kill = (bot: string, process: BotProcess) =>
+      process.kill.pipe(
+        Effect.as(true),
+        Effect.catchTag("KillFailed", ({ reason }) =>
           Effect.sync(() => {
-            if (survivors > 0) {
-              options.logger.error(
-                "the bot runner couldn't kill every process",
-                { bot, survivors },
-              );
-            }
+            options.logger.error(killFailed, { bot, reason });
+            wedged.add(bot);
+            return false;
           }),
         ),
       );
@@ -145,25 +187,39 @@ export const runBotRunner = (
       Effect.gen(function* () {
         yield* Queue.end(events);
         yield* FiberSet.awaitEmpty(launches);
-        yield* Effect.forEach([...slots.keys()], stopAll, {
-          concurrency: "unbounded",
-          discard: true,
-        });
+        yield* Effect.forEach(
+          [...slots.values()],
+          (slot) =>
+            slot.process ? kill(slot.start.bot, slot.process) : Effect.void,
+          { concurrency: "unbounded", discard: true },
+        );
       }),
     );
 
+    const freshProcess = (slot: Slot) =>
+      Effect.gen(function* () {
+        slot.process = undefined;
+        slot.inbox = yield* Queue.unbounded<string>();
+        slot.pending = new Map();
+        slot.gone = yield* Deferred.make<undefined>();
+        slot.queued = yield* Semaphore.make(maxQueuedOutputBytes);
+        slot.nextId = 1;
+      });
+
     const report = (
       slot: Slot,
-      reply: (tag: Tag) => Extract<RunnerReply, { type: "log" | "notice" }>,
+      reply: (
+        frame: ReturnType<typeof frameOf>,
+      ) => Extract<RunnerReply, { type: "log" | "notice" }>,
     ) =>
       Effect.gen(function* () {
         switch (slot.budget(yield* Clock.currentTimeMillis)) {
           case "send":
-            return yield* link.send(reply(tagOf(slot)));
+            return yield* link.send(reply(frameOf(slot)));
           case "notice":
             return yield* link.send({
               type: "notice",
-              ...tagOf(slot),
+              ...frameOf(slot),
               code: "too-much-log",
             });
           case "drop":
@@ -172,7 +228,7 @@ export const runBotRunner = (
       });
 
     const notice = (slot: Slot, code: Exclude<RunnerNotice, "too-much-log">) =>
-      report(slot, (tag) => ({ type: "notice", ...tag, code }));
+      report(slot, (frame) => ({ type: "notice", ...frame, code }));
 
     const call = (
       slot: Slot,
@@ -188,17 +244,17 @@ export const runBotRunner = (
       );
     };
 
-    const feed = (slot: Slot, process: BotProcess) =>
+    const feed = (tag: Tag, inbox: Queue.Queue<string>, process: BotProcess) =>
       Effect.gen(function* () {
         for (;;) {
-          const line = yield* Queue.take(slot.inbox);
+          const line = yield* Queue.take(inbox);
           yield* process
             .write(line)
             .pipe(Effect.timeout(options.writeDeadline));
         }
       }).pipe(
         Effect.catchTag("TimeoutError", () =>
-          Queue.offer(events, { type: "stuck", ...tagOf(slot) }),
+          Queue.offer(events, { type: "stuck", ...tag }),
         ),
       );
 
@@ -212,24 +268,29 @@ export const runBotRunner = (
 
     const watch = (slot: Slot, process: BotProcess) =>
       Effect.gen(function* () {
-        const writer = yield* FiberSet.run(work, feed(slot, process));
+        const tag = tagOf(slot);
+        const { queued, gone } = slot;
+        const writer = yield* FiberSet.run(
+          work,
+          feed(tag, slot.inbox, process),
+        );
         const output = yield* FiberSet.run(
           work,
           lines(process.stdout)((piece) => {
             const bytes = piece.kind === "line" ? utf8Bytes(piece.text) + 1 : 1;
-            return slot.queued.take(bytes).pipe(
+            return queued.take(bytes).pipe(
               Effect.andThen(
                 Queue.offer(events, {
                   type: "line",
-                  ...tagOf(slot),
+                  ...tag,
                   piece,
-                  handled: slot.queued.release(bytes),
+                  handled: queued.release(bytes),
                 }),
               ),
             );
           }).pipe(
             Effect.andThen(
-              Queue.offer(events, { type: "stdout-closed", ...tagOf(slot) }),
+              Queue.offer(events, { type: "stdout-closed", ...tag }),
             ),
           ),
         );
@@ -237,9 +298,9 @@ export const runBotRunner = (
           work,
           lines(process.stderr)((piece) =>
             piece.kind === "line"
-              ? report(slot, (tag) => ({
+              ? report(slot, (frame) => ({
                   type: "log",
-                  ...tag,
+                  ...frame,
                   line: piece.text,
                 }))
               : notice(slot, "line-too-long"),
@@ -254,12 +315,8 @@ export const runBotRunner = (
               Effect.timeout("1 second"),
               Effect.ignore,
             );
-            yield* Queue.offer(events, {
-              type: "exited",
-              ...tagOf(slot),
-              exit,
-            });
-            yield* Deferred.succeed(slot.gone, undefined);
+            yield* Queue.offer(events, { type: "exited", ...tag, exit });
+            yield* Deferred.succeed(gone, undefined);
           }),
         );
       });
@@ -268,52 +325,50 @@ export const runBotRunner = (
       FiberSet.run(
         work,
         Effect.gen(function* () {
-          yield* Deferred.await(slot.gone).pipe(
+          const tag = tagOf(slot);
+          const { gone, process } = slot;
+          yield* Deferred.await(gone).pipe(
             Effect.timeout(grace),
             Effect.ignore,
           );
-          yield* stopAll(slot.start.bot);
-          yield* Deferred.await(slot.gone).pipe(
+          if (process) yield* kill(tag.bot, process);
+          yield* Deferred.await(gone).pipe(
             Effect.timeout("5 seconds"),
             Effect.ignore,
           );
-          yield* Queue.offer(events, { type: "ended", ...tagOf(slot) });
+          yield* Queue.offer(events, { type: "ended", ...tag });
         }),
       );
 
-    const launch = (start: StartRequest) =>
-      Effect.uninterruptible(
+    const launch = (slot: Slot) => {
+      const tag = tagOf(slot);
+      return Effect.uninterruptible(
         processes
-          .start({
-            bot: start.bot,
-            adapter: start.adapter,
-            env: botEnvironment(start.provider, options.home),
-            cwd: start.folder,
-          })
+          .start({ bot: slot.start.bot, adapter: slot.start.adapter })
           .pipe(
             Effect.matchEffect({
               onSuccess: (process) =>
-                Queue.offer(events, {
-                  type: "launched",
-                  bot: start.bot,
-                  run: start.run,
-                  process,
-                }).pipe(
+                Queue.offer(events, { type: "launched", ...tag, process }).pipe(
                   Effect.flatMap((handedOver) =>
-                    handedOver ? Effect.void : stopAll(start.bot),
+                    handedOver ? Effect.void : kill(tag.bot, process),
                   ),
                 ),
               onFailure: (failed) =>
                 Queue.offer(events, {
                   type: "launch-failed",
-                  bot: start.bot,
-                  run: start.run,
-                  reason: failed.reason,
+                  ...tag,
+                  ...(failed._tag === "CgroupsUnsafe"
+                    ? {
+                        stage: "cgroups" as const,
+                        reason: `${failed.step}: ${failed.errno}`,
+                      }
+                    : { stage: "spawn" as const, reason: failed.reason }),
                 }),
             }),
             Effect.asVoid,
           ),
       );
+    };
 
     const begin = Effect.fnUntraced(function* (start: StartRequest) {
       const existing = slots.get(start.bot);
@@ -321,39 +376,65 @@ export const runBotRunner = (
         existing.next = start;
         return;
       }
-      if (existing !== undefined) {
-        return yield* link.send({
+      const refuse = (reason: string) =>
+        link.send({
           type: "start-failed",
           bot: start.bot,
           run: start.run,
           stage: "spawn",
-          reason: "already running",
+          reason,
         });
-      }
-      slots.set(start.bot, {
+      if (existing !== undefined) return yield* refuse("already running");
+      if (wedged.has(start.bot)) return yield* refuse(wedgedReason);
+      const slot: Slot = {
         start,
         phase: "launching",
+        gen: 1,
         process: undefined,
         inbox: yield* Queue.unbounded<string>(),
-        stream: streamTracker(),
         pending: new Map(),
         gone: yield* Deferred.make<undefined>(),
-        budget: logBudget(),
         queued: yield* Semaphore.make(maxQueuedOutputBytes),
         nextId: 1,
+        seqBase: 0,
+        stream: streamTracker(),
+        budget: logBudget(),
+        resume: start.resume,
+        restarting: false,
+        cancel: undefined,
+        exit: undefined,
         stopReplies: 0,
         failure: undefined,
         next: undefined,
-      });
-      yield* FiberSet.run(launches, launch(start));
+      };
+      slots.set(start.bot, slot);
+      yield* FiberSet.run(launches, launch(slot));
     });
 
     const close = Effect.fnUntraced(function* (slot: Slot) {
       slots.delete(slot.start.bot);
+      if (slot.failure !== undefined) {
+        yield* link.send({
+          type: "start-failed",
+          ...frameOf(slot),
+          stage: "initialize",
+          reason: slot.failure,
+        });
+      }
+      if (slot.exit !== undefined) {
+        yield* link.send({ type: "exited", ...frameOf(slot), ...slot.exit });
+      }
       for (let count = 0; count < slot.stopReplies; count++) {
-        yield* link.send({ type: "stopped", ...tagOf(slot) });
+        yield* link.send({ type: "stopped", ...frameOf(slot) });
       }
       if (slot.next !== undefined) yield* begin(slot.next);
+    });
+
+    const reap = Effect.fnUntraced(function* (slot: Slot, exit: ProcessExit) {
+      slot.phase = "stopping";
+      slot.restarting = false;
+      slot.exit = exit;
+      yield* finish(slot, 0);
     });
 
     const answer = Effect.fnUntraced(function* (
@@ -375,15 +456,26 @@ export const runBotRunner = (
             : undefined;
           if (provider === slot.start.provider) {
             slot.phase = "live";
-            return yield* link.send({ type: "started", ...tagOf(slot) });
+            if (slot.restarting) {
+              slot.restarting = false;
+              return;
+            }
+            return yield* link.send({ type: "started", ...frameOf(slot) });
+          }
+          yield* call(slot, adapterMethods.shutdown, undefined, {
+            kind: "other",
+          });
+          if (slot.restarting) {
+            slot.restarting = false;
+            slot.phase = "stopping";
+            slot.exit = { code: null, signal: null };
+            yield* finish(slot, options.shutdownGrace);
+            return;
           }
           slot.phase = "stopping";
           slot.failure = ok
             ? "the adapter is for another provider"
             : "the adapter refused to start";
-          yield* call(slot, adapterMethods.shutdown, undefined, {
-            kind: "other",
-          });
           yield* finish(slot, options.shutdownGrace);
           return;
         }
@@ -392,13 +484,13 @@ export const runBotRunner = (
             slot.stream.begin(pending.turn);
             return yield* link.send({
               type: "turn.accepted",
-              ...tagOf(slot),
+              ...frameOf(slot),
               turn: pending.turn,
             });
           }
           return yield* link.send({
             type: "turn.refused",
-            ...tagOf(slot),
+            ...frameOf(slot),
             turn: pending.turn,
             reason: refusalOf("error" in message ? message.error.code : null),
           });
@@ -419,34 +511,55 @@ export const runBotRunner = (
           JSON.stringify(failure(message.id, rpcErrors.methodNotFound)),
         );
       }
-      const envelope =
+      const parsed =
         message.method === adapterMethods.event
           ? adapterEnvelope.safeParse(message.params)
           : undefined;
-      if (!envelope?.success) return yield* notice(slot, "not-a-message");
-      slot.stream.observe(envelope.data);
-      yield* link.send({
-        type: "event",
-        ...tagOf(slot),
-        envelope: envelope.data,
-      });
+      if (!parsed?.success) return yield* notice(slot, "not-a-message");
+      const envelope = { ...parsed.data, seq: parsed.data.seq + slot.seqBase };
+      slot.stream.observe(envelope);
+      const { event } = envelope;
+      if (event.type === "session") slot.resume = event.ref;
+      if (
+        event.type === "turn.end" &&
+        slot.cancel !== undefined &&
+        envelope.turn === slot.cancel.turn
+      ) {
+        yield* Deferred.succeed(slot.cancel.done, undefined);
+      }
+      yield* link.send({ type: "event", ...frameOf(slot), envelope });
     });
 
     const abandon = Effect.fnUntraced(function* (slot: Slot) {
       for (const envelope of slot.stream.repair()) {
-        yield* link.send({ type: "event", ...tagOf(slot), envelope });
+        yield* link.send({ type: "event", ...frameOf(slot), envelope });
       }
       for (const pending of slot.pending.values()) {
         if (pending.kind !== "turn") continue;
         yield* link.send({
           type: "turn.refused",
-          ...tagOf(slot),
+          ...frameOf(slot),
           turn: pending.turn,
           reason: "not-running",
         });
       }
       slot.pending.clear();
+      if (slot.cancel !== undefined) {
+        yield* Deferred.succeed(slot.cancel.done, undefined);
+      }
     });
+
+    const loseProcess = Effect.fnUntraced(function* (slot: Slot) {
+      slot.phase = "lost";
+      const { process } = slot;
+      if (process) yield* FiberSet.run(work, kill(slot.start.bot, process));
+    });
+
+    const turnOpen = (slot: Slot, turn: TurnId) =>
+      slot.stream.open() === turn ||
+      [...slot.pending.values()].some(
+        (pending) => pending.kind === "turn" && pending.turn === turn,
+      );
 
     const handle = Effect.fnUntraced(function* (event: LoopEvent) {
       switch (event.type) {
@@ -455,7 +568,7 @@ export const runBotRunner = (
         case "launched": {
           const slot = current(event);
           if (slot === undefined) {
-            yield* FiberSet.run(work, stopAll(event.bot));
+            yield* FiberSet.run(work, kill(event.bot, event.process));
             return;
           }
           slot.process = event.process;
@@ -465,7 +578,9 @@ export const runBotRunner = (
             return;
           }
           slot.phase = "initializing";
-          yield* link.send({ type: "spawned", ...tagOf(slot) });
+          if (!slot.restarting) {
+            yield* link.send({ type: "spawned", ...frameOf(slot) });
+          }
           return yield* call(
             slot,
             adapterMethods.initialize,
@@ -473,7 +588,7 @@ export const runBotRunner = (
               api: adapterApiVersion,
               bot: { id: slot.start.bot },
               folder: slot.start.folder,
-              resume: slot.start.resume,
+              resume: slot.resume,
             },
             { kind: "initialize" },
           );
@@ -483,10 +598,18 @@ export const runBotRunner = (
           if (slot === undefined) return;
           if (slot.phase === "stopping") return yield* close(slot);
           slots.delete(event.bot);
+          if (slot.restarting) {
+            return yield* link.send({
+              type: "exited",
+              ...frameOf(slot),
+              code: null,
+              signal: null,
+            });
+          }
           return yield* link.send({
             type: "start-failed",
-            ...tagOf(slot),
-            stage: "spawn",
+            ...frameOf(slot),
+            stage: event.stage,
             reason: event.reason,
           });
         }
@@ -500,49 +623,72 @@ export const runBotRunner = (
           const slot = current(event);
           if (slot === undefined) return;
           yield* abandon(slot);
-          if (slot.phase === "stopping" || slot.phase === "lost") return;
-          slot.phase = "lost";
-          yield* FiberSet.run(work, stopAll(event.bot));
-          return;
+          if (["stopping", "lost", "killing"].includes(slot.phase)) return;
+          return yield* loseProcess(slot);
         }
         case "exited": {
           const slot = current(event);
           if (slot === undefined) return;
           yield* abandon(slot);
           yield* Queue.shutdown(slot.inbox);
-          if (slot.phase === "stopping") return;
-          slots.delete(event.bot);
-          return yield* link.send({
-            type: "exited",
-            ...tagOf(slot),
-            ...event.exit,
-          });
+          if (slot.phase === "stopping" || slot.phase === "killing") return;
+          return yield* reap(slot, event.exit);
         }
         case "stuck": {
           const slot = current(event);
           if (slot === undefined) return;
-          if (slot.phase === "stopping" || slot.phase === "lost") return;
-          slot.phase = "lost";
+          if (["stopping", "lost", "killing"].includes(slot.phase)) return;
           yield* notice(slot, "stopped-reading");
-          yield* FiberSet.run(work, stopAll(event.bot));
+          return yield* loseProcess(slot);
+        }
+        case "cancel-done": {
+          const slot = current(event);
+          if (slot?.phase !== "cancelling") return;
+          slot.phase = "killing";
+          slot.cancel = undefined;
+          const tag = tagOf(slot);
+          const { process } = slot;
+          yield* FiberSet.run(
+            work,
+            (process ? kill(tag.bot, process) : Effect.succeed(true)).pipe(
+              Effect.flatMap((ok) =>
+                Queue.offer(events, { type: "killed", ...tag, ok }),
+              ),
+            ),
+          );
+          return;
+        }
+        case "killed": {
+          const slot = current(event);
+          if (slot === undefined) return;
+          if (slot.phase === "stopping") return yield* close(slot);
+          if (slot.phase !== "killing") return;
+          if (!event.ok) {
+            slots.delete(event.bot);
+            return yield* link.send({
+              type: "exited",
+              ...frameOf(slot),
+              code: null,
+              signal: null,
+            });
+          }
+          yield* abandon(slot);
+          slot.seqBase = slot.stream.last();
+          slot.gen += 1;
+          yield* freshProcess(slot);
+          slot.restarting = true;
+          slot.phase = "launching";
+          yield* FiberSet.run(launches, launch(slot));
           return;
         }
         case "ended": {
           const slot = current(event);
           if (slot?.phase !== "stopping") return;
-          if (slot.failure !== undefined) {
-            yield* link.send({
-              type: "start-failed",
-              ...tagOf(slot),
-              stage: "initialize",
-              reason: slot.failure,
-            });
-          }
           return yield* close(slot);
         }
         case "turn.start": {
-          const slot = current(event);
-          const refuse = (reason: "not-running" | "too-long") =>
+          const slot = named(event.bot, event.run);
+          const refuse = (reason: TurnRefusal) =>
             link.send({
               type: "turn.refused",
               bot: event.bot,
@@ -550,6 +696,15 @@ export const runBotRunner = (
               turn: event.turn,
               reason,
             });
+          if (
+            slot !== undefined &&
+            (slot.phase === "cancelling" ||
+              slot.phase === "killing" ||
+              (slot.restarting &&
+                (slot.phase === "launching" || slot.phase === "initializing")))
+          ) {
+            return yield* refuse("busy");
+          }
           if (slot?.phase !== "live") return yield* refuse("not-running");
           const params = { turn: event.turn, text: event.text };
           const line = JSON.stringify(
@@ -562,14 +717,29 @@ export const runBotRunner = (
           });
         }
         case "turn.cancel": {
-          const slot = current(event);
-          if (slot?.phase !== "live") return;
-          return yield* call(
+          const slot = named(event.bot, event.run);
+          if (slot?.phase !== "live" || !turnOpen(slot, event.turn)) return;
+          yield* call(
             slot,
             adapterMethods.turnCancel,
             { turn: event.turn },
             { kind: "other" },
           );
+          const done = yield* Deferred.make<undefined>();
+          slot.cancel = { turn: event.turn, done };
+          slot.phase = "cancelling";
+          const tag = tagOf(slot);
+          yield* FiberSet.run(
+            work,
+            Deferred.await(done).pipe(
+              Effect.timeout(cancelGrace),
+              Effect.ignore,
+              Effect.andThen(
+                Queue.offer(events, { type: "cancel-done", ...tag }),
+              ),
+            ),
+          );
+          return;
         }
         case "stop": {
           const stopped = link.send({
@@ -585,9 +755,10 @@ export const runBotRunner = (
           }
           slot.stopReplies++;
           if (slot.phase === "stopping") return;
-          const launched = slot.phase !== "launching";
+          const before = slot.phase;
           slot.phase = "stopping";
-          if (!launched) return;
+          slot.restarting = false;
+          if (before === "launching" || before === "killing") return;
           yield* call(slot, adapterMethods.shutdown, undefined, {
             kind: "other",
           });

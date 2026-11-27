@@ -17,8 +17,12 @@ import { describe } from "vitest";
 import type { z } from "zod";
 import { createLogger } from "../log";
 import { memoryLinkPair, type Framing } from "../plugins/link";
-import { botEnvironment } from "./environment";
-import { maxQueuedOutputBytes, runBotRunner } from "./runner";
+import {
+  killFailed,
+  maxQueuedOutputBytes,
+  runBotRunner,
+  wedgedReason,
+} from "./runner";
 import {
   maxFrameBytes,
   runnerReplySchema,
@@ -40,7 +44,7 @@ const startFrame = (bot: string, run = 1, resume: string | null = null) =>
     bot,
     run,
     provider: "fake",
-    adapter: "/adapters/fake/adapter.js",
+    adapter: "fake",
     folder: `/bots/${bot}`,
     resume,
   }) as const;
@@ -60,15 +64,19 @@ const scripted = (script: FakeScript) => {
 const runner = (bots: Readonly<Record<string, FakeBot>>) =>
   Effect.gen(function* () {
     const fake = fakeBotProcesses(bots);
+    const logs: Record<string, unknown>[] = [];
     const { a, b } = yield* memoryLinkPair<RunnerReply, RunnerRequest>(
       framing(runnerReplySchema),
       framing(runnerRequestSchema),
     );
     yield* runBotRunner(b, {
-      home: "/var/lib/aphelion-bots",
       shutdownGrace: "200 millis",
       writeDeadline: "200 millis",
-      logger: createLogger({ write: () => undefined }),
+      logger: createLogger({
+        write: (line) => {
+          logs.push(JSON.parse(line) as Record<string, unknown>);
+        },
+      }),
     }).pipe(Effect.provide(fake.layer), Effect.forkScoped);
     const frames: RunnerReply[] = [];
     const until = (done: (frame: RunnerReply) => boolean) =>
@@ -81,7 +89,7 @@ const runner = (bots: Readonly<Record<string, FakeBot>>) =>
       }).pipe(Effect.timeout("5 seconds"), Effect.orDie);
     const send = (frame: z.input<typeof runnerRequestSchema>) =>
       a.send(runnerRequestSchema.parse(frame));
-    return { fake, frames, until, send };
+    return { fake, frames, until, send, logs };
   });
 
 const is = (type: RunnerReply["type"], bot?: string) => (frame: RunnerReply) =>
@@ -118,12 +126,7 @@ describe("the bot runner", () => {
           "spawned",
           "started",
         ]);
-        expect(fake.runs[0]?.spec).toEqual({
-          bot: "alpha",
-          adapter: "/adapters/fake/adapter.js",
-          env: botEnvironment("fake", "/var/lib/aphelion-bots"),
-          cwd: "/bots/alpha",
-        });
+        expect(fake.runs[0]?.spec).toEqual({ bot: "alpha", adapter: "fake" });
         expect(alpha.made[0]?.contexts[0]).toMatchObject({
           bot: { id: "alpha" },
           folder: "/bots/alpha",
@@ -293,7 +296,7 @@ describe("the bot runner", () => {
         expect(
           fake.latest("beta")?.received.map((line) => line.method),
         ).toEqual(["initialize", "turn.start"]);
-        expect(fake.stopAllCalls).toEqual([]);
+        expect(fake.killCalls).toEqual([]);
       }).pipe(Effect.scoped),
   );
 
@@ -407,7 +410,7 @@ describe("the bot runner", () => {
         "exited",
       ]);
       expect(frames[1]).toMatchObject({ code: "stopped-reading" });
-      expect(fake.stopAllCalls).toEqual(["stuck"]);
+      expect(fake.killCalls).toEqual(["stuck"]);
     }).pipe(Effect.scoped),
   );
 
@@ -527,13 +530,152 @@ describe("the bot runner", () => {
           frame.turn === "t2" &&
           frame.reason === "not-running";
         yield* until(() => frames.some(is("exited")) && frames.some(refusedT2));
-        expect(fake.stopAllCalls).toEqual(["alpha"]);
+        expect(fake.killCalls).toEqual(["alpha"]);
         const events = envelopesOf(frames, "alpha");
         expect(events.slice(-2).map(({ event }) => event)).toEqual([
           { type: "error", code: "cli-exited" },
           { type: "turn.end", reason: "error" },
         ]);
         expect(checkStream(events)).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "cancels a turn, then kills the bot's processes and starts a fresh adapter that resumes the session",
+    () =>
+      Effect.gen(function* () {
+        const made: FakeAdapter[] = [];
+        const alpha: FakeBot = {
+          adapter: () => {
+            const adapter = fakeAdapter(
+              made.length === 0
+                ? [
+                    [
+                      {
+                        emit: { type: "session", ref: sessionRef.parse("s-1") },
+                      },
+                      { emit: { type: "text.delta", text: "working" } },
+                      { waitForAbort: true },
+                    ],
+                  ]
+                : [reply],
+            );
+            made.push(adapter);
+            return adapter;
+          },
+        };
+        const { fake, frames, until, send } = yield* runner({ alpha });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        const turn = (id: string) =>
+          send({
+            type: "turn.start",
+            bot: "alpha",
+            run: 1,
+            turn: id,
+            text: "go",
+          });
+        yield* turn("t1");
+        yield* until(
+          (frame) =>
+            frame.type === "event" &&
+            frame.envelope.event.type === "text.delta",
+        );
+        yield* send({ type: "turn.cancel", bot: "alpha", run: 1, turn: "t1" });
+        yield* turn("early");
+        expect(yield* until(is("turn.refused"))).toMatchObject({
+          turn: "early",
+          reason: "busy",
+        });
+        yield* until(turnEnded("alpha"));
+        for (let tries = 0; tries < 200 && made.length < 2; tries++) {
+          yield* Effect.sleep("10 millis");
+        }
+        expect(fake.killCalls).toEqual(["alpha"]);
+        expect(fake.runs[0]?.alive()).toBe(false);
+        expect(made[1]?.contexts[0]).toMatchObject({
+          bot: { id: "alpha" },
+          resume: "s-1",
+        });
+        let accepted = false;
+        for (let tries = 0; tries < 50 && !accepted; tries++) {
+          yield* turn(`t2-${String(tries)}`);
+          const answer = yield* until(
+            (frame) =>
+              frame.type === "turn.accepted" || frame.type === "turn.refused",
+          );
+          accepted = answer.type === "turn.accepted";
+          if (!accepted) yield* Effect.sleep("20 millis");
+        }
+        expect(accepted).toBe(true);
+        yield* until(turnEnded("alpha"));
+        expect(frames.filter(is("spawned"))).toHaveLength(1);
+        expect(frames.filter(is("started"))).toHaveLength(1);
+        expect(frames.filter(is("exited"))).toEqual([]);
+        expect(checkStream(envelopesOf(frames, "alpha"))).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "kills what a crashed adapter left behind before it reports the exit",
+    () =>
+      Effect.gen(function* () {
+        const alpha = scripted([[{ hang: true }]]);
+        const { fake, until, send } = yield* runner({ alpha: alpha.bot });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        fake.latest("alpha")?.crash();
+        yield* until(is("exited"));
+        expect(fake.killCalls).toEqual(["alpha"]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps a bot stopped when its processes can't be removed, and logs one fixed line",
+    () =>
+      Effect.gen(function* () {
+        const alpha = scripted([]);
+        const { fake, logs, until, send } = yield* runner({
+          alpha: { ...alpha.bot, killFails: "populated: ETIMEDOUT" },
+        });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        yield* send({ type: "stop", bot: "alpha", run: 1 });
+        yield* until(is("stopped"));
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            msg: killFailed,
+            bot: "alpha",
+            reason: "populated: ETIMEDOUT",
+          }),
+        );
+        yield* send(startFrame("alpha", 2));
+        expect(yield* until(is("start-failed"))).toMatchObject({
+          run: 2,
+          stage: "spawn",
+          reason: wedgedReason,
+        });
+        expect(fake.runs).toHaveLength(1);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "refuses every start when the cgroup check failed, naming the step and errno",
+    () =>
+      Effect.gen(function* () {
+        const alpha = scripted([]);
+        const { fake, until, send } = yield* runner({
+          alpha: { ...alpha.bot, unsafe: { step: "bot-denied", errno: "ok" } },
+        });
+        yield* send(startFrame("alpha"));
+        expect(yield* until(is("start-failed"))).toEqual({
+          type: "start-failed",
+          bot: "alpha",
+          run: 1,
+          stage: "cgroups",
+          reason: "bot-denied: ok",
+        });
+        expect(fake.runs).toEqual([]);
       }).pipe(Effect.scoped),
   );
 });

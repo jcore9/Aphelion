@@ -37,9 +37,12 @@ import type {
 } from "./runner-protocol";
 import { SessionRefs } from "./session-refs";
 
-export const adapterBundles: Readonly<Record<string, string>> = {
-  claude: "/usr/local/lib/aphelion/adapters/claude/adapter.js",
+export const adapterKeys: Readonly<Record<string, string>> = {
+  claude: "claude",
 };
+
+export const cgroupsUnsafe =
+  "bots can't start, because the cgroup check failed";
 
 export const resumeFailed =
   "the saved session could not be resumed, so the bot started a new one";
@@ -195,7 +198,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
         ...defaultRestartPolicy,
         graceMs: 10_000,
       };
-      const adapters = options.adapters ?? adapterBundles;
+      const adapters = options.adapters ?? adapterKeys;
       const definitions = new Map(options.bots.map((bot) => [bot.name, bot]));
       const slots = new Map<string, Slot>();
 
@@ -334,12 +337,16 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 slot.resume = null;
                 return yield* sendStart(slot, reply.run);
               }
-              logger.warn("the bot runner couldn't start the bot", {
-                bot,
-                adapter: slot.adapter,
-                stage: reply.stage,
-                reason: reply.reason,
-              });
+              if (reply.stage === "cgroups") {
+                logger.error(cgroupsUnsafe, { bot, check: reply.reason });
+              } else {
+                logger.warn("the bot runner couldn't start the bot", {
+                  bot,
+                  adapter: slot.adapter,
+                  stage: reply.stage,
+                  reason: reply.reason,
+                });
+              }
               return yield* apply(slot, {
                 type: "spawn-failed",
                 run: reply.run,

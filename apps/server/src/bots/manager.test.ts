@@ -23,6 +23,7 @@ import {
   BotManager,
   botManagerLayer,
   BotRunnerLink,
+  cgroupsUnsafe,
   resumeFailed,
   runnerNotices,
   type BotEvent,
@@ -73,7 +74,7 @@ const system = (
         bots: [{ name: "chief", provider, folder }],
         logger,
         policy,
-        adapters: { fake: "/adapters/fake/adapter.js" },
+        adapters: { fake: "fake" },
         ...(turns === undefined ? {} : { turns }),
       }).pipe(
         Layer.provideMerge(sessionLayer),
@@ -580,6 +581,27 @@ describe("the bot manager", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "logs one fixed line naming the failed cgroup check when the runner refuses to start bots",
+    () =>
+      Effect.gen(function* () {
+        const { logs, manager, reach } = yield* system({
+          adapter: () => fakeAdapter([]),
+          unsafe: { step: "own-cgroup", errno: "EROFS" },
+        });
+        yield* manager.start("chief");
+        yield* reach("crashed");
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            level: "error",
+            msg: cgroupsUnsafe,
+            bot: "chief",
+            check: "own-cgroup: EROFS",
+          }),
+        );
+      }).pipe(Effect.scoped),
+  );
+
   it.live("names the adapter bundle when the bot runner can't start it", () =>
     Effect.gen(function* () {
       const { logs, manager, reach } = yield* system({
@@ -592,7 +614,7 @@ describe("the bot manager", () => {
         expect.objectContaining({
           msg: "the bot runner couldn't start the bot",
           bot: "chief",
-          adapter: "/adapters/fake/adapter.js",
+          adapter: "fake",
           reason: "the adapter bundle isn't there",
         }),
       );
