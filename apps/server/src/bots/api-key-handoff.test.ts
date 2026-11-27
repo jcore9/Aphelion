@@ -14,6 +14,8 @@ import { openStore, readServerId } from "../store";
 import {
   apiKeyReadFailed,
   BotManager,
+  brokerSilent,
+  brokerWaitMs,
   botManagerLayer,
   BotRunnerLink,
   type ApiKeySource,
@@ -217,6 +219,113 @@ describe("the API key at bot start", () => {
       expect(JSON.stringify(rows)).not.toContain(fakeKey);
       expect(logs.join("\n")).not.toContain(fakeKey);
       db.close();
+    }).pipe(Effect.scoped),
+  );
+});
+
+const boot = (source: ApiKeySource, booted: typeof bots = bots) =>
+  Effect.gen(function* () {
+    const dir = mkdtempSync(join(tmpdir(), "aphelion-key-boot-"));
+    onTestFinished(() => {
+      rmSync(dir, { recursive: true });
+    });
+    const db = openStore(join(dir, "aphelion.db"));
+    onTestFinished(() => {
+      db.close();
+    });
+    const fake = fakes();
+    const logs: string[] = [];
+    const logger = createLogger({ write: (line) => logs.push(line) });
+    const link = yield* fakeRunnerLink(fake, logger);
+    const services = yield* Layer.build(
+      Layer.mergeAll(Layer.succeed(BotRunnerLink, link), memorySessionRefs),
+    );
+    const history = yield* openEventStore(db, readServerId(db), { logger });
+    const manager = yield* runBots(
+      { bots: booted, logger, adapters, apiKeys: source },
+      history,
+    ).pipe(Effect.provideContext(services));
+    const returnedAt = Date.now();
+    yield* Effect.forEach(booted, (bot) =>
+      manager
+        .waitFor(bot.name, (state) => state.state === "running")
+        .pipe(Effect.timeout("5 seconds"), Effect.orDie),
+    );
+    return { fake, logs, returnedAt };
+  });
+
+describe("the secrets broker at server start", () => {
+  it.live(
+    "waits for a slow broker before the first bot starts, so a stored key still reaches the bot, without holding up the server",
+    () =>
+      Effect.gen(function* () {
+        let up = false;
+        let answeredAt = 0;
+        const source: ApiKeySource = {
+          read: (ref) =>
+            !up
+              ? Promise.reject(new BrokerError("can't reach the broker"))
+              : Promise.resolve(
+                  ref === "local://apikey/claude"
+                    ? Secret.make(fakeKey, { label: "API key" })
+                    : undefined,
+                ),
+          answers: () =>
+            new Promise((resolve) => {
+              setTimeout(() => {
+                up = true;
+                answeredAt = Date.now();
+                resolve(true);
+              }, 300);
+            }),
+        };
+        const { fake, logs, returnedAt } = yield* boot(source);
+        expect(returnedAt).toBeLessThan(answeredAt);
+        expect(specKey(fake, "chief")?.reveal().length).toBe(fakeKey.length);
+        expect(logs.join("\n")).not.toContain(apiKeyReadFailed);
+        expect(logs.join("\n")).not.toContain(brokerSilent);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "starts the bots without keys and logs one fixed line when the broker never answers",
+    () =>
+      Effect.gen(function* () {
+        const limits: number[] = [];
+        const source: ApiKeySource = {
+          read: () => Promise.reject(new BrokerError("can't reach the broker")),
+          answers: (limitMs) => {
+            limits.push(limitMs);
+            return Promise.resolve(false);
+          },
+        };
+        const { fake, logs } = yield* boot(source);
+        expect(limits).toEqual([brokerWaitMs]);
+        expect(brokerWaitMs).toBe(10_000);
+        expect(specKey(fake, "chief")).toBeUndefined();
+        const silent = logs.filter((line) => line.includes(brokerSilent));
+        expect(silent.map((line) => JSON.parse(line) as unknown)).toEqual([
+          expect.objectContaining({ level: "warn", msg: brokerSilent }),
+        ]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("doesn't wait for the broker when no bot takes an API key", () =>
+    Effect.gen(function* () {
+      let asked = 0;
+      const source: ApiKeySource = {
+        read: () => Promise.resolve(undefined),
+        answers: () => {
+          asked += 1;
+          return Promise.resolve(false);
+        },
+      };
+      const { logs } = yield* boot(
+        source,
+        bots.filter((bot) => bot.provider === "fake"),
+      );
+      expect(asked).toBe(0);
+      expect(logs.join("\n")).not.toContain(brokerSilent);
     }).pipe(Effect.scoped),
   );
 });

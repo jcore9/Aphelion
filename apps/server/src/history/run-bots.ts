@@ -10,11 +10,12 @@ import { persistBotEvents } from "./persist";
 
 export const runBots = (options: BotManagerOptions, history: EventStore) =>
   Effect.gen(function* () {
+    const apiKeys = options.apiKeys ?? brokerClient();
     const botsScope = yield* Scope.make();
     const services = yield* Layer.buildWithScope(
       botManagerLayer({
-        apiKeys: brokerClient(),
         ...options,
+        apiKeys,
         turns: { open: history.openTurn, end: history.endTurn },
       }),
       botsScope,

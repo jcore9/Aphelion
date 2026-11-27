@@ -1,9 +1,11 @@
 import { request } from "node:http";
+import { connect } from "node:net";
 import { Secret } from "./secret";
 
 export const brokerSocket = "/run/aphelion-secrets/broker.sock";
 const maxAnswerBytes = 64 * 1024;
 const defaultTimeoutMs = 5_000;
+const answerRetryMs = 100;
 
 export class BrokerError extends Error {
   override name = "BrokerError";
@@ -91,6 +93,38 @@ function send(
   });
 }
 
+const takesConnection = (socketPath: string, limitMs: number) =>
+  new Promise<boolean>((resolve) => {
+    const probe = connect(socketPath);
+    const refuse = () => {
+      probe.destroy();
+      resolve(false);
+    };
+    probe.setTimeout(Math.max(limitMs, 1), refuse);
+    probe.once("error", refuse);
+    probe.once("connect", () => {
+      probe.setTimeout(0);
+      probe.end();
+      resolve(true);
+    });
+  });
+
+async function answersWithin(
+  socketPath: string,
+  limitMs: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const until = Date.now() + limitMs;
+  for (;;) {
+    if (await takesConnection(socketPath, until - Date.now())) return true;
+    const left = until - Date.now();
+    if (left <= 0 || signal?.aborted === true) return false;
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(answerRetryMs, left)),
+    );
+  }
+}
+
 const answered = (status: number) =>
   new BrokerError(`the secrets broker answered HTTP ${String(status)}`);
 
@@ -112,6 +146,8 @@ export function brokerClient(
   { timeoutMs = defaultTimeoutMs }: { readonly timeoutMs?: number } = {},
 ) {
   return {
+    answers: (limitMs: number, signal?: AbortSignal) =>
+      answersWithin(socketPath, limitMs, signal),
     async read(ref: string): Promise<Secret | undefined> {
       const { status, body } = await ask(socketPath, timeoutMs, {
         op: "read",
