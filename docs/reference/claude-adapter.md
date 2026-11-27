@@ -46,12 +46,38 @@ A **query** is one running Claude Code process that the SDK talks to. The adapte
 | `allowedTools` | Never set. A tool on that list runs without asking `canUseTool`. |
 | `hooks` | One `PreToolUse` hook that applies the fixed rule to every tool call, with `onFailure: "block"`. See [The hook](#the-hook). |
 | `settingSources` | `[]`, so Claude Code reads no user or project settings files |
+| `settings` | Five keys that keep out what the signed-in account would add. See [What the adapter turns off](#what-the-adapter-turns-off). |
+| `strictMcpConfig` | `true`, so Claude Code starts only the MCP servers in `mcpServers`. The adapter never sets `mcpServers`, so a bot has no MCP server. |
 | `verbatimPrompts` | `true`, so each prompt reaches Claude Code exactly as typed. See [Prompts are passed as typed](#prompts-are-passed-as-typed). |
 | `includePartialMessages` | `true`, so text arrives in small pieces |
 | `resume` | The session to resume, when there is one |
 | `env` | Built from the allow list below |
 | `stderr` | Counts the lines Claude Code writes to its error output, and keeps none of them |
 | `executable` | `bun` |
+
+### What the adapter turns off
+
+Claude Code adds tools, skills and plugins from the claude.ai account it is signed in with, even with `settingSources: []`. In the first recorded turn, the session listed 123 tools instead of 7. The extra 116 were the account's claude.ai connectors, such as Notion and Gmail. Those tools act as the owner's account, outside the bot's folder, and their definitions filled most of each request's context.
+
+Under [decision 0058](../decisions/0058-specialized-bots.md), a bot has only the connectors and plugins that Aphelion gives it. So the adapter passes these keys in `settings`. Claude Code reads them as if they came from its `--settings` flag.
+
+| Key | Value | What it stops |
+| --- | --- | --- |
+| `disableClaudeAiConnectors` | `true` | The account's claude.ai connectors. Claude Code doesn't fetch or connect them. |
+| `syncClaudeAiSkills` | `false` | The skills the account enabled on claude.ai |
+| `syncClaudeAiPlugins` | `false` | The plugins the account enabled on claude.ai |
+| `disableBundledSkills` | `true` | The skills and workflows that ship with Claude Code |
+| `autoMemoryEnabled` | `false` | Claude Code's auto memory, which reads and writes notes in a folder under `HOME` and adds them to the prompt |
+
+Claude Code also loads its built-in plugins, named `cc-plugin-…`, whose path is `builtin`. The SDK documents no setting that turns them off from `--settings`, so they stay.
+
+The adapter then checks the session's `init` message. It stops the query and ends the turn with `error` (`vendor`) when the message lists any of these:
+
+- a tool other than the seven in `tools`
+- any MCP server
+- a plugin whose path isn't `builtin`
+
+An `init` that has no `tools`, `mcp_servers` or `plugins` list is stopped the same way. Until the adapter has checked the `init`, every tool call waits, and a call whose `init` fails is denied. The log line gives the counts and no names. The `init` also lists skill names, but not where each skill came from, so the adapter doesn't check them. A skill can't run anyway: it needs the `Skill` tool, and a session that lists `Skill` is stopped.
 
 ### Prompts are passed as typed
 
@@ -71,7 +97,7 @@ No key passes. An `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OA
 
 | SDK message | Event |
 | --- | --- |
-| `system` with subtype `init` | `session`, the first time and again when the id changes. An `init` with another permission mode or Claude Code version, or one with no readable mode or version, stops the query and ends the turn with `error` (`vendor`). |
+| `system` with subtype `init` | `session`, the first time and again when the id changes. An `init` with another permission mode or Claude Code version, or one with no readable mode or version, stops the query and ends the turn with `error` (`vendor`). So does an `init` that lists more than the adapter gave the session, as [What the adapter turns off](#what-the-adapter-turns-off) describes. |
 | A `text_delta` in a `stream_event` | `text.delta`, split into pieces of at most 16 KiB |
 | A `tool_use` block in an `assistant` message | `tool.start`, once per call id, with the kind from the table below |
 | A `tool_result` block in a `user` message | `tool.end` with `ok`, or `error` when Claude Code marks the result as an error, or `denied` when this turn's `decide` denied that call and the runtime announced the deny with a `permission.decision` event |
@@ -94,7 +120,7 @@ The adapter drops a message from a sub-agent, which has a `parent_tool_use_id`, 
 | Claude Code exits or the SDK throws during a turn | `cli-exited` |
 | A sign-in problem: the assistant error `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold` or `verification_required`, an `auth_status` error, or status 401 | `signed-out` |
 | A rate limit: the assistant error `rate_limit` or `billing_error`, a rejected `rate_limit_event`, or status 429 | `rate-limited` |
-| Claude Code reports another permission mode or version than 2.1.330, a result the adapter can't read, or any other failure | `vendor` |
+| Claude Code reports another permission mode or version than 2.1.330, a tool, MCP server or plugin that Aphelion didn't give it, a result the adapter can't read, or any other failure | `vendor` |
 
 ### Tool kinds
 
@@ -173,6 +199,7 @@ The adapter writes these lines to the log:
 - `the Claude CLI didn't start: <class>`
 - `the CLI wrote <n> lines to stderr`
 - `the CLI didn't start as Claude Code 2.1.330 in default permission mode, so the adapter stopped it`
+- `the session reported <n> tools, <n> MCP servers and <n> plugins that Aphelion didn't give it, so the adapter stopped it`
 - `the saved session ref isn't a Claude session id, so the bot starts a new session`
 
 ## Record a stream for the replay tests
