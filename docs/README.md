@@ -53,6 +53,7 @@ A spike is a research task. Each spike answers its questions in writing before a
 - [Plugin manifest](reference/plugin-manifest.md) covers the fields of `aphelion-plugin.json`, the API-range rule and the secret backend type.
 - [Plugin API reference](reference/plugin-api.md) lists every type, function and constant in `@aphelion/plugin-sdk`, generated from the SDK's types and doc comments.
 - [Running plugins on the server](reference/plugins.md) covers how the plugin host and the plugin runner start, talk to, restart and stop a plugin's server part. It also covers the plugin's environment and data folder and the JSON-RPC messages.
+- [The Claude adapter](reference/claude-adapter.md) covers how bots that use Claude Code run a turn: the options every query gets, the environment allow list, how SDK messages become events, permissions, cancel and the record script.
 - [The container](reference/container.md) covers the image, the four users and the folders. It also covers how the launcher starts and stops the processes, the hardening, the network boundary and the contract tests.
 - [Secrets](reference/secrets.md) covers the `Secret` type, what it guarantees and what it doesn't, how to read a value, and the secret reference syntax.
 
@@ -127,3 +128,5 @@ Each significant decision has one numbered record. A record lists the context, t
 | [0063](decisions/0063-m1-planning-answers.md) | Before M2 approvals, the first bot works in its own folder, and M1 takes four other choices | Accepted |
 | [0064](decisions/0064-linked-equal-servers.md) | Two or more Aphelion servers can link up as equals, with groundwork in M1 and the build after v1.0 | Accepted |
 | [0065](decisions/0065-bot-adapter-runs-inside-the-bot.md) | The bot adapter runs inside the bot, not under the plugin runner | Proposed |
+| [0066](decisions/0066-grok-checksum-recorded-by-aphelion.md) | Aphelion records its own checksum for Grok Build, because xAI publishes none | Proposed |
+| [0067](decisions/0067-cli-on-effect-cli.md) | The aphelion command reads its command line with effect/cli, and a test pins the usage rules | Proposed |

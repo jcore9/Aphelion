@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "claude",
+      "version": "2.1.330",
+      "builds": {
+        "x86_64": {
+          "url": "https://downloads.claude.ai/claude-code-releases/2.1.330/linux-x64/claude",
+          "sha256": "f390eaa0814e6a1bff74cbb47acb74cb9c89d30ced809fe0af5af00c7bfe8ebb",
+          "size": 381121040,
+          "format": "binary",
+          "entry": "claude"
+        },
+        "aarch64": {
+          "url": "https://downloads.claude.ai/claude-code-releases/2.1.330/linux-arm64/claude",
+          "sha256": "6016f90cac783e367fb1aa97c768a2efb94a0128a5b46b70fb3d8fcbbd9dd444",
+          "size": 379971000,
+          "format": "binary",
+          "entry": "claude"
+        }
+      },
+      "signIn": ["claude", "auth", "login"],
+      "status": ["claude", "auth", "status", "--text"],
+      "checksumSource": "vendor-manifest"
+    },
+    {
+      "name": "codex",
+      "version": "0.172.0",
+      "builds": {
+        "x86_64": {
+          "url": "https://github.com/openai/codex/releases/download/rust-v0.172.0/codex-x86_64-unknown-linux-musl.tar.gz",
+          "sha256": "a2342a8f7f68f088be30620ccfe9cb84162c93a6b56177855961cda3ed6be392",
+          "size": 125369335,
+          "format": "tar.gz",
+          "entry": "codex-x86_64-unknown-linux-musl"
+        },
+        "aarch64": {
+          "url": "https://github.com/openai/codex/releases/download/rust-v0.172.0/codex-aarch64-unknown-linux-musl.tar.gz",
+          "sha256": "0b99526c185a4425fe96a2214fb7b6a6a7f7c1471883b7afbebe97e15e83e79e",
+          "size": 127043934,
+          "format": "tar.gz",
+          "entry": "codex-aarch64-unknown-linux-musl"
+        }
+      },
+      "signIn": ["codex", "login", "--device-auth"],
+      "status": ["codex", "login", "status"],
+      "checksumSource": "github-digest"
+    },
+    {
+      "name": "grok",
+      "version": "1.0.92",
+      "builds": {
+        "x86_64": {
+          "url": "https://x.ai/cli/grok-1.0.92-linux-x86_64",
+          "sha256": "add4d201dbf2c0bd6077a36feb55a76939de30bae48dbb06f16b2307d38ceacb",
+          "size": 208487936,
+          "format": "binary",
+          "entry": "grok"
+        },
+        "aarch64": {
+          "url": "https://x.ai/cli/grok-1.0.92-linux-aarch64",
+          "sha256": "8c74f1dc6cdc1befff6b9faada06bec4cf6759d04f2a60cdc28ece5ff696b44f",
+          "size": 178160184,
+          "format": "binary",
+          "entry": "grok"
+        }
+      },
+      "signIn": ["grok", "login", "--device-auth"],
+      "checksumSource": "recorded"
+    },
+    {
+      "name": "opencode",
+      "version": "2.4.1",
+      "builds": {
+        "x86_64": {
+          "url": "https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-x64.tar.gz",
+          "sha256": "9ddd18e3faf64eaeccf6a0fcbc96a5c7a14520ae5fd5b61e5be51d894f478b47",
+          "size": 130647866,
+          "format": "tar.gz",
+          "entry": "opencode"
+        },
+        "aarch64": {
+          "url": "https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-arm64.tar.gz",
+          "sha256": "cb28cf94541aeb62a4b2ea5997a99b5dd6bae595a772f36fbe279299f2032a4f",
+          "size": 128876799,
+          "format": "tar.gz",
+          "entry": "opencode"
+        }
+      },
+      "signIn": ["opencode", "auth", "login"],
+      "checksumSource": "sha256sums"
+    }
+  ]
+}

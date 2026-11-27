@@ -1,6 +1,7 @@
 import { lstat, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Cause, type Duration, Effect, Queue } from "effect";
+import { Command } from "effect/cli";
 import {
   controlReplySchema,
   controlSocketFile,
@@ -11,6 +12,7 @@ import {
 import { connectControl } from "../plugins/control-client";
 import { LineSplitter } from "../plugins/lines";
 import { failed } from "./failure";
+import { operandArgument, operands, stateDirFlag, type Handler } from "./flags";
 import { CliIo } from "./io";
 
 export const folderFingerprint = (folder: string) =>
@@ -147,3 +149,19 @@ export const pluginDev = (options: {
       options.every ?? "500 millis",
     ).pipe(Effect.raceFirst(connected.success.read));
   }).pipe(Effect.scoped);
+
+export const pluginDevCommand = (
+  handler: Handler<Parameters<typeof pluginDev>[0]>,
+) =>
+  Command.make(
+    "dev",
+    {
+      stateDir: stateDirFlag,
+      folder: operandArgument(operands["plugin dev"]),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Reload the approved plugin in the folder through the running server, then again each time its files change. Works only when the server runs with --plugin-dev for that folder. Ctrl-C stops watching.",
+    ),
+  );

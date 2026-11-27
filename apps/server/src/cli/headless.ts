@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { Context, Deferred, Effect, Layer } from "effect";
+import { CliError, Command, Flag } from "effect/cli";
+import { z } from "zod";
 import type { BotDefinition } from "../bots/manager";
 import { botRunnerPipeLink } from "../bots/runner-pipe";
 import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
@@ -26,7 +28,18 @@ import { readServerId, type Database } from "../store";
 import { version } from "../version";
 import { checkDirs, migratedNote } from "./checks";
 import { withStore } from "./device";
-import { failed } from "./failure";
+import { failed, usage } from "./failure";
+import {
+  absolutePath,
+  checkedFlag,
+  configDirFlag,
+  optionalFlag,
+  options,
+  stateDirFlag,
+  type Handler,
+} from "./flags";
+import { CliIo } from "./io";
+import { hint } from "./output";
 
 interface PluginOptions {
   readonly fds: RunnerPipeFds;
@@ -179,3 +192,93 @@ export const headless = (
       ),
     );
   });
+
+const runnerFds = z
+  .string()
+  .regex(/^\d{1,4},\d{1,4}$/, {
+    error: "must be two file descriptor numbers, such as 3,4",
+  })
+  .transform((text) => {
+    const [replies = 0, requests = 0] = text.split(",").map(Number);
+    return { replies, requests };
+  })
+  .refine(({ replies, requests }) => replies >= 3 && requests >= 3, {
+    error:
+      "must name descriptors from 3 up, after standard input, output and error",
+  })
+  .refine(({ replies, requests }) => replies !== requests, {
+    error: "must name two different descriptors",
+  });
+
+const shareDescriptors = (config: {
+  readonly pluginRunnerFds: RunnerPipeFds | undefined;
+  readonly botRunnerFds: RunnerPipeFds | undefined;
+}) => {
+  const plugin = config.pluginRunnerFds;
+  const bot = config.botRunnerFds;
+  return (
+    plugin !== undefined &&
+    bot !== undefined &&
+    [bot.replies, bot.requests].some(
+      (fd) => fd === plugin.replies || fd === plugin.requests,
+    )
+  );
+};
+
+export const rootCommand = (handler: Handler<Parameters<typeof headless>[0]>) =>
+  Command.make(
+    "aphelion",
+    {
+      headless: Flag.Boolean(options.headless).pipe(
+        Flag.withDefault(false),
+        Flag.withoutNegation,
+        Flag.withDescription("Start the server. The container runs this"),
+      ),
+      configDir: configDirFlag,
+      stateDir: stateDirFlag,
+      pluginRunnerFds: optionalFlag(
+        checkedFlag(options.pluginRunnerFds, runnerFds).pipe(
+          Flag.withDescription(
+            "Descriptors REPLIES,REQUESTS of the plugin runner's pipes. The server starts every installed plugin",
+          ),
+        ),
+      ),
+      botRunnerFds: optionalFlag(
+        checkedFlag(options.botRunnerFds, runnerFds).pipe(
+          Flag.withDescription(
+            "Descriptors REPLIES,REQUESTS of the bot runner's pipes. The server starts every bot in bots.yaml",
+          ),
+        ),
+      ),
+      pluginDev: optionalFlag(
+        checkedFlag(options.pluginDev, absolutePath).pipe(
+          Flag.withDescription(
+            "Let plugin dev reload the approved plugin in this folder",
+          ),
+        ),
+      ),
+    },
+    ({ headless: serve, ...config }) =>
+      serve
+        ? shareDescriptors(config)
+          ? Effect.gen(function* () {
+              const io = yield* CliIo;
+              yield* Effect.ignore(
+                Effect.andThen(
+                  io.err(
+                    "aphelion: --bot-runner-fds must name other descriptors than --plugin-runner-fds",
+                  ),
+                  io.err(hint),
+                ),
+              );
+              return yield* Effect.fail(usage);
+            })
+          : handler(config)
+        : Effect.fail(
+            new CliError.ShowHelp({ commandPath: ["aphelion"], errors: [] }),
+          ),
+  ).pipe(
+    Command.withDescription(
+      "Aphelion server and command line. Run it with --headless to start the server, or with a command below.",
+    ),
+  );

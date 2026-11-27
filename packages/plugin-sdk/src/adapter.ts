@@ -229,6 +229,9 @@ export const permissionDecision = z.strictObject({
 /** The answer to one permission request. It covers that request only, never a whole session. */
 export type PermissionDecision = z.infer<typeof permissionDecision>;
 
+/** What `decide` resolves to. `announced` is true when the runtime put a `permission.decision` event for this request on the stream. It stays in memory and never goes on the wire. */
+export type TurnDecision = PermissionDecision & { readonly announced: boolean };
+
 /** The methods that the bot runner and the adapter send over their JSON lines. `permissionAsk` is reserved for M2. */
 export const adapterMethods = {
   initialize: "initialize",
@@ -281,9 +284,10 @@ export interface TurnInput {
   readonly text: string;
   /**
    * Asks whether a tool may run in this turn. The runtime puts `permission.request` and `permission.decision` on the stream, so the adapter reports nothing itself.
-   * It always resolves. A request that is invalid, comes after this turn ended, after a cancel or after shutdown began, or isn't answered in time resolves as `deny`. The ones that can't be asked send no event.
+   * It always resolves. A request that is invalid, comes after this turn ended, after a cancel or after shutdown began, or isn't answered in time resolves as `deny`. The ones that can't be asked send no event, and resolve with `announced: false`.
+   * An adapter may report a tool call as `denied` only when its deny has `announced: true`.
    */
-  readonly decide: (request: PermissionRequest) => Promise<PermissionDecision>;
+  readonly decide: (request: PermissionRequest) => Promise<TurnDecision>;
 }
 
 /** One running conversation with the vendor's CLI. */
@@ -306,10 +310,17 @@ export interface BotAdapter {
   open(context: AdapterContext): MaybePromise<AdapterSession>;
 }
 
-/** Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends. */
+/** What a decider knows about the bot it answers for. */
+export interface DeciderContext {
+  /** The absolute path of the bot's folder, as the bot runner sent it in `initialize`. */
+  readonly folder: string;
+}
+
+/** Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends, and the bot's folder. */
 export type Decider = (
   request: PermissionRequest,
   signal: AbortSignal,
+  context: DeciderContext,
 ) => MaybePromise<PermissionDecision>;
 
 /** A `Decider` that denies every request with `by: "default"`. */

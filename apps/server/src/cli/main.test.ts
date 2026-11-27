@@ -108,6 +108,15 @@ test("aphelion --version runs as a program", async () => {
   expect(run.stdout()).toMatch(/^aphelion \d+\.\d+\.\d+(-[0-9A-Za-z.]+)?\n$/);
 });
 
+test("aphelion exits 2 on a usage error and keeps standard output empty", async () => {
+  const run = start(["device", "add"]);
+  expect(await run.exited).toBe(2);
+  expect(run.stdout()).toBe("");
+  expect(run.stderr()).toBe(
+    'aphelion: "device add" needs a name\nRun aphelion --help to see the commands.\n',
+  );
+});
+
 test("aphelion --headless serves, checks tokens from device add, and stops on SIGTERM", async () => {
   const added = start(["device", "add", "laptop", "--state-dir", stateDir]);
   expect(await added.exited).toBe(0);

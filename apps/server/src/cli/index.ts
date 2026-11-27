@@ -1,80 +1,194 @@
-import { Cause, Effect } from "effect";
+import { Cause, Effect, Layer } from "effect";
+import { CliConfig, CliError, Command, GlobalFlag } from "effect/cli";
 import { createLogger } from "../log";
 import { version } from "../version";
-import { parseCommandLine, type Command } from "./args";
-import { configCheck } from "./config-check";
-import { deviceAdd, deviceList, deviceRevoke } from "./device";
+import { configCheck, configCheckCommand } from "./config-check";
+import {
+  deviceAdd,
+  deviceAddCommand,
+  deviceList,
+  deviceListCommand,
+  deviceRevoke,
+  deviceRevokeCommand,
+} from "./device";
 import { CliFailure, failed, usage } from "./failure";
-import { headless } from "./headless";
-import { helpText } from "./help";
+import { headless, rootCommand } from "./headless";
 import { CliIo } from "./io";
-import { pluginInstall } from "./plugin";
-import { pluginEnable } from "./plugin-enable";
-import { pluginDev } from "./plugin-dev";
-import { restoreFinish } from "./restore";
-import { pluginRestart, pluginRollback, pluginUpdate } from "./plugin-update";
+import { hint, presenter } from "./output";
+import { pluginInstall, pluginInstallCommand } from "./plugin";
+import { pluginDev, pluginDevCommand } from "./plugin-dev";
+import { pluginEnable, pluginEnableCommand } from "./plugin-enable";
+import {
+  pluginRestart,
+  pluginRestartCommand,
+  pluginRollback,
+  pluginRollbackCommand,
+  pluginUpdate,
+  pluginUpdateCommand,
+} from "./plugin-update";
+import { restoreFinish, restoreFinishCommand } from "./restore";
+import {
+  defaultToolListFile,
+  toolInstall,
+  toolCheck,
+  toolCheckCommand,
+  toolInstallCommand,
+  toolList,
+  toolListCommand,
+  toolRemove,
+  toolRemoveCommand,
+  toolUpdate,
+  toolUpdateCommand,
+} from "./tool";
 
 export { CliIo, processIo } from "./io";
 export { CliFailure } from "./failure";
 
-const run = (command: Command) =>
-  Effect.gen(function* () {
-    const io = yield* CliIo;
-    switch (command.kind) {
-      case "help":
-        return yield* io.out(helpText);
-      case "version":
-        return yield* io.out(`aphelion ${version}`);
-      case "headless":
-        return yield* headless(command, createLogger());
-      case "config check":
-        return yield* configCheck(command);
-      case "device add":
-        return yield* deviceAdd(command);
-      case "plugin install":
-        return yield* pluginInstall(command);
-      case "plugin update":
-        return yield* pluginUpdate(command, process.env["APHELION_GITHUB_API"]);
-      case "plugin enable":
-        return yield* pluginEnable(command);
-      case "plugin rollback":
-        return yield* pluginRollback(command);
-      case "plugin restart":
-        return yield* pluginRestart(command);
-      case "plugin dev":
-        return yield* pluginDev(command);
-      case "restore finish":
-        return yield* restoreFinish(command);
-      case "device list":
-        return yield* deviceList(command);
-      case "device revoke":
-        return yield* deviceRevoke(command);
-    }
-  });
+export interface Handlers {
+  readonly headless: Parameters<typeof rootCommand>[0];
+  readonly configCheck: Parameters<typeof configCheckCommand>[0];
+  readonly deviceAdd: Parameters<typeof deviceAddCommand>[0];
+  readonly deviceList: Parameters<typeof deviceListCommand>[0];
+  readonly deviceRevoke: Parameters<typeof deviceRevokeCommand>[0];
+  readonly pluginInstall: Parameters<typeof pluginInstallCommand>[0];
+  readonly pluginUpdate: Parameters<typeof pluginUpdateCommand>[0];
+  readonly pluginEnable: Parameters<typeof pluginEnableCommand>[0];
+  readonly pluginRollback: Parameters<typeof pluginRollbackCommand>[0];
+  readonly pluginRestart: Parameters<typeof pluginRestartCommand>[0];
+  readonly pluginDev: Parameters<typeof pluginDevCommand>[0];
+  readonly toolList: Parameters<typeof toolListCommand>[0];
+  readonly toolInstall: Parameters<typeof toolInstallCommand>[0];
+  readonly toolRemove: Parameters<typeof toolRemoveCommand>[0];
+  readonly toolUpdate: Parameters<typeof toolUpdateCommand>[0];
+  readonly toolCheck: Parameters<typeof toolCheckCommand>[0];
+  readonly restoreFinish: Parameters<typeof restoreFinishCommand>[0];
+}
+
+const toolListFile = () =>
+  process.env["APHELION_TOOL_LIST"] ?? defaultToolListFile;
+
+const handlers: Handlers = {
+  headless: (options) => headless(options, createLogger()),
+  configCheck,
+  deviceAdd,
+  deviceList,
+  deviceRevoke,
+  pluginInstall,
+  pluginUpdate: (options) =>
+    pluginUpdate(options, process.env["APHELION_GITHUB_API"]),
+  pluginEnable,
+  pluginRollback,
+  pluginRestart,
+  pluginDev,
+  toolList: (options) => toolList(options, toolListFile()),
+  toolInstall: (options) => toolInstall(options, toolListFile()),
+  toolRemove,
+  toolUpdate: (options) => toolUpdate(options, toolListFile()),
+  toolCheck: () => toolCheck(toolListFile(), fetch),
+  restoreFinish,
+};
+
+const shortCluster = /^-[^-]/;
+const shortFlags: ReadonlySet<string> = new Set(["-h", "-v"]);
+
+const hasShortCluster = (argv: readonly string[]) =>
+  argv.some((arg) => shortCluster.test(arg) && !shortFlags.has(arg));
 
 const describe = (cause: Cause.Cause<unknown>) => {
   const error = Cause.squash(cause);
   return error instanceof Error ? error.message : String(error);
 };
 
-export const cli = (argv: readonly string[]) =>
-  Effect.gen(function* () {
-    const io = yield* CliIo;
-    const parsed = parseCommandLine(argv);
-    if (!parsed.ok) {
-      yield* Effect.ignore(io.err(`aphelion: ${parsed.message}`));
-      yield* Effect.ignore(io.err("Run aphelion --help to see the commands."));
-      return yield* usage;
-    }
-    return yield* run(parsed.command).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause) ||
-        Cause.squash(cause) instanceof CliFailure
-          ? Effect.failCause(cause)
-          : Effect.andThen(
-              Effect.ignore(io.err(`aphelion: ${describe(cause)}`)),
-              Effect.fail(failed),
-            ),
+const group = <
+  const Subcommands extends ReadonlyArray<Command.Command.SubcommandEntry>,
+>(
+  name: string,
+  description: string,
+  subcommands: Subcommands,
+) =>
+  Command.make(name, {}, () =>
+    Effect.fail(
+      new CliError.ShowHelp({
+        commandPath: ["aphelion", name],
+        errors: [
+          new CliError.UnknownSubcommand({
+            subcommand: "",
+            parent: ["aphelion", name],
+            suggestions: [],
+          }),
+        ],
+      }),
+    ),
+  ).pipe(
+    Command.withDescription(description),
+    Command.withSubcommands(subcommands),
+  );
+
+export const makeCli = (handle: Handlers) => {
+  const root = rootCommand(handle.headless).pipe(
+    Command.withSubcommands([
+      group("config", "Check the config files and folders.", [
+        configCheckCommand(handle.configCheck),
+      ]),
+      group("device", "Add, list and revoke devices.", [
+        deviceAddCommand(handle.deviceAdd),
+        deviceListCommand(handle.deviceList),
+        deviceRevokeCommand(handle.deviceRevoke),
+      ]),
+      group(
+        "plugin",
+        "Install, update, switch on, roll back, restart and develop plugins.",
+        [
+          pluginInstallCommand(handle.pluginInstall),
+          pluginUpdateCommand(handle.pluginUpdate),
+          pluginEnableCommand(handle.pluginEnable),
+          pluginRollbackCommand(handle.pluginRollback),
+          pluginRestartCommand(handle.pluginRestart),
+          pluginDevCommand(handle.pluginDev),
+        ],
       ),
-    );
-  });
+      group("tool", "List, install, update, check and remove AI tools.", [
+        toolListCommand(handle.toolList),
+        toolInstallCommand(handle.toolInstall),
+        toolUpdateCommand(handle.toolUpdate),
+        toolCheckCommand(handle.toolCheck),
+        toolRemoveCommand(handle.toolRemove),
+      ]),
+      group("restore", "Finish a restore from a backup.", [
+        restoreFinishCommand(handle.restoreFinish),
+      ]),
+    ]),
+  );
+  const parse = Command.runWith(root, { version });
+  const settings = Layer.merge(
+    CliConfig.layer({ builtIns: [GlobalFlag.Help, GlobalFlag.Version] }),
+    presenter,
+  );
+  return (argv: readonly string[]) =>
+    Effect.gen(function* () {
+      const io = yield* CliIo;
+      if (hasShortCluster(argv)) {
+        yield* Effect.ignore(
+          Effect.andThen(io.err("aphelion: unknown option"), io.err(hint)),
+        );
+        return yield* Effect.fail(usage);
+      }
+      return yield* parse(argv).pipe(
+        Effect.catchCause((cause) => {
+          const error = Cause.squash(cause);
+          if (CliError.isCliError(error) && error._tag === "ShowHelp") {
+            return error.errors.length > 0 ? Effect.fail(usage) : Effect.void;
+          }
+          if (Cause.hasInterruptsOnly(cause) || error instanceof CliFailure) {
+            return Effect.failCause(cause);
+          }
+          return Effect.andThen(
+            Effect.ignore(io.err(`aphelion: ${describe(cause)}`)),
+            Effect.fail(failed),
+          );
+        }),
+      );
+    }).pipe(Effect.provide(settings));
+};
+
+export const cli = makeCli(handlers);

@@ -22,6 +22,7 @@ export {
   type AdapterSession,
   type BotAdapter,
   type Decider,
+  type DeciderContext,
   type PermissionDecision,
   type PermissionRequest,
   type PermissionRequestId,
@@ -29,9 +30,11 @@ export {
   type StreamEvent,
   type ToolCallId,
   type ToolKind,
+  type TurnDecision,
   type TurnId,
   type TurnInput,
 } from "./adapter.ts";
+export { folderRule, type RealPath } from "./folder-rule.ts";
 export {
   parsePluginManifest,
   pluginApiVersion,

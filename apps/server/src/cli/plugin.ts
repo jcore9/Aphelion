@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Effect } from "effect";
+import { Command } from "effect/cli";
 import {
   approvalToken,
   readInstall,
@@ -14,6 +15,14 @@ import { UpdateRefused } from "../plugins/updates/refused";
 import { isReleaseDirectoryName } from "../plugins/updates/release-path";
 import { databaseFile, withStore } from "./device";
 import { failed } from "./failure";
+import {
+  approveFlag,
+  operandArgument,
+  operands,
+  pluginsDirFlag,
+  stateDirFlag,
+  type Handler,
+} from "./flags";
 import { CliIo } from "./io";
 
 const installedVersion = (stateDir: string, plugin: string) =>
@@ -139,3 +148,21 @@ export const pluginInstall = (options: {
     }
     yield* io.out("Plugin approved.");
   });
+
+export const pluginInstallCommand = (
+  handler: Handler<Parameters<typeof pluginInstall>[0]>,
+) =>
+  Command.make(
+    "install",
+    {
+      stateDir: stateDirFlag,
+      pluginsDir: pluginsDirFlag,
+      folder: operandArgument(operands["plugin install"]),
+      approve: approveFlag,
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Preview the permissions for an unpacked plugin. Repeat with the displayed digest to save the grants.",
+    ),
+  );

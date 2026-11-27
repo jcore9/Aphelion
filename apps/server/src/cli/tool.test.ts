@@ -1,0 +1,660 @@
+import { execFile, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { afterEach, beforeEach, expect, test } from "vitest";
+import { lockFile } from "../adapters/file-lock";
+import { filesLockFile } from "../plugins/updates/files-lock";
+import { run as invoke } from "./testing";
+
+const run = promisify(execFile);
+
+let root: string;
+let stateDir: string;
+let toolsDir: string;
+let server: Server;
+let served: Map<string, Buffer>;
+let requests: string[];
+
+const origin = () =>
+  `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "aphelion-tool-cli-"));
+  stateDir = join(root, "state");
+  toolsDir = join(root, "tools");
+  await mkdir(stateDir, { mode: 0o700 });
+  await mkdir(toolsDir);
+  served = new Map();
+  requests = [];
+  server = createServer((request, response) => {
+    const body = served.get(request.url ?? "");
+    requests.push(request.url ?? "");
+    if (body !== undefined && request.url?.startsWith("/chunked")) {
+      response.write(body.subarray(0, 10));
+      response.end(body.subarray(10));
+      return;
+    }
+    response.statusCode = body === undefined ? 404 : 200;
+    response.end(body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  process.env["APHELION_TOOL_LIST"] = join(root, "ai-tools.json");
+});
+
+afterEach(async () => {
+  delete process.env["APHELION_TOOL_LIST"];
+  await new Promise((resolve) => server.close(resolve));
+  await rm(root, { recursive: true, force: true });
+});
+
+const dirs = () => ["--state-dir", stateDir, "--tools-dir", toolsDir];
+const listArgs = () => ["tool", "list", "--tools-dir", toolsDir];
+const install = (name = "claude") =>
+  invoke(["tool", "install", name, ...dirs()]);
+
+const script = Buffer.from("#!/bin/sh\necho hello from the tool\n");
+
+interface Fixture {
+  readonly path: string;
+  readonly bytes: Buffer;
+  readonly format: "binary" | "tar.gz";
+  readonly entry: string;
+}
+
+const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+async function writeList(
+  fixture: Fixture,
+  overrides: { version?: string; sha256?: string; size?: number } = {},
+  name = "claude",
+) {
+  served.set(fixture.path, fixture.bytes);
+  const build = {
+    url: `${origin()}${fixture.path}`,
+    sha256: overrides.sha256 ?? sha(fixture.bytes),
+    size: overrides.size ?? fixture.bytes.length,
+    format: fixture.format,
+    entry: fixture.entry,
+  };
+  await writeEntry({
+    version: overrides.version ?? "1.2.3",
+    name,
+    build,
+  });
+}
+
+async function writeEntry(options: {
+  version: string;
+  name: string;
+  build: Record<string, unknown>;
+  builds?: Record<string, unknown>;
+}) {
+  const tool = {
+    name: options.name,
+    version: options.version,
+    builds: options.builds ?? {
+      x86_64: options.build,
+      aarch64: options.build,
+    },
+    signIn: [options.name, "auth", "login"],
+    status: [options.name, "auth", "status"],
+    checksumSource: "recorded",
+  };
+  await writeFile(
+    process.env["APHELION_TOOL_LIST"] ?? "",
+    JSON.stringify({ version: 1, tools: [tool] }),
+  );
+}
+
+const binary: Fixture = {
+  path: "/claude",
+  bytes: script,
+  format: "binary",
+  entry: "claude",
+};
+
+async function archive(
+  files: Record<string, string>,
+  extra: string[] = [],
+  links: Record<string, string> = {},
+) {
+  const source = await mkdtemp(join(root, "source-"));
+  for (const [name, content] of Object.entries(files)) {
+    await mkdir(join(source, name, ".."), { recursive: true });
+    await writeFile(join(source, name), content, { mode: 0o755 });
+  }
+  for (const [name, target] of Object.entries(links)) {
+    await symlink(target, join(source, name));
+  }
+  const file = join(root, `${source.split("-").at(-1) ?? "x"}.tar.gz`);
+  const made = spawnSync("tar", [
+    "-czf",
+    file,
+    "-C",
+    source,
+    ...extra,
+    ...Object.keys(files),
+    ...Object.keys(links),
+  ]);
+  expect(made.status).toBe(0);
+  return readFile(file);
+}
+
+const stateOf = async (name = "claude") =>
+  (await invoke(listArgs())).out.find((row) => row.startsWith(`${name}\t`));
+
+test("tool list shows each tool, its state and its status command", async () => {
+  await writeList(binary);
+  expect(await invoke(listArgs())).toEqual({
+    code: 0,
+    out: [
+      "NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\tSIGN-IN-COMMAND",
+      "claude\t1.2.3\t-\tnot installed\tclaude auth status\tclaude auth login",
+    ],
+    err: [],
+  });
+});
+
+test("tool list says unavailable for a tool with no build for this processor", async () => {
+  await writeEntry({
+    version: "1.2.3",
+    name: "claude",
+    build: {},
+    builds: {},
+  });
+  expect((await invoke(listArgs())).out[1]).toBe(
+    "claude\t1.2.3\t-\tunavailable\tclaude auth status\tclaude auth login",
+  );
+  const refused = await install();
+  expect(refused.code).toBe(1);
+  expect(refused.err[0]).toContain("has no build");
+});
+
+test("tool install downloads a binary, checks it, and bots can run it", async () => {
+  await writeList(binary);
+  const result = await install();
+  expect(result).toEqual({
+    code: 0,
+    out: [
+      "Installed claude 1.2.3.",
+      "Sign in as aphelion-bot with: claude auth login",
+    ],
+    err: [],
+  });
+  const program = join(toolsDir, "claude", "current", "claude");
+  expect((await stat(program)).mode & 0o777).toBe(0o755);
+  expect((await run(program)).stdout).toBe("hello from the tool\n");
+  expect(await readlink(join(toolsDir, "claude", "current"))).toBe("1.2.3");
+  expect(await stateOf()).toBe(
+    "claude\t1.2.3\t1.2.3\tinstalled\tclaude auth status\tclaude auth login",
+  );
+  expect(await readdir(toolsDir)).toEqual(["claude"]);
+});
+
+test("installing the installed version again downloads nothing and changes nothing", async () => {
+  await writeList(binary);
+  await install();
+  const inode = (await stat(join(toolsDir, "claude", "1.2.3", "claude"))).ino;
+  const again = await install();
+  expect(again.out[0]).toBe("claude 1.2.3 is already installed.");
+  expect(requests).toEqual(["/claude"]);
+  expect((await stat(join(toolsDir, "claude", "1.2.3", "claude"))).ino).toBe(
+    inode,
+  );
+});
+
+test("tool install refuses a wrong checksum and leaves nothing behind", async () => {
+  await writeList(binary, { sha256: "0".repeat(64) });
+  const result = await install();
+  expect(result.code).toBe(1);
+  expect(result.out).toEqual([]);
+  expect(result.err[0]).toMatch(/SHA-256 is [0-9a-f]{64}, not the 0{64}/);
+  expect(await readdir(toolsDir)).toEqual([]);
+  expect(await stateOf()).toContain("not installed");
+});
+
+test("tool install refuses a download bigger than the list says, and a smaller one", async () => {
+  await writeList(binary, { size: script.length - 1 });
+  const bigger = await install();
+  expect(bigger.code).toBe(1);
+  expect(bigger.err[0]).toMatch(/more than|larger than/);
+  await writeList(binary, { size: script.length + 1 });
+  const smaller = await install();
+  expect(smaller.code).toBe(1);
+  expect(smaller.err[0]).toContain("not the");
+  expect(await readdir(toolsDir)).toEqual([]);
+  await writeList(binary);
+  expect((await install()).code).toBe(0);
+});
+
+test("tool install stops a download with no announced size once it passes the list's size", async () => {
+  await writeList({ ...binary, path: "/chunked" }, { size: script.length - 1 });
+  const result = await install();
+  expect(result.code).toBe(1);
+  expect(result.err[0]).toContain("larger than");
+  expect(await readdir(toolsDir)).toEqual([]);
+  await writeList({ ...binary, path: "/chunked" });
+  expect((await install()).code).toBe(0);
+});
+
+test("tool install refuses a name that isn't on the list or isn't a tool name", async () => {
+  await writeList(binary);
+  const missing = await install("codex");
+  expect(missing.code).toBe(1);
+  expect(missing.err[0]).toContain("isn't on the list");
+  const unknown = await install("gemini");
+  expect(unknown.code).toBe(2);
+  expect(unknown.err[0]).toContain(
+    "the tool name must be claude, codex, grok or opencode",
+  );
+  expect(requests).toEqual([]);
+});
+
+test("tool install refuses a list it can't read or that is invalid", async () => {
+  expect((await install()).err[0]).toContain("can't read the tool list");
+  await writeFile(process.env["APHELION_TOOL_LIST"] ?? "", "{}");
+  const invalid = await install();
+  expect(invalid.code).toBe(1);
+  expect(invalid.err[0]).toContain("the tool list is invalid");
+});
+
+test("tool install unpacks a gzip archive with the program in a folder", async () => {
+  const bytes = await archive({
+    "bin/tool": "#!/bin/sh\necho from the archive\n",
+    "share/readme": "text",
+  });
+  await writeList({
+    path: "/tool.tar.gz",
+    bytes,
+    format: "tar.gz",
+    entry: "bin/tool",
+  });
+  expect((await install()).code).toBe(0);
+  const program = join(toolsDir, "claude", "current", "bin", "tool");
+  expect((await run(program)).stdout).toBe("from the archive\n");
+  expect(
+    (await stat(join(toolsDir, "claude", "1.2.3", "share"))).mode & 0o777,
+  ).toBe(0o755);
+});
+
+test.each([
+  [
+    "a member outside its folder",
+    { tool: "x" },
+    ["--transform", "s,^,../,"],
+    {},
+    "outside its folder",
+  ],
+  ["a link", { tool: "x" }, [], { link: "/etc/passwd" }, "link"],
+  ["no program at the entry path", { other: "x" }, [], {}, "has no tool"],
+])(
+  "tool install refuses an archive with %s",
+  async (_label, files, extra, links, reason) => {
+    const bytes = await archive(files, extra, links);
+    await writeList({
+      path: "/bad.tar.gz",
+      bytes,
+      format: "tar.gz",
+      entry: "tool",
+    });
+    const result = await install();
+    expect(result.code).toBe(1);
+    expect(result.err[0]).toContain(reason);
+    expect(result.out).toEqual([]);
+    expect(await readdir(toolsDir)).toEqual([]);
+  },
+);
+
+test("a new list version replaces the old one, and leftovers from a crash are cleaned", async () => {
+  await writeList(binary);
+  await install();
+  await mkdir(join(toolsDir, ".staging", "junk"), { recursive: true });
+  await symlink("1.2.3", join(toolsDir, "claude", "current.new-abc"));
+  const next = { ...binary, bytes: Buffer.from("#!/bin/sh\necho second\n") };
+  await writeList(next, { version: "1.3.0" });
+  expect(await stateOf()).toBe(
+    "claude\t1.3.0\t1.2.3\tupdate available\tclaude auth status\tclaude auth login",
+  );
+  expect((await install()).out[0]).toBe("Installed claude 1.3.0.");
+  expect((await readdir(join(toolsDir, "claude"))).sort()).toEqual([
+    "1.3.0",
+    "current",
+  ]);
+  expect(
+    (await run(join(toolsDir, "claude", "current", "claude"))).stdout,
+  ).toBe("second\n");
+  expect(await readdir(toolsDir)).toEqual(["claude"]);
+});
+
+test("an install that died after the move but before the switch is finished by the next run", async () => {
+  await writeList(binary);
+  await mkdir(join(toolsDir, "claude", "1.2.3"), { recursive: true });
+  await writeFile(join(toolsDir, "claude", "1.2.3", "claude"), "half");
+  expect(await stateOf()).toContain("not installed");
+  expect((await install()).code).toBe(0);
+  expect(
+    (await run(join(toolsDir, "claude", "current", "claude"))).stdout,
+  ).toBe("hello from the tool\n");
+});
+
+test("tool install refuses with the shared message while another change holds the lock", async () => {
+  await writeList(binary);
+  const lock = lockFile(join(stateDir, filesLockFile));
+  const result = await install();
+  if (lock.kind === "locked") lock.release();
+  expect(result.code).toBe(1);
+  expect(result.err[0]).toBe(
+    "Another plugin or AI tool change is running. Try again when it finishes.",
+  );
+  expect((await install()).code).toBe(0);
+});
+
+test("tool remove deletes the tool and can run twice", async () => {
+  await writeList(binary);
+  await install();
+  const remove = ["tool", "remove", "claude", ...dirs()];
+  expect((await invoke(remove)).out).toEqual([
+    "Removed claude. Its sign-in in the bots volume is still there.",
+  ]);
+  await expect(lstat(join(toolsDir, "claude"))).rejects.toThrow();
+  expect(await invoke(remove)).toEqual({
+    code: 0,
+    out: ["claude isn't installed."],
+    err: [],
+  });
+  expect(await stateOf()).toContain("not installed");
+});
+
+async function onProcessor<T>(arch: string, work: () => Promise<T>) {
+  const real = Object.getOwnPropertyDescriptor(process, "arch");
+  Object.defineProperty(process, "arch", { value: arch, configurable: true });
+  try {
+    return await work();
+  } finally {
+    if (real !== undefined) Object.defineProperty(process, "arch", real);
+  }
+}
+
+async function writeTwoBuilds() {
+  const other = Buffer.from("#!/bin/sh\necho hello from the other build\n");
+  served.set("/claude-x64", script);
+  served.set("/claude-arm64", other);
+  const build = (path: string, bytes: Buffer) => ({
+    url: `${origin()}${path}`,
+    sha256: sha(bytes),
+    size: bytes.length,
+    format: "binary",
+    entry: "claude",
+  });
+  await writeEntry({
+    version: "1.2.3",
+    name: "claude",
+    build: {},
+    builds: {
+      x86_64: build("/claude-x64", script),
+      aarch64: build("/claude-arm64", other),
+    },
+  });
+}
+
+test("on arm64, tool install downloads the aarch64 build, and on x86-64 the x86_64 one", async () => {
+  await writeTwoBuilds();
+  const program = join(toolsDir, "claude", "current", "claude");
+  expect((await onProcessor("arm64", install)).code).toBe(0);
+  expect(requests).toEqual(["/claude-arm64"]);
+  expect((await run(program)).stdout).toBe("hello from the other build\n");
+
+  await rm(toolsDir, { recursive: true });
+  await mkdir(toolsDir);
+  requests.length = 0;
+  expect((await onProcessor("x64", install)).code).toBe(0);
+  expect(requests).toEqual(["/claude-x64"]);
+  expect((await run(program)).stdout).toBe("hello from the tool\n");
+});
+
+test("on arm64, a tool with only an x86_64 build is unavailable and install refuses it", async () => {
+  await writeEntry({
+    version: "1.2.3",
+    name: "claude",
+    build: {},
+    builds: {
+      x86_64: {
+        url: `${origin()}/claude`,
+        sha256: sha(script),
+        size: script.length,
+        format: "binary",
+        entry: "claude",
+      },
+    },
+  });
+  served.set("/claude", script);
+  const listed = await onProcessor("arm64", () => invoke(listArgs()));
+  expect(listed.out[1]).toBe(
+    "claude\t1.2.3\t-\tunavailable\tclaude auth status\tclaude auth login",
+  );
+  const refused = await onProcessor("arm64", install);
+  expect(refused.code).toBe(1);
+  expect(refused.err[0]).toContain("has no build");
+  expect(requests).toEqual([]);
+  expect((await onProcessor("x64", install)).code).toBe(0);
+});
+
+const update = (name?: string) =>
+  invoke(["tool", "update", ...(name === undefined ? [] : [name]), ...dirs()]);
+
+const second = Buffer.from("#!/bin/sh\necho second\n");
+
+async function writeTools(
+  tools: { name: string; version: string; bytes: Buffer; sha256?: string }[],
+) {
+  const entries = tools.map(({ name, version, bytes, sha256 }) => {
+    served.set(`/${name}-${version}`, bytes);
+    const build = {
+      url: `${origin()}/${name}-${version}`,
+      sha256: sha256 ?? sha(bytes),
+      size: bytes.length,
+      format: "binary",
+      entry: name,
+    };
+    return {
+      name,
+      version,
+      builds: { x86_64: build, aarch64: build },
+      signIn: [name, "auth", "login"],
+      status: [name, "auth", "status"],
+      checksumSource: "recorded",
+    };
+  });
+  await writeFile(
+    process.env["APHELION_TOOL_LIST"] ?? "",
+    JSON.stringify({ version: 1, tools: entries }),
+  );
+}
+
+async function installedThenListed(newVersion: string) {
+  await writeList(binary);
+  await install();
+  await writeList({ ...binary, bytes: second }, { version: newVersion });
+}
+
+test("tool update installs the version the list pins and removes the old one", async () => {
+  await installedThenListed("1.3.0");
+  expect(await update("claude")).toEqual({
+    code: 0,
+    out: ["updated claude 1.2.3 -> 1.3.0"],
+    err: [],
+  });
+  expect(await readlink(join(toolsDir, "claude", "current"))).toBe("1.3.0");
+  expect((await readdir(join(toolsDir, "claude"))).sort()).toEqual([
+    "1.3.0",
+    "current",
+  ]);
+  expect(
+    (await run(join(toolsDir, "claude", "current", "claude"))).stdout,
+  ).toBe("second\n");
+  expect(await stateOf()).toBe(
+    "claude\t1.3.0\t1.3.0\tinstalled\tclaude auth status\tclaude auth login",
+  );
+});
+
+test("a second tool update changes nothing and downloads nothing", async () => {
+  await installedThenListed("1.3.0");
+  await update("claude");
+  const downloads = requests.length;
+  const inode = (await stat(join(toolsDir, "claude", "1.3.0", "claude"))).ino;
+  expect(await update("claude")).toEqual({
+    code: 0,
+    out: ["claude is up to date (1.3.0)"],
+    err: [],
+  });
+  expect(requests).toHaveLength(downloads);
+  expect((await stat(join(toolsDir, "claude", "1.3.0", "claude"))).ino).toBe(
+    inode,
+  );
+});
+
+test("tool update with no name goes through every tool on the list, one line each", async () => {
+  await writeTools([
+    { name: "claude", version: "1.2.3", bytes: script },
+    { name: "codex", version: "0.5.0", bytes: script },
+    { name: "grok", version: "1.0.0", bytes: script },
+  ]);
+  await install("claude");
+  await install("grok");
+  await writeTools([
+    { name: "claude", version: "1.3.0", bytes: second },
+    { name: "codex", version: "0.5.0", bytes: script },
+    { name: "grok", version: "1.0.0", bytes: script },
+  ]);
+  expect(await update()).toEqual({
+    code: 0,
+    out: [
+      "updated claude 1.2.3 -> 1.3.0",
+      "codex isn't installed",
+      "grok is up to date (1.0.0)",
+    ],
+    err: [],
+  });
+  expect((await invoke(listArgs())).out.slice(1)).toEqual([
+    "claude\t1.3.0\t1.3.0\tinstalled\tclaude auth status\tclaude auth login",
+    "codex\t0.5.0\t-\tnot installed\tcodex auth status\tcodex auth login",
+    "grok\t1.0.0\t1.0.0\tinstalled\tgrok auth status\tgrok auth login",
+  ]);
+});
+
+test("tool update leaves a tool that isn't installed alone", async () => {
+  await writeList(binary);
+  expect(await update("claude")).toEqual({
+    code: 0,
+    out: ["claude isn't installed"],
+    err: [],
+  });
+  expect(requests).toEqual([]);
+  expect(await readdir(toolsDir)).toEqual([]);
+});
+
+test("tool update says when the list has no build for this processor", async () => {
+  await installedThenListed("1.3.0");
+  await writeEntry({ version: "1.3.0", name: "claude", build: {}, builds: {} });
+  expect(await update("claude")).toEqual({
+    code: 0,
+    out: ["claude has no build for this processor"],
+    err: [],
+  });
+  expect(await readlink(join(toolsDir, "claude", "current"))).toBe("1.2.3");
+});
+
+test("tool update refuses a name that isn't on the list or isn't a tool name", async () => {
+  await writeList(binary);
+  const missing = await update("codex");
+  expect(missing.code).toBe(1);
+  expect(missing.out).toEqual([]);
+  expect(missing.err[0]).toContain("isn't on the list");
+  expect((await update("gemini")).code).toBe(2);
+  expect(requests).toEqual([]);
+});
+
+test("a wrong checksum leaves the installed version in place and running", async () => {
+  await writeList(binary);
+  await install();
+  await writeList(
+    { ...binary, bytes: second },
+    { version: "1.3.0", sha256: "0".repeat(64) },
+  );
+  const result = await update("claude");
+  expect(result.code).toBe(1);
+  expect(result.out).toEqual([]);
+  expect(result.err[0]).toMatch(/SHA-256 is [0-9a-f]{64}, not the 0{64}/);
+  expect(await readlink(join(toolsDir, "claude", "current"))).toBe("1.2.3");
+  expect(
+    (await run(join(toolsDir, "claude", "current", "claude"))).stdout,
+  ).toBe("hello from the tool\n");
+  expect((await readdir(toolsDir)).sort()).toEqual(["claude"]);
+  expect(await stateOf()).toContain("update available");
+});
+
+test("a refused tool doesn't stop the others, and the exit code is 1", async () => {
+  await writeTools([
+    { name: "claude", version: "1.2.3", bytes: script },
+    { name: "codex", version: "0.5.0", bytes: script },
+  ]);
+  await install("claude");
+  await install("codex");
+  await writeTools([
+    { name: "claude", version: "1.3.0", bytes: second, sha256: "0".repeat(64) },
+    { name: "codex", version: "0.6.0", bytes: second },
+  ]);
+  const result = await update();
+  expect(result.code).toBe(1);
+  expect(result.out).toEqual(["updated codex 0.5.0 -> 0.6.0"]);
+  expect(result.err[0]).toContain("claude");
+  expect(result.err[0]).toContain("SHA-256");
+});
+
+test("tool update refuses with the shared message while another change holds the lock", async () => {
+  await installedThenListed("1.3.0");
+  const lock = lockFile(join(stateDir, filesLockFile));
+  const result = await update("claude");
+  if (lock.kind === "locked") lock.release();
+  expect(result.code).toBe(1);
+  expect(result.err[0]).toBe(
+    "Another plugin or AI tool change is running. Try again when it finishes.",
+  );
+  expect((await update("claude")).out).toEqual([
+    "updated claude 1.2.3 -> 1.3.0",
+  ]);
+});
+
+test("a current link that points outside the tool's folder counts as not installed", async () => {
+  await writeList(binary);
+  await mkdir(join(toolsDir, "claude"));
+  await symlink("../../etc", join(toolsDir, "claude", "current"));
+  expect(await stateOf()).toBe(
+    "claude\t1.2.3\t-\tnot installed\tclaude auth status\tclaude auth login",
+  );
+  expect((await update("claude")).out).toEqual(["claude isn't installed"]);
+  expect(requests).toEqual([]);
+});
+
+test("a current link whose folder is gone counts as not installed", async () => {
+  await installedThenListed("1.3.0");
+  await rm(join(toolsDir, "claude", "1.2.3"), { recursive: true });
+  expect(await stateOf()).toContain("not installed");
+  expect((await update("claude")).out).toEqual(["claude isn't installed"]);
+});

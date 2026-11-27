@@ -36,7 +36,7 @@ cleanup() {
     "${compose[@]}" logs --no-color 2>&1 | tail -n 60 >&2 || true
   fi
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
-  as_root rm -rf /scratch/secrets >/dev/null 2>&1 || true
+  as_root rm -rf /scratch/secrets /scratch/backups >/dev/null 2>&1 || true
   rm -rf "$scratch"
 }
 
@@ -87,6 +87,48 @@ as_root bash -euo pipefail -c '
   for tool in claude codex grok opencode; do if command -v "$tool"; then exit 1; fi; done
 ' >/dev/null || fail "the image's users, groups or tools are not as expected"
 pass "four fixed users, a private harness group, no sudo, no set-user-ID files, no AI tool"
+
+as_root bash -euo pipefail -c '
+  [[ $DISABLE_AUTOUPDATER == 1 ]]
+  [[ $(cat /etc/codex/requirements.toml) == "check_for_update_on_startup = false" ]]
+  [[ $(stat -c "%U:%G %a" /opt/aphelion/tools) == "harness:harness 755" ]]
+  for tool in claude grok opencode; do
+    [[ $(readlink /usr/local/bin/$tool) == /opt/aphelion/tools/$tool/current/$tool ]]
+  done
+  [[ $(readlink /usr/local/bin/codex) == /opt/aphelion/tools/codex/current/codex-$(uname -m)-unknown-linux-musl ]]
+  adapters=/usr/local/lib/aphelion/adapters/claude
+  [[ $(stat -c "%U:%G %a" "${adapters%/*}" "$adapters" | tr "\n" " ") == "root:root 755 root:root 755 " ]]
+  [[ $(ls -A "$adapters" | tr "\n" " ") == "adapter.js aphelion-plugin.json " ]]
+  for file in "$adapters"/*; do [[ $(stat -c "%U:%G %a" "$file") == "root:root 644" ]]; done
+  [[ -z $(find / -xdev \( -name node_modules -o -name "claude-agent-sdk*" \) -print -quit) ]]
+  [[ -z $(find / -xdev -path /opt/aphelion/tools -prune -o -name claude -type f -print -quit) ]]
+' || fail "the image doesn't turn off auto-update, own the tools folder, link the four tool names, or carry the Claude adapter bundle without node_modules or another claude binary"
+pass "the image turns off Claude and Codex auto-update, makes the tools folder harness's, and links each tool name to a path that doesn't exist yet"
+adapter_out=$(docker run --rm --interactive --entrypoint "" --network none --user aphelion-bot \
+  --env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 --env ANTHROPIC_API_KEY=sk-ant-contract-fake "$image" \
+  bash -c 'mkdir -p /tmp/work && { printf "%s\n" "$1" "$2"; sleep 3; printf "%s\n" "$3"; } |
+    bun /usr/local/lib/aphelion/adapters/claude/adapter.js 2>&1' _ \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"api":"0.1.0","bot":{"id":"contract"},"folder":"/tmp/work","resume":null}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"turn.start","params":{"turn":"t1","text":"hello"}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"shutdown"}') || fail "the Claude adapter bundle didn't run: $adapter_out"
+grep -qF '"result":{"api":"0.1.0","provider":"claude"}' <<<"$adapter_out" || fail "the Claude adapter didn't answer initialize: $adapter_out"
+grep -qF '"event":{"type":"error","code":"cli-not-found"}' <<<"$adapter_out" || fail "the Claude adapter didn't report a missing CLI: $adapter_out"
+[[ $adapter_out != *sk-ant* ]] || fail "the Claude adapter printed the key from its environment"
+pass "the image runs the bundled Claude adapter with no node_modules, ships no other claude binary, and reports the missing CLI without the key"
+
+as_root bash -euo pipefail -c '
+  settings=/etc/claude-code/managed-settings.json
+  [[ $(stat -c "%U:%G %a" "${settings%/*}" "$settings" | tr "\n" " ") == "root:root 755 root:root 644 " ]]
+  [[ $(ls -A "${settings%/*}") == managed-settings.json ]]
+  bun -e "
+    const { permissions } = await Bun.file(\"$settings\").json();
+    if (permissions.disableBypassPermissionsMode !== \"disable\" || permissions.disableAutoMode !== \"disable\") process.exit(1);
+  "
+' || fail "Claude Code's managed settings aren't root-owned, or don't turn off bypassPermissions and auto mode"
+docker run --rm --entrypoint "" --network none --user aphelion-bot "$image" bash -c '
+  [[ -r /etc/claude-code/managed-settings.json && ! -w /etc/claude-code/managed-settings.json && ! -w /etc/claude-code ]]
+' || fail "aphelion-bot can change Claude Code's managed settings, or can't read them"
+pass "Claude Code's managed settings turn off bypassPermissions and auto mode, and aphelion-bot can read but not change them"
 
 cp deploy/test/probe.mjs deploy/test/probe-plugin/* "$scratch/plugins/contract-probe/"
 cat >"$scratch/plugins/contract-probe/checks.json" <<'EOF'
@@ -230,10 +272,10 @@ docker exec --privileged "$container" bash -euo pipefail -c '
     held=$(stat -L -c %d:%i "$fd" 2>/dev/null) || continue
     pid=${fd#/proc/}; pid=${pid%%/*}
     if [[ $held == "$requests" || $held == "$replies" ]]; then
-      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[runner]}" ]] || { echo "process $pid holds the plugin runner pipe"; exit 1; }
+      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[runner]}" ]] || { echo "process $pid ($(tr "\0" " " <"/proc/$pid/cmdline")) holds the plugin runner pipe through $fd"; exit 1; }
     fi
     if [[ $held == "$bot_requests" || $held == "$bot_replies" ]]; then
-      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[bot_runner]}" ]] || { echo "process $pid holds the bot runner pipe"; exit 1; }
+      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[bot_runner]}" ]] || { echo "process $pid ($(tr "\0" " " <"/proc/$pid/cmdline")) holds the bot runner pipe through $fd"; exit 1; }
     fi
   done
 ' || fail "a process runs with the wrong user, privileges or pipes"
@@ -281,9 +323,9 @@ tar -C "$scratch" -cf - bot-test | docker exec -i --user aphelion-bot "$containe
 driven=$(docker exec --user aphelion-bot "$container" /usr/local/bin/bun /tmp/bot-test/drive.mjs 2>&1) ||
   fail "the bot runner check failed: $driven"
 docker exec --user aphelion-bot "$container" rm -rf /tmp/bot-test /var/lib/aphelion-bots/contract-bot
-wait_for_log "\"msg\":\"the bot runner couldn't start the bot\",\"bot\":\"chief-of-staff\",\"adapter\":\"/usr/local/lib/aphelion/adapters/claude/adapter.js\""
+wait_for_log "\"msg\":\"the bot runner started the bot's process\",\"bot\":\"chief-of-staff\""
 wait_for_log "no adapter in this image runs the bot's provider, so the bot won't start\",\"bot\":\"triage\""
-pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner, and its log names a missing adapter bundle"
+pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner, which starts the bundled Claude adapter for the example bot"
 
 probe aphelion-plugins '[
   ["list", "/etc/aphelion", "EACCES"],
@@ -407,6 +449,118 @@ grep -qF "The release's attestation vouches for other bytes than the downloaded 
   fail "the running plugin stopped or restarted after a refused update"
 docker exec --user harness "$container" bash -c 'for p in /proc/[0-9]*; do [[ ${p#/proc/} != "$$" && $(tr "\0" " " <$p/cmdline 2>/dev/null) == *fake-github.mjs* ]] && kill ${p#/proc/}; done; true'
 pass "plugin update refuses an archive with one changed byte, and the running version keeps running"
+
+fake_tools=$scratch/fake-tools
+mkdir -p "$fake_tools"
+printf '#!/bin/sh\necho fake tool ok\n' >"$fake_tools/claude-fake"
+fake_sha=$(sha256sum "$fake_tools/claude-fake" | cut -d' ' -f1)
+fake_size=$(stat -c %s "$fake_tools/claude-fake")
+printf '#!/bin/sh\necho fake tool ok, second version\n' >"$fake_tools/claude-fake-2"
+fake_sha_2=$(sha256sum "$fake_tools/claude-fake-2" | cut -d' ' -f1)
+fake_size_2=$(stat -c %s "$fake_tools/claude-fake-2")
+tool_list() {
+  local sha=$1 size=$2 build version=${3:-9.9.9} file=${4:-claude-fake}
+  build="{\"url\":\"http://127.0.0.1:8098/$file\",\"sha256\":\"$sha\",\"size\":$size,\"format\":\"binary\",\"entry\":\"claude\"}"
+  printf '{"version":1,"tools":[{"name":"claude","version":"%s","builds":{"x86_64":%s,"aarch64":%s},"signIn":["claude","auth","login"],"status":["claude","auth","status"],"checksumSource":"recorded"}]}\n' "$version" "$build" "$build"
+}
+tool_list "$fake_sha" "$fake_size" >"$fake_tools/list-good.json"
+tool_list "$(printf '0%.0s' {1..64})" "$fake_size" >"$fake_tools/list-wrong-checksum.json"
+tool_list "$fake_sha" "$((fake_size - 1))" >"$fake_tools/list-too-large.json"
+tool_list "$fake_sha_2" "$fake_size_2" 9.9.10 claude-fake-2 >"$fake_tools/list-next.json"
+tool_list "$(printf '0%.0s' {1..64})" "$fake_size_2" 9.9.10 claude-fake-2 >"$fake_tools/list-next-wrong-checksum.json"
+cp deploy/test/fake-tools.mjs "$fake_tools/"
+chmod -R a+rX,go-w "$fake_tools"
+tar -C "$scratch" -cf - fake-tools | docker exec -i --user harness "$container" tar -xf - -C /tmp
+docker exec --detach --user harness --env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$container" \
+  bun /tmp/fake-tools/fake-tools.mjs /tmp/fake-tools 8098
+tool_aphelion() {
+  local list=$1
+  shift
+  docker exec --user harness --env "APHELION_TOOL_LIST=/tmp/fake-tools/$list" "$container" aphelion tool "$@"
+}
+as_bot() {
+  docker exec --user aphelion-bot "$container" "$@"
+}
+
+shipped=$(docker exec --user harness "$container" aphelion tool list) || fail "tool list failed on the shipped list"
+[[ $(sed -n 1p <<<"$shipped") == $'NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\tSIGN-IN-COMMAND' ]] || fail "tool list printed no header: $shipped"
+grep -qP '^claude\t\S+\t-\tnot installed\tclaude auth status --text\tclaude auth login$' <<<"$shipped" || fail "tool list doesn't show Claude Code as not installed: $shipped"
+grep -qP '^grok\t\S+\t-\tnot installed\t-\tgrok login --device-auth$' <<<"$shipped" || fail "tool list doesn't show Grok Build with no status command: $shipped"
+[[ $(grep -c . <<<"$shipped") == 5 ]] || fail "tool list doesn't list the four tools: $shipped"
+pass "tool list shows the four pinned tools as not installed, each with its status and sign-in command"
+
+for _ in {1..50}; do
+  docker exec --user harness --env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$container" \
+    bun --eval 'await fetch("http://127.0.0.1:8098/claude-fake")' >/dev/null 2>&1 && break
+  sleep 0.1
+done
+for bad in list-wrong-checksum.json list-too-large.json; do
+  status=0
+  refused=$(tool_aphelion "$bad" install claude 2>&1) || status=$?
+  [[ $status == 1 && $refused == *"the list"* ]] || fail "tool install didn't refuse $bad (exit $status): $refused"
+  docker exec --user harness "$container" test ! -e /opt/aphelion/tools/claude ||
+    fail "tool install left files behind after refusing $bad"
+done
+status=0
+refused=$(tool_aphelion list-good.json install codex 2>&1) || status=$?
+[[ $status == 1 && $refused == *"isn't on the list"* ]] || fail "tool install accepted a name that isn't on the list: $refused"
+if as_bot sh -c 'command -v claude' >/dev/null 2>&1; then fail "Claude Code is on the PATH before it was installed"; fi
+pass "tool install refuses a wrong checksum, a download over the listed size and a name that isn't on the list, and installs nothing"
+
+installed=$(tool_aphelion list-good.json install claude 2>&1) || fail "tool install failed: $installed"
+[[ $installed == "Installed claude 9.9.9."$'\n'"Sign in as aphelion-bot with: claude auth login" ]] ||
+  fail "tool install printed something else: $installed"
+[[ $(as_bot claude) == "fake tool ok" ]] || fail "aphelion-bot can't run the installed tool"
+[[ $(as_bot sh -c 'command -v claude') == /usr/local/bin/claude ]] || fail "the installed tool isn't on aphelion-bot's PATH"
+pass "tool install puts the tool where aphelion-bot runs it by its name"
+
+inode=$(docker exec --user harness "$container" stat -c %i /opt/aphelion/tools/claude/9.9.9/claude)
+again=$(tool_aphelion list-good.json install claude 2>&1) || fail "a second tool install failed: $again"
+[[ $again == "claude 9.9.9 is already installed."* ]] || fail "a second tool install printed something else: $again"
+[[ $(docker exec --user harness "$container" stat -c %i /opt/aphelion/tools/claude/9.9.9/claude) == "$inode" ]] ||
+  fail "a second tool install replaced the files"
+pass "installing the installed version again changes nothing"
+
+for change in 'echo x >>/opt/aphelion/tools/claude/current/claude' \
+  'touch /opt/aphelion/tools/claude/9.9.9/extra' \
+  'ln -sfn / /opt/aphelion/tools/claude/current' \
+  'rm /opt/aphelion/tools/claude/9.9.9/claude' \
+  'mkdir /opt/aphelion/tools/other' \
+  'chmod 0777 /opt/aphelion/tools/claude/9.9.9/claude'; do
+  if as_bot bash -c "$change" >/dev/null 2>&1; then fail "aphelion-bot could change the tools volume with: $change"; fi
+done
+[[ $(as_bot claude) == "fake tool ok" ]] || fail "the tool stopped working after aphelion-bot's attempts"
+pass "aphelion-bot can run the installed tool and can't write, replace, remove or re-mode anything in the tools volume"
+
+listed=$(tool_aphelion list-next.json list 2>&1) || fail "tool list failed against the next list: $listed"
+grep -qP '^claude\t9\.9\.10\t9\.9\.9\tupdate available\tclaude auth status\tclaude auth login$' <<<"$listed" ||
+  fail "tool list doesn't say update available once the list names a newer version: $listed"
+status=0
+refused=$(tool_aphelion list-next-wrong-checksum.json update claude 2>&1) || status=$?
+[[ $status == 1 && $refused == *"the list"* ]] || fail "tool update didn't refuse a wrong checksum (exit $status): $refused"
+[[ $(as_bot claude) == "fake tool ok" ]] || fail "a refused tool update changed the installed tool"
+updated=$(tool_aphelion list-next.json update claude 2>&1) || fail "tool update failed: $updated"
+[[ $updated == "updated claude 9.9.9 -> 9.9.10" ]] || fail "tool update printed something else: $updated"
+[[ $(as_bot claude) == "fake tool ok, second version" ]] || fail "aphelion-bot doesn't run the updated tool"
+[[ $(docker exec --user harness "$container" ls /opt/aphelion/tools/claude | tr '\n' ' ') == "9.9.10 current " ]] ||
+  fail "tool update left the old version folder behind"
+inode=$(docker exec --user harness "$container" stat -c %i /opt/aphelion/tools/claude/9.9.10/claude)
+for words in "update claude" "update"; do
+  again=$(tool_aphelion list-next.json $words 2>&1) || fail "a second tool $words failed: $again"
+  [[ $again == "claude is up to date (9.9.10)" ]] || fail "a second tool $words printed something else: $again"
+done
+[[ $(docker exec --user harness "$container" stat -c %i /opt/aphelion/tools/claude/9.9.10/claude) == "$inode" ]] ||
+  fail "a second tool update replaced the files"
+grep -qP '^claude\t9\.9\.10\t9\.9\.10\tinstalled\t' < <(tool_aphelion list-next.json list) ||
+  fail "tool list doesn't show the updated tool as installed"
+pass "tool list says update available, tool update installs the new version and removes the old one, and a second update changes nothing"
+
+removed=$(tool_aphelion list-good.json remove claude 2>&1) || fail "tool remove failed: $removed"
+[[ $removed == "Removed claude. Its sign-in in the bots volume is still there." ]] || fail "tool remove printed something else: $removed"
+if as_bot sh -c 'command -v claude' >/dev/null 2>&1; then fail "Claude Code stayed on the PATH after tool remove"; fi
+[[ $(tool_aphelion list-good.json remove claude 2>&1) == "claude isn't installed." ]] || fail "a second tool remove printed something else"
+docker exec --user harness "$container" bash -c 'for p in /proc/[0-9]*; do [[ ${p#/proc/} != "$$" && $(tr "\0" " " <$p/cmdline 2>/dev/null) == *fake-tools.mjs* ]] && kill ${p#/proc/}; done; true'
+pass "tool remove takes the tool off the PATH, and a second remove changes nothing"
 
 if [[ -n ${APHELION_TEST_TAILNET_ADDRESS:-} ]]; then
   [[ $(curl --silent --max-time 5 "http://$APHELION_TAILNET_ADDRESS:17400/health") == '{"status":"ok"}' ]] ||
@@ -565,6 +719,40 @@ done
 wait_for_log "$test_plugin 1.0.0 started"
 "${compose[@]}" stop >/dev/null 2>&1
 pass "restore finish revokes every device token and switches every plugin off, and plugin enable switches each back on"
+
+volume_files() {
+  docker run --rm --pull never --network none --entrypoint "" -v "${project}_$1:/v:ro" "$image" \
+    sh -c 'cd /v && find . -printf "%p %y %U:%G %m\n" | sort && find . -type f -exec sha256sum {} + | sort -k2'
+}
+snapshot() {
+  local volume
+  for volume in config bots secrets plugin-data plugin-files; do
+    echo "== $volume"
+    volume_files "$volume"
+  done
+}
+before=$(snapshot)
+[[ -n $before ]] || fail "the snapshot of the volumes is empty"
+backups=$scratch/backups
+made=$(host_aphelion backup --to "$backups") || fail "backup failed"
+[[ $made == "$backups"/aphelion-backup-* && $("${host_root[@]}" readlink "$backups/latest") == "$(basename "$made")" ]] ||
+  fail "backup printed something other than its folder: $made"
+"${host_root[@]}" sh -c 'cd "$1" && sha256sum --check --status aphelion-data.tar.gz.sha256' sh "$made" || fail "the backup's checksum doesn't match"
+"${compose[@]}" down --volumes >/dev/null 2>&1
+[[ -z $(docker volume ls --quiet --filter "name=${project}_") ]] || fail "down --volumes left volumes behind"
+status=0
+refused=$(host_aphelion restore "$made/aphelion-data.tar.gz" 2>&1) || status=$?
+[[ $status == 0 && $refused == *"Restore finished. Every device token is revoked."* && $refused == *"aphelion plugin enable $test_plugin"* ]] ||
+  fail "restore didn't finish (exit $status): $refused"
+[[ $(snapshot) == "$before" ]] || fail "the restored volumes differ from the ones that were backed up"
+docker run --rm --pull never --network none --entrypoint "" -v "${project}_state:/v:ro" "$image" test -f /v/aphelion.db ||
+  fail "the restored state volume has no database"
+status=0
+again=$(host_aphelion restore "$made" 2>&1) || status=$?
+[[ $status == 1 && $again == *"already exist"* ]] || fail "restore ran over existing volumes (exit $status): $again"
+"${compose[@]}" create --quiet-pull >/dev/null 2>&1
+container=$("${compose[@]}" ps --all --quiet "$service")
+pass "backup, then restore into new volumes, gives back every file with its owner and mode, and restore refuses over existing volumes"
 
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 sleep 1

@@ -1,6 +1,6 @@
 # The aphelion command
 
-`aphelion` is one program. It starts the server, checks the config, and manages device tokens. In the container it is the compiled binary that the image runs with `--headless` ([decision 0016](../decisions/0016-one-docker-container.md)). The desktop app doesn't bundle it ([decision 0017](../decisions/0017-desktop-remote-only.md)). [Decision 0048](../decisions/0048-cli-on-node-parseargs.md) explains how the command line is read. On the host, [`sudo aphelion`](host-command.md) runs the `device` commands inside the container for you.
+`aphelion` is one program. It starts the server, checks the config, and manages device tokens. In the container it is the compiled binary that the image runs with `--headless` ([decision 0016](../decisions/0016-one-docker-container.md)). The desktop app doesn't bundle it ([decision 0017](../decisions/0017-desktop-remote-only.md)). [Decision 0067](../decisions/0067-cli-on-effect-cli.md) explains how the command line is read. On the host, [`sudo aphelion`](host-command.md) runs the `device` commands inside the container for you.
 
 ## Commands
 
@@ -14,19 +14,25 @@
 | `aphelion plugin rollback ID` | Goes back to the version of plugin `ID` before the current one, and restarts the plugin on it |
 | `aphelion plugin restart ID` | Asks the running server to restart plugin `ID` on its approved version |
 | `aphelion plugin dev FOLDER` | Reloads the approved plugin in `FOLDER` through the running server, and again after each change to the folder. Works only in [dev mode](plugins.md#dev-mode). |
+| `aphelion tool list` | Lists the AI tools on Aphelion's list and whether each is installed |
+| `aphelion tool install NAME` | Downloads an AI tool from the list, checks it and installs it |
+| `aphelion tool update [NAME]` | Moves an installed AI tool, or every installed AI tool, to the version the list pins |
+| `aphelion tool check` | Asks each AI tool's vendor for its newest version and compares it with the list's |
+| `aphelion tool remove NAME` | Removes an installed AI tool |
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
 | `aphelion device revoke ID` | Stops a device's token at once |
-| `aphelion --version` | Prints `aphelion` and the version, such as `aphelion 0.1.0-alpha.1` |
-| `aphelion --help`, or `aphelion` alone | Prints the commands |
+| `aphelion --version`, or `-v` | Prints `aphelion` and the version, such as `aphelion 0.1.0-alpha.1` |
+| `aphelion --help`, or `aphelion` alone | Prints the command groups. `aphelion GROUP --help` lists the commands in a group, and `aphelion GROUP COMMAND --help` shows that command's options and defaults. |
 
 ### Options
 
 | Option | Used by | Default | Meaning |
 | --- | --- | --- | --- |
 | `--config-dir DIR` | `--headless`, `config check` | `/etc/aphelion` | The folder with the [config files](config.md) |
-| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device`, `restore` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
+| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device`, `restore`, `tool install`, `tool remove` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
 | `--plugins-dir DIR` | `plugin install`, `plugin update`, `plugin rollback` | `/opt/aphelion/plugins` | An absolute path. The folder where updates put each release, as `<id>@<version>`. `plugin install` refuses a folder there that updates manage. |
+| `--tools-dir DIR` | `tool` | `/opt/aphelion/tools` | An absolute path. The folder that holds the installed AI tools. |
 | `--approve DIGEST` | `plugin install`, `plugin update`, `plugin enable` | none | The value the preview printed. It approves exactly what the preview showed. |
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
@@ -34,7 +40,7 @@
 | `--bot-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the [bot runner](bot-runner.md)'s pipes, from 3 up and not the plugin runner's. The server reads the bot runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
 | `--plugin-dev FOLDER` | `--headless` | none | An absolute path. Turns on [dev mode](plugins.md#dev-mode): `plugin dev` can reload the approved plugin in `FOLDER` through the server's [control socket](plugins.md#control-socket). Needs `--plugin-runner-fds` to have any effect. |
 
-The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
+The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. Write each option after the command, as in `aphelion device list --state-dir /s`. An option before the command is an error. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
 
 ### Exit codes
 
@@ -271,6 +277,88 @@ b9e491d2e2e20b59	active	2027-02-20T22:29:30.928Z	"my laptop"
 
 Stops the token of the device with this id. A WebSocket that uses it closes within 5 seconds. It exits with code 1 when no active device has the id. Both outcomes are written to the [audit log](devices.md#what-is-audited).
 
+## `aphelion tool list`
+
+Prints a header line and one tab-separated line per tool on the list. The list is the copy of [`deploy/ai-tools.json`](https://github.com/jcore9/Aphelion/blob/main/deploy/ai-tools.json) that the image ships.
+
+```
+NAME	VERSION	INSTALLED	STATE	STATUS-COMMAND	SIGN-IN-COMMAND
+claude	2.1.332	2.1.330	update available	claude auth status --text	claude auth login
+codex	0.172.0	0.172.0	installed	codex login status	codex login --device-auth
+grok	1.0.92	-	not installed	-	grok login --device-auth
+```
+
+`VERSION` is the version the list pins. `INSTALLED` is the version `<tools folder>/<name>/current` points at, or `-` when the tool isn't installed. `STATE` is one of:
+
+| `STATE` | Meaning |
+| --- | --- |
+| `installed` | The installed version is the pinned version. |
+| `update available` | A version is installed, and it isn't the pinned one. [`tool update`](#aphelion-tool-update-name) installs the pinned one. |
+| `not installed` | Nothing usable is installed. This includes a `current` link that is missing, points outside the tool's folder or points at a folder that is gone. |
+| `unavailable` | The list has no build for this processor. |
+
+`STATUS-COMMAND` is the command that exits with 0 when the tool is signed in, or `-` when Aphelion has none for the tool.
+
+`SIGN-IN-COMMAND` is the tool's own sign-in command, which [`sudo aphelion sign-in NAME`](host-command.md#sign-in) runs on the host.
+
+## `aphelion tool install NAME`
+
+Installs the tool `NAME` from the list: `claude`, `codex`, `grok` or `opencode`. The command:
+
+1. Takes the build for this processor. It refuses a name that isn't on the list, and a tool with no build for this processor.
+2. Downloads the build into a staging folder in the tools folder. It stops at the size the list gives, and refuses a download that is larger or smaller.
+3. Checks the SHA-256 against the list before it unpacks anything. A gzip archive is unpacked with `tar` only if every member is a plain file or folder inside the archive's own folder.
+4. Moves the result to `<tools folder>/<name>/<version>/`, sets mode `0755` on the program, and points `<tools folder>/<name>/current` at that folder with one atomic rename. It then deletes the tool's other version folders.
+
+Installing the version that is installed changes nothing. A run that stopped half way leaves only the staging folder or an unused link, and the next run clears them. The command holds the same lock as `plugin install`, and exits with code 1 and says `Another plugin or AI tool change is running. Try again when it finishes.` when another install, update, rollback, tool install or tool remove holds it. It exits with code 1 for every refusal, and prints the reason on standard error.
+
+The image links `/usr/local/bin/<name>` to the program in `current`, so a bot runs the tool by its name.
+
+## `aphelion tool update [NAME]`
+
+Moves an installed tool to the version the list pins. With `NAME` (`claude`, `codex`, `grok` or `opencode`), it updates that tool. Without a name, it goes through every tool on the list in the list's order. It refuses a name that isn't on the list.
+
+For a tool whose state is `update available`, the command installs the pinned version with every check of [`tool install`](#aphelion-tool-install-name): the size cap, the SHA-256 check before anything is unpacked, the archive listing, the atomic switch, and the lock. It then deletes the old version's folder. A tool that isn't installed isn't installed by this command.
+
+It prints one line per tool on standard output:
+
+| Line | Meaning |
+| --- | --- |
+| `updated NAME FROM -> TO` | The pinned version `TO` is installed in place of `FROM`. |
+| `NAME is up to date (VERSION)` | `VERSION` is the pinned version. Nothing changed. |
+| `NAME isn't installed` | There is nothing to update. |
+| `NAME has no build for this processor` | The list has no download for this processor. |
+
+Running it again changes nothing. It exits with 1 and prints the reason on standard error when a check refuses the download, and then the installed version stays. With no name, a refused tool doesn't stop the others. Each reason starts with the tool's name, and the exit code is 1 when any tool was refused. The command takes the same lock as `tool install`.
+
+## `aphelion tool check`
+
+Asks each tool's vendor for its newest version, and compares it with the version the list pins. It downloads no program: each lookup reads a small version file or release list and gives up after 10 seconds. The lookups run at the same time. Nothing is installed or changed.
+
+```
+NAME	PINNED	LATEST	STATE
+claude	2.1.330	2.1.332	newer version available
+codex	0.172.0	0.172.0	current
+grok	1.0.92	-	unknown
+opencode	2.4.1	2.4.1	current
+A newer version is available. Moving to it needs a new entry in the AI tool list, which you approve. See "Update an AI tool" in the install guide.
+```
+
+`STATE` is `current` when the vendor's newest version is the pinned one or older, `newer version available` when it is higher, and `unknown` when the vendor didn't answer or answered something that isn't a version. `LATEST` is `-` for `unknown`, and standard error says why. The last line appears only when some tool has a newer version.
+
+| Tool | Where the newest version comes from |
+| --- | --- |
+| `claude` | The `latest` file of Claude Code's release channel, `https://downloads.claude.ai/claude-code-releases/latest`. |
+| `grok` | The `stable` channel file at `https://x.ai/cli/stable`, and at xAI's Google Cloud address when the first doesn't answer. |
+| `codex` | GitHub's `releases/latest` for `openai/codex`, which is the newest release that isn't a prerelease. |
+| `opencode` | The highest plain version among the ten newest releases of `anomalyco/opencode`. GitHub's own `latest` mark points at an old release. |
+
+The command exits with 0 when it ran, even when newer versions exist, and with 1 when every vendor lookup failed or the list can't be read. A newer version reaches your server only through a new entry in the list, which the owner approves ([Update an AI tool](../guides/install.md#update-an-ai-tool)).
+
+## `aphelion tool remove NAME`
+
+Deletes `<tools folder>/<name>`. Running it again prints `<name> isn't installed.` and changes nothing. It doesn't touch the tool's sign-in in the `bots` volume.
+
 ## Building the binary
 
 ```sh
@@ -285,8 +373,9 @@ This runs `bun build --compile` and writes one file, `apps/server/dist/aphelion`
 | File | Holds |
 | --- | --- |
 | [`apps/server/src/cli/main.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/main.ts) | The entry point of the binary |
-| [`apps/server/src/cli/args.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/args.ts) | Reads the command line into one command, and refuses a wrong one |
-| [`apps/server/src/cli/index.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/index.ts) | Runs the command, and turns failures into exit codes |
+| [`apps/server/src/cli/index.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/index.ts) | Builds the command tree, runs the command, and turns failures into exit codes |
+| [`apps/server/src/cli/flags.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/flags.ts) | The options and operands that several commands share, and the Zod checks on values |
+| [`apps/server/src/cli/output.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/output.ts) | Prints help, the version and usage errors, with fixed text that never repeats your input |
 | [`apps/server/src/cli/headless.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/headless.ts) | `--headless` |
 | [`apps/server/src/cli/checks.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/checks.ts) | The checks that `--headless` and `config check` share |
 | [`apps/server/src/cli/config-check.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/config-check.ts) | `config check` |

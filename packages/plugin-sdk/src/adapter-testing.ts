@@ -7,8 +7,8 @@ import {
   type AdapterEvent,
   type AdapterSession,
   type BotAdapter,
-  type PermissionDecision,
   type PermissionRequest,
+  type TurnDecision,
   type TurnInput,
 } from "./adapter.ts";
 import { runAdapter, type RunAdapterOptions } from "./adapter-runtime.ts";
@@ -58,7 +58,7 @@ export interface FakeAdapter extends BotAdapter {
   /** The signal of each turn, in order. */
   readonly signals: readonly AbortSignal[];
   /** The answers to the `ask` steps, in order. */
-  readonly answers: readonly PermissionDecision[];
+  readonly answers: readonly TurnDecision[];
   /** Whether the runtime has called `close`. */
   readonly closed: boolean;
 }
@@ -71,7 +71,7 @@ export function fakeAdapter(
   const contexts: AdapterContext[] = [];
   const inputs: TurnInput[] = [];
   const signals: AbortSignal[] = [];
-  const answers: PermissionDecision[] = [];
+  const answers: TurnDecision[] = [];
   const state = { closed: false };
 
   const never = new Promise<never>(() => undefined);
@@ -143,7 +143,7 @@ export interface AdapterHarness {
   readonly problems: readonly string[];
   /** Settles when the runtime stops: it resolves after `shutdown` and rejects when the runtime fails. */
   readonly done: Promise<void>;
-  /** Sends `initialize` for a bot called `bot-1` in the folder `/work`, with no session to resume unless `resume` says otherwise. */
+  /** Sends `initialize` for a bot called `bot-1` in the folder from the options, with no session to resume unless `resume` says otherwise. */
   initialize(resume?: string | null): Promise<AdapterReply>;
   /** Sends `turn.start`. The reply comes when the runtime accepts the turn, not when the turn ends. */
   startTurn(turn: string, text: string): Promise<AdapterReply>;
@@ -157,11 +157,18 @@ export interface AdapterHarness {
   ): Promise<AdapterEnvelope>;
 }
 
+/** What `startAdapter` and `runTurn` can be told: the runtime's options and the bot's folder. */
+export interface HarnessOptions extends RunAdapterOptions {
+  /** The folder that `initialize` sends. The default is `/work`. */
+  readonly folder?: string;
+}
+
 /** Starts the adapter's runtime with a fake bot runner on the other end of its lines. */
 export function startAdapter(
   adapter: BotAdapter,
-  options?: RunAdapterOptions,
+  options: HarnessOptions = {},
 ): AdapterHarness {
+  const { folder = "/work", ...runtime } = options;
   const toAdapter = lineQueue();
   const events: AdapterEnvelope[] = [];
   const logs: string[] = [];
@@ -209,7 +216,7 @@ export function startAdapter(
         logs.push(message);
       },
     },
-    options,
+    runtime,
   ).finally(() => {
     toAdapter.end();
   });
@@ -231,7 +238,7 @@ export function startAdapter(
       call(adapterMethods.initialize, {
         api: adapterApiVersion,
         bot: { id: "bot-1" },
-        folder: "/work",
+        folder,
         resume,
       }),
     startTurn: (turn, text) => call(adapterMethods.turnStart, { turn, text }),
@@ -265,7 +272,7 @@ export interface TurnRun {
  */
 export async function runTurn(
   adapter: BotAdapter,
-  options: RunAdapterOptions & { turn?: string; text?: string } = {},
+  options: HarnessOptions & { turn?: string; text?: string } = {},
 ): Promise<TurnRun> {
   const { turn = "t1", text = "hello", ...runtime } = options;
   const harness = startAdapter(adapter, runtime);
