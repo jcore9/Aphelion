@@ -66,6 +66,18 @@ const usageErrors: readonly (readonly string[])[] = [
   ["tool", "update", "--tools-dir", canary],
   ["tool", "check", canary],
   ["tool", "list", "--tools-dir", canary],
+  ["key"],
+  ["key", canary],
+  ["key", "add"],
+  ["key", "add", canary],
+  ["key", "add", "claude", canary],
+  ["key", "replace", "claude", canary],
+  ["key", "test", canary],
+  ["key", "test", "claude", canary],
+  ["key", "remove", canary],
+  ["key", "remove", "codex", canary],
+  ["key", "test", "grok", "--test-url", canary],
+  ["key", "add", "--state-dir", canary, "--state-dir", canary],
   ["--headless", "--plugin-runner-fds", canary],
   ["--headless", "--bot-runner-fds", canary],
   ["--headless", "--plugin-runner-fds", "3,4", "--bot-runner-fds", "4,5"],
@@ -88,6 +100,34 @@ describe("a usage error", () => {
       expect(err.join("\n")).not.toContain("aph_dev_");
     },
   );
+});
+
+describe("key", () => {
+  test.each([
+    [
+      "opencode",
+      "aphelion: the tool name can't be opencode, which has no single API key. Sign it in with: sudo aphelion sign-in opencode",
+    ],
+    ["frobnicate", "aphelion: the tool name must be claude, codex or grok"],
+  ])("refuses the tool name %s with a fixed line", async (name, line) => {
+    const { code, out, err } = await run(["key", "add", name]);
+    expect(code).toBe(2);
+    expect(out).toEqual([]);
+    expect(err).toEqual([line, hint]);
+  });
+
+  test("names the broker socket when it isn't there", async () => {
+    const { code, out, err } = await run(
+      ["key", "add", "claude", "--state-dir", stateDir],
+      canary,
+    );
+    expect(code).toBe(1);
+    expect(out).toEqual([]);
+    expect(err).toEqual([
+      "can't reach the secrets broker at /run/aphelion-secrets/broker.sock",
+    ]);
+    expect(err.join("\n")).not.toContain(canary);
+  });
 });
 
 describe("an empty value", () => {

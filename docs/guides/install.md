@@ -550,6 +550,36 @@ The tools' own auto-update is off. Claude Code and Codex are switched off in the
 
 **What the Grok Build checksum proves.** xAI publishes no checksum for Grok Build. The bot downloaded the file from both of xAI's addresses, saw that the two copies matched, and recorded their SHA-256 in the list, and you approved that when you merged the change. The install proves that the file hasn't changed since. It doesn't prove that the first copy came from xAI. [Decision 0066](https://github.com/jcore9/Aphelion/blob/main/docs/decisions/0066-grok-checksum-recorded-by-aphelion.md) has the reasoning.
 
+## Use an API key instead of a sign-in
+
+This step is optional. An **API key** is a long password from an AI vendor's developer console. A tool that runs on a key bills each request to that vendor account, instead of using your subscription. You can store a key now, but bots don't use it yet: the change that hands the key to a bot at start is still to come ([#181](https://github.com/jcore9/Aphelion/issues/181)). When it comes, a working sign-in still wins over a key.
+
+| Tool | Key it takes |
+| --- | --- |
+| `claude` | An Anthropic API key |
+| `codex` | An OpenAI API key |
+| `grok` | An xAI API key |
+
+OpenCode signs in to many vendors, so it has no single key. Use `sudo aphelion sign-in opencode` for it.
+
+1. Store the key. Run it in a shell on the host. Paste the key when it asks, and press Enter. The key doesn't show on the screen.
+
+   ```sh
+   sudo aphelion key add claude
+   ```
+
+   It prints `Stored the claude API key.` The broker keeps the key encrypted in the `secrets` volume, which the backup holds. The key never goes on a command line, into a log or into the audit log.
+
+2. Test the key. The command asks the vendor to list its models with the key, which costs nothing.
+
+   ```sh
+   sudo aphelion key test claude
+   ```
+
+   `The provider accepted the claude API key.` means the key works. `The provider refused the claude API key.` means the vendor doesn't accept it: check that you copied all of it, and that it is still active in the vendor's console.
+
+To change a key, run `sudo aphelion key replace claude`. To delete it, run `sudo aphelion key remove claude`. [The host command](../reference/host-command.md#key) has the details.
+
 ## Update an AI tool
 
 A tool's version changes only when the list changes. You see whether a newer version exists, you approve it, and then you apply it. Each step is its own command.

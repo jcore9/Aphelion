@@ -20,6 +20,10 @@
 | `aphelion tool check` | Asks each AI tool's vendor for its newest version and compares it with the list's |
 | `aphelion tool remove NAME` | Removes an installed AI tool |
 | `aphelion chat BOT` | Chats with a bot in plain lines. See [`aphelion chat BOT`](#aphelion-chat-bot). |
+| `aphelion key add NAME` | Reads an API key for the AI tool `NAME` from standard input and stores it encrypted |
+| `aphelion key test NAME` | Asks the tool's provider whether it accepts the stored key |
+| `aphelion key replace NAME` | Reads a new API key for `NAME` and stores it in place of the old one |
+| `aphelion key remove NAME` | Deletes the stored API key for `NAME` |
 | `aphelion device add NAME` | Adds a device and prints its token once |
 | `aphelion device list` | Lists the devices and whether each token is active, expired or revoked |
 | `aphelion device revoke ID` | Stops a device's token at once |
@@ -31,7 +35,7 @@
 | Option | Used by | Default | Meaning |
 | --- | --- | --- | --- |
 | `--config-dir DIR` | `--headless`, `config check` | `/etc/aphelion` | The folder with the [config files](config.md) |
-| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device`, `restore`, `tool install`, `tool remove` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
+| `--state-dir DIR` | `--headless`, `config check`, `plugin`, `device`, `restore`, `tool install`, `tool remove`, `key` | `/var/lib/aphelion` | The folder that holds the database, `aphelion.db` |
 | `--plugins-dir DIR` | `plugin install`, `plugin update`, `plugin rollback` | `/opt/aphelion/plugins` | An absolute path. The folder where updates put each release, as `<id>@<version>`. `plugin install` refuses a folder there that updates manage. |
 | `--tools-dir DIR` | `tool` | `/opt/aphelion/tools` | An absolute path. The folder that holds the installed AI tools. |
 | `--approve DIGEST` | `plugin install`, `plugin update`, `plugin enable` | none | The value the preview printed. It approves exactly what the preview showed. |
@@ -373,6 +377,65 @@ The command exits with 0 when it ran, even when newer versions exist, and with 1
 
 Deletes `<tools folder>/<name>`. Running it again prints `<name> isn't installed.` and changes nothing. It doesn't touch the tool's sign-in in the `bots` volume.
 
+## `aphelion key add NAME`
+
+Stores an API key for the AI tool `NAME`, so that a later version of Aphelion can start the tool on the key when it isn't signed in ([#181](https://github.com/jcore9/Aphelion/issues/181)). Bots don't use the key yet.
+
+`NAME` is the tool's name, as in `aphelion tool`. Each tool takes its vendor's key:
+
+| `NAME` | Key |
+| --- | --- |
+| `claude` | An Anthropic API key |
+| `codex` | An OpenAI API key |
+| `grok` | An xAI API key |
+
+`opencode` is refused, because it signs in to many providers and has no single key. Sign it in with [`sudo aphelion sign-in opencode`](host-command.md#sign-in).
+
+The command:
+
+1. Asks the [secrets broker](secrets.md#local-secrets-broker) whether a key is stored. If one is, it exits with 1 and says to use `key replace`. It reads no key in that case.
+2. Reads the key from standard input, never from the command line. On a terminal it prints `API key for claude (an Anthropic API key): ` on standard error and turns the echo off, so the key doesn't show as you type. Enter ends the key, and Ctrl-C stops without storing anything. From a pipe it reads up to the end of the input.
+3. Removes one line break from the end, then refuses a key that is empty or longer than 512 bytes. It also refuses a key with any character other than the printable ASCII characters `!` to `~`. That rules out spaces, tabs, line breaks, control characters and letters outside ASCII, such as `é` or an invisible zero-width space, which a copy from a web page can add. It doesn't check the vendor's key format, because vendors change it.
+4. Asks the broker to store the key at `local://apikey/NAME`, encrypted like every local secret.
+5. Prints `Stored the claude API key. Test it with: aphelion key test claude`.
+
+The key never appears on standard output, on standard error, in a log line or in the audit log. Each `key` command adds one row to the audit log, with the action, such as `key.add`, the tool and a short result, such as `stored` or `already stored`.
+
+On the host, [`sudo aphelion key add NAME`](host-command.md#key) reads the key on your terminal and passes it to this command.
+
+## `aphelion key test NAME`
+
+Reads the stored key and asks the provider to list its models with it. This is a free request that reads no data.
+
+| `NAME` | Request |
+| --- | --- |
+| `claude` | `GET https://api.anthropic.com/v1/models`, with the key in `x-api-key` and `anthropic-version: 2023-06-01` |
+| `codex` | `GET https://api.openai.com/v1/models`, with the key in `Authorization: Bearer` |
+| `grok` | `GET https://api.x.ai/v1/models`, with the key in `Authorization: Bearer` |
+
+The addresses are fixed in the code, and no option or setting changes them. The request follows no redirect, so the key goes only to the provider's address, and it gives up after 10 seconds. The command prints one fixed line and never the provider's answer:
+
+| Answer | Line | Exit code |
+| --- | --- | --- |
+| `200` | `The provider accepted the claude API key.` on standard output | `0` |
+| `401` or `403` | `The provider refused the claude API key. To change it, run: aphelion key replace claude` | `1` |
+| Any other status | `The provider answered HTTP 500, so the claude API key wasn't checked.` | `1` |
+| No answer within 10 seconds, or no connection | `Couldn't reach the provider, or it didn't answer within 10 seconds.` | `1` |
+
+With no key stored, it exits with 1 and says how to add one, and asks no provider.
+
+## `aphelion key replace NAME`
+
+Reads a new key the same way as `key add` and stores it in place of the old one. It exits with 1, and reads no key, when no key is stored for `NAME`.
+
+## `aphelion key remove NAME`
+
+Deletes the stored key and prints `Removed the claude API key.` It exits with 1 when no key is stored for `NAME`.
+
+### When the broker can't be reached
+
+The `key` commands talk to the broker over `/run/aphelion-secrets/broker.sock`. Only the `harness` user can open it. Run as another user, a command exits with 1 and prints `this user can't reach the secrets broker at /run/aphelion-secrets/broker.sock. Run it as harness.` When the socket is missing, as when the server isn't running, it prints `can't reach the secrets broker at /run/aphelion-secrets/broker.sock`.
+
 ## Building the binary
 
 ```sh
@@ -390,6 +453,7 @@ This runs `bun build --compile` and writes one file, `apps/server/dist/aphelion`
 | [`apps/server/src/cli/index.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/index.ts) | Builds the command tree, runs the command, and turns failures into exit codes |
 | [`apps/server/src/cli/flags.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/flags.ts) | The options and operands that several commands share, and the Zod checks on values |
 | [`apps/server/src/cli/output.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/output.ts) | Prints help, the version and usage errors, with fixed text that never repeats your input |
+| [`apps/server/src/cli/key.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/key.ts) | The `key` commands |
 | [`apps/server/src/cli/headless.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/headless.ts) | `--headless` |
 | [`apps/server/src/cli/checks.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/checks.ts) | The checks that `--headless` and `config check` share |
 | [`apps/server/src/cli/config-check.ts`](https://github.com/jcore9/Aphelion/blob/main/apps/server/src/cli/config-check.ts) | `config check` |
