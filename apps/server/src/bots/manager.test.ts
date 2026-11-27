@@ -705,6 +705,96 @@ describe("a turn start that the adapter hasn't answered", () => {
   );
 
   it.live(
+    "answers not-running, not no-answer, when a prompt's acceptance deadline passes during channel teardown",
+    () =>
+      Effect.gen(function* () {
+        const { calls, turns } = ledgerCalls();
+        const logger = createLogger({ write: () => undefined });
+        const encoder = new TextEncoder();
+        let blockWrites = false;
+        let repliesController:
+          ReadableStreamDefaultController<Uint8Array> | undefined;
+        const repliesStream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            repliesController = controller;
+          },
+        });
+        const failedSignal = yield* Deferred.make<undefined>();
+        const baseLink = yield* pipeLink(
+          repliesStream,
+          (line) => {
+            if (blockWrites) return new Promise(() => undefined);
+            const message = JSON.parse(line) as RunnerRequest;
+            if (message.type === "start") {
+              for (const type of ["spawned", "started"] as const) {
+                repliesController?.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({ type, bot: message.bot, run: message.run })}\n`,
+                  ),
+                );
+              }
+            }
+            return Promise.resolve();
+          },
+          {
+            schema: runnerReplySchema,
+            maxBytes: maxFrameBytes,
+            onDrop: () => Effect.void,
+          },
+          runnerRequestSchema,
+        );
+        const services = yield* Layer.build(
+          botManagerLayer({
+            bots: [{ name: "chief", provider: "fake", folder }],
+            logger,
+            policy,
+            adapters: { fake: "/adapters/fake/adapter.js" },
+            turns,
+            turnAcceptDeadlineMs: 80,
+            writeDeadlineMs: 20,
+            drainDeadlineMs: 1_000,
+            stopDeadlineMs: 2_000,
+            onChannelFailed: () =>
+              Deferred.succeed(failedSignal, undefined).pipe(Effect.asVoid),
+          }).pipe(
+            Layer.provideMerge(memorySessionRefs),
+            Layer.provide(
+              Layer.succeed(BotRunnerLink, {
+                incoming: baseLink.incoming,
+                send: baseLink.send,
+                close: Effect.void,
+              }),
+            ),
+          ),
+        );
+        const manager = Context.get(services, BotManager);
+        yield* manager.start("chief");
+        yield* manager
+          .waitFor("chief", (state) => state.state === "running")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+
+        blockWrites = true;
+        const started = Date.now();
+        const result = yield* manager
+          .startTurn("chief", "stuck")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+        const waited = Date.now() - started;
+        yield* Deferred.await(failedSignal).pipe(
+          Effect.timeout("1 second"),
+          Effect.orDie,
+        );
+
+        expect(result.outcome).toBe("not-running");
+        expect(waited).toBeLessThan(1_000);
+        expect(calls).toEqual([
+          `open ${result.turn}`,
+          `end ${result.turn} refused`,
+        ]);
+        expect(yield* manager.status("chief")).toEqual({ state: "stopped" });
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
     "saves a turn.end queued behind a stalled write before signalling channel failure",
     () =>
       Effect.gen(function* () {
