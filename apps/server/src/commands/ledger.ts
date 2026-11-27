@@ -4,7 +4,7 @@ import {
   type CommandId,
   type CommandName,
 } from "@aphelion/protocol";
-import { Clock, Deferred, Duration, Effect, Scope } from "effect";
+import { Clock, Deferred, Duration, Effect, Exit, Scope } from "effect";
 import { z } from "zod";
 import type { DeviceId } from "../devices";
 import type { Logger } from "../log";
@@ -31,6 +31,7 @@ export interface CommandLedger {
 
 const windowMs = Duration.toMillis(Duration.hours(24));
 const purgeEvery = Duration.hours(1);
+export const commandDrainDeadlineMs = 2_000;
 export const resultWriteBackoff = [
   Duration.millis(100),
   Duration.millis(500),
@@ -62,7 +63,34 @@ const savedOutcome = (row: Row, name: CommandName): Outcome => {
 export const openCommandLedger = (db: Database, logger: Logger) =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
+    const executions = yield* Scope.make();
     const running = new Map<string, Running>();
+    let closing = false;
+
+    const drain: Effect.Effect<void> = Effect.suspend(() => {
+      const active = [...running.values()].map(({ done }) =>
+        Deferred.await(done),
+      );
+      if (active.length === 0) return Effect.void;
+      return Effect.all(active, {
+        concurrency: "unbounded",
+        discard: true,
+      }).pipe(Effect.andThen(drain));
+    });
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        closing = true;
+      }).pipe(
+        Effect.andThen(
+          drain.pipe(
+            Effect.timeoutOption(commandDrainDeadlineMs),
+            Effect.asVoid,
+          ),
+        ),
+        Effect.andThen(Scope.close(executions, Exit.void)),
+      ),
+    );
 
     const purge = Effect.flatMap(Clock.currentTimeMillis, (at) =>
       Effect.sync(() => {
@@ -128,6 +156,9 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
         )[0];
         if (row !== undefined && at - Number(row["created_at"]) < windowMs) {
           return { type: "known", outcome: savedOutcome(row, entry.name) };
+        }
+        if (closing) {
+          return { type: "known", outcome: failed("interrupted") };
         }
         db.run("DELETE FROM commands WHERE device = ? AND id = ?", [
           entry.device,
@@ -203,7 +234,7 @@ export const openCommandLedger = (db: Database, logger: Logger) =>
             held?.release();
           }),
         ),
-        Effect.forkIn(scope),
+        Effect.forkIn(executions),
         Effect.as(Deferred.await(done)),
       );
 

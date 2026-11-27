@@ -15,6 +15,7 @@ import {
   Context,
   Deferred,
   Effect,
+  Fiber,
   Layer,
   Option,
   PubSub,
@@ -141,6 +142,7 @@ type SlotInput =
   | TurnRequest
   | { readonly type: "cancel"; readonly turn: TurnId }
   | { readonly type: "recover"; readonly run: number }
+  | { readonly type: "drain"; readonly done: Deferred.Deferred<undefined> }
   | ({ readonly type: "wait" } & Waiter);
 
 interface Slot {
@@ -203,6 +205,7 @@ export const turnAcceptDeadlineMs = 30_000;
 export const runnerWriteDeadlineMs = 10_000;
 export const runnerChannelFailedMessage =
   "a write to the bot runner timed out, so the channel is closed";
+const incomingDrainDeadlineMs = 200;
 
 const promptFitsRunnerLine = (turn: TurnId, text: string) =>
   pluginLineFits(
@@ -234,10 +237,21 @@ export const botManagerLayer = (options: BotManagerOptions) =>
       const definitions = new Map(options.bots.map((bot) => [bot.name, bot]));
       const slots = new Map<string, Slot>();
       const channelDown = yield* Deferred.make<undefined>();
+      const incomingDrained = yield* Deferred.make<undefined>();
+      const channelTeardownDone = yield* Deferred.make<undefined>();
       let channelFailed = false;
       let shuttingDown = false;
 
       const stateOf = (slot: Slot) => botState(slot.state, slot.turn);
+
+      const enqueueReply = (reply: RunnerReply) => {
+        const slot = slots.get(reply.bot);
+        return slot
+          ? Queue.offer(slot.mailbox, { type: "reply", reply }).pipe(
+              Effect.asVoid,
+            )
+          : Effect.void;
+      };
 
       const settleWaiters = (slot: Slot) =>
         Effect.forEach(
@@ -265,7 +279,58 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           yield* Deferred.succeed(pending.done, outcome);
         });
 
-      const failChannel = (reason: "write-timeout" | "pipe-closed") =>
+      const teardownChannel = (
+        reason: "write-timeout" | "pipe-closed",
+      ): Effect.Effect<void> =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            if (link.close !== undefined) {
+              yield* link.close.pipe(Effect.ignore);
+            }
+            if (reason !== "pipe-closed") {
+              const ended =
+                link.close !== undefined &&
+                Option.isSome(
+                  yield* Deferred.await(incomingDrained).pipe(
+                    Effect.timeoutOption(incomingDrainDeadlineMs),
+                  ),
+                );
+              if (!ended) {
+                yield* Fiber.interrupt(reader);
+                const remaining = yield* Queue.clear(link.incoming);
+                yield* Effect.forEach(remaining, enqueueReply, {
+                  discard: true,
+                });
+              }
+            }
+            yield* Effect.forEach(
+              [...slots.values()],
+              (slot) =>
+                Effect.gen(function* () {
+                  const drained = yield* Deferred.make<undefined>();
+                  yield* Queue.offer(slot.mailbox, {
+                    type: "drain",
+                    done: drained,
+                  });
+                  yield* Deferred.await(drained);
+                }),
+              { concurrency: "unbounded", discard: true },
+            );
+            if (!shuttingDown && options.onChannelFailed !== undefined) {
+              yield* options.onChannelFailed();
+            }
+          }).pipe(
+            Effect.ensuring(
+              Deferred.succeed(channelTeardownDone, undefined).pipe(
+                Effect.asVoid,
+              ),
+            ),
+          ),
+        );
+
+      const failChannel = (
+        reason: "write-timeout" | "pipe-closed",
+      ): Effect.Effect<void> =>
         Effect.uninterruptible(
           Effect.gen(function* () {
             if (channelFailed) return;
@@ -278,28 +343,22 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             } else {
               logger.error("the bot runner's pipe closed");
             }
-            if (link.close !== undefined) {
-              yield* link.close.pipe(Effect.ignore);
-            }
-            if (!shuttingDown && options.onChannelFailed !== undefined) {
-              yield* options.onChannelFailed();
-            }
-            for (const slot of slots.values()) {
-              slot.restart = false;
-              slot.recovering = false;
-              slot.turn = undefined;
-              slot.state = {
-                state: "stopped",
-                run: slot.state.run,
-                reason: "requested",
-              };
-              for (const turn of [...slot.turns.keys()]) {
-                yield* settleTurn(slot, turn, "not-running");
-              }
-              yield* settleWaiters(slot);
-            }
+            yield* teardownChannel(reason).pipe(Effect.forkIn(work));
           }),
         );
+
+      const reader: Fiber.Fiber<void> = yield* Effect.uninterruptibleMask(
+        (restore) =>
+          restore(Queue.take(link.incoming)).pipe(
+            Effect.flatMap(enqueueReply),
+            Effect.forever,
+            Effect.catchIf(Cause.isDone, () =>
+              Deferred.succeed(incomingDrained, undefined).pipe(
+                Effect.andThen(failChannel("pipe-closed")),
+              ),
+            ),
+          ),
+      ).pipe(Effect.forkIn(work));
 
       const sendToRunner = (message: RunnerRequest): Effect.Effect<void> =>
         Effect.gen(function* () {
@@ -334,6 +393,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
 
       const run = (slot: Slot, command: LifecycleCommand) =>
         Effect.gen(function* () {
+          if (channelFailed) return;
           switch (command.type) {
             case "spawn": {
               const saved = yield* refs.get(slot.bot.name);
@@ -373,6 +433,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const next = step(before, event, policy);
           slot.state = next.state;
           const restarting =
+            !channelFailed &&
             slot.restart &&
             next.state.state === "stopped" &&
             next.state.reason === "requested";
@@ -448,6 +509,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 logger.warn(resumeFailed, { bot });
                 yield* refs.clear(bot);
                 slot.resume = null;
+                if (channelFailed) return;
                 return yield* sendStart(slot, reply.run);
               }
               logger.warn("the bot runner couldn't start the bot", {
@@ -542,15 +604,34 @@ export const botManagerLayer = (options: BotManagerOptions) =>
       const handle = (slot: Slot, input: SlotInput) =>
         Effect.gen(function* () {
           if (channelFailed) {
-            if (input.type === "wait") {
-              slot.waiters.add(input);
-              return yield* settleWaiters(slot);
+            switch (input.type) {
+              case "reply":
+                return yield* onReply(slot, input.reply);
+              case "wait":
+                slot.waiters.add(input);
+                return yield* settleWaiters(slot);
+              case "turn":
+                if (input.expired) return;
+                return yield* refuse(input, "not-running");
+              case "drain":
+                slot.restart = false;
+                slot.recovering = false;
+                slot.turn = undefined;
+                slot.state = {
+                  state: "stopped",
+                  run: slot.state.run,
+                  reason: "requested",
+                };
+                for (const turn of [...slot.turns.keys()]) {
+                  yield* settleTurn(slot, turn, "not-running");
+                }
+                yield* settleWaiters(slot);
+                return yield* Deferred.succeed(input.done, undefined).pipe(
+                  Effect.asVoid,
+                );
+              default:
+                return;
             }
-            if (input.type === "turn") {
-              if (input.expired) return;
-              return yield* refuse(input, "not-running");
-            }
-            return;
           }
           switch (input.type) {
             case "reply":
@@ -558,6 +639,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             case "wait":
               slot.waiters.add(input);
               return yield* settleWaiters(slot);
+            case "drain":
+              return yield* Deferred.succeed(input.done, undefined).pipe(
+                Effect.asVoid,
+              );
             case "turn": {
               const action = yield* Effect.sync(() => {
                 if (input.expired) return "skip" as const;
@@ -610,18 +695,6 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }
         });
 
-      yield* Queue.take(link.incoming).pipe(
-        Effect.flatMap((reply) => {
-          const slot = slots.get(reply.bot);
-          return slot
-            ? Queue.offer(slot.mailbox, { type: "reply", reply })
-            : Effect.void;
-        }),
-        Effect.forever,
-        Effect.catchIf(Cause.isDone, () => failChannel("pipe-closed")),
-        Effect.forkIn(work),
-      );
-
       const slotFor = (definition: BotDefinition, adapter: string) =>
         Effect.gen(function* () {
           const existing = slots.get(definition.name);
@@ -661,6 +734,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             );
             return "unknown provider" as const;
           }
+          if (channelFailed) return "starting" as const;
           const slot = yield* slotFor(definition, adapter);
           yield* Queue.offer(slot.mailbox, { type: "start" });
           return "starting" as const;
@@ -734,17 +808,28 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           };
           const dispatched = yield* Effect.uninterruptible(
             Effect.gen(function* () {
+              if (channelFailed) return "not-running" as const;
               if (
                 options.turns !== undefined &&
                 !(yield* options.turns.open(name, turn))
               ) {
-                return false;
+                return "refused" as const;
               }
-              yield* Queue.offer(slot.mailbox, turnRequest);
-              return true;
+              const queued = yield* Effect.sync(() => {
+                if (channelFailed) return false;
+                Queue.offerUnsafe(slot.mailbox, turnRequest);
+                return true;
+              });
+              if (!queued) {
+                if (options.turns !== undefined) {
+                  yield* options.turns.end(turn, "refused");
+                }
+                return "not-running" as const;
+              }
+              return "queued" as const;
             }),
           );
-          if (!dispatched) return { turn, outcome: "refused" as const };
+          if (dispatched !== "queued") return { turn, outcome: dispatched };
           const answered = yield* Deferred.await(done).pipe(
             Effect.timeoutOption(
               options.turnAcceptDeadlineMs ?? turnAcceptDeadlineMs,
@@ -757,13 +842,21 @@ export const botManagerLayer = (options: BotManagerOptions) =>
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           shuttingDown = true;
-          yield* Effect.forEach([...slots.keys()], stop, {
-            concurrency: "unbounded",
-            discard: true,
-          }).pipe(
-            Effect.timeoutOption(options.stopDeadlineMs ?? 15_000),
-            Effect.asVoid,
-          );
+          if (!channelFailed) {
+            yield* Effect.forEach([...slots.keys()], stop, {
+              concurrency: "unbounded",
+              discard: true,
+            }).pipe(
+              Effect.timeoutOption(options.stopDeadlineMs ?? 15_000),
+              Effect.asVoid,
+            );
+          }
+          if (channelFailed) {
+            yield* Deferred.await(channelTeardownDone).pipe(
+              Effect.timeoutOption(options.stopDeadlineMs ?? 15_000),
+              Effect.asVoid,
+            );
+          }
         }),
       );
 
@@ -773,6 +866,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
         startTurn,
         cancelTurn: (name, turn) =>
           Effect.suspend(() => {
+            if (channelFailed) return Effect.void;
             const slot = slots.get(name);
             return slot
               ? Queue.offer(slot.mailbox, { type: "cancel", turn })

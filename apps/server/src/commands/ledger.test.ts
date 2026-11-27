@@ -13,7 +13,11 @@ import { describe, onTestFinished } from "vitest";
 import { deviceId } from "../devices";
 import { createLogger } from "../log";
 import { openStore, type Database } from "../store";
-import { openCommandLedger, type Outcome } from "./ledger";
+import {
+  commandDrainDeadlineMs,
+  openCommandLedger,
+  type Outcome,
+} from "./ledger";
 
 const day = 24 * 60 * 60 * 1000;
 
@@ -445,7 +449,9 @@ describe("the command ledger after a restart", () => {
         expect(db.all("SELECT state FROM commands")).toEqual([
           { state: "running" },
         ]);
-        yield* Scope.close(before, Exit.void);
+        const closing = yield* Effect.forkChild(Scope.close(before, Exit.void));
+        yield* TestClock.adjust(commandDrainDeadlineMs);
+        yield* Fiber.join(closing);
         const { ran, apply } = counting();
 
         const restarted = yield* open(db);
@@ -456,6 +462,39 @@ describe("the command ledger after a restart", () => {
         expect(db.all("SELECT state, result FROM commands")).toEqual([
           { state: "failed", result: "interrupted" },
         ]);
+      }),
+  );
+
+  it.effect(
+    "drains an in-flight command during shutdown so its result saves instead of becoming interrupted",
+    () =>
+      Effect.gen(function* () {
+        const { db } = tempStore();
+        const before = yield* Scope.make();
+        const ledger = yield* open(db).pipe(Scope.provide(before));
+        const gate = yield* Deferred.make<undefined>();
+        const slow: Effect.Effect<Outcome> = Deferred.await(gate).pipe(
+          Effect.as({ ok: false, code: "bot-not-running" } as const),
+        );
+        yield* Effect.forkChild(ledger.run(entry("c1"), slow));
+        yield* Effect.yieldNow;
+
+        const closing = yield* Effect.forkChild(Scope.close(before, Exit.void));
+        yield* Effect.yieldNow;
+        expect(closing.pollUnsafe()).toBeUndefined();
+
+        yield* TestClock.adjust("500 millis");
+        yield* Deferred.succeed(gate, undefined);
+        yield* Fiber.join(closing);
+
+        expect(db.all("SELECT state, result FROM commands")).toEqual([
+          { state: "failed", result: "bot-not-running" },
+        ]);
+        const restarted = yield* open(db);
+        expect(yield* restarted.run(entry("c1"), counting().apply)).toEqual({
+          ok: false,
+          code: "bot-not-running",
+        });
       }),
   );
 });
@@ -579,7 +618,9 @@ describe("the command ledger and the 24-hour limit", () => {
       const first = yield* open(db).pipe(Scope.provide(before));
       yield* Effect.forkChild(first.run(entry("lost"), Effect.never));
       yield* Effect.yieldNow;
-      yield* Scope.close(before, Exit.void);
+      const closing = yield* Effect.forkChild(Scope.close(before, Exit.void));
+      yield* TestClock.adjust(commandDrainDeadlineMs);
+      yield* Fiber.join(closing);
       db.run("UPDATE commands SET state = 'running'");
       yield* open(db);
 

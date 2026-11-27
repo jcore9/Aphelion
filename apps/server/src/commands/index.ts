@@ -16,6 +16,7 @@ export {
   type CommandServices,
 } from "./dispatch";
 export {
+  commandDrainDeadlineMs,
   openCommandLedger,
   type CommandEntry,
   type CommandLedger,
