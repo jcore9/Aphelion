@@ -24,6 +24,9 @@ usage:
   aphelion tool check                  ask each vendor for its newest version
   aphelion tool remove NAME            remove an installed AI tool
   aphelion sign-in NAME                sign in to an installed AI tool, on your terminal
+  aphelion key add|replace NAME        type an API key for claude, codex or grok and store it encrypted
+  aphelion key test NAME               ask the tool's provider whether it accepts the stored key
+  aphelion key remove NAME             delete the stored API key for a tool
   aphelion backup [--to FOLDER]        stop the service, pack the data into a new folder, start the service
   aphelion restore [PATH]              put a backup into new volumes and start the service
   aphelion plugin install FOLDER [--approve DIGEST]
@@ -37,7 +40,7 @@ usage:
   aphelion --help                      show this text
 
 Run it as root: sudo aphelion status
-The device, tool and plugin commands run the server's own aphelion command inside the container.
+The device, tool, key and plugin commands run the server's own aphelion command inside the container.
 USAGE
 }
 
@@ -257,6 +260,22 @@ cmd_sign_in() {
   compose exec --user aphelion-bot "$service" "${argv[@]}"
 }
 
+cmd_key() {
+  local subcommand=$1 name=$2 key
+  case $subcommand:$name in
+    add:claude | add:codex | add:grok | replace:claude | replace:codex | replace:grok) ;;
+    *)
+      in_container harness aphelion key "$subcommand" "$name" </dev/null
+      return
+      ;;
+  esac
+  [[ -t 0 ]] ||
+    fail "key $subcommand needs a terminal, so you can type the key without it showing. Run it in a shell on the host, not through a pipe or a script."
+  read -r -s -p "API key for $name: " key || key=""
+  echo >&2
+  printf '%s\n' "$key" | in_container harness aphelion key "$subcommand" "$name"
+}
+
 backup_folder="" backup_restart=0
 backup_cleanup() {
   if ((backup_restart)); then
@@ -466,6 +485,12 @@ case ${1:-} in
   tool)
     case ${2:-}:$# in
       list:2 | check:2 | update:[23] | install:3 | remove:3) cmd_tool "${@:2}" ;;
+      *) usage_error ;;
+    esac
+    ;;
+  key)
+    case ${2:-}:$# in
+      add:3 | replace:3 | test:3 | remove:3) cmd_key "$2" "$3" ;;
       *) usage_error ;;
     esac
     ;;

@@ -294,6 +294,13 @@ case " $* " in
     all="$*"
     echo "ran tool ${all##* aphelion tool }"
     exit "${FAKE_TOOL_EXIT:-0}" ;;
+  *" --user harness aphelion aphelion key "*)
+    all="$*"
+    case " $* " in
+      *" key add "* | *" key replace "*) cat >"${FAKE_KEY_INPUT:-/dev/null}" ;;
+    esac
+    echo "ran key ${all##* aphelion key }"
+    exit "${FAKE_KEY_EXIT:-0}" ;;
   *" --user harness aphelion aphelion plugin "*)
     all="$*"
     echo "ran plugin ${all##* aphelion plugin }"
@@ -400,11 +407,12 @@ error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" status 2>&1 >
 [[ $status == 2 && $error == "Run it with sudo: sudo aphelion status" ]] ||
   fail "the command didn't refuse a user other than root with status 2: $status $error"
 help=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" --help) || fail "--help needs root"
-[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* && $help == *"aphelion tool install NAME"* ]] ||
+[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* && $help == *"aphelion tool install NAME"* && $help == *"aphelion key add|replace NAME"* && $help == *"aphelion key test NAME"* && $help == *"aphelion key remove NAME"* ]] ||
   fail "--help doesn't list the commands: $help"
 pass "the command refuses a user other than root with status 2, and --help works for everyone"
 
 for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b" tool "tool frobnicate" "tool list extra" "tool install" "tool install a b" "tool remove" "tool remove a b" "tool update a b" "tool check a" "tool check now please" \
+  key "key add" "key add a b" "key replace" "key test" "key test a b" "key remove" "key remove a b" "key frobnicate claude" \
   sign-in "sign-in a b" "backup extra" "backup --to" "backup --to a b" "restore a b" \
   plugin "plugin frobnicate" "plugin install" "plugin install a b" "plugin install a --approve" "plugin install a --other x" \
   "plugin update" "plugin update a --other x" "plugin enable a b" "plugin rollback" "plugin rollback a b" "plugin restart a b" "plugin dev" "plugin dev a b"; do
@@ -538,6 +546,52 @@ out=$(FAKE_TOOLS=claude FAKE_NO_SIGNIN=1 with_terminal /opt/aphelion/deploy/host
 [[ $status == 1 && $out == *"gave no sign-in command for claude"* ]] || fail "sign-in ran with an empty sign-in command ($status, $out)"
 ! called "aphelion-bot" || fail "sign-in ran compose exec with no command"
 pass "sign-in refuses an unknown tool, a tool that isn't installed, a run without a terminal, and an empty sign-in command"
+
+fake_key=sk-ant-fake-host-canary-0123456789abcdef
+key_input=$(mktemp)
+typed_in_terminal() {
+  local typed=$1
+  shift
+  { sleep 2; printf '%s\r' "$typed"; } |
+    script --quiet --return --command "$(printf '%q ' env "PATH=$fakebin:$PATH" "$@")" /dev/null | tr -d '\r'
+}
+for subcommand in add replace; do
+  reset_calls
+  : >"$key_input"
+  status=0
+  out=$(typed_in_terminal "$fake_key" FAKE_KEY_INPUT="$key_input" FAKE_KEY_EXIT=3 /opt/aphelion/deploy/host/aphelion key "$subcommand" claude 2>&1) || status=$?
+  [[ $status == 3 && $out == *"API key for claude: "* && $out == *"ran key $subcommand claude"* ]] ||
+    fail "key $subcommand didn't prompt, run the server's command and pass its output and exit code through ($status, $out)"
+  [[ $out != *"$fake_key"* ]] || fail "key $subcommand showed the key on the terminal"
+  [[ $(cat "$key_input") == "$fake_key" ]] || fail "key $subcommand didn't send the typed key on standard input"
+  grep -qxF "$exec_line -T --user harness aphelion aphelion key $subcommand claude" "$FAKE_CALLS" ||
+    fail "key $subcommand didn't run the server's command as harness over exec -T: $(cat "$FAKE_CALLS")"
+  ! grep -qF "$fake_key" "$FAKE_CALLS" || fail "key $subcommand put the key on a command line"
+done
+pass "key add and key replace read the key with the echo off and send it to the server's command on standard input, never on a command line"
+
+reset_calls
+status=0
+out=$(as_root_aphelion key add claude </dev/null 2>&1) || status=$?
+[[ $status == 1 && $out == "aphelion: key add needs a terminal, so you can type the key without it showing. Run it in a shell on the host, not through a pipe or a script." ]] ||
+  fail "key add didn't refuse without a terminal ($status, $out)"
+! called "aphelion key" || fail "key add ran the server's command without a terminal"
+status=0
+out=$(FAKE_KEY_EXIT=2 with_terminal /opt/aphelion/deploy/host/aphelion key add opencode 2>&1) || status=$?
+[[ $status == 2 && $out == "ran key add opencode" ]] ||
+  fail "key add opencode didn't pass the server's refusal through without a prompt ($status, $out)"
+pass "key add refuses a run without a terminal, and lets the server refuse a tool that takes no key before any prompt"
+
+for subcommand in test remove; do
+  reset_calls
+  status=0
+  out=$(FAKE_KEY_EXIT=1 as_root_aphelion key "$subcommand" grok 2>&1) || status=$?
+  [[ $status == 1 && $out == "ran key $subcommand grok" ]] ||
+    fail "key $subcommand changed the exit code or output ($status, $out)"
+  grep -qxF "$exec_line -T --user harness aphelion aphelion key $subcommand grok" "$FAKE_CALLS" ||
+    fail "key $subcommand didn't run the server's command as harness: $(cat "$FAKE_CALLS")"
+done
+pass "key test and key remove run the server's command as harness and pass its output and exit code through"
 
 bk=$(mktemp -d)/backups
 export APHELION_BACKUP_DIR=$bk
