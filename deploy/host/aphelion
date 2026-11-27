@@ -588,6 +588,7 @@ latest_release_tag() {
 
 wait_for_health() {
   local deadline=$((SECONDS + ${APHELION_HEALTH_WAIT:-300}))
+  echo "Waiting up to 5 minutes for the server to answer..."
   until health_answers; do
     ((SECONDS < deadline)) || return 0
     sleep 1
@@ -676,37 +677,43 @@ cmd_upgrade() {
       at_tag=1
     fi
   fi
-  if ((at_tag)); then
+  if ((at_tag)) && service_is_up && health_answers; then
     echo "Aphelion is already at $tag."
     return 0
   fi
-  git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" ||
-    fail "git checkout $tag failed"
+  if ((!at_tag)); then
+    git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" ||
+      fail "git checkout $tag failed"
+  fi
   if [[ ! -x $APHELION_DEPLOY/host/get-image ]]; then
-    restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
     fail "$tag has no $APHELION_DEPLOY/host/get-image"
   fi
   previous_image=$(docker image inspect --format '{{.Id}}' aphelion:local 2>/dev/null) || previous_image=""
   if ! "$APHELION_DEPLOY/host/get-image" "$tag"; then
     restore_image "$previous_image"
-    restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
     exit 1
   fi
   if ! "$APHELION_DEPLOY/host/install"; then
     restore_image "$previous_image"
-    restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
     fail "host/install failed"
   fi
   if ! systemctl restart "$service"; then
     echo "aphelion: restarting $service failed" >&2
     echo "Read why with: sudo aphelion logs --lines 50" >&2
-    if [[ -n $before_tag && $before_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && $before_tag != *..* ]]; then
+    if ((!at_tag)) && [[ -n $before_tag && $before_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && $before_tag != *..* ]]; then
       echo "To go back: sudo aphelion upgrade $before_tag" >&2
     fi
     exit 1
   fi
   after=$(git -C "$repo" describe --tags --exact-match 2>/dev/null || echo "$tag")
-  echo "Upgraded Aphelion from $before to $after."
+  if ((at_tag)); then
+    echo "Finished upgrading Aphelion to $after."
+  else
+    echo "Upgraded Aphelion from $before to $after."
+  fi
   wait_for_health
   if [[ -x $APHELION_DEPLOY/host/aphelion ]]; then
     env "APHELION_DEPLOY=$APHELION_DEPLOY" "$APHELION_DEPLOY/host/aphelion" check || {

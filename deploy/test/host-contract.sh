@@ -240,12 +240,23 @@ cat >"$fakebin/systemctl" <<'FAKE'
 echo "systemctl $*" >>"${FAKE_CALLS:-/dev/null}"
 case $1 in
   is-enabled) echo enabled ;;
-  is-active) echo "${FAKE_SERVICE:-active}"; [[ ${FAKE_SERVICE:-active} == active ]] ;;
+  is-active)
+    if [[ -n ${FAKE_STATE:-} && -e $FAKE_STATE/service-down ]]; then
+      state=$(cat "$FAKE_STATE/service-down")
+      echo "${state:-inactive}"
+      exit 3
+    fi
+    echo "${FAKE_SERVICE:-active}"
+    [[ ${FAKE_SERVICE:-active} == active ]] ;;
   start)
     if [[ -n ${FAKE_DAMAGE_ARCHIVES:-} ]]; then
       echo damage >>"$(ls -d "$FAKE_DAMAGE_ARCHIVES"/aphelion-backup-*/ | tail -n 1)aphelion-data.tar.gz"
     fi ;;
-  restart) exit "${FAKE_RESTART_EXIT:-0}" ;;
+  restart)
+    if [[ ${FAKE_RESTART_EXIT:-0} == 0 && -n ${FAKE_STATE:-} ]]; then
+      rm -f "$FAKE_STATE/service-down" "$FAKE_STATE/health-down"
+    fi
+    exit "${FAKE_RESTART_EXIT:-0}" ;;
 esac
 FAKE
 cat >"$fakebin/curl" <<'FAKE'
@@ -1370,6 +1381,17 @@ url=${*: -1}
 echo "curl $*" >>"${FAKE_CALLS:-/dev/null}"
 case $url in
   http://100.100.5.1:7400/health)
+    if [[ -n ${FAKE_STATE:-} && -e $FAKE_STATE/health-down ]]; then
+      exit 7
+    fi
+    if [[ -n ${FAKE_STATE:-} && -e $FAKE_STATE/health-waits ]]; then
+      left=$(cat "$FAKE_STATE/health-waits")
+      if ((left > 0)); then
+        echo $((left - 1)) >"$FAKE_STATE/health-waits"
+        exit 7
+      fi
+      rm -f "$FAKE_STATE/health-waits"
+    fi
     [[ ${FAKE_CONTAINER:-up} == up ]] || exit 7
     echo '{"status":"ok"}'
     ;;
@@ -1503,7 +1525,7 @@ reset_upgrade_repo() {
   echo v0.1.0-alpha.1 >/opt/aphelion/.git/tag
   chown -R root:root /opt/aphelion
   chmod -R go-w /opt/aphelion
-  rm -f "$FAKE_STATE/fetched" "$FAKE_STATE/pulled" "$FAKE_STATE/pulled-id" "$FAKE_STATE/local-id" "$FAKE_STATE"/digest-*
+  rm -f "$FAKE_STATE/fetched" "$FAKE_STATE/pulled" "$FAKE_STATE/pulled-id" "$FAKE_STATE/local-id" "$FAKE_STATE/service-down" "$FAKE_STATE/health-down" "$FAKE_STATE/health-waits" "$FAKE_STATE"/digest-*
   echo "$old_digest" >"$FAKE_STATE/local"
   reset_calls
 }
@@ -1674,9 +1696,12 @@ out=$(FAKE_PULL=fail aphelion_210 upgrade v0.1.0-alpha.2 2>&1) ||
   fail "upgrade at the current tag failed: $out"
 [[ $out == "Aphelion is already at v0.1.0-alpha.2." ]] ||
   fail "upgrade at the current tag printed something else: $out"
-! called "fetch --tags" && ! called "checkout" && ! called "host/get-image" && ! called "host/install" && ! called "docker" && ! called "systemctl" ||
+called "systemctl is-active aphelion" && called "http://100.100.5.1:7400/health" ||
+  fail "upgrade at the current tag didn't check the service and /health: $(cat "$FAKE_CALLS")"
+! called "fetch --tags" && ! called "checkout" && ! called "host/get-image" && ! called "host/install" && ! called "docker" &&
+  ! called "systemctl restart" && ! called "systemctl start" && ! called "systemctl daemon-reload" && ! called "systemctl enable" ||
   fail "upgrade at the current tag ran git, image, install or restart steps: $(cat "$FAKE_CALLS")"
-pass "upgrade prints a fixed line and exits 0 without fetching, building, installing or restarting when already at the target tag"
+pass "upgrade prints a fixed line and exits 0 without fetching, building, installing or restarting when already at the target tag and healthy"
 
 reset_upgrade_repo
 status=0
@@ -1799,7 +1824,84 @@ pass "upgrade prints log and rollback next steps when systemctl restart fails"
 reset_upgrade_repo
 status=0
 out=$(APHELION_HEALTH_WAIT=0 FAKE_CONTAINER=down FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
-[[ $status == 1 && $out == *"Upgraded Aphelion from v0.1.0-alpha.1 to v0.1.0-alpha.2."* && $out == *"The upgrade finished, but aphelion check failed."* ]] ||
-  fail "upgrade didn't report that the upgrade finished when check failed ($status): $out"
+[[ $status == 1 && $out == *"Upgraded Aphelion from v0.1.0-alpha.1 to v0.1.0-alpha.2."* && $out == *"Waiting up to 5 minutes for the server to answer..."* && $out == *"The upgrade finished, but aphelion check failed."* ]] ||
+  fail "upgrade didn't report that the upgrade finished and the health wait line when check failed ($status): $out"
 [[ $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.2 ]] || fail "upgrade rolled back when post-upgrade check failed"
-pass "upgrade reports that the upgrade finished when aphelion check fails after restart"
+pass "upgrade prints a waiting line before waiting for /health and reports when aphelion check fails after restart"
+
+reset_upgrade_repo
+echo 1 >"$FAKE_STATE/health-waits"
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 2>&1) ||
+  fail "upgrade failed when /health answered on a later try: $out"
+upgraded_line=$(grep -nF "Upgraded Aphelion from v0.1.0-alpha.1 to v0.1.0-alpha.2." <<<"$out" | head -n 1 | cut -d: -f1)
+waiting_line=$(grep -nF "Waiting up to 5 minutes for the server to answer..." <<<"$out" | head -n 1 | cut -d: -f1)
+check_line=$(grep -nF "ok    the service is enabled and running" <<<"$out" | head -n 1 | cut -d: -f1)
+[[ -n $upgraded_line && -n $waiting_line && -n $check_line && $upgraded_line -lt $waiting_line && $waiting_line -lt $check_line ]] ||
+  fail "upgrade didn't print the waiting line between the version line and aphelion check: $out"
+[[ ! -e $FAKE_STATE/health-waits ]] || fail "upgrade didn't wait for /health to answer"
+pass "upgrade prints one line before waiting for /health and runs check once it answers"
+
+reset_upgrade_repo
+status=0
+FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_RESTART_EXIT=1 aphelion_210 upgrade v0.1.0-alpha.2 >/dev/null 2>&1 || status=$?
+[[ $status == 1 && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.2 ]] || fail "first run didn't leave the checkout on v0.1.0-alpha.2 after a failed restart ($status)"
+echo failed >"$FAKE_STATE/service-down"
+touch "$FAKE_STATE/health-down"
+reset_calls
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 2>&1) ||
+  fail "rerun after a failed restart failed: $out"
+[[ $out != *"already at"* && $out == *"Finished upgrading Aphelion to v0.1.0-alpha.2."* && $out == *"Waiting up to 5 minutes for the server to answer..."* && $out == *"checks passed"* ]] ||
+  fail "rerun after a failed restart printed something else: $out"
+! called "fetch --tags" && ! called "checkout" ||
+  fail "rerun after a failed restart moved the checkout: $(cat "$FAKE_CALLS")"
+ordered "release-v0.1.0-alpha.2 host/get-image v0.1.0-alpha.2" "release-v0.1.0-alpha.2 host/install" &&
+  ordered "release-v0.1.0-alpha.2 host/install" "systemctl restart aphelion" &&
+  ordered "systemctl restart aphelion" "release-v0.1.0-alpha.2 host/aphelion check" ||
+  fail "rerun after a failed restart didn't finish get-image, install, restart and check: $(cat "$FAKE_CALLS")"
+pass "upgrade finishes on rerun after a failed restart without moving the checkout"
+
+reset_upgrade_repo
+rm -rf /opt/aphelion/deploy
+cp -a "$releases_210/v0.1.0-alpha.2/deploy" /opt/aphelion/deploy
+printf 'APHELION_TAILNET_ADDRESS=100.100.5.1\n' >/opt/aphelion/deploy/.env
+echo v0.1.0-alpha.2 >/opt/aphelion/.git/tag
+chown -R root:root /opt/aphelion
+chmod -R go-w /opt/aphelion
+echo "# older unit" >>"$unit"
+touch "$FAKE_STATE/health-down"
+reset_calls
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 2>&1) ||
+  fail "rerun after a run stopped right after checkout failed: $out"
+[[ $out != *"already at"* && $out == *"Finished upgrading Aphelion to v0.1.0-alpha.2."* && $out == *"checks passed"* ]] ||
+  fail "rerun after a run stopped right after checkout printed something else: $out"
+[[ $(cat "$FAKE_STATE/local") == "$good_digest" ]] ||
+  fail "rerun after a run stopped right after checkout didn't update aphelion:local"
+! called "fetch --tags" && ! called "checkout" ||
+  fail "rerun after a run stopped right after checkout moved the checkout: $(cat "$FAKE_CALLS")"
+ordered "release-v0.1.0-alpha.2 host/get-image v0.1.0-alpha.2" "docker pull --quiet $good_digest" &&
+  ordered "docker tag $good_digest aphelion:local" "release-v0.1.0-alpha.2 host/install" &&
+  ordered "release-v0.1.0-alpha.2 host/install" "systemctl daemon-reload" &&
+  ordered "systemctl daemon-reload" "systemctl restart aphelion" &&
+  ordered "systemctl restart aphelion" "release-v0.1.0-alpha.2 host/aphelion check" ||
+  fail "rerun after a run stopped right after checkout didn't run the remaining steps: $(cat "$FAKE_CALLS")"
+pass "upgrade finishes when the checkout is already at the tag and /health doesn't answer"
+
+echo inactive >"$FAKE_STATE/service-down"
+reset_calls
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 2>&1) ||
+  fail "upgrade at the tag with the service down failed: $out"
+[[ $out != *"already at"* && $out == *"Finished upgrading Aphelion to v0.1.0-alpha.2."* && $out == *"checks passed"* ]] ||
+  fail "upgrade at the tag with the service down printed something else: $out"
+! called "fetch --tags" && ! called "checkout" ||
+  fail "upgrade at the tag with the service down moved the checkout: $(cat "$FAKE_CALLS")"
+ordered "release-v0.1.0-alpha.2 host/get-image v0.1.0-alpha.2" "release-v0.1.0-alpha.2 host/install" &&
+  ordered "release-v0.1.0-alpha.2 host/install" "systemctl restart aphelion" &&
+  ordered "systemctl restart aphelion" "release-v0.1.0-alpha.2 host/aphelion check" ||
+  fail "upgrade at the tag with the service down didn't finish the upgrade: $(cat "$FAKE_CALLS")"
+echo inactive >"$FAKE_STATE/service-down"
+reset_calls
+status=0
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_RESTART_EXIT=1 aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 1 && $out == *"restarting aphelion failed"* && $out != *"To go back:"* ]] ||
+  fail "upgrade at the tag printed a rollback tag to itself on restart failure ($status): $out"
+pass "upgrade finishes when the checkout is at the tag and the service is down, without moving the checkout"
