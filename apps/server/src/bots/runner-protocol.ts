@@ -20,7 +20,7 @@ export const runnerRequestSchema = z.discriminatedUnion("type", [
     bot,
     run,
     provider: bot,
-    adapter: absolutePath,
+    adapter: bot,
     folder: absolutePath,
     resume: sessionRef.nullable(),
   }),
@@ -61,7 +61,7 @@ export const runnerReplySchema = z.discriminatedUnion("type", [
     type: z.literal("start-failed"),
     bot,
     run,
-    stage: z.enum(["spawn", "initialize"]),
+    stage: z.enum(["spawn", "initialize", "cgroups"]),
     reason: z.string().max(1024),
   }),
   z.strictObject({ type: z.literal("turn.accepted"), bot, run, turn }),
@@ -93,6 +93,7 @@ export const runnerReplySchema = z.discriminatedUnion("type", [
     signal: z.string().max(32).nullable(),
   }),
   z.strictObject({ type: z.literal("stopped"), bot, run }),
+  z.strictObject({ type: z.literal("stop-failed"), bot, run }),
 ]);
 
 export type RunnerRequest = z.infer<typeof runnerRequestSchema>;

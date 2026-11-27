@@ -52,7 +52,7 @@ const startServer = (dbPath: string, scripts: Record<string, FakeScript>) =>
             folder: `/var/lib/aphelion-bots/${name}`,
           })),
           logger,
-          adapters: { fake: "/adapters/fake/adapter.js" },
+          adapters: { fake: "fake" },
           stopDeadlineMs: 5_000,
         },
         history,
