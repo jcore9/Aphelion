@@ -5,7 +5,7 @@ readonly APHELION_DEPLOY=${APHELION_DEPLOY:-/opt/aphelion/deploy}
 readonly APHELION_CREDENTIAL=${APHELION_CREDENTIAL:-/etc/credstore.encrypted/aphelion-bootstrap}
 readonly service=aphelion
 readonly health_port=7400
-readonly hardening='true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"]'
+readonly hardening='true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true","writable-cgroups=true"]'
 
 usage() {
   cat <<'USAGE'
@@ -120,6 +120,13 @@ check_hardening() {
   [[ $mounts != *docker.sock* ]] || { echo "the Docker socket is mounted"; return 1; }
 }
 
+check_cgroups() {
+  local output
+  [[ -n $(container_id) ]] || { echo "no running container to probe"; return 1; }
+  output=$(in_container root /usr/local/lib/aphelion/launch --check-cgroups 2>/dev/null) ||
+    { echo "${output##*$'\n'}"; return 1; }
+}
+
 check_credential() {
   [[ -f $APHELION_CREDENTIAL ]] || { echo "$APHELION_CREDENTIAL is missing. Run host/install."; return 1; }
 }
@@ -207,6 +214,7 @@ cmd_check() {
   tally "/health answers on the tailnet address" check_health
   tally "config check accepts the Compose file" check_config
   tally "the container is hardened" check_hardening
+  tally "the bots' cgroups pass the start probe" check_cgroups
   tally "the bootstrap credential exists" check_credential
   tally "the firewall chains exist" check_firewall
   if [[ $(uname -m) == x86_64 ]]; then

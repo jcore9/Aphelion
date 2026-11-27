@@ -12,6 +12,7 @@ const roles = {
   server: "/usr/local/bin/aphelion --headless",
   runner: "/usr/local/lib/aphelion/plugin-runner.js",
   botRunner: "/usr/local/lib/aphelion/bot-runner.js",
+  supervisor: "/usr/local/lib/aphelion/cgroup-supervisor.js",
   broker: "/usr/local/bin/aphelion-secrets",
 };
 

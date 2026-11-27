@@ -3,6 +3,16 @@ set -euo pipefail
 
 readonly bootstrap=/run/secrets/bootstrap
 readonly drop=(setpriv --init-groups --inh-caps=-all --reset-env)
+readonly cgroups=/sys/fs/cgroup/bots
+readonly supervisor=(setpriv --init-groups --reset-env --reuid=aphelion-cgroups --regid=aphelion-cgroups
+  --inh-caps=-all,+setuid,+setgid --ambient-caps=-all,+setuid,+setgid --
+  /usr/bin/env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 /usr/local/bin/bun /usr/local/lib/aphelion/cgroup-supervisor.js)
+
+if [[ ${1:-} == --check-cgroups ]]; then
+  echo "$$" 2>/dev/null >"$cgroups/system/supervisor/cgroup.procs" ||
+    { echo "the cgroup check failed at own-cgroup: the bots' cgroup tree isn't there"; exit 1; }
+  exec "${supervisor[@]}" --probe
+fi
 
 log() {
   printf '{"time":"%s","level":"%s","msg":"%s"}\n' \
@@ -43,6 +53,22 @@ stop() {
 close_pipes() {
   exec {requests_in}<&- {requests_out}>&- {replies_in}<&- {replies_out}>&-
   exec {bot_requests_in}<&- {bot_requests_out}>&- {bot_replies_in}<&- {bot_replies_out}>&-
+  exec {sup_requests_in}<&- {sup_requests_out}>&- {sup_replies_in}<&- {sup_replies_out}>&-
+}
+
+build_cgroup_tree() {
+  local group
+  group=$(getent group aphelion-cgroups | cut -d: -f3) || return 1
+  mkdir "$cgroups" "$cgroups/system" "$cgroups/system/runner" "$cgroups/system/supervisor" "$cgroups/work" 2>/dev/null ||
+    return 1
+  setpriv --groups="$group" --inh-caps=-all -- bash -c \
+    'chgrp aphelion-cgroups "$1/cgroup.procs" "$1/work" && chmod 0664 "$1/cgroup.procs" && chmod 0775 "$1/work"' \
+    bash "$cgroups"
+}
+
+place() {
+  ((tree == 1)) || return 0
+  echo "$BASHPID" >"$cgroups/system/$1/cgroup.procs" || refuse "the launcher couldn't place the $1 in its cgroup"
 }
 
 check_dir /etc/aphelion harness:harness 750
@@ -62,19 +88,31 @@ check_dir /run/aphelion-secrets aphelion-secrets:harness 2710
   refuse "$bootstrap must be a regular file owned by root"
 (((8#$(stat -L -c '%a' "$bootstrap") & 8#077) == 0)) ||
   refuse "$bootstrap must not be readable by group or others"
+check_dir /run/aphelion-runs aphelion-cgroups:aphelion-runs 750
+
+tree=1
+build_cgroup_tree || {
+  tree=0
+  log error "the launcher couldn't build the bots' cgroup tree, so no bot will start. Docker must allow writable-cgroups"
+}
 
 stopping=0
 trap 'stopping=1' TERM INT
 
 pipes=$(mktemp -d /run/aphelion-launch.XXXXXX)
-mkfifo -m 0600 "$pipes/requests" "$pipes/replies" "$pipes/bot-requests" "$pipes/bot-replies"
+mkfifo -m 0600 "$pipes/requests" "$pipes/replies" "$pipes/bot-requests" "$pipes/bot-replies" \
+  "$pipes/sup-requests" "$pipes/sup-replies"
 exec {hold_requests}<>"$pipes/requests" {hold_replies}<>"$pipes/replies"
 exec {hold_bot_requests}<>"$pipes/bot-requests" {hold_bot_replies}<>"$pipes/bot-replies"
+exec {hold_sup_requests}<>"$pipes/sup-requests" {hold_sup_replies}<>"$pipes/sup-replies"
 exec {requests_in}<"$pipes/requests" {requests_out}>"$pipes/requests"
 exec {replies_in}<"$pipes/replies" {replies_out}>"$pipes/replies"
 exec {bot_requests_in}<"$pipes/bot-requests" {bot_requests_out}>"$pipes/bot-requests"
 exec {bot_replies_in}<"$pipes/bot-replies" {bot_replies_out}>"$pipes/bot-replies"
+exec {sup_requests_in}<"$pipes/sup-requests" {sup_requests_out}>"$pipes/sup-requests"
+exec {sup_replies_in}<"$pipes/sup-replies" {sup_replies_out}>"$pipes/sup-replies"
 exec {hold_requests}<&- {hold_replies}<&- {hold_bot_requests}<&- {hold_bot_replies}<&-
+exec {hold_sup_requests}<&- {hold_sup_replies}<&-
 rm -r "$pipes"
 
 (
@@ -95,12 +133,20 @@ broker=$!
 runner=$!
 
 (
-  exec <&"$bot_requests_in" >&"$bot_replies_out"
+  exec <&"$sup_requests_in" >&"$sup_replies_out"
   close_pipes
-  exec "${drop[@]}" --reuid=aphelion-bot --regid=aphelion-bot -- \
+  place supervisor
+  exec "${supervisor[@]}"
+) &
+cgroup_supervisor=$!
+
+(
+  exec <&"$bot_requests_in" >&"$bot_replies_out" 3<&"$sup_replies_in" 4>&"$sup_requests_out"
+  close_pipes
+  place runner
+  exec "${drop[@]}" --reuid=aphelion-runner --regid=aphelion-runner -- \
     /usr/bin/env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 \
-    /usr/local/bin/bun /usr/local/lib/aphelion/bot-runner.js \
-    --bun /usr/local/bin/bun --home /var/lib/aphelion-bots
+    /usr/local/bin/bun /usr/local/lib/aphelion/bot-runner.js --supervisor-fds 3,4
 ) &
 bot_runner=$!
 
@@ -118,20 +164,21 @@ fi
 server=$!
 
 close_pipes
-log info "the launcher started the secrets broker, the plugin runner, the bot runner and the server"
+log info "the launcher started the secrets broker, the plugin runner, the cgroup supervisor, the bot runner and the server"
 
 status=0
 if ((stopping == 0)); then
-  wait -n -p exited "$broker" "$runner" "$bot_runner" "$server" || status=$?
+  wait -n -p exited "$broker" "$runner" "$cgroup_supervisor" "$bot_runner" "$server" || status=$?
 fi
 
 if ((stopping == 1)); then
-  log info "the launcher is stopping the server, the runners and the secrets broker"
+  log info "the launcher is stopping the server, the runners, the cgroup supervisor and the secrets broker"
   failed=0
 else
   case ${exited:-} in
     "$broker") name="secrets broker" ;;
     "$runner") name="plugin runner" ;;
+    "$cgroup_supervisor") name="cgroup supervisor" ;;
     "$bot_runner") name="bot runner" ;;
     "$server") name="server" ;;
     *) name="launcher's wait" ;;
@@ -143,6 +190,7 @@ fi
 stop "$server" 20
 await_exit "$runner" 5 || stop "$runner" 5
 await_exit "$bot_runner" 5 || stop "$bot_runner" 5
+await_exit "$cgroup_supervisor" 10 || stop "$cgroup_supervisor" 5
 stop "$broker" 5
 wait || true
 exit "$failed"

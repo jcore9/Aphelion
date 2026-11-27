@@ -1,0 +1,7 @@
+#!/bin/sh
+echo $$ >"$1/cgroup.procs" || exit 1
+echo placed
+exec 1>"$2/stdout" 2>"$2/stderr" 0<"$2/stdin"
+unset PWD
+exec /usr/bin/setpriv --clear-groups --regid=aphelion-bot --reuid=aphelion-bot --inh-caps=-all --no-new-privs -- \
+  /usr/local/bin/bun --no-env-file --preload /usr/local/lib/aphelion/adapter-launcher.js "$3" "$4"

@@ -35,6 +35,7 @@ cleanup() {
   if ((status != 0)); then
     "${compose[@]}" logs --no-color 2>&1 | tail -n 60 >&2 || true
   fi
+  docker rm --force aphelion-contract-bots aphelion-contract-nocg >/dev/null 2>&1 || true
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   as_root rm -rf /scratch/secrets >/dev/null 2>&1 || true
   rm -rf "$scratch"
@@ -78,6 +79,11 @@ as_root bash -euo pipefail -c '
   [[ $(id aphelion-bot) == "uid=10002(aphelion-bot) gid=10002(aphelion-bot) groups=10002(aphelion-bot)" ]]
   [[ $(id aphelion-secrets) == "uid=10003(aphelion-secrets) gid=10003(aphelion-secrets) groups=10003(aphelion-secrets)" ]]
   [[ $(id aphelion-plugins) == "uid=10004(aphelion-plugins) gid=10004(aphelion-plugins) groups=10004(aphelion-plugins)" ]]
+  [[ $(id aphelion-cgroups) == "uid=10005(aphelion-cgroups) gid=10005(aphelion-cgroups) groups=10005(aphelion-cgroups),10007(aphelion-runs)" ]]
+  [[ $(id aphelion-runner) == "uid=10006(aphelion-runner) gid=10006(aphelion-runner) groups=10006(aphelion-runner),10007(aphelion-runs)" ]]
+  [[ $(getent group aphelion-runs) == "aphelion-runs:x:10007:aphelion-cgroups,aphelion-runner" ]]
+  [[ $(getent group aphelion-cgroups) == "aphelion-cgroups:x:10005:" ]]
+  [[ $(stat -c "%U:%G %a" /usr/local/lib/aphelion/run-adapter) == "root:root 755" ]]
   [[ $(getent group harness) == "harness:x:10001:" ]]
   [[ $(awk -F: "\$4 == 10001" /etc/passwd | cut -d: -f1) == harness ]]
   if getent passwd ubuntu || command -v sudo; then exit 1; fi
@@ -86,7 +92,7 @@ as_root bash -euo pipefail -c '
   for tool in aphelion aphelion-secrets bun git tini; do command -v "$tool"; done
   for tool in claude codex grok opencode; do if command -v "$tool"; then exit 1; fi; done
 ' >/dev/null || fail "the image's users, groups or tools are not as expected"
-pass "four fixed users, a private harness group, no sudo, no set-user-ID files, no AI tool"
+pass "six fixed users, a private harness group, a run-folder group for the supervisor and runner only, a root-owned adapter entry script, no sudo, no set-user-ID files, no AI tool"
 
 as_root bash -euo pipefail -c '
   [[ $DISABLE_AUTOUPDATER == 1 ]]
@@ -216,13 +222,13 @@ grep -qF "Plugin dev mode is off." <<<"$reload" ||
   fail "the server didn't refuse a reload without the dev override: $reload"
 pass "the server opens a plugin control socket only harness can use, and refuses reloads without the dev override"
 
-[[ $(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}' "$container") == 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"] 1024' ]] ||
+[[ $(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}' "$container") == 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true","writable-cgroups=true"] 1024' ]] ||
   fail "docker inspect shows different hardening: $(docker inspect --format '{{json .HostConfig}}' "$container")"
 (($(docker inspect --format '{{.HostConfig.Memory}}' "$container") > 0)) || fail "no memory limit"
 if docker inspect --format '{{json .Mounts}}' "$container" | grep docker.sock >/dev/null; then
   fail "the Docker socket is mounted"
 fi
-pass "read-only root, no-new-privileges, only SETUID, SETGID and KILL, limits set, no Docker socket"
+pass "read-only root, no-new-privileges, writable cgroups, only SETUID, SETGID and KILL, limits set, no Docker socket"
 
 docker exec --privileged "$container" bash -euo pipefail -c '
   declare -A pid_of
@@ -236,7 +242,8 @@ docker exec --privileged "$container" bash -euo pipefail -c '
       "/bin/bash /usr/local/lib/aphelion/launch"*) role=launcher user=0 ;;
       "/usr/local/bin/aphelion-secrets"*) role=broker user=10003 ;;
       *plugin-runner.js*) role=runner user=10004 ;;
-      *bot-runner.js*) role=bot_runner user=10002 ;;
+      *bot-runner.js*) role=bot_runner user=10006 ;;
+      *cgroup-supervisor.js*) role=supervisor user=10005 ;;
       "/usr/local/bin/aphelion --headless"*) role=server user=10001 ;;
       "/usr/local/bin/bun --no-env-file /opt/aphelion/"*) role=plugin user=10004 ;;
       *) continue ;;
@@ -247,16 +254,28 @@ docker exec --privileged "$container" bash -euo pipefail -c '
     [[ $uids == "$user $user $user $user" ]] || { echo "$role runs as $uids"; exit 1; }
     [[ $(awk "/^NoNewPrivs:/ {print \$2}" <<<"$status") == 1 ]] || { echo "$role can gain privileges"; exit 1; }
     [[ $(awk "/^Seccomp:/ {print \$2}" <<<"$status") == 2 ]] || { echo "$role has no seccomp filter"; exit 1; }
+    caps=0000000000000000
+    [[ $role != supervisor ]] || caps=00000000000000c0
     if ((user != 0)); then
       for set in CapInh CapPrm CapEff CapAmb; do
-        [[ $(awk "/^$set:/ {print \$2}" <<<"$status") == 0000000000000000 ]] || { echo "$role keeps $set"; exit 1; }
+        [[ $(awk "/^$set:/ {print \$2}" <<<"$status") == "$caps" ]] || { echo "$role has $set other than $caps"; exit 1; }
       done
     fi
   done
-  for role in init launcher broker runner bot_runner server plugin; do
+  for role in init launcher broker runner supervisor bot_runner server plugin; do
     [[ -n ${pid_of[$role]:-} ]] || { echo "no $role process"; exit 1; }
   done
   [[ $(awk "/^Groups:/ {print \$2, \$3}" "/proc/${pid_of[server]}/status") == "10001 10002" ]] || { echo "the server lost its bot group"; exit 1; }
+  [[ $(cat "/proc/${pid_of[bot_runner]}/cgroup") == "0::/bots/system/runner" ]] || { echo "the bot runner is not in its cgroup"; exit 1; }
+  [[ $(cat "/proc/${pid_of[supervisor]}/cgroup") == "0::/bots/system/supervisor" ]] || { echo "the supervisor is not in its cgroup"; exit 1; }
+  for role in init launcher broker runner server plugin; do
+    [[ $(cat "/proc/${pid_of[$role]}/cgroup") == "0::/" ]] || { echo "the $role is inside the bots tree"; exit 1; }
+  done
+  cg=/sys/fs/cgroup/bots
+  tree=$(stat -c "%U:%G %a" $cg $cg/cgroup.procs $cg/work $cg/system $cg/system/runner/cgroup.procs $cg/system/supervisor/cgroup.procs $cg/cgroup.subtree_control | tr "\n" " ")
+  [[ $tree == "root:root 755 root:aphelion-cgroups 664 root:aphelion-cgroups 775 root:root 755 root:root 644 root:root 644 root:root 644 " ]] || { echo "the cgroup tree has other owners or modes: $tree"; exit 1; }
+  [[ -z $(cat $cg/cgroup.subtree_control) ]] || { echo "the bots tree enables controllers"; exit 1; }
+  [[ $(stat -c "%U:%G %a" /run/aphelion-runs) == "aphelion-cgroups:aphelion-runs 750" ]] || { echo "the run folder root has another owner or mode"; exit 1; }
   for fd in "/proc/${pid_of[broker]}"/fd/*; do
     [[ $(readlink "$fd") != /run/secrets/bootstrap ]] || { echo "the broker still holds the bootstrap file"; exit 1; }
   done
@@ -268,6 +287,9 @@ docker exec --privileged "$container" bash -euo pipefail -c '
   bot_replies=$(pipe "${pid_of[server]}" 5)
   [[ $(pipe "${pid_of[runner]}" 0) == "$requests" && $(pipe "${pid_of[runner]}" 1) == "$replies" ]] || { echo "the server and plugin runner hold different pipes"; exit 1; }
   [[ $(pipe "${pid_of[bot_runner]}" 0) == "$bot_requests" && $(pipe "${pid_of[bot_runner]}" 1) == "$bot_replies" ]] || { echo "the server and bot runner hold different pipes"; exit 1; }
+  sup_requests=$(pipe "${pid_of[bot_runner]}" 4)
+  sup_replies=$(pipe "${pid_of[bot_runner]}" 3)
+  [[ $(pipe "${pid_of[supervisor]}" 0) == "$sup_requests" && $(pipe "${pid_of[supervisor]}" 1) == "$sup_replies" ]] || { echo "the bot runner and supervisor hold different pipes"; exit 1; }
   for fd in /proc/[0-9]*/fd/*; do
     held=$(stat -L -c %d:%i "$fd" 2>/dev/null) || continue
     pid=${fd#/proc/}; pid=${pid%%/*}
@@ -277,9 +299,12 @@ docker exec --privileged "$container" bash -euo pipefail -c '
     if [[ $held == "$bot_requests" || $held == "$bot_replies" ]]; then
       [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[bot_runner]}" ]] || { echo "process $pid ($(tr "\0" " " <"/proc/$pid/cmdline")) holds the bot runner pipe through $fd"; exit 1; }
     fi
+    if [[ $held == "$sup_requests" || $held == "$sup_replies" ]]; then
+      [[ $pid == "${pid_of[supervisor]}" || $pid == "${pid_of[bot_runner]}" ]] || { echo "process $pid holds the supervisor pipe"; exit 1; }
+    fi
   done
 ' || fail "a process runs with the wrong user, privileges or pipes"
-pass "each process runs as its own user with no capabilities, NoNewPrivs and seccomp; only the server and each runner hold that runner's pipe"
+pass "each process runs as its own user with NoNewPrivs and seccomp, the supervisor with only SETUID and SETGID and every other one with no capabilities; the runner and supervisor sit in their own cgroups; only the two ends hold each private pipe"
 
 docker exec --user aphelion-secrets "$container" bash -euo pipefail -c '
   [[ $(stat -c %a /var/lib/aphelion-secrets/recipient.pub) == 600 ]]
@@ -306,6 +331,11 @@ probe aphelion-bot '[
   ["readlink", "/proc/{runner}/fd/0", "EACCES"],
   ["readlink", "/proc/{botRunner}/fd/0", "EACCES"],
   ["read", "/proc/{botRunner}/environ", "EACCES"],
+  ["signal", "{botRunner}", "EPERM"],
+  ["signal", "{supervisor}", "EPERM"],
+  ["list", "/run/aphelion-runs", "EACCES"],
+  ["write", "/sys/fs/cgroup/bots", "EACCES"],
+  ["write", "/sys/fs/cgroup/bots/work", "EACCES"],
   ["signal", "{server}", "EPERM"],
   ["signal", "{runner}", "EPERM"],
   ["signal", "{broker}", "EPERM"],
@@ -313,19 +343,74 @@ probe aphelion-bot '[
   ["write", "/usr/local/bin", "EROFS"],
   ["write", "/opt/aphelion/plugins", "EACCES"]
 ]'
-pass "aphelion-bot can't reach the config, state, secrets, plugins, broker, pipes or other users' processes"
+pass "aphelion-bot can't reach the config, state, secrets, plugins, broker, pipes, run folders, cgroup tree or other users' processes"
+
+wait_for_log '"msg":"the cgroup check passed, so bots can start"'
+wait_for_log "\"msg\":\"the bot runner started the bot's process\",\"bot\":\"chief-of-staff\""
+wait_for_log "no adapter in this image runs the bot's provider, so the bot won't start\",\"bot\":\"triage\""
+pass "the supervisor's start probe passed through the real start and kill path, and the server reaches the bot runner, which starts the bundled Claude adapter for the example bot"
 
 bot_test=$scratch/bot-test
 mkdir "$bot_test"
 cp deploy/test/bot-runner/* "$bot_test/"
-chmod -R a+rX,go-w "$bot_test"
-tar -C "$scratch" -cf - bot-test | docker exec -i --user aphelion-bot "$container" tar -xf - -C /tmp
-driven=$(docker exec --user aphelion-bot "$container" /usr/local/bin/bun /tmp/bot-test/drive.mjs 2>&1) ||
-  fail "the bot runner check failed: $driven"
-docker exec --user aphelion-bot "$container" rm -rf /tmp/bot-test /var/lib/aphelion-bots/contract-bot
-wait_for_log "\"msg\":\"the bot runner started the bot's process\",\"bot\":\"chief-of-staff\""
-wait_for_log "no adapter in this image runs the bot's provider, so the bot won't start\",\"bot\":\"triage\""
-pass "the shipped bot runner runs a fake adapter bot as aphelion-bot for one turn, with only its own environment; another aphelion-bot process can't open the adapter's descriptors; the server reaches the bot runner, which starts the bundled Claude adapter for the example bot"
+chmod 0755 "$bot_test/drive.mjs"
+chmod 0644 "$bot_test/fake-adapter.mjs"
+cat >"$scratch/bots.yaml" <<YAML
+services:
+  $service:
+    volumes:
+      - $bot_test/drive.mjs:/usr/local/bin/aphelion:ro
+      - $bot_test/fake-adapter.mjs:/usr/local/lib/aphelion/adapters/claude/adapter.js:ro
+YAML
+bots=aphelion-contract-bots
+"${compose[@]}" -f "$scratch/bots.yaml" run --detach --name "$bots" "$service" >/dev/null 2>&1 ||
+  fail "the bot test container didn't start"
+bot_log() { docker logs "$bots" 2>&1; }
+bot_failure() {
+  if bot_log | grep -q "^bot test FAIL"; then fail "$(bot_log | grep "^bot test FAIL")"; fi
+}
+await_bot_line() {
+  local tries
+  for ((tries = 0; tries < 900; tries++)); do
+    if bot_log | grep -qx "$1"; then return 0; fi
+    bot_failure
+    sleep 0.2
+  done
+  fail "the bot test never printed \"$1\": $(bot_log | tail -n 20)"
+}
+bot_processes() {
+  docker exec "$bots" bash -c 'for p in /proc/[0-9]*; do
+    [[ $(awk "/^Uid:/ {print \$2}" "$p/status" 2>/dev/null) == 10002 ]] || continue
+    echo "${p#/proc/} $(cut -d: -f3- "$p/cgroup" 2>/dev/null)"
+  done; true'
+}
+check_checkpoint() {
+  local name=$1 key values value listing leaves=""
+  listing=$(bot_processes)
+  while read -r key values; do
+    for value in $values; do
+      case $key in
+        gone) ! grep -q "^$value " <<<"$listing" || fail "after $name, process $value of the bot is still alive: $listing" ;;
+        alive) grep -q "^$value " <<<"$listing" || fail "after $name, process $value of the other bot is gone" ;;
+        removed) docker exec "$bots" test ! -e "/sys/fs/cgroup$value" || fail "after $name, the cgroup $value is still there" ;;
+        leaves) leaves+=" $value" ;;
+      esac
+    done
+  done < <(docker exec "$bots" cat "/tmp/drive/$name")
+  while read -r pid group; do
+    [[ -n $pid ]] || continue
+    [[ "$leaves " == *" $group "* ]] || fail "after $name, aphelion-bot process $pid runs in ${group:-no cgroup}, outside the live bots' cgroups"
+  done <<<"$listing"
+  docker exec --user harness "$bots" touch "/tmp/drive/$name.go"
+}
+for checkpoint in daemons cancelled stopped; do
+  await_bot_line "checkpoint $checkpoint"
+  check_checkpoint "$checkpoint"
+done
+await_bot_line "bot test passed"
+bot_log | grep -E '^(isolation|cancel|stop):'
+docker rm --force "$bots" >/dev/null
+pass "through the shipped launcher, supervisor and runner, a fake adapter's setsid and double-fork daemons and fork loop died on cancel and on stop (ps as root), the other bot kept its processes, and no bot could write the cgroup tree or signal the runner or supervisor"
 
 probe aphelion-plugins '[
   ["list", "/etc/aphelion", "EACCES"],
@@ -351,6 +436,10 @@ probe harness '[
   ["read", "/run/secrets/bootstrap", "EACCES"],
   ["readlink", "/proc/{runner}/fd/0", "EACCES"],
   ["readlink", "/proc/{botRunner}/fd/0", "EACCES"],
+  ["list", "/run/aphelion-runs", "EACCES"],
+  ["write", "/sys/fs/cgroup/bots/work", "EACCES"],
+  ["signal", "{supervisor}", "EPERM"],
+  ["signal", "{botRunner}", "EPERM"],
   ["signal", "{broker}", "EPERM"]
 ]'
 pass "harness reads the config, state and bot folders, writes the plugin files and reaches the broker, and nothing else"
@@ -647,7 +736,8 @@ read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \
 [[ $status == 0 && -n $total && $passed == "$total" && $checked != *FAIL* ]] ||
   fail "check didn't pass every check (exit $status): $checked"
 for name in "the service is enabled and running" "the container is running" "/health answers on the tailnet address" \
-  "config check accepts the Compose file" "the container is hardened" "the bootstrap credential exists" "the firewall chains exist"; do
+  "config check accepts the Compose file" "the container is hardened" "the bots' cgroups pass the start probe" \
+  "the bootstrap credential exists" "the firewall chains exist"; do
   grep -qx "ok    $name" <<<"$checked" || fail "check didn't print ok for: $name"
 done
 pass "check passes every check against the running container"
@@ -672,6 +762,30 @@ for text in "the launcher is stopping" '"msg":"server stopping"'; do
   "${compose[@]}" logs --no-color 2>&1 | grep -F "$text" >/dev/null || fail "the stop never logged: $text"
 done
 pass "docker compose stop stops every process and exits 0"
+
+cat >"$scratch/no-cgroups.yaml" <<YAML
+services:
+  $service:
+    security_opt: !override ["no-new-privileges:true"]
+YAML
+nocg=aphelion-contract-nocg
+unsafe_line="\"msg\":\"bots can't start, because the cgroup check failed\",\"bot\":\"chief-of-staff\",\"check\":\"own-cgroup:"
+"${compose[@]}" -f "$scratch/no-cgroups.yaml" run --detach --name "$nocg" "$service" >/dev/null 2>&1 ||
+  fail "the container without writable cgroups didn't start"
+for ((tries = 0; tries < 300; tries++)); do
+  docker logs "$nocg" 2>&1 | grep -F "$unsafe_line" >/dev/null && break
+  sleep 0.1
+done
+nocg_log=$(docker logs "$nocg" 2>&1)
+docker rm --force "$nocg" >/dev/null
+grep -F "$unsafe_line" <<<"$nocg_log" ||
+  fail "without writable cgroups the server didn't log the fixed line: $(tail -n 20 <<<"$nocg_log")"
+grep -F "the launcher couldn't build the bots' cgroup tree" <<<"$nocg_log" >/dev/null ||
+  fail "without writable cgroups the launcher didn't say why"
+if grep -F "the bot runner started the bot's process" <<<"$nocg_log"; then
+  fail "a bot started without writable cgroups"
+fi
+pass "without writable-cgroups the launcher says why, the bot runner starts no bot, and the server logs one fixed line naming the failed check"
 
 status=0
 shown=$(host_aphelion status 2>&1) || status=$?
