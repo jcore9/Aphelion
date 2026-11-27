@@ -49,6 +49,7 @@ async function check(fetcher: Fetcher, listFile = shippedList) {
     out: (line) => Effect.sync(() => void out.push(line)),
     err: (line) => Effect.sync(() => void err.push(line)),
     stdin: Effect.succeed(""),
+    readApiKey: () => Effect.die("unused"),
   });
   const exit = await Effect.runPromiseExit(
     toolCheck(listFile, fetcher).pipe(Effect.provide(io)),

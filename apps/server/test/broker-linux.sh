@@ -81,6 +81,7 @@ as_user harness bun /check/broker-probe.mjs read
 stop_broker
 start_broker
 as_user harness bun /check/broker-probe.mjs read
+as_user harness bun /check/broker-probe.mjs delete
 stop_broker
 
 refused() {
@@ -115,4 +116,4 @@ case "$status" in
   0) echo "Plaintext canary reached a broker log or store file" >&2; exit 1 ;;
   *) echo "Could not scan broker logs and store files" >&2; exit 1 ;;
 esac
-echo "harness read the encrypted secret across broker restart"
+echo "harness read the encrypted secret across broker restart, then deleted it"
