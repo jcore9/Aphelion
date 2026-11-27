@@ -91,4 +91,20 @@ describe.skipIf(process.platform !== "linux")("the server's pipe ends", () => {
     expect(await within(read, 2_000)).toBe("hello\n");
     expect(errors).toEqual([]);
   });
+
+  it("closes a stuck writer immediately without hanging a later end", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "aphelion-fd-pipe-"));
+    folders.push(folder);
+    const pipe = fifo(folder, "full");
+    const errors: Error[] = [];
+    const writer = fdWriter(pipe.writer, (error) => errors.push(error));
+    void writer.write("x".repeat(256 * 1024));
+    await new Promise((done) => setTimeout(done, 20));
+
+    writer.close();
+    opened.splice(opened.indexOf(pipe.writer), 1);
+
+    expect(await within(writer.end(), 1_000)).not.toBe("stalled");
+    expect(errors).toEqual([]);
+  });
 });

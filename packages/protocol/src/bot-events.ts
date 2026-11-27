@@ -28,12 +28,12 @@ const toolKind = z
 
 const count = z.int().nonnegative();
 
-const turnId = z
+export const turnId = z
   .string()
   .regex(turnPattern)
   .describe("The id of one turn, the bot's work on one prompt.");
 
-const botName = z
+export const botName = z
   .string()
   .regex(/^[a-z][a-z0-9-]{0,62}$/)
   .describe("The name of the bot, as in its config.");

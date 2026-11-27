@@ -1,12 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  encodeFrame,
-  parseServerFrame,
-  streamId,
-  type ServerFrame,
-} from "@aphelion/protocol";
+import { encodeFrame, streamId, type ServerFrame } from "@aphelion/protocol";
 import { expect, layer } from "@effect/vitest";
 import { Duration, Effect, Exit, Scope } from "effect";
 import { HttpServer } from "effect/http";
@@ -16,6 +11,7 @@ import { openEventStore, type EventStore } from "../history";
 import { createLogger } from "../log";
 import { openStore, readServerId, readStreamId } from "../store";
 import { serveHttp } from "./index";
+import { connectClient, idleCommands } from "./test-client";
 
 const live = { excludeTestServices: true };
 
@@ -61,58 +57,8 @@ const say = (target: EventStore, text: string) =>
 
 const baseUrl = HttpServer.addressFormattedWith(Effect.succeed);
 
-interface Client {
-  readonly frames: ServerFrame[];
-  readonly send: (frame: Parameters<typeof encodeFrame>[0]) => void;
-  readonly close: () => void;
-  readonly until: (count: number) => Effect.Effect<readonly ServerFrame[]>;
-}
-
 const connectWith = (bearer: string) =>
-  Effect.flatMap(baseUrl, (url) =>
-    Effect.promise(
-      () =>
-        new Promise<Client>((resolve, reject) => {
-          const socket = new WebSocket(`${url.replace(/^http/, "ws")}/ws`, {
-            headers: { authorization: `Bearer ${bearer}` },
-          });
-          const frames: ServerFrame[] = [];
-          let wake: (() => void) | undefined;
-          socket.addEventListener("message", ({ data }) => {
-            const parsed = parseServerFrame(String(data));
-            if (!parsed.ok) throw new Error(parsed.error.message);
-            frames.push(parsed.frame);
-            wake?.();
-          });
-          socket.addEventListener("error", () => {
-            reject(new Error("the socket failed to open"));
-          });
-          socket.addEventListener("open", () => {
-            resolve({
-              frames,
-              send: (frame) => {
-                socket.send(encodeFrame(frame));
-              },
-              close: () => {
-                socket.close();
-              },
-              until: (count) =>
-                Effect.promise(
-                  () =>
-                    new Promise<readonly ServerFrame[]>((done) => {
-                      const check = () => {
-                        if (frames.length >= count)
-                          done(frames.slice(0, count));
-                      };
-                      wake = check;
-                      check();
-                    }),
-                ).pipe(Effect.timeout("5 seconds"), Effect.orDie),
-            });
-          });
-        }),
-    ),
-  );
+  Effect.flatMap(baseUrl, (url) => connectClient(url, bearer));
 
 const connect = connectWith(token);
 
@@ -125,7 +71,7 @@ const cursor = (seq: number, stream = readStreamId(db)) => ({
 });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, db, store, {
+  serveHttp({ address: "127.0.0.1", port: 0 }, db, store, idleCommands, {
     recheckEvery: Duration.seconds(30),
   }),
   live,
@@ -207,9 +153,15 @@ layer(
 });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, reopened, restarted, {
-    recheckEvery: Duration.seconds(30),
-  }),
+  serveHttp(
+    { address: "127.0.0.1", port: 0 },
+    reopened,
+    restarted,
+    idleCommands,
+    {
+      recheckEvery: Duration.seconds(30),
+    },
+  ),
   live,
 )("a client that reconnects after the server restarted", (it) => {
   it.effect("continues from its cursor in the same stream", () =>
@@ -229,9 +181,15 @@ layer(
 });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, damaged, damagedStore, {
-    recheckEvery: Duration.seconds(30),
-  }),
+  serveHttp(
+    { address: "127.0.0.1", port: 0 },
+    damaged,
+    damagedStore,
+    idleCommands,
+    {
+      recheckEvery: Duration.seconds(30),
+    },
+  ),
   live,
 )("a client that asks for history the server can't read", (it) => {
   it.effect("is disconnected with a clear reason, not left waiting", () =>

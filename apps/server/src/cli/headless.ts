@@ -1,10 +1,11 @@
 import { join } from "node:path";
-import { Context, Effect, Layer } from "effect";
+import { Context, Deferred, Effect, Layer } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
 import { z } from "zod";
 import type { BotDefinition } from "../bots/manager";
 import { botRunnerPipeLink } from "../bots/runner-pipe";
 import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
+import { createAdmission, openCommandLedger } from "../commands";
 import { formatIssue } from "../config";
 import {
   closeDanglingTurns,
@@ -77,12 +78,16 @@ const startPlugins = (
     }
   });
 
+export const botRunnerChannelFailedMessage =
+  "the bot runner channel failed, so the server is stopping";
+
 const startBots = (
   bots: readonly BotDefinition[],
   fds: RunnerPipeFds,
   logger: Logger,
   db: Database,
   history: EventStore,
+  onChannelFailed: () => Effect.Effect<void>,
 ) =>
   Effect.gen(function* () {
     const links = yield* Layer.build(
@@ -91,7 +96,7 @@ const startBots = (
         sqliteSessionRefs(db, history.serverId),
       ),
     );
-    yield* runBots({ bots, logger }, history).pipe(
+    return yield* runBots({ bots, logger, onChannelFailed }, history).pipe(
       Effect.provideContext(links),
     );
   });
@@ -134,7 +139,28 @@ export const headless = (
             },
           );
         }
-        yield* Layer.build(serveHttp({ address, port }, db, history));
+        const ledger = yield* openCommandLedger(db, logger);
+        const runnerFailed = yield* Deferred.make<undefined>();
+        const bots =
+          options.botRunnerFds === undefined
+            ? undefined
+            : yield* startBots(
+                checked.config.bots.bots,
+                options.botRunnerFds,
+                logger,
+                db,
+                history,
+                () =>
+                  Deferred.succeed(runnerFailed, undefined).pipe(Effect.asVoid),
+              );
+        yield* Layer.build(
+          serveHttp({ address, port }, db, history, {
+            bots,
+            ledger,
+            admission: createAdmission(),
+            logger,
+          }),
+        );
         logger.info("server started", { version, address, port });
         if (fds === undefined) {
           logger.info("plugins are off: no plugin runner pipe was given");
@@ -149,18 +175,13 @@ export const headless = (
             logger,
           );
         }
-        if (options.botRunnerFds === undefined) {
+        if (bots === undefined) {
           logger.info("bots are off: no bot runner pipe was given");
-        } else {
-          yield* startBots(
-            checked.config.bots.bots,
-            options.botRunnerFds,
-            logger,
-            db,
-            history,
-          );
+          return yield* Effect.never;
         }
-        return yield* Effect.never;
+        yield* Deferred.await(runnerFailed);
+        logger.error(botRunnerChannelFailedMessage);
+        return yield* failed;
       }).pipe(
         Effect.scoped,
         Effect.onInterrupt(() =>

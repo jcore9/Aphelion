@@ -45,6 +45,225 @@
           ],
           "additionalProperties": false,
           "description": "Answers a command that succeeded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number",
+              "const": 1,
+              "description": "The protocol version."
+            },
+            "type": {
+              "type": "string",
+              "const": "result",
+              "description": "The frame type."
+            },
+            "id": {
+              "description": "The id of the command this frame answers.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CommandId"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "const": "bot.prompt",
+              "description": "The command that ran."
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "turn": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                  "description": "The turn the bot started. A repeat of the command returns the same turn."
+                }
+              },
+              "required": [
+                "turn"
+              ],
+              "additionalProperties": false,
+              "description": "The command's output."
+            }
+          },
+          "required": [
+            "v",
+            "type",
+            "id",
+            "name",
+            "result"
+          ],
+          "additionalProperties": false,
+          "description": "Answers a command that succeeded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number",
+              "const": 1,
+              "description": "The protocol version."
+            },
+            "type": {
+              "type": "string",
+              "const": "result",
+              "description": "The frame type."
+            },
+            "id": {
+              "description": "The id of the command this frame answers.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CommandId"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "const": "bot.cancel",
+              "description": "The command that ran."
+            },
+            "result": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false,
+              "description": "The command's output."
+            }
+          },
+          "required": [
+            "v",
+            "type",
+            "id",
+            "name",
+            "result"
+          ],
+          "additionalProperties": false,
+          "description": "Answers a command that succeeded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number",
+              "const": 1,
+              "description": "The protocol version."
+            },
+            "type": {
+              "type": "string",
+              "const": "result",
+              "description": "The frame type."
+            },
+            "id": {
+              "description": "The id of the command this frame answers.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CommandId"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "const": "history.read",
+              "description": "The command that ran."
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "events": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "seq": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991,
+                        "description": "The event's position, as in an event frame."
+                      },
+                      "payload": {
+                        "type": "object",
+                        "properties": {
+                          "bot": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                            "description": "The bot the event belongs to."
+                          },
+                          "turn": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                                "description": "The id of one turn, the bot's work on one prompt."
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The turn the event belongs to. It is `null` for an `error` outside a turn."
+                          },
+                          "format": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991,
+                            "description": "The format version of the saved event. It is 1 today, and a change to an event's shape raises it."
+                          },
+                          "event": {
+                            "description": "What happened.",
+                            "allOf": [
+                              {
+                                "$ref": "#/definitions/BotEvent"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "bot",
+                          "turn",
+                          "format",
+                          "event"
+                        ],
+                        "additionalProperties": false,
+                        "description": "The same payload an event frame carries."
+                      }
+                    },
+                    "required": [
+                      "seq",
+                      "payload"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "The events the client may see, in order. A page holds at most 256 KiB of encoded events. It can hold fewer than `limit`, or none, while `more` is `true`."
+                },
+                "next": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "The position to send as `after` to read the next page. It can be higher than the last event, because the server skips events a client never sees."
+                },
+                "more": {
+                  "type": "boolean",
+                  "description": "Whether the server holds more saved events of this bot after `next`."
+                }
+              },
+              "required": [
+                "events",
+                "next",
+                "more"
+              ],
+              "additionalProperties": false,
+              "description": "The command's output."
+            }
+          },
+          "required": [
+            "v",
+            "type",
+            "id",
+            "name",
+            "result"
+          ],
+          "additionalProperties": false,
+          "description": "Answers a command that succeeded."
         }
       ]
     },
@@ -228,7 +447,18 @@
           "type": "string",
           "enum": [
             "malformed",
-            "unsupported-version"
+            "unsupported-version",
+            "bot-not-running",
+            "bot-busy",
+            "prompt-too-long",
+            "prompt-refused",
+            "bot-not-responding",
+            "interrupted",
+            "storage-failed",
+            "device-revoked",
+            "rate-limited",
+            "id-reused",
+            "internal"
           ],
           "description": "Why the frame was rejected."
         },

@@ -74,6 +74,7 @@ it.effect(
             Effect.succeed(true),
             Duration.seconds(30),
             store,
+            () => Effect.die("no command was sent"),
             limit,
           ),
         );
