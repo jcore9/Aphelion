@@ -394,6 +394,7 @@ case " $* " in
     rm -f "$FAKE_STATE/local" "$FAKE_STATE/local-id"
     exit 0 ;;
   *" tag "*)
+    [[ -z ${FAKE_TAG_FAIL:-} || $2 != "$FAKE_TAG_FAIL"* ]] || exit 1
     if [[ -e $FAKE_STATE/digest-$2 ]]; then
       cp "$FAKE_STATE/digest-$2" "$FAKE_STATE/local"
       echo "$2" >"$FAKE_STATE/local-id"
@@ -2013,7 +2014,7 @@ out=$(umask 0002 && FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphel
   fail "rerun with a mode 0600 marker failed under umask 0002: $out"
 pass "upgrade creates the marker with mode 0600 whatever the umask is"
 
-for bad_wait in -5 abc 1+1 08 1.5 " 3"; do
+for bad_wait in -5 abc 1+1 08 1.5 " 3" 1000000; do
   reset_upgrade_repo
   reset_calls
   status=0
@@ -2042,6 +2043,17 @@ out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_CHECK_KEY=reje
 ! called "checkout" && ! called "systemctl restart" ||
   fail "upgrade moved the checkout or restarted the service after an install failure on the partial path"
 pass "upgrade keeps the checkout and the marker, and puts aphelion:local back, when the image or host/install fails on the partial path"
+
+reset_upgrade_repo
+status=0
+out=$(FAKE_TAG_FAIL=sha256:local- FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_CHECK_KEY=reject aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 1 && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && -e /opt/aphelion/.git/aphelion-upgrade-pending && $out == *"The earlier image is not back on aphelion:local"* ]] ||
+  fail "a failed image rollback didn't keep the marker or say so ($status): $out"
+status=0
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.1 2>&1) || status=$?
+[[ $out != *"already at"* && $out == *"Finished upgrading Aphelion to v0.1.0-alpha.1."* ]] ||
+  fail "a rerun of the old tag after a failed image rollback took the already-at shortcut ($status): $out"
+pass "upgrade keeps the marker when the image rollback fails, so a rerun doesn't say already at"
 
 reset_upgrade_repo
 status=0

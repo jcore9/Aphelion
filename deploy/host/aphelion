@@ -645,13 +645,25 @@ restore_image() {
     if [[ $current_image != "$previous_image" ]]; then
       if ! docker tag "$previous_image" aphelion:local >/dev/null 2>&1; then
         echo "aphelion: couldn't put aphelion:local back on $previous_image" >&2
+        return 1
       fi
     fi
   elif [[ -n $current_image ]]; then
     if ! docker image rm aphelion:local >/dev/null 2>&1; then
       echo "aphelion: couldn't remove the new aphelion:local tag" >&2
+      return 1
     fi
   fi
+}
+
+rollback_upgrade() {
+  local repo=$1 previous=$2 previous_branch=$3 marker_existed=$4 previous_image=$5 at_tag=$6 image_back=1
+  restore_image "$previous_image" || image_back=0
+  if ((!image_back)); then
+    marker_existed=1
+    echo "aphelion: The earlier image is not back on aphelion:local. Run the same sudo aphelion upgrade command again to finish the upgrade." >&2
+  fi
+  ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
 }
 
 cmd_upgrade() {
@@ -731,13 +743,11 @@ cmd_upgrade() {
   fi
   previous_image=$(docker image inspect --format '{{.Id}}' aphelion:local 2>/dev/null) || previous_image=""
   if ! "$APHELION_DEPLOY/host/get-image" "$tag"; then
-    restore_image "$previous_image"
-    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
+    rollback_upgrade "$repo" "$previous" "$previous_branch" "$marker_existed" "$previous_image" "$at_tag"
     exit 1
   fi
   if ! "$APHELION_DEPLOY/host/install"; then
-    restore_image "$previous_image"
-    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
+    rollback_upgrade "$repo" "$previous" "$previous_branch" "$marker_existed" "$previous_image" "$at_tag"
     fail "host/install failed"
   fi
   if ! systemctl restart "$service"; then
