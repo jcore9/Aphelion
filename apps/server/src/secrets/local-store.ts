@@ -196,5 +196,15 @@ export async function openLocalStore(directory: string, key: Secret) {
       const encrypted = await encrypter.encrypt(JSON.stringify(entry));
       await publish(directory, entryPath(name), encrypted, rename);
     },
+    async delete(name: string): Promise<boolean> {
+      try {
+        await unlink(entryPath(name));
+      } catch (error) {
+        if (hasCode(error, "ENOENT")) return false;
+        throw error;
+      }
+      await syncDirectory(directory);
+      return true;
+    },
   };
 }

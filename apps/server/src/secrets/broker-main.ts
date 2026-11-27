@@ -1,35 +1,21 @@
 import { closeSync, readSync } from "node:fs";
 import { chmod, lstat, readFile } from "node:fs/promises";
-import {
-  createServer,
-  type IncomingMessage,
-  type ServerResponse,
-} from "node:http";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { generateIdentity } from "age-encryption";
-import { z } from "zod";
 import { createLogger } from "../log";
+import { handleBrokerRequest } from "./broker-handler";
 import {
   LocalStoreRefusal,
   openLocalStore,
   validateBootstrapKey,
 } from "./local-store";
-import { parseSecretReference } from "./reference";
 import { Secret } from "./secret";
 
 const brokerUid = 10003;
 const socketDirectory = "/run/aphelion-secrets";
 const storeDirectory = "/var/lib/aphelion-secrets";
-const maxRequestBytes = 64 * 1024;
 const maxKeyBytes = 1024;
-const requestSchema = z.discriminatedUnion("op", [
-  z.strictObject({ op: z.literal("read"), ref: z.string() }),
-  z.strictObject({
-    op: z.literal("write"),
-    ref: z.string(),
-    value: z.string(),
-  }),
-]);
 
 class BrokerRefusal extends Error {
   override name = "BrokerRefusal";
@@ -47,71 +33,6 @@ class BrokerRefusal extends Error {
 const logger = createLogger({
   write: (line) => process.stderr.write(`${line}\n`),
 });
-
-async function handleRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-  store: Awaited<ReturnType<typeof openLocalStore>>,
-): Promise<void> {
-  response.setHeader("Connection", "close");
-  response.setHeader("Cache-Control", "no-store");
-  if (request.method !== "POST" || request.url !== "/v1/local") {
-    response.writeHead(404).end();
-    return;
-  }
-
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of request) {
-    if (!Buffer.isBuffer(chunk)) throw new Error("Unexpected request encoding");
-    bytes += chunk.length;
-    if (bytes > maxRequestBytes) {
-      request.destroy();
-      return;
-    }
-    chunks.push(chunk);
-  }
-
-  let input: unknown;
-  try {
-    input = JSON.parse(
-      new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)),
-    );
-  } catch {
-    response.writeHead(400).end();
-    return;
-  }
-  const parsed = requestSchema.safeParse(input);
-  const ref = parsed.success && parseSecretReference(parsed.data.ref);
-  if (!parsed.success || !ref || !ref.ok || ref.reference.scheme !== "local") {
-    response.writeHead(400).end();
-    return;
-  }
-
-  if (parsed.data.op === "write") {
-    const secret = Secret.make(parsed.data.value);
-    try {
-      await store.write(ref.reference.path, secret);
-    } finally {
-      secret.wipe();
-    }
-    response.writeHead(204).end();
-    return;
-  }
-
-  const secret = await store.read(ref.reference.path);
-  if (!secret) {
-    response.writeHead(404).end();
-    return;
-  }
-  try {
-    response
-      .writeHead(200, { "Content-Type": "application/json" })
-      .end(JSON.stringify(secret.reveal()));
-  } finally {
-    secret.wipe();
-  }
-}
 
 function readBootstrapKey(): Secret {
   const buffer = Buffer.alloc(maxKeyBytes + 1);
@@ -180,7 +101,7 @@ async function run(args: readonly string[]): Promise<void> {
   const server = createServer(
     { requestTimeout: 5_000, headersTimeout: 5_000 },
     (request, response) => {
-      void handleRequest(request, response, store).catch(() => {
+      void handleBrokerRequest(request, response, store).catch(() => {
         logger.error("Secrets broker request failed");
         if (response.headersSent) response.destroy();
         else response.writeHead(500).end();
