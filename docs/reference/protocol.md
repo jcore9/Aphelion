@@ -18,7 +18,7 @@ The server and every client, such as the web app or the desktop app, talk over o
 
 Every frame is a JSON object with `v: 1` and a `type`. A frame with any other `v`, or with a field the frame type doesn't define, is rejected.
 
-A client sends `command` frames and `resume` frames. The server answers a command with a `result` frame, and it sends `event`, `resync` and `error` frames.
+A client sends `command` frames and `resume` frames. The server answers a command with a `result` frame, and it sends `event`, `resync`, `live` and `error` frames.
 
 To add a command or an event, add one entry to `commands` or `events` in `registry.ts`. Give each field a `.describe()` text, because the spec shows it. The frame unions, the parsers and the types pick the entry up from there. Then regenerate the spec and the JSON Schema files:
 
@@ -60,10 +60,12 @@ The server keeps one event stream. Its id is the stream ID, a UUID that the serv
 
 A client sends `resume` with its cursor after it connects and after it reconnects. The server answers with one of these:
 
-- The events after the cursor, in order, and then every new event as the server saves it. A client that is up to date gets no replay. A client can send `resume` again on the same connection. The server then stops the earlier replay and starts over from the new cursor.
+- The events after the cursor, in order, then one `live` frame, and then every new event as the server saves it. A client that is up to date gets only the `live` frame. A client can send `resume` again on the same connection. The server then stops the earlier replay and starts over from the new cursor.
 - One `resync` frame with the server's current cursor, and nothing more until the client sends `resume` again. The server sends it when the cursor is `null`, names another stream, or is ahead of the server. It also sends it when the cursor is more than one behind the oldest retained event. A cursor at the position just before the oldest retained event is accepted. The server never replays part of the history.
 
 For example, when the server has events 2 and 3, a cursor at 1 gets events 2 and 3. A cursor at 0 gets `resync`. A client that has no cursor sends `resume` with `null`, takes the cursor from the `resync` frame, and sends `resume` again with it.
+
+The `live` frame says that the server has replayed everything after the cursor and is now sending events as they happen. Its cursor is the position of the last saved event the server replayed. That is the client's own cursor when it missed nothing, and a client takes it as its new cursor. The server sends it once for each `resume` it accepts, and never after a `resync`. A client that waits for it knows its `resume` took effect, so an event that arrives after `live` is not one the client could have missed. When the connection closes before `live`, the client has not caught up and sends `resume` again after it reconnects.
 
 The server subscribes to new events before it reads the saved ones, sends the saved ones in pages, and then sends the new ones that have a higher position than the last one it sent. A client with a cursor the server accepts gets every client-visible saved event after that cursor, in order, with no gap and no repeat, even when the bot writes while the replay runs. The server saves only events whose turn it started, so a client never sees an event the server refused ([how events are written](store.md#how-events-are-written)).
 

@@ -252,7 +252,7 @@ it.live(
         type: "resume",
         cursor: { stream: streamId.parse(readStreamId(server.db)), seq: 0 },
       });
-      const frames = yield* client.until(4);
+      const frames = yield* client.until(5);
       client.close();
 
       const read = answerTo(frames, "r1");
