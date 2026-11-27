@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -78,9 +85,10 @@ describe("the device token", () => {
       expect(seen).toEqual([]);
       expect(out).toEqual([]);
       expect(err[0]).toBe(
-        `aphelion: ${path} can be read by other users; run chmod 600 on it`,
+        "aphelion: the token file can be read by other users; run chmod 600 on it",
       );
       expect(err.join("\n")).not.toContain(token);
+      expect(err.join("\n")).not.toContain(path);
     },
   );
 
@@ -92,8 +100,9 @@ describe("the device token", () => {
     );
 
     expect(code).toBe(2);
-    expect(err[0]).toBe(`aphelion: ${path} doesn't hold a device token`);
+    expect(err[0]).toBe("aphelion: the token file doesn't hold a device token");
     expect(err.join("\n")).not.toContain("hunter2");
+    expect(err.join("\n")).not.toContain(path);
   });
 
   test("is refused from a file that isn't there", async () => {
@@ -104,7 +113,8 @@ describe("the device token", () => {
     );
 
     expect(code).toBe(2);
-    expect(err[0]).toBe(`aphelion: can't read ${path}`);
+    expect(err[0]).toBe("aphelion: can't read the token file");
+    expect(err.join("\n")).not.toContain(path);
   });
 
   test("is asked for when there is a terminal and no file", async () => {
@@ -132,6 +142,25 @@ describe("the device token", () => {
     expect(code).toBe(2);
     expect(err[0]).toBe("aphelion: that isn't a device token");
     expect(err.join("\n")).not.toContain("not a token");
+  });
+
+  test("ends with exit 0 and a fixed message when the prompt is abandoned", async () => {
+    const seen: string[] = [];
+
+    const { code, out, err } = await capture(
+      chatWith(
+        options(),
+        environment(
+          { isTerminal: true, promptToken: () => Promise.resolve(null) },
+          seen,
+        ),
+      ),
+    );
+
+    expect(code).toBe(0);
+    expect(seen).toEqual([]);
+    expect(out).toEqual([]);
+    expect(err).toEqual(["aphelion: no device token entered"]);
   });
 
   test("makes exit 2 with a fixed message when there is no file and no terminal", async () => {
@@ -217,6 +246,21 @@ describe("the cursor file", () => {
       stream,
       seq: 4,
     });
+  });
+
+  test("stays private when an older temporary file with looser rights is lying there", async () => {
+    const path = join(dir, "cursor");
+    await writeFile(`${path}.next`, "old", { mode: 0o644 });
+    const store = fileCursorStore(path);
+
+    store.save({ stream: stream as never, seq: 7 });
+
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect(fileCursorStore(path).load()).toEqual({ stream, seq: 7 });
+    expect(await readdir(dir).then((names) => names.sort())).toEqual([
+      "cursor",
+      "cursor.next",
+    ]);
   });
 
   test("starts empty when the file holds something else", async () => {

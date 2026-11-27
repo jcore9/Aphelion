@@ -261,7 +261,7 @@ cmd_sign_in() {
 cmd_chat() {
   local bot=$1 address image
   [[ $bot =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
-    fail "$bot isn't a bot name. A bot name is lower case letters, digits and hyphens, like chief."
+    fail "that isn't a bot name. A bot name is lower case letters, digits and hyphens, like chief."
   [[ -t 0 && -t 1 ]] ||
     fail "chat needs a terminal. Run it in a shell on the host, not through a pipe or a script."
   address=$(tailnet_address)

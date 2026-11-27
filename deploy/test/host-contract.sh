@@ -552,8 +552,14 @@ out=$(as_root_aphelion chat chief </dev/null 2>&1) || status=$?
 ! called "docker run" || fail "chat started a container without a terminal"
 status=0
 out=$(with_terminal /opt/aphelion/deploy/host/aphelion chat Chief 2>&1) || status=$?
-[[ $status == 1 && $out == *"Chief isn't a bot name"* ]] || fail "chat accepted a name that isn't a bot name ($status, $out)"
+[[ $status == 1 && $out == "aphelion: that isn't a bot name. A bot name is lower case letters, digits and hyphens, like chief." ]] ||
+  fail "chat accepted a name that isn't a bot name, or repeated it ($status, $out)"
 ! called "docker run" || fail "chat started a container for a name that isn't a bot name"
+canary=aph_dev_0123456789abcdef_secret
+status=0
+out=$(with_terminal /opt/aphelion/deploy/host/aphelion chat "$canary" 2>&1) || status=$?
+[[ $status == 1 && $out != *"$canary"* && $out != *aph_dev_* ]] || fail "chat repeated a bot name that looks like a token ($status, $out)"
+! called "docker run" || fail "chat started a container for a token in place of a bot name"
 cp /opt/aphelion/deploy/.env /opt/aphelion/deploy/.env.saved
 : >/opt/aphelion/deploy/.env
 status=0

@@ -58,6 +58,7 @@ const usageErrors: readonly (readonly string[])[] = [
   ["chat", "chief", `--token=${canary}`],
   ["chat", "chief", "--url", canary],
   ["chat", "chief", "--token-file"],
+  ["chat", "chief", "--token-file", canary],
   ["chat", "chief", "--token-file", canary, "--token-file", canary],
   ["tool", "install", canary],
   ["tool", "update", canary],

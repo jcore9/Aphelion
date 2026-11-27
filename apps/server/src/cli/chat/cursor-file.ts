@@ -1,4 +1,5 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { cursor, type Cursor } from "@aphelion/protocol";
 
 export const fileCursorStore = (path: string) => ({
@@ -17,8 +18,13 @@ export const fileCursorStore = (path: string) => ({
     }
   },
   save: (position: Cursor) => {
-    const next = `${path}.next`;
-    writeFileSync(next, JSON.stringify(position), { mode: 0o600 });
-    renameSync(next, path);
+    const next = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+    writeFileSync(next, JSON.stringify(position), { mode: 0o600, flag: "wx" });
+    try {
+      renameSync(next, path);
+    } catch (error) {
+      rmSync(next, { force: true });
+      throw error;
+    }
   },
 });

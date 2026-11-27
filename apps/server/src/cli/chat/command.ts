@@ -22,7 +22,7 @@ import { runChat, type ChatHost } from "./session";
 export interface ChatEnvironment {
   readonly host: ChatHost;
   readonly isTerminal: boolean;
-  readonly promptToken: () => Promise<string>;
+  readonly promptToken: () => Promise<string | null>;
   readonly release?: () => void;
 }
 
@@ -96,19 +96,19 @@ const tokenFromFile = (path: string) =>
   Effect.gen(function* () {
     const mode = yield* Effect.tryPromise(() => stat(path)).pipe(
       Effect.map((info) => info.mode),
-      Effect.catch(() => refuse(`can't read ${path}`)),
+      Effect.catch(() => refuse("can't read the token file")),
     );
     if ((mode & 0o077) !== 0) {
       return yield* refuse(
-        `${path} can be read by other users; run chmod 600 on it`,
+        "the token file can be read by other users; run chmod 600 on it",
       );
     }
     const text = yield* Effect.tryPromise(() => readFile(path, "utf8")).pipe(
-      Effect.catch(() => refuse(`can't read ${path}`)),
+      Effect.catch(() => refuse("can't read the token file")),
     );
     return yield* checkToken(
       text.trim(),
-      `${path} doesn't hold a device token`,
+      "the token file doesn't hold a device token",
     );
   });
 
@@ -123,7 +123,11 @@ const resolveToken = (
     );
   }
   return Effect.promise(environment.promptToken).pipe(
-    Effect.flatMap((text) => checkToken(text, "that isn't a device token")),
+    Effect.flatMap((text) =>
+      text === null
+        ? Effect.succeed(null)
+        : checkToken(text, "that isn't a device token"),
+    ),
   );
 };
 
@@ -133,6 +137,11 @@ export const chatWith = (
 ) =>
   Effect.gen(function* () {
     const token = yield* resolveToken(config.tokenFile, environment);
+    if (token === null) {
+      const io = yield* CliIo;
+      yield* io.err("aphelion: no device token entered");
+      return;
+    }
     const store =
       config.cursorFile === undefined
         ? undefined
