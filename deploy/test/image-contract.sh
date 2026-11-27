@@ -158,6 +158,23 @@ as_root bash -c 'rm /scratch/secrets/bootstrap && aphelion-secrets --new-key >/s
 key=$(as_root cat /scratch/secrets/bootstrap)
 [[ $key == AGE-SECRET-KEY-1* ]] || fail "aphelion-secrets --new-key printed no age identity"
 
+check_key() {
+  docker run --rm -i --pull never --log-driver none --network none --read-only --user aphelion-secrets \
+    --entrypoint /usr/local/bin/aphelion-secrets "$image" --check-key
+}
+shaped=AGE-SECRET-KEY-1$(printf 'Q%.0s' {1..58})
+[[ $shaped =~ ^AGE-SECRET-KEY-1[0-9A-Z]{58}$ ]] || fail "the test key doesn't have the shape the old check accepted"
+accepted=$(printf '%s\n' "$key" | check_key 2>&1) || fail "--check-key refused the key --new-key printed"
+[[ $accepted == "The bootstrap key is a valid age identity" ]] || fail "--check-key printed something else for a good key: $accepted"
+status=0
+refused=$(printf '%s\n' "$shaped" | check_key 2>&1) || status=$?
+[[ $status == 1 && $refused == *"The bootstrap key is not a valid age identity"* && $refused != *"$shaped"* ]] ||
+  fail "--check-key didn't refuse a key with a wrong checksum with a fixed message ($status, $refused)"
+status=0
+refused=$(check_key </dev/null 2>&1) || status=$?
+[[ $status == 1 && $refused == *"missing from standard input"* ]] || fail "--check-key accepted an empty standard input ($status, $refused)"
+pass "aphelion-secrets --check-key accepts the key --new-key printed, refuses a key that only has the right shape, and never prints a key"
+
 "${compose[@]}" config | "${compose[@]}" run --rm -T --user harness "$service" \
   aphelion config check --compose - >/dev/null ||
   fail "config check refused the contract Compose file"
