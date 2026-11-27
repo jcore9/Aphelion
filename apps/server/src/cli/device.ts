@@ -1,6 +1,25 @@
 import { join } from "node:path";
 import { Effect } from "effect";
-import { addDevice, listDevices, revokeDevice } from "../devices";
+import { Command, Flag } from "effect/cli";
+import { z } from "zod";
+import {
+  addDevice,
+  defaultLifetimeDays,
+  deviceId,
+  deviceName,
+  lifetimeDays,
+  listDevices,
+  revokeDevice,
+} from "../devices";
+import {
+  checkedArgument,
+  checkedFlag,
+  optionalFlag,
+  options,
+  operands,
+  stateDirFlag,
+  type Handler,
+} from "./flags";
 import { openStore, type Database } from "../store";
 import { failed } from "./failure";
 import { CliIo } from "./io";
@@ -104,3 +123,53 @@ export const deviceRevoke = (options: {
       return yield* failed;
     }),
   );
+
+const deviceLifetime = z
+  .string()
+  .regex(/^\d+$/, { error: "must be a whole number of days" })
+  .transform(Number)
+  .pipe(lifetimeDays);
+
+export const deviceAddCommand = (
+  handler: Handler<Parameters<typeof deviceAdd>[0]>,
+) =>
+  Command.make(
+    "add",
+    {
+      stateDir: stateDirFlag,
+      name: checkedArgument(operands["device add"], "device name", deviceName),
+      days: optionalFlag(
+        checkedFlag(options.days, deviceLifetime).pipe(
+          Flag.withDescription(
+            `Days until the token expires, 1 to 365 (default ${String(defaultLifetimeDays)})`,
+          ),
+        ),
+      ),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Add a device and print its token once to standard output.",
+    ),
+  );
+
+export const deviceListCommand = (
+  handler: Handler<Parameters<typeof deviceList>[0]>,
+) =>
+  Command.make("list", { stateDir: stateDirFlag }, handler).pipe(
+    Command.withDescription(
+      "List devices and whether each token is active, expired or revoked.",
+    ),
+  );
+
+export const deviceRevokeCommand = (
+  handler: Handler<Parameters<typeof deviceRevoke>[0]>,
+) =>
+  Command.make(
+    "revoke",
+    {
+      stateDir: stateDirFlag,
+      id: checkedArgument(operands["device revoke"], "device id", deviceId),
+    },
+    handler,
+  ).pipe(Command.withDescription("Stop a device's token at once."));

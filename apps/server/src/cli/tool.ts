@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
+import { Argument, Command } from "effect/cli";
+import { z } from "zod";
 import { withFilesLock } from "../plugins/updates/files-lock";
 import { UpdateRefused } from "../plugins/updates/refused";
 import {
@@ -14,6 +16,7 @@ import {
   buildFor,
   parseToolList,
   processorFor,
+  toolName,
   type Processor,
   type Tool,
   type ToolList,
@@ -21,6 +24,13 @@ import {
 } from "../tools/list";
 import { checkState, lookupLatest, type Fetcher } from "../tools/vendor-latest";
 import { failed } from "./failure";
+import {
+  checkedArgument,
+  operands,
+  stateDirFlag,
+  toolsDirFlag,
+  type Handler,
+} from "./flags";
 import { CliIo } from "./io";
 
 export const defaultToolListFile = "/usr/local/lib/aphelion/ai-tools.json";
@@ -162,7 +172,7 @@ export const toolUpdate = (
   options: {
     readonly stateDir: string;
     readonly toolsDir: string;
-    readonly name?: ToolName;
+    readonly name?: ToolName | undefined;
   },
   listFile: string,
 ) =>
@@ -263,4 +273,79 @@ export const toolCheck = (listFile: string, fetcher: Fetcher) =>
       }
       if (list.tools.length > 0 && answered === 0) return yield* failed;
     }),
+  );
+
+const toolNameText = z.string().pipe(toolName);
+
+export const toolListCommand = (
+  handler: Handler<Parameters<typeof toolList>[0]>,
+) =>
+  Command.make("list", { toolsDir: toolsDirFlag }, handler).pipe(
+    Command.withDescription(
+      "List the AI tools on Aphelion's list as a tab-separated table: name, pinned version, installed version, state (installed, update available, not installed or unavailable on this processor), and the command that checks its sign-in.",
+    ),
+  );
+
+export const toolInstallCommand = (
+  handler: Handler<Parameters<typeof toolInstall>[0]>,
+) =>
+  Command.make(
+    "install",
+    {
+      stateDir: stateDirFlag,
+      toolsDir: toolsDirFlag,
+      name: checkedArgument(
+        operands["tool install"],
+        "tool name",
+        toolNameText,
+      ),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Download the pinned build of an AI tool from the list, check it against the list's SHA-256 and size, and install it.",
+    ),
+  );
+
+export const toolUpdateCommand = (
+  handler: Handler<Parameters<typeof toolUpdate>[0]>,
+) =>
+  Command.make(
+    "update",
+    {
+      stateDir: stateDirFlag,
+      toolsDir: toolsDirFlag,
+      name: Argument.optional(
+        checkedArgument(operands["tool update"], "tool name", toolNameText),
+      ).pipe(Argument.map(Option.getOrUndefined)),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Install the version the list pins for NAME, or for every installed tool when no name is given, with the same checks as tool install. Prints one line per tool.",
+    ),
+  );
+
+export const toolCheckCommand = (handler: Handler<Record<string, never>>) =>
+  Command.make("check", {}, handler).pipe(
+    Command.withDescription(
+      "Ask each tool's vendor for its newest version and print it next to the pinned one. Downloads no program. A newer version still needs a new entry in the list.",
+    ),
+  );
+
+export const toolRemoveCommand = (
+  handler: Handler<Parameters<typeof toolRemove>[0]>,
+) =>
+  Command.make(
+    "remove",
+    {
+      stateDir: stateDirFlag,
+      toolsDir: toolsDirFlag,
+      name: checkedArgument(operands["tool remove"], "tool name", toolNameText),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Remove an installed AI tool. Its sign-in stays in the bots volume.",
+    ),
   );

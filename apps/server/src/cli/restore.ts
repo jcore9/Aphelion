@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
+import { Command } from "effect/cli";
 import { finishRestore } from "../restore";
 import { databaseFile, withStore } from "./device";
 import { failed } from "./failure";
+import { stateDirFlag, type Handler } from "./flags";
 import { CliIo } from "./io";
 
 export const restoreFinish = (options: { readonly stateDir: string }) =>
@@ -27,3 +29,12 @@ export const restoreFinish = (options: { readonly stateDir: string }) =>
     }
     yield* io.out("Enroll a device: aphelion device add NAME");
   });
+
+export const restoreFinishCommand = (
+  handler: Handler<Parameters<typeof restoreFinish>[0]>,
+) =>
+  Command.make("finish", { stateDir: stateDirFlag }, handler).pipe(
+    Command.withDescription(
+      "Run once after restoring a backup, before the server starts. Revokes every device token, switches every plugin off, and lists the commands that switch the plugins back on.",
+    ),
+  );

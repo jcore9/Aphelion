@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
+import { Command, Flag } from "effect/cli";
 import {
   checkComposePorts,
   checkServerListener,
@@ -11,6 +12,14 @@ import {
 } from "../config";
 import { checkDirs, migratedNote } from "./checks";
 import { failed } from "./failure";
+import {
+  configDirFlag,
+  optionalFlag,
+  options,
+  stateDirFlag,
+  textFlag,
+  type Handler,
+} from "./flags";
 import { CliIo } from "./io";
 
 export const stdinLabel = "compose (stdin)";
@@ -86,3 +95,26 @@ export const configCheck = (options: {
         : `Config OK. The Compose file publishes ports only on the tailnet, and server.yaml sets address ${composeListener.address} and port ${String(composeListener.port)}.`,
     );
   });
+
+export const configCheckCommand = (
+  handler: Handler<Parameters<typeof configCheck>[0]>,
+) =>
+  Command.make(
+    "check",
+    {
+      configDir: configDirFlag,
+      stateDir: stateDirFlag,
+      compose: optionalFlag(
+        textFlag(options.compose).pipe(
+          Flag.withDescription(
+            "A Compose file to check for published ports, or - to read it from standard input",
+          ),
+        ),
+      ),
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Check the config files and the modes of both folders. With --compose, also check the ports a Compose file publishes.",
+    ),
+  );

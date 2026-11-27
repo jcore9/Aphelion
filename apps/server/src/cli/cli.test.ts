@@ -11,12 +11,11 @@ import {
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Cause, Effect, Exit, Layer } from "effect";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { readInstall } from "../plugins/approvals";
 import { openStore } from "../store";
 import { version } from "../version";
-import { cli, CliFailure, CliIo } from "./index";
+import { run } from "./testing";
 import { stdinLabel } from "./config-check";
 
 const example = join(
@@ -45,23 +44,6 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function run(argv: string[], stdin = "") {
-  const out: string[] = [];
-  const err: string[] = [];
-  const io = Layer.succeed(CliIo, {
-    out: (line) => Effect.sync(() => void out.push(line)),
-    err: (line) => Effect.sync(() => void err.push(line)),
-    stdin: Effect.succeed(stdin),
-  });
-  const exit = await Effect.runPromiseExit(cli(argv).pipe(Effect.provide(io)));
-  let code = 0;
-  if (Exit.isFailure(exit)) {
-    const error = Cause.squash(exit.cause);
-    code = error instanceof CliFailure ? error.exitCode : -1;
-  }
-  return { code, out, err };
-}
-
 const dirs = () => ["--config-dir", configDir, "--state-dir", stateDir];
 
 test("--version prints the version", async () => {
@@ -79,20 +61,31 @@ test("version.ts matches package.json", async () => {
   expect(version).toBe(pkg.version);
 });
 
-test("--help and no arguments print the commands", async () => {
+const commands = {
+  config: ["check"],
+  device: ["add", "list", "revoke"],
+  plugin: ["install", "update", "enable", "rollback", "restart", "dev"],
+  tool: ["list", "install", "remove"],
+  restore: ["finish"],
+};
+
+test("--help and no arguments list the command groups", async () => {
   for (const argv of [["--help"], []]) {
     const { code, out } = await run(argv);
     expect(code).toBe(0);
-    for (const command of [
-      "aphelion --headless",
-      "aphelion config check",
-      "aphelion device add NAME",
-      "aphelion device list",
-      "aphelion device revoke ID",
-      "aphelion restore finish",
-      "aphelion --version",
-    ]) {
-      expect(out.join("\n")).toContain(command);
+    const text = out.join("\n");
+    for (const word of ["--headless", "--version", ...Object.keys(commands)]) {
+      expect(text).toContain(word);
+    }
+  }
+});
+
+test("each group's help lists its commands", async () => {
+  for (const [group, names] of Object.entries(commands)) {
+    const { code, out } = await run([group, "--help"]);
+    expect(code).toBe(0);
+    for (const name of names) {
+      expect(out.join("\n")).toMatch(new RegExp(`^  ${name}\\s`, "m"));
     }
   }
 });

@@ -17,11 +17,10 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { Cause, Effect, Exit, Layer } from "effect";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { lockFile } from "../adapters/file-lock";
 import { filesLockFile } from "../plugins/updates/files-lock";
-import { cli, CliFailure, CliIo } from "./index";
+import { run as invoke } from "./testing";
 
 const run = promisify(execFile);
 
@@ -63,23 +62,6 @@ afterEach(async () => {
   await new Promise((resolve) => server.close(resolve));
   await rm(root, { recursive: true, force: true });
 });
-
-async function invoke(argv: string[]) {
-  const out: string[] = [];
-  const err: string[] = [];
-  const io = Layer.succeed(CliIo, {
-    out: (line) => Effect.sync(() => void out.push(line)),
-    err: (line) => Effect.sync(() => void err.push(line)),
-    stdin: Effect.succeed(""),
-  });
-  const exit = await Effect.runPromiseExit(cli(argv).pipe(Effect.provide(io)));
-  let code = 0;
-  if (Exit.isFailure(exit)) {
-    const error = Cause.squash(exit.cause);
-    code = error instanceof CliFailure ? error.exitCode : -1;
-  }
-  return { code, out, err };
-}
 
 const dirs = () => ["--state-dir", stateDir, "--tools-dir", toolsDir];
 const listArgs = () => ["tool", "list", "--tools-dir", toolsDir];

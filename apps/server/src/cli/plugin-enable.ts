@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
+import { Command } from "effect/cli";
 import { appendAudit } from "../audit";
 import {
   enableToken,
@@ -14,6 +15,13 @@ import { withFilesLock } from "../plugins/updates/files-lock";
 import { UpdateRefused } from "../plugins/updates/refused";
 import { databaseFile, withStore } from "./device";
 import { failed } from "./failure";
+import {
+  approveFlag,
+  operandArgument,
+  operands,
+  stateDirFlag,
+  type Handler,
+} from "./flags";
 import { CliIo } from "./io";
 
 const readRecord = (stateDir: string, plugin: string) =>
@@ -128,3 +136,20 @@ export const pluginEnable = (options: {
         return yield* failed;
     }
   });
+
+export const pluginEnableCommand = (
+  handler: Handler<Parameters<typeof pluginEnable>[0]>,
+) =>
+  Command.make(
+    "enable",
+    {
+      stateDir: stateDirFlag,
+      plugin: operandArgument(operands["plugin enable"]),
+      approve: approveFlag,
+    },
+    handler,
+  ).pipe(
+    Command.withDescription(
+      "Switch a plugin on after a restore. Preview what it is allowed to do, then repeat with the displayed digest.",
+    ),
+  );
