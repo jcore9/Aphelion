@@ -58,11 +58,14 @@ else
   echo "install: created the bootstrap key in $credential. Keep a recovery copy. Print it with:"
   echo "  sudo systemd-creds decrypt --name=bootstrap $credential -"
 fi
-cmp -s "$root/deploy/host/aphelion.service" "$unit" ||
+unit_changed=0
+if ! cmp -s "$root/deploy/host/aphelion.service" "$unit"; then
   install -o root -g root -m 0644 "$root/deploy/host/aphelion.service" "$unit"
+  unit_changed=1
+fi
 [[ $(readlink "$command_link" 2>/dev/null) == "$root/deploy/host/aphelion" ]] ||
   ln -sfn "$root/deploy/host/aphelion" "$command_link"
-systemctl daemon-reload
-systemctl enable aphelion.service
+((!unit_changed)) || systemctl daemon-reload
+systemctl is-enabled --quiet aphelion.service 2>/dev/null || systemctl enable aphelion.service
 echo "install: aphelion.service is installed and enabled. Start it with: sudo systemctl start aphelion"
 echo "install: $command_link is the aphelion command. Try: sudo aphelion status"
