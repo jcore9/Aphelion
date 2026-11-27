@@ -7,6 +7,7 @@ readonly APHELION_BACKUP_DIR=${APHELION_BACKUP_DIR:-/var/backups/aphelion}
 readonly host_dir=$(dirname "$(realpath -e -- "$0")")
 readonly service=aphelion
 readonly github_repo=jcore9/Aphelion
+readonly repository_url=https://github.com/$github_repo.git
 readonly volumes=(config state bots secrets plugin-data plugin-files)
 readonly archive_name=aphelion-data.tar.gz
 readonly plugins_dir=/opt/aphelion/plugins
@@ -153,12 +154,13 @@ check_credential() {
 }
 
 check_firewall() {
-  local output first
+  local output first detail
   if output=$(env "APHELION_DEPLOY=$APHELION_DEPLOY" "$host_dir/network-check" 2>&1); then
     return 0
   fi
   first=$(sed -n 's/^FAIL  //p' <<<"$output" | head -n 1)
-  echo "${first:-$output}"
+  detail=${first:-$output}
+  echo "${detail%.}. Run sudo aphelion network-check for the full list."
   return 1
 }
 
@@ -238,7 +240,7 @@ cmd_check() {
   tally "config check accepts the Compose file" check_config
   tally "the container is hardened" check_hardening
   tally "the bootstrap credential exists" check_credential
-  tally "the firewall chains exist" check_firewall
+  tally "the firewall rules are in place" check_firewall
   if [[ $(uname -m) == x86_64 ]]; then
     tally "the processor has sse4_2" check_cpu
   fi
@@ -570,7 +572,7 @@ latest_release_tag() {
 }
 
 wait_for_health() {
-  local deadline=$((SECONDS + ${APHELION_HEALTH_WAIT:-30}))
+  local deadline=$((SECONDS + ${APHELION_HEALTH_WAIT:-300}))
   until health_answers; do
     ((SECONDS < deadline)) || return 0
     sleep 1
@@ -580,17 +582,38 @@ wait_for_health() {
 restore_checkout() {
   local repo=$1 previous=$2 previous_branch=$3
   if [[ -n $previous_branch ]]; then
-    git -C "$repo" switch --quiet -- "${previous_branch#refs/heads/}" ||
+    if git -C "$repo" switch --quiet -- "${previous_branch#refs/heads/}"; then
+      echo "aphelion: moved $repo back to $previous, where it was before" >&2
+    else
       echo "aphelion: couldn't put $repo back on ${previous_branch#refs/heads/}" >&2
+    fi
   else
-    git -C "$repo" -c advice.detachedHead=false checkout --quiet --detach "$previous" ||
+    if git -C "$repo" -c advice.detachedHead=false checkout --quiet --detach "$previous"; then
+      echo "aphelion: moved $repo back to $previous, where it was before" >&2
+    else
       echo "aphelion: couldn't put $repo back on $previous" >&2
+    fi
   fi
-  echo "aphelion: moved $repo back to $previous, where it was before" >&2
+}
+
+restore_image() {
+  local previous_image=$1 current_image
+  current_image=$(docker image inspect --format '{{.Id}}' aphelion:local 2>/dev/null) || current_image=""
+  if [[ -n $previous_image ]]; then
+    if [[ $current_image != "$previous_image" ]]; then
+      if ! docker tag "$previous_image" aphelion:local >/dev/null 2>&1; then
+        echo "aphelion: couldn't put aphelion:local back on $previous_image" >&2
+      fi
+    fi
+  elif [[ -n $current_image ]]; then
+    if ! docker image rm aphelion:local >/dev/null 2>&1; then
+      echo "aphelion: couldn't remove the new aphelion:local tag" >&2
+    fi
+  fi
 }
 
 cmd_upgrade() {
-  local repo offender dirty previous previous_branch before tag tag_commit at_tag=0 moved=0 after
+  local repo offender origin dirty previous previous_branch before before_tag tag tag_commit at_tag=0 previous_image="" after
   repo=$APHELION_DEPLOY
   while [[ $repo == */ && $repo != / ]]; do repo=${repo%/}; done
   repo=$(dirname -- "$repo")
@@ -602,6 +625,9 @@ cmd_upgrade() {
     fail "couldn't read the files in $repo"
   [[ -z $offender ]] ||
     fail "$offender must be owned by root and writable only by root"
+  origin=$(git -C "$repo" remote get-url origin 2>/dev/null) || origin=""
+  [[ $origin == "$repository_url" ]] ||
+    fail "$repo isn't a clone of $repository_url (its origin is ${origin:-unknown})"
   dirty=$(git --no-optional-locks -C "$repo" status --porcelain) ||
     fail "couldn't check $repo for local changes"
   [[ -z $dirty ]] ||
@@ -609,8 +635,13 @@ cmd_upgrade() {
   previous=$(git -C "$repo" rev-parse HEAD) ||
     fail "couldn't read the commit that $repo is on"
   previous_branch=$(git -C "$repo" symbolic-ref -q HEAD) || previous_branch=""
-  before=$(git -C "$repo" describe --tags --exact-match 2>/dev/null || git -C "$repo" rev-parse --short HEAD) ||
-    fail "couldn't read the current version in $repo"
+  before_tag=$(git -C "$repo" describe --tags --exact-match 2>/dev/null) || before_tag=""
+  if [[ -n $before_tag ]]; then
+    before=$before_tag
+  else
+    before=$(git -C "$repo" rev-parse --short HEAD) ||
+      fail "couldn't read the current version in $repo"
+  fi
   if [[ -n ${1:-} ]]; then
     tag=$1
   else
@@ -630,31 +661,48 @@ cmd_upgrade() {
       at_tag=1
     fi
   fi
-  if ((!at_tag)); then
-    git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" ||
-      fail "git checkout $tag failed"
-    moved=1
+  if ((at_tag)); then
+    echo "Aphelion is already at $tag."
+    return 0
   fi
+  git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" ||
+    fail "git checkout $tag failed"
   if [[ ! -x $APHELION_DEPLOY/host/get-image ]]; then
-    ((!moved)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    restore_checkout "$repo" "$previous" "$previous_branch"
     fail "$tag has no $APHELION_DEPLOY/host/get-image"
   fi
+  previous_image=$(docker image inspect --format '{{.Id}}' aphelion:local 2>/dev/null) || previous_image=""
   if ! "$APHELION_DEPLOY/host/get-image" "$tag"; then
-    ((!moved)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    restore_image "$previous_image"
+    restore_checkout "$repo" "$previous" "$previous_branch"
     exit 1
   fi
   if ! "$APHELION_DEPLOY/host/install"; then
-    ((!moved)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    restore_image "$previous_image"
+    restore_checkout "$repo" "$previous" "$previous_branch"
     fail "host/install failed"
   fi
-  systemctl restart "$service" || fail "restarting $service failed"
+  if ! systemctl restart "$service"; then
+    echo "aphelion: restarting $service failed" >&2
+    echo "Read why with: sudo aphelion logs --lines 50" >&2
+    if [[ -n $before_tag && $before_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && $before_tag != *..* ]]; then
+      echo "To go back: sudo aphelion upgrade $before_tag" >&2
+    fi
+    exit 1
+  fi
   after=$(git -C "$repo" describe --tags --exact-match 2>/dev/null || echo "$tag")
   echo "Upgraded Aphelion from $before to $after."
   wait_for_health
   if [[ -x $APHELION_DEPLOY/host/aphelion ]]; then
-    env "APHELION_DEPLOY=$APHELION_DEPLOY" "$APHELION_DEPLOY/host/aphelion" check
+    env "APHELION_DEPLOY=$APHELION_DEPLOY" "$APHELION_DEPLOY/host/aphelion" check || {
+      echo "aphelion: The upgrade finished, but aphelion check failed." >&2
+      exit 1
+    }
   else
-    cmd_check
+    cmd_check || {
+      echo "aphelion: The upgrade finished, but aphelion check failed." >&2
+      exit 1
+    }
   fi
 }
 
