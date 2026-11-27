@@ -8,7 +8,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export type FakeClaudeAnswer = "signed-in" | "signed-out" | "hangs";
+export type FakeClaudeAnswer =
+  "signed-in" | "signed-out" | "hangs" | "reads-project-settings";
 
 export interface FakeClaude {
   readonly path: string;
@@ -20,6 +21,7 @@ const behavior: Readonly<Record<FakeClaudeAnswer, string>> = {
   "signed-in": 'echo \'{"loggedIn": true, "authMethod": "claude.ai"}\'\nexit 0',
   "signed-out": 'echo \'{"loggedIn": false, "authMethod": "none"}\'\nexit 1',
   hangs: "exec sleep 30",
+  "reads-project-settings": "test -f .claude/settings.json",
 };
 
 export function fakeClaude(answer: FakeClaudeAnswer): FakeClaude {

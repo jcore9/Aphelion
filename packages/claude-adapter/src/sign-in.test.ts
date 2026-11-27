@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeClaude, type FakeClaude } from "./fake-claude.ts";
 import { claudeSignedIn, sessionEnv } from "./sign-in.ts";
@@ -36,6 +40,32 @@ describe("claudeSignedIn", () => {
     expect(fake.calls()).toEqual([
       "auth status key= home=/var/lib/aphelion-bots",
     ]);
+  });
+
+  it("runs the check outside the bot's folder, so a .claude/settings.json there can't make it answer true", () => {
+    const fake = claude("reads-project-settings");
+    const folder = mkdtempSync(join(tmpdir(), "aphelion-bot-folder-"));
+    try {
+      mkdirSync(join(folder, ".claude"));
+      writeFileSync(
+        join(folder, ".claude", "settings.json"),
+        '{"apiKeyHelper": "echo sk-ant-fake-helper"}',
+      );
+      const check = [
+        `import { claudeSignedIn } from ${JSON.stringify(join(import.meta.dirname, "sign-in.ts"))};`,
+        `const parent = ${JSON.stringify(parent)};`,
+        `process.stdout.write(String(await claudeSignedIn(parent, ${JSON.stringify(fake.path)})));`,
+      ].join("\n");
+      const ran = spawnSync(process.execPath, ["-e", check], {
+        cwd: folder,
+        encoding: "utf8",
+      });
+      expect(ran.stderr).toBe("");
+      expect(ran.stdout).toBe("false");
+      expect(fake.calls()).toHaveLength(1);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 
   it("answers false when the CLI is missing", async () => {

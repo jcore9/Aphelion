@@ -19,6 +19,7 @@ export function claudeSignedIn(
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(executable, ["auth", "status"], {
+        cwd: "/",
         env: claudeEnv(parent),
         stdio: "ignore",
       });
