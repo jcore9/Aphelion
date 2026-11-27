@@ -6,6 +6,7 @@ import {
   type AdapterEvent,
   type Decider,
   type PermissionRequest,
+  type TurnDecision,
 } from "@aphelion/plugin-sdk";
 import {
   checkStream,
@@ -815,15 +816,22 @@ describe("when the session has more than the adapter gave it", () => {
       [sdk.init(), {}],
       [sdk.init({ tools: ["mcp__example__tool"] }), blocked],
     ] as const) {
+      const gate = held();
       const { adapter, scripted } = allowingAdapter([
-        [{ send: init }, { send: sdk.result() }],
+        [gate.step, { send: init }, { send: sdk.result() }],
       ]);
       const harness = startAdapter(adapter);
       await harness.initialize();
-      const early = askHook(hookOf(scripted.runs[0]?.options));
-      await harness.startTurn("t1", "hi");
-      await untilTurnEnd(harness, "t1");
+      const hook = hookOf(scripted.runs[0]?.options);
 
+      expect(await askHook(hook)).toEqual(blocked);
+      await harness.startTurn("t1", "hi");
+      await gate.reached;
+      const early = askHook(hook);
+
+      expect(await pending(early)).toBe(true);
+      gate.release();
+      await untilTurnEnd(harness, "t1");
       expect(await early).toEqual(answer);
       await harness.shutdown();
     }
@@ -1034,6 +1042,134 @@ describe("when the session has more than the adapter gave it", () => {
       expect(await pending(early)).toBe(true);
       gate.release();
       expect(await early).toEqual(blocked);
+      await untilTurnEnd(harness, "t1");
+      await harness.shutdown();
+    });
+
+    it("blocks the hook between turns", async () => {
+      const { adapter, scripted } = allowingAdapter([
+        [{ send: sdk.init() }, { send: sdk.result() }],
+      ]);
+      const harness = startAdapter(adapter, { decider: allow });
+      await harness.initialize();
+      await harness.startTurn("t1", "hi");
+      await untilTurnEnd(harness, "t1");
+      const options = scripted.runs[0]?.options;
+
+      expect(options?.abortController?.signal.aborted).toBe(false);
+      expect(await askHook(hookOf(options))).toEqual(blocked);
+      await harness.shutdown();
+    });
+
+    it("blocks the hook once shutdown starts, while the CLI is still stopping", async () => {
+      const { adapter, scripted } = allowingAdapter([
+        [{ send: sdk.init() }, { hang: true }],
+      ]);
+      const harness = startAdapter(adapter, { decider: allow });
+      await harness.initialize();
+      await harness.startTurn("t1", "hi");
+      await harness.untilEvent(({ event }) => event.type === "session");
+      const options = scripted.runs[0]?.options;
+      const closing = harness.shutdown();
+
+      expect(await pending(closing)).toBe(true);
+      expect(options?.abortController?.signal.aborted).toBe(false);
+      expect(await askHook(hookOf(options))).toEqual(blocked);
+      await closing;
+    });
+
+    it("denies a call left waiting when its turn ended without an init, even after the next turn's init", async () => {
+      const first = held();
+      const second = held();
+      const { adapter, scripted } = allowingAdapter([
+        [first.step, { send: sdk.result() }],
+        [{ send: sdk.init() }, second.step, { send: sdk.result() }],
+      ]);
+      const harness = startAdapter(adapter, { decider: allow });
+      await harness.initialize();
+      await harness.startTurn("t1", "one");
+      await first.reached;
+      const options = scripted.runs[0]?.options;
+      const fromHook = askHook(hookOf(options));
+      const fromCanUseTool = askCanUseTool(options);
+
+      expect(await pending(fromHook)).toBe(true);
+      first.release();
+      await untilTurnEnd(harness, "t1");
+      await harness.startTurn("t2", "two");
+      await second.reached;
+
+      expect(await settlesWithin(fromHook, 1000)).toBe(true);
+      expect(await settlesWithin(fromCanUseTool, 1000)).toBe(true);
+      expect(await fromHook).toEqual(blocked);
+      expect(await fromCanUseTool).toEqual(denied);
+      second.release();
+      await untilTurnEnd(harness, "t2");
+      await harness.shutdown();
+    });
+
+    it("denies canUseTool when its turn ends while the rule is answering", async () => {
+      const first = held();
+      const second = held();
+      const { adapter, scripted } = allowingAdapter([
+        [{ send: sdk.init() }, first.step, { send: sdk.result() }],
+        [{ send: sdk.init() }, second.step, { send: sdk.result() }],
+      ]);
+      const session = await adapter.open({
+        bot: { id: "bot-1" },
+        folder: "/work",
+        resume: null,
+        log: () => undefined,
+      });
+      const answer = Promise.withResolvers<TurnDecision>();
+      const drain = async (id: string, decide: () => Promise<TurnDecision>) => {
+        const events: AdapterEvent[] = [];
+        for await (const event of session.turn(
+          { turn: turnId.parse(id), text: id, decide },
+          new AbortController().signal,
+        )) {
+          events.push(event);
+        }
+        return events;
+      };
+      const one = drain("t1", () => answer.promise);
+      await first.reached;
+      const late = askCanUseTool(scripted.runs[0]?.options);
+
+      expect(await pending(late)).toBe(true);
+      first.release();
+      await one;
+      const two = drain("t2", () => answer.promise);
+      await second.reached;
+      answer.resolve({
+        decision: "allow",
+        by: "rule",
+        reason: "inside-folder",
+        announced: true,
+      });
+
+      expect(await late).toEqual(denied);
+      second.release();
+      await two;
+      await session.close?.();
+    });
+
+    it("denies a call whose signal had already aborted", async () => {
+      const gate = held();
+      const { adapter, scripted } = allowingAdapter([
+        [{ send: sdk.init() }, gate.step, { send: sdk.result() }],
+      ]);
+      const harness = startAdapter(adapter, { decider: allow });
+      await harness.initialize();
+      await harness.startTurn("t1", "hi");
+      await gate.reached;
+      const options = scripted.runs[0]?.options;
+      const signal = AbortSignal.abort();
+
+      expect(await askHook(hookOf(options), { signal })).toEqual(blocked);
+      expect(await askCanUseTool(options, { signal })).toEqual(denied);
+      expect(await askHook(hookOf(options))).toEqual({});
+      gate.release();
       await untilTurnEnd(harness, "t1");
       await harness.shutdown();
     });

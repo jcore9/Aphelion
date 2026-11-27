@@ -24,6 +24,7 @@ import {
   unchecked,
   untilTrusted,
   type Trust,
+  type TurnTrust,
 } from "./hook.ts";
 import {
   parseMessage,
@@ -87,6 +88,7 @@ interface ActiveTurn {
   readonly input: TurnInput;
   readonly signal: AbortSignal;
   readonly live: Live;
+  readonly trust: TurnTrust;
   readonly inbox: Channel<Item>;
   readonly denied: Set<string>;
   errorSent: boolean;
@@ -212,8 +214,10 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
             if (!givenTools.has(tool) || mcpServer !== undefined) {
               return refusal;
             }
-            const { trust } = turn.live;
-            if (!(await trust.until(signal))) return refusal;
+            const { trust } = turn;
+            if (!(await trust.until(signal)) || active !== turn) {
+              return refusal;
+            }
             const request = permissionRequestFor({
               tool,
               input,
@@ -225,7 +229,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               turn.input.decide(request),
               signal,
             );
-            if (trust.revoked) return refusal;
+            if (!trust.held || active !== turn) return refusal;
             if (decision?.decision === "allow") return { behavior: "allow" };
             if (decision?.announced) {
               turn.denied.add(toolUseID);
@@ -250,7 +254,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               `the session reported ${String(message.skills)} skills`,
             );
           }
-          if (active?.live === owner) owner.trust.grant();
+          if (active?.live === owner) active.trust.grant();
         }
         return true;
       };
@@ -430,11 +434,11 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           input,
           signal,
           live: owner,
+          trust: owner.trust.begin(),
           inbox: channel(),
           denied: new Set(),
           errorSent: false,
         };
-        owner.trust.reset();
         active = turn;
         const cancel = whenAborted(signal, "cancel" as const);
         let deadline: Wait<"deadline"> | undefined;
@@ -490,6 +494,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         } finally {
           cancel.stop();
           deadline?.stop();
+          turn.trust.end();
           if (active === turn) active = undefined;
         }
       }
@@ -499,6 +504,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         const owner = live;
         live = undefined;
         if (!owner) return;
+        owner.trust.revoke();
         owner.prompts.end();
         if (!(await settlesWithin(owner.done, closeWaitMs))) {
           owner.abort.abort();

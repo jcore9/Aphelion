@@ -46,48 +46,73 @@ export function preToolUseHook(rule: Decider, folder: string): HookCallback {
   };
 }
 
-export interface Trust {
-  readonly revoked: boolean;
-  reset(): void;
+export interface TurnTrust {
+  readonly held: boolean;
   grant(): void;
-  revoke(): void;
+  end(): void;
   until(signal: AbortSignal): Promise<boolean>;
+}
+
+export interface Trust {
+  readonly current: TurnTrust;
+  begin(): TurnTrust;
+  revoke(): void;
+}
+
+function turnTrust(): TurnTrust {
+  let state: "waiting" | "granted" | "ended" = "waiting";
+  const check = Promise.withResolvers<boolean>();
+  return {
+    get held() {
+      return state === "granted";
+    },
+    grant() {
+      if (state !== "waiting") return;
+      state = "granted";
+      check.resolve(true);
+    },
+    end() {
+      state = "ended";
+      check.resolve(false);
+    },
+    async until(signal) {
+      if (state === "ended" || signal.aborted) return false;
+      const trusted = await unlessAborted(check.promise, signal);
+      return trusted === true && state === "granted";
+    },
+  };
+}
+
+function endedTurn(): TurnTrust {
+  const turn = turnTrust();
+  turn.end();
+  return turn;
 }
 
 export function unchecked(): Trust {
   let revoked = false;
-  let granted = false;
-  let check = Promise.withResolvers<boolean>();
+  let current = endedTurn();
   return {
-    get revoked() {
-      return revoked;
+    get current() {
+      return current;
     },
-    reset() {
-      if (!granted || revoked) return;
-      granted = false;
-      check = Promise.withResolvers<boolean>();
-    },
-    grant() {
-      if (revoked) return;
-      granted = true;
-      check.resolve(true);
+    begin() {
+      current.end();
+      current = revoked ? endedTurn() : turnTrust();
+      return current;
     },
     revoke() {
       revoked = true;
-      check.resolve(false);
-    },
-    async until(signal) {
-      if (revoked) return false;
-      const trusted = await unlessAborted(check.promise, signal);
-      return trusted === true && !revoked;
+      current.end();
     },
   };
 }
 
 export function untilTrusted(trust: Trust, hook: HookCallback): HookCallback {
   return async (input, toolUseID, options) => {
-    if (!(await trust.until(options.signal))) return blocked;
+    const turn = trust.current;
+    if (!(await turn.until(options.signal))) return blocked;
     const answer = await hook(input, toolUseID, options);
-    return trust.revoked ? blocked : answer;
+    return turn.held ? answer : blocked;
   };
 }
