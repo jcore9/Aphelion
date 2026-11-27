@@ -126,7 +126,17 @@ cd /opt/aphelion/deploy
 sudo docker compose exec -T --user harness aphelion aphelion device add laptop
 ```
 
-`sign-in`, `chat`, `backup`, `restore` and `plugin` run Docker for you too. [Back up](#back-up), [Restore on the new host](#restore-on-the-new-host), [Install a plugin](#install-a-plugin) and [Install an AI tool](#install-an-ai-tool) show the Docker commands under each one.
+`chat` starts a short-lived container from the service's image on the host's network, as the `harness` user, with no mounts and all capabilities dropped. It needs a terminal, and the token is typed at its prompt:
+
+```sh
+sudo docker run --rm -it --pull never --network host --entrypoint "" --user harness \
+  --cap-drop ALL --security-opt no-new-privileges:true IMAGE \
+  aphelion chat chief --url ws://ADDRESS:7400/ws
+```
+
+`IMAGE` is the first line of `docker compose config --images`, and `ADDRESS` is `APHELION_TAILNET_ADDRESS` in `.env`. [The test client guide](test-client.md) shows a session.
+
+`sign-in`, `backup`, `restore` and `plugin` run Docker for you too. [Back up](#back-up), [Restore on the new host](#restore-on-the-new-host), [Install a plugin](#install-a-plugin) and [Install an AI tool](#install-an-ai-tool) show the Docker commands under each one.
 
 `status` and `check` ask `systemctl`, `docker compose ps`, `docker inspect`, `curl` and `iptables` read-only questions. [The host command](../reference/host-command.md) lists each one.
 

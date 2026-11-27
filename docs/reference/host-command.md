@@ -40,7 +40,7 @@ Run any other command without root, and it prints `Run it with sudo: sudo apheli
 | 1 | `status` found the service or `/health` down. `check` found a failed check. |
 | 2 | The command was misused, or it wasn't run as root. |
 
-A `device`, `tool` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `sign-in` exits with the code of the tool's own sign-in. `sign-in`, `backup` and `restore` exit with 1 when they refuse or a step fails. `plugin install` exits with 1 when it refuses.
+A `device`, `tool` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `sign-in` exits with the code of the tool's own sign-in. `chat` exits with the code of [`aphelion chat`](cli.md#aphelion-chat-bot): 0 when you leave, 1 when the server refuses the token, and 2 when the client is misused. `sign-in`, `chat`, `backup` and `restore` exit with 1 when they refuse or a step fails, and `chat` refuses without a terminal, with a name that isn't a bot name, or without `APHELION_TAILNET_ADDRESS`. `plugin install` exits with 1 when it refuses.
 
 ## `status`
 
@@ -148,5 +148,6 @@ Compose's own `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` pass through to every ca
 | `plugin install FOLDER` | `docker compose cp FOLDER aphelion:/opt/aphelion/plugins/NAME`, then `docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/NAME …` |
 | `plugin …` (other) | `docker compose exec -T --user harness aphelion aphelion plugin …`, with output and exit code passed through |
 | `sign-in NAME` | `docker compose exec --user aphelion-bot aphelion <the tool's sign-in command>`, attached to your terminal |
+| `chat BOT` | `docker run --rm -it --pull never --network host --entrypoint "" --user harness --cap-drop ALL --security-opt no-new-privileges:true IMAGE aphelion chat BOT --url ws://ADDRESS:7400/ws`, with the image from `docker compose config --images` and `ADDRESS` from `APHELION_TAILNET_ADDRESS`. It mounts nothing, and the token is typed at the prompt, so it never shows in the command line. |
 | `backup`, `restore` | `systemctl`, `docker compose config --images`, `docker volume`, and `docker run` for the packing, the unpacking and `aphelion restore finish`. [Back up](../guides/install.md#back-up) and [Restore on the new host](../guides/install.md#restore-on-the-new-host) list them. |
 | `status`, `check` | `systemctl`, `curl`, `iptables -t mangle -S`, `docker compose ps`, `docker inspect`, and for each installed tool `docker compose exec -T --user aphelion-bot aphelion <status command>` |
