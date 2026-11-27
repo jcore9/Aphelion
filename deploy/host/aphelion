@@ -586,9 +586,25 @@ latest_release_tag() {
   echo "$tag"
 }
 
+upgrade_marker=aphelion-upgrade-pending
+
+describe_wait() {
+  local seconds=$1
+  if ((seconds == 1)); then
+    echo "1 second"
+  elif ((seconds == 60)); then
+    echo "1 minute"
+  elif ((seconds > 0 && seconds % 60 == 0)); then
+    echo "$((seconds / 60)) minutes"
+  else
+    echo "$seconds seconds"
+  fi
+}
+
 wait_for_health() {
-  local deadline=$((SECONDS + ${APHELION_HEALTH_WAIT:-300}))
-  echo "Waiting up to 5 minutes for the server to answer..."
+  local limit=${APHELION_HEALTH_WAIT:-300}
+  local deadline=$((SECONDS + limit))
+  echo "Waiting up to $(describe_wait "$limit") for the server to answer..."
   until health_answers; do
     ((SECONDS < deadline)) || return 0
     sleep 1
@@ -600,12 +616,14 @@ restore_checkout() {
   if [[ -n $previous_branch ]]; then
     if git -C "$repo" switch --quiet -- "${previous_branch#refs/heads/}"; then
       echo "aphelion: moved $repo back to $previous, where it was before" >&2
+      rm -f "$repo/.git/$upgrade_marker"
     else
       echo "aphelion: couldn't put $repo back on ${previous_branch#refs/heads/}" >&2
     fi
   else
     if git -C "$repo" -c advice.detachedHead=false checkout --quiet --detach "$previous"; then
       echo "aphelion: moved $repo back to $previous, where it was before" >&2
+      rm -f "$repo/.git/$upgrade_marker"
     else
       echo "aphelion: couldn't put $repo back on $previous" >&2
     fi
@@ -629,7 +647,7 @@ restore_image() {
 }
 
 cmd_upgrade() {
-  local repo offender origin dirty previous previous_branch before before_tag tag tag_commit at_tag=0 previous_image="" after
+  local pending repo offender origin dirty previous previous_branch before before_tag tag tag_commit at_tag=0 previous_image="" after
   repo=$APHELION_DEPLOY
   while [[ $repo == */ && $repo != / ]]; do repo=${repo%/}; done
   repo=$(dirname -- "$repo")
@@ -677,13 +695,22 @@ cmd_upgrade() {
       at_tag=1
     fi
   fi
-  if ((at_tag)) && service_is_up && health_answers; then
+  if [[ -e $repo/.git/$upgrade_marker ]]; then
+    pending=$(<"$repo/.git/$upgrade_marker") || pending=""
+    if [[ $pending != "$tag" ]]; then
+      fail "An earlier upgrade to ${pending:-another release} didn't finish. Finish it first: sudo aphelion upgrade ${pending:-TAG}"
+    fi
+  elif ((at_tag)) && service_is_up && health_answers; then
     echo "Aphelion is already at $tag."
     return 0
   fi
+  echo "$tag" >"$repo/.git/$upgrade_marker" ||
+    fail "couldn't write $repo/.git/$upgrade_marker"
   if ((!at_tag)); then
-    git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" ||
+    git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" || {
+      rm -f "$repo/.git/$upgrade_marker"
       fail "git checkout $tag failed"
+    }
   fi
   if [[ ! -x $APHELION_DEPLOY/host/get-image ]]; then
     ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
@@ -726,6 +753,7 @@ cmd_upgrade() {
       exit 1
     }
   fi
+  rm -f "$repo/.git/$upgrade_marker"
 }
 
 cmd_network_check() {
