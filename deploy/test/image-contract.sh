@@ -36,7 +36,7 @@ cleanup() {
     "${compose[@]}" logs --no-color 2>&1 | tail -n 60 >&2 || true
   fi
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
-  as_root rm -rf /scratch/secrets >/dev/null 2>&1 || true
+  as_root rm -rf /scratch/secrets /scratch/backups >/dev/null 2>&1 || true
   rm -rf "$scratch"
 }
 
