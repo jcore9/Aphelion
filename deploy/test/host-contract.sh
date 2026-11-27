@@ -336,6 +336,9 @@ case " $* " in
   *" --new-key "*)
     echo "${FAKE_NEW_KEY:-AGE-SECRET-KEY-1FAKE}"
     exit 0 ;;
+  *" compose "*" run "*)
+    [[ -z ${FAKE_NEED_CREDENTIALS:-} || -d /run/credentials/aphelion.service ]] || exit 1
+    exit 0 ;;
   *" run "*)
     mount=""
     for argument in "$@"; do
@@ -781,6 +784,7 @@ cat >"$installbin/git" <<'FAKE'
 #!/bin/bash
 echo "git $*" >>"$FAKE_CALLS"
 args=" $* "
+head_tag() { cat /opt/aphelion/.git/tag; }
 case $args in
   *" clone "*)
     target=${*: -1}
@@ -788,9 +792,21 @@ case $args in
     cp -a "$FAKE_TEMPLATE/deploy" "$target/deploy"
     mkdir "$target/.git"
     echo "${FAKE_CLONE_TAG:?}" >"$target/.git/tag" ;;
-  *" status "*) cat /opt/aphelion/.git/dirty 2>/dev/null || true ;;
-  *" describe "*) cat /opt/aphelion/.git/tag ;;
-  *" checkout "*) echo "${*: -1}" | sed 's|^tags/||' >/opt/aphelion/.git/tag ;;
+  *" remote get-url origin "*) echo "${FAKE_ORIGIN:-https://github.com/jcore9/Aphelion.git}" ;;
+  *" status "*)
+    [[ -z ${FAKE_STATUS_FAIL:-} ]] || { echo "fatal: not a git repository" >&2; exit 128; }
+    cat /opt/aphelion/.git/dirty 2>/dev/null || true ;;
+  *" fetch "*) touch "$FAKE_STATE/fetched" ;;
+  *" rev-parse HEAD "*) echo "commit-of-$(head_tag)" ;;
+  *" rev-parse "*)
+    ref=${*: -1}
+    ref=${ref#refs/tags/}
+    ref=${ref%^\{commit\}}
+    if [[ $ref == "$(head_tag)" || -e $FAKE_STATE/fetched ]]; then echo "commit-of-$ref"; else exit 128; fi ;;
+  *" checkout "*)
+    target=${*: -1}
+    target=${target#tags/}
+    echo "${target#commit-of-}" >/opt/aphelion/.git/tag ;;
 esac
 FAKE
 cat >"$installbin/curl" <<'FAKE'
@@ -815,11 +831,14 @@ cat >"$installbin/systemctl" <<'FAKE'
 echo "systemctl $*" >>"$FAKE_CALLS"
 case $1 in
   is-active) [[ -e $FAKE_STATE/active ]] ;;
+  is-enabled) [[ -e $FAKE_STATE/enabled ]] ;;
+  enable) [[ $* != *aphelion.service* ]] || touch "$FAKE_STATE/enabled" ;;
   start) touch "$FAKE_STATE/active" ;;
 esac
 FAKE
 chmod +x "$installbin"/*
 export FAKE_TEMPLATE=$installer_template
+export FAKE_NEED_CREDENTIALS=1
 export FAKE_DIGEST_LINE=ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000001
 export FAKE_CLONE_TAG=v9.9.9
 export PATH=$installbin:$PATH
@@ -831,7 +850,8 @@ fresh_host() {
   rm -rf /opt/aphelion "$FAKE_STATE"
   mkdir "$FAKE_STATE"
   rm -f "$credential" "$unit" "$link"
-  unset FAKE_PULL FAKE_PULLED FAKE_DIGEST_FILE FAKE_CHECK_KEY FAKE_TAILSCALE
+  unset FAKE_PULL FAKE_PULLED FAKE_DIGEST_FILE FAKE_CHECK_KEY FAKE_TAILSCALE FAKE_ORIGIN FAKE_STATUS_FAIL
+  rm -f /etc/ufw/ufw.conf /etc/default/ufw
   reset_calls
 }
 run_installer() {
@@ -884,6 +904,7 @@ called "docker tag $FAKE_DIGEST_LINE aphelion:local" || fail "the installer didn
 [[ $(readlink "$link") == /opt/aphelion/deploy/host/aphelion && -f $unit && -f $credential ]] ||
   fail "the installer didn't run host/install"
 called "systemctl start" && fail "--no-start started the service"
+called "systemctl daemon-reload" && called "systemctl enable aphelion.service" || fail "the installer didn't reload systemd and enable the unit"
 grep -q "sudo aphelion" /tmp/installer-out || fail "the installer didn't say what to do next"
 pass "a fresh install with --no-start installs Docker, clones the tag, writes .env, downloads and tags the image, runs host/install, and leaves the service stopped"
 
@@ -891,10 +912,17 @@ before=$(snapshot)
 reset_calls
 run_installer --tag v9.9.9 --no-start || fail "a second install failed: $(cat /tmp/installer-out)"
 [[ $(snapshot) == "$before" ]] || fail "a second install changed files: $(diff <(echo "$before") <(snapshot))"
-! grep -qE "apt-get|git (clone|fetch|checkout)|docker (pull|tag|compose.*build)|systemctl (start|restart)" "$FAKE_CALLS" ||
+! grep -qE "apt-get|git (clone|fetch|checkout)|docker (pull|tag|compose.*build)|systemctl (start|restart|daemon-reload|enable aphelion)" "$FAKE_CALLS" ||
   fail "a second install repeated a step: $(cat "$FAKE_CALLS")"
 grep -q "already" /tmp/installer-out || fail "a second install didn't say that the steps were done"
-pass "a second run changes no file, runs no install, clone, download or start, and says each step is done"
+pass "a second run changes no file, runs no install, clone, download, reload, enable or start, and says each step is done"
+
+echo ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000009 >"$FAKE_STATE/local"
+reset_calls
+run_installer --tag v9.9.9 --no-start || fail "a rerun over a stale image failed: $(cat /tmp/installer-out)"
+called "docker pull" && called "docker tag $FAKE_DIGEST_LINE aphelion:local" && [[ $(cat "$FAKE_STATE/local") == "$FAKE_DIGEST_LINE" ]] ||
+  fail "a rerun at the same tag kept a stale image: $(cat "$FAKE_CALLS")"
+pass "a rerun at the same tag replaces an image that doesn't carry the release's digest"
 
 echo "# local edit" >/opt/aphelion/.git/dirty
 status=0
@@ -953,13 +981,102 @@ reset_calls
 printf 'wrong\nsaved\n' | script -qec "bash -s -- --tag v9.9.9 </opt/aphelion/deploy/install.sh" /tmp/installer-tty >/dev/null 2>&1 || fail "the installer failed with a terminal: $(cat /tmp/installer-tty)"
 grep -q "AGE-SECRET-KEY-1FAKE" /tmp/installer-tty && called "systemctl start aphelion" ||
   fail "with a terminal the installer didn't show the key and start the service: $(cat /tmp/installer-tty)"
-ordered "docker compose --profile * config" "systemctl start aphelion" || fail "the installer started the service before the preflight"
+! called "docker compose --profile" && ! called "compose --project-directory /opt/aphelion/deploy run" ||
+  fail "the installer ran the preflight itself, which needs the credential that only the running unit has: $(cat "$FAKE_CALLS")"
 reset_calls
 before=$(snapshot)
 run_installer --tag v9.9.9 || fail "a second run of a started install failed: $(cat /tmp/installer-out)"
 [[ $(snapshot) == "$before" ]] && ! called "systemctl start" && ! grep -q "AGE-SECRET-KEY" /tmp/installer-out ||
   fail "a second run of a started install changed something or showed the key"
 pass "with a terminal the installer shows the key until you type saved, then starts the service, and a second run neither shows the key nor starts it again"
+
+fresh_host
+export FAKE_DIGEST_FILE=present
+run_installer --tag v9.9.9 --no-start || fail "a fresh install failed before the truncation test: $(cat /tmp/installer-out)"
+fresh_host
+total=$(wc -l <"$installer_template/deploy/install.sh")
+install_block=$(grep -n "apt-get install" "$installer_template/deploy/install.sh" | head -n 1 | cut -d: -f1)
+for lines in 20 "$((total / 2))" "$((install_block + 1))" "$((total - 1))"; do
+  status=0
+  head -n "$lines" "$installer_template/deploy/install.sh" | bash -s -- --tag v9.9.9 >/tmp/installer-out 2>&1 || status=$?
+  [[ ! -s $FAKE_CALLS && ! -e /opt/aphelion && ! -e $unit && ! -e $credential ]] ||
+    fail "a script cut after $lines lines changed the host: $(cat "$FAKE_CALLS")"
+done
+pass "a download cut short runs nothing"
+
+fresh_host
+mkdir -p /etc/ufw
+printf 'ENABLED=yes\n' >/etc/ufw/ufw.conf
+printf 'MANAGE_BUILTINS=yes\n' >/etc/default/ufw
+for flags in "" "--no-start"; do
+  status=0
+  # shellcheck disable=SC2086
+  run_installer --tag v9.9.9 $flags || status=$?
+  [[ $status == 1 ]] && grep -q "MANAGE_BUILTINS=no" /tmp/installer-out && [[ ! -s $FAKE_CALLS && ! -e /opt/aphelion ]] ||
+    fail "the installer went on with ufw enabled and MANAGE_BUILTINS=yes ($status, '$flags'): $(cat /tmp/installer-out)"
+done
+printf 'MANAGE_BUILTINS=no\n' >/etc/default/ufw
+run_installer --tag v9.9.9 --no-start || fail "the installer refused MANAGE_BUILTINS=no: $(cat /tmp/installer-out)"
+pass "the installer reads ufw before it changes anything, with or without --no-start, and refuses enabled ufw with MANAGE_BUILTINS=yes"
+
+fresh_host
+export FAKE_DIGEST_FILE=present
+run_installer --tag v9.9.9 --no-start || fail "a fresh install failed before the checkout tests: $(cat /tmp/installer-out)"
+refuses_checkout() {
+  local message=$1 status=0 before
+  before=$(snapshot)
+  reset_calls
+  run_installer --tag v9.9.9 --no-start || status=$?
+  [[ $status == 1 ]] && grep -q "$message" /tmp/installer-out && ! called "git -C /opt/aphelion fetch" && ! called "git -C /opt/aphelion checkout" &&
+    ! called "docker" && ! called "apt-get" && [[ $(snapshot) == "$before" ]] ||
+    fail "the installer used a checkout it shouldn't ($message, $status): $(cat /tmp/installer-out) $(cat "$FAKE_CALLS")"
+}
+chown nobody /opt/aphelion
+refuses_checkout "owned by root"
+chown root /opt/aphelion
+chmod 0775 /opt/aphelion
+refuses_checkout "writable"
+chmod 0757 /opt/aphelion
+refuses_checkout "writable"
+chmod 0755 /opt/aphelion
+FAKE_ORIGIN=https://example.com/other.git
+export FAKE_ORIGIN
+refuses_checkout "isn't a clone of"
+unset FAKE_ORIGIN
+FAKE_STATUS_FAIL=1
+export FAKE_STATUS_FAIL
+refuses_checkout "git status"
+unset FAKE_STATUS_FAIL
+pass "the installer refuses a checkout that isn't root's, that others can write, that has another origin, or whose git status fails, before it changes anything"
+
+fresh_host
+export FAKE_DIGEST_FILE=present
+run_installer --tag v9.9.9 --no-start || fail "a fresh install failed before the running-service tests: $(cat /tmp/installer-out)"
+touch "$FAKE_STATE/active"
+before=$(snapshot)
+reset_calls
+status=0
+run_installer --tag v9.9.9 --no-start || status=$?
+[[ $status == 1 ]] && grep -q "running" /tmp/installer-out && grep -q "systemctl stop" /tmp/installer-out && [[ $(snapshot) == "$before" ]] && ! grep -qE "apt-get|git (clone|fetch|checkout)|docker (pull|tag|compose.*build)" "$FAKE_CALLS" ||
+  fail "--no-start went on with a running service ($status): $(cat /tmp/installer-out)"
+status=0
+FAKE_DIGEST_LINE=ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000003 \
+  run_installer --tag v9.8.8 || status=$?
+[[ $status == 1 ]] && grep -q "aphelion upgrade" /tmp/installer-out && [[ $(snapshot) == "$before" && $(cat /opt/aphelion/.git/tag) == v9.9.9 ]] && ! grep -qE "apt-get|git (clone|fetch|checkout)|docker (pull|tag|compose.*build)" "$FAKE_CALLS" ||
+  fail "a tag change went on with a running service ($status): $(cat /tmp/installer-out)"
+pass "the installer refuses --no-start and a tag change while the service runs, changes nothing, and points a tag change to aphelion upgrade"
+
+fresh_host
+export FAKE_DIGEST_FILE=present
+run_installer --tag v9.9.9 --no-start || fail "a fresh install failed before the mismatch test: $(cat /tmp/installer-out)"
+local_before=$(cat "$FAKE_STATE/local")
+status=0
+FAKE_DIGEST_LINE=ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000003 \
+  FAKE_PULLED=ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000002 \
+  run_installer --tag v9.8.8 --no-start || status=$?
+[[ $status != 0 && $(cat /opt/aphelion/.git/tag) == v9.9.9 && $(cat "$FAKE_STATE/local") == "$local_before" ]] && grep -q "v9.9.9" /tmp/installer-out && grep -qi "back" /tmp/installer-out ||
+  fail "a digest mismatch left the checkout or the image changed ($status): $(cat /tmp/installer-out)"
+pass "a digest mismatch after a tag change puts the checkout back on the commit it was on and leaves the image alone"
 
 for direct in "" "v1" "v9.9.9 extra" "--x"; do
   status=0
