@@ -40,6 +40,12 @@ describe("apiKeyFromInput", () => {
     [`${fake}\nsecond`, "The API key has a line break or a control character."],
     [`${fake}\t`, "The API key has a line break or a control character."],
     [`${fake}\u007f`, "The API key has a line break or a control character."],
+    [`${fake} `, "The API key has a line break or a control character."],
+    [`sk fake`, "The API key has a line break or a control character."],
+    [`${fake}\u0085`, "The API key has a line break or a control character."],
+    [`${fake}\u009b`, "The API key has a line break or a control character."],
+    [`${fake}\u00e9`, "The API key has a line break or a control character."],
+    [`${fake}\u200b`, "The API key has a line break or a control character."],
     ["k".repeat(513), "The API key is longer than 512 bytes."],
   ])("refuses %j without repeating it", (text, reason) => {
     const result = apiKeyFromInput(input(text));
@@ -47,11 +53,24 @@ describe("apiKeyFromInput", () => {
     if (!result.ok) expect(result.reason).not.toContain(fake);
   });
 
-  it("refuses bytes that aren't UTF-8 text", () => {
+  it("refuses bytes that aren't printable ASCII", () => {
     expect(apiKeyFromInput(new Uint8Array([0x6b, 0xff, 0x6b]))).toEqual({
       ok: false,
-      reason: "The API key isn't UTF-8 text.",
+      reason: "The API key has a line break or a control character.",
     });
+  });
+
+  it("takes every printable ASCII character", () => {
+    const printable = String.fromCharCode(
+      ...Array.from({ length: 0x7e - 0x21 + 1 }, (_, index) => 0x21 + index),
+    );
+    const result = apiKeyFromInput(input(printable));
+    if (!result.ok) throw new Error(result.reason);
+    try {
+      expect(result.key.reveal()).toBe(printable);
+    } finally {
+      result.key.wipe();
+    }
   });
 
   it("zeroes the input it read", () => {

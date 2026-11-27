@@ -48,16 +48,15 @@ export function apiKeyFromInput(input: Uint8Array): ApiKeyInput {
       );
     }
     const bytes = input.subarray(0, end);
-    if (bytes.some((byte) => byte < 0x20 || byte === 0x7f)) {
+    if (bytes.some((byte) => byte < 0x21 || byte > 0x7e)) {
       return refused("The API key has a line break or a control character.");
     }
-    let text: string;
-    try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      return refused("The API key isn't UTF-8 text.");
-    }
-    return { ok: true, key: Secret.make(text, { label: "API key" }) };
+    return {
+      ok: true,
+      key: Secret.make(new TextDecoder().decode(bytes), {
+        label: "API key",
+      }),
+    };
   } finally {
     input.fill(0);
   }
