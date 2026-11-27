@@ -1,4 +1,5 @@
 import type { ChatHost, ChatSocket, SocketEvents } from "./session";
+import { sleepUnlessAborted } from "./process-environment";
 import { connectWebSocket } from "./socket";
 
 export const waitFor = async (
@@ -49,11 +50,12 @@ export interface TestHost extends ChatHost {
   readonly sent: () => Record<string, unknown>[];
   readonly connects: () => number;
   readonly sleeps: () => number[];
+  readonly sleepSignals: () => AbortSignal[];
   readonly type: (line: string) => void;
   readonly endInput: () => void;
   readonly interrupt: () => void;
   readonly drop: () => void;
-  readonly dropOnNextSend: () => void;
+  readonly muteCurrent: () => void;
 }
 
 export const testHost = (
@@ -65,22 +67,28 @@ export const testHost = (
   const handlers = new Set<() => void>();
   const input = lineQueue();
   const sleeps: number[] = [];
+  const signals: AbortSignal[] = [];
   let connects = 0;
   let current: ChatSocket | undefined;
-  let dropNext = false;
+  let mute: () => void = () => undefined;
   let ids = 0;
   return {
     connect: async (url: string, token: string, events: SocketEvents) => {
       connects += 1;
-      const socket = await connect(url, token, events);
+      let muted = false;
+      mute = () => {
+        muted = true;
+      };
+      const socket = await connect(url, token, {
+        message: (text) => {
+          if (!muted) events.message(text);
+        },
+        close: events.close,
+      });
       const wrapped: ChatSocket = {
         send: (text) => {
           sent.push(JSON.parse(text) as Record<string, unknown>);
           socket.send(text);
-          if (dropNext && text.includes('"bot.prompt"')) {
-            dropNext = false;
-            socket.close();
-          }
         },
         close: () => {
           socket.close();
@@ -96,9 +104,10 @@ export const testHost = (
     },
     out: (text) => out.push(text),
     err: (line) => err.push(line),
-    sleep: (millis) => {
+    sleep: (millis, signal) => {
       sleeps.push(millis);
-      return new Promise((resolve) => setTimeout(resolve, 5));
+      signals.push(signal);
+      return sleepUnlessAborted(5, signal);
     },
     random: () => 0.5,
     uuid: () => `cmd-${String((ids += 1))}`,
@@ -108,6 +117,7 @@ export const testHost = (
     sent: () => sent,
     connects: () => connects,
     sleeps: () => sleeps,
+    sleepSignals: () => signals,
     type: input.push,
     endInput: input.end,
     interrupt: () => {
@@ -116,8 +126,8 @@ export const testHost = (
     drop: () => {
       current?.close();
     },
-    dropOnNextSend: () => {
-      dropNext = true;
+    muteCurrent: () => {
+      mute();
     },
   };
 };

@@ -143,18 +143,33 @@ describe("a chat against the real server", () => {
           { emit: { type: "turn.end", reason: "completed" } },
         ],
       ]);
-      const host = testHost();
+      let down = false;
+      const host = testHost((url, bearer, events) =>
+        down
+          ? Promise.reject(new Error("the server is unreachable"))
+          : connectWebSocket(url, bearer, events),
+      );
       const { done, saved } = chat(host, server.url, token);
 
       host.type("hello");
       yield* Effect.promise(() =>
         waitFor("the first text", () => host.stdout().includes("one ")),
       );
+      down = true;
       host.drop();
       yield* Effect.promise(() =>
-        waitFor("the second connection", () => host.connects() === 2),
+        waitFor("the drop to show", () => host.stderr().length > 0),
       );
+      const before = server.history.head();
       gate.resolve(undefined);
+      yield* Effect.promise(() =>
+        waitFor(
+          "the server to save the rest",
+          () => server.history.head() >= before + 2,
+        ),
+      );
+      expect(host.stdout()).not.toContain("two");
+      down = false;
       yield* Effect.promise(() =>
         waitFor("the turn to end", () =>
           host.stdout().includes("[turn] completed"),
@@ -187,17 +202,24 @@ describe("a chat against the real server", () => {
           waitFor("the greeting", () => host.stdout().includes("Connected")),
         );
 
-        host.dropOnNextSend();
+        host.muteCurrent();
         host.type("hello");
         host.endInput();
+        yield* Effect.promise(() =>
+          waitFor(
+            "the server to start the turn",
+            () => server.turnsStarted() === 1,
+          ),
+        );
+        host.drop();
         const code = yield* Effect.promise(() => done);
 
         const prompts = host
           .sent()
           .filter((frame) => frame["name"] === "bot.prompt");
         expect(code).toBe(0);
-        expect(prompts.length).toBeGreaterThanOrEqual(1);
-        expect(new Set(prompts.map((frame) => frame["id"])).size).toBe(1);
+        expect(prompts).toHaveLength(2);
+        expect(prompts[1]?.["id"]).toBe(prompts[0]?.["id"]);
         expect(host.stdout()).toBe(`${greeting}answer\n[turn] completed\n`);
         expect(server.turnsStarted()).toBe(1);
         yield* server.stop;
@@ -384,11 +406,29 @@ type Script = {
   readonly closeWith: (code: number) => void;
 };
 
-const scripted = (): Script => {
+const scripted = (answerPings = true): Script => {
   let events: SocketEvents | undefined;
   const host = testHost((_url, _token, given) => {
     events = given;
-    return Promise.resolve({ send: () => undefined, close: () => undefined });
+    return Promise.resolve({
+      send: (text) => {
+        const sent = JSON.parse(text) as Record<string, unknown>;
+        if (answerPings && sent["name"] === "ping") {
+          queueMicrotask(() => {
+            given.message(
+              JSON.stringify({
+                v: 1,
+                type: "result",
+                id: sent["id"],
+                name: "ping",
+                result: {},
+              }),
+            );
+          });
+        }
+      },
+      close: () => undefined,
+    });
   });
   return {
     host,
@@ -454,15 +494,14 @@ describe("a chat against a scripted server", () => {
     script.host.type("");
     script.host.type("   ");
     script.host.type("hi");
-    await waitFor("a prompt", () => script.host.sent().length === 2);
+    await waitFor("a prompt", () => script.host.sent().length === 3);
     script.host.interrupt();
     script.host.interrupt();
 
     expect(await done).toBe(0);
-    expect(script.host.sent().map((frame) => frame["type"])).toEqual([
-      "resume",
-      "command",
-    ]);
+    expect(
+      script.host.sent().map((frame) => frame["name"] ?? "resume"),
+    ).toEqual(["resume", "ping", "bot.prompt"]);
   });
 
   it("prints an interrupted answer and doesn't send that prompt again", async () => {
@@ -470,8 +509,8 @@ describe("a chat against a scripted server", () => {
     const done = base(script.host);
     await waitFor("the connection", () => script.host.connects() === 1);
     script.host.type("hi");
-    await waitFor("a prompt", () => script.host.sent().length === 2);
-    const id = script.host.sent()[1]?.["id"];
+    await waitFor("a prompt", () => script.host.sent().length === 3);
+    const id = script.host.sent()[2]?.["id"];
 
     script.frame({
       v: 1,
@@ -489,7 +528,7 @@ describe("a chat against a scripted server", () => {
       "[error] the server stopped while it ran this command",
     );
     expect(
-      script.host.sent().filter((frame) => frame["type"] === "command"),
+      script.host.sent().filter((frame) => frame["name"] === "bot.prompt"),
     ).toHaveLength(1);
   });
 
@@ -533,5 +572,163 @@ describe("a chat against a scripted server", () => {
 
     expect(await done).toBe(0);
     expect(host.sleeps().slice(0, 3)).toEqual([250, 500, 1000]);
+  });
+
+  const names = (host: TestHost) =>
+    host.sent().map((frame) => frame["name"] ?? frame["type"]);
+
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 60));
+
+  test("isn't connected, and sends no prompt, until the server answers the resume", async () => {
+    const script = scripted(false);
+    const done = base(script.host);
+    await waitFor("the connection", () => script.host.connects() === 1);
+
+    script.host.type("hi");
+    await pause();
+
+    expect(names(script.host)).toEqual(["resume", "ping"]);
+    expect(script.host.stdout()).toBe("");
+
+    const ping = script.host.sent()[1]?.["id"];
+    script.frame({ v: 1, type: "result", id: ping, name: "ping", result: {} });
+    await waitFor("the prompt", () => script.host.sent().length === 3);
+    script.host.interrupt();
+    script.host.interrupt();
+
+    expect(await done).toBe(0);
+    expect(names(script.host)).toEqual(["resume", "ping", "bot.prompt"]);
+    expect(script.host.stdout()).toContain("Connected to chief");
+  });
+
+  test("sends the second resume before a prompt when the server restored its history", async () => {
+    const script = scripted(false);
+    const done = base(script.host);
+    await waitFor("the connection", () => script.host.connects() === 1);
+    script.host.type("hi");
+    await pause();
+
+    script.frame({
+      v: 1,
+      type: "resync",
+      cursor: { stream: "s2", seq: 9 },
+    });
+    await waitFor("the prompt", () => script.host.sent().length === 4);
+    script.host.interrupt();
+    script.host.interrupt();
+
+    expect(await done).toBe(0);
+    expect(names(script.host)).toEqual([
+      "resume",
+      "ping",
+      "resume",
+      "bot.prompt",
+    ]);
+    expect(script.host.sent()[2]?.["cursor"]).toEqual({ stream: "s2", seq: 9 });
+    expect(script.host.stdout()).toContain(
+      "[notice] the server's history was restored; continuing from now\n",
+    );
+  });
+
+  test("resumes without a notice when the resync names the same stream", async () => {
+    const saved: Cursor[] = [];
+    const script = scripted(false);
+    const done = base(script.host, saved);
+    await waitFor("the resume", () => script.host.sent().length === 2);
+
+    script.frame({
+      v: 1,
+      type: "resync",
+      cursor: { stream: "s1", seq: 10 },
+    });
+    await waitFor("the second resume", () => script.host.sent().length === 3);
+    script.host.interrupt();
+
+    expect(await done).toBe(0);
+    expect(script.host.sent()[2]?.["cursor"]).toEqual({
+      stream: "s1",
+      seq: 10,
+    });
+    expect(saved.at(-1)).toEqual({ stream: "s1", seq: 10 });
+    expect(script.host.stdout()).not.toContain("[notice]");
+  });
+
+  test("says once that the connection is lost, and not that it is back, while the server keeps closing with 1011", async () => {
+    const script = scripted(false);
+    const done = base(script.host);
+    for (let tries = 1; tries <= 3; tries += 1) {
+      await waitFor("a connection", () => script.host.connects() === tries);
+      script.closeWith(1011);
+    }
+    await waitFor("a fourth connection", () => script.host.connects() === 4);
+    script.host.interrupt();
+
+    expect(await done).toBe(0);
+    expect(script.host.stderr()).toEqual([
+      "aphelion: lost the connection to the server, trying again",
+    ]);
+    expect(script.host.stdout()).toBe("");
+  });
+
+  test("starts the backoff over after each resume the server accepts, with nothing to replay", async () => {
+    const script = scripted();
+    const done = base(script.host);
+    await waitFor("the first connection", () => script.host.connects() === 1);
+    await waitFor("the greeting", () => script.host.stdout() !== "");
+    script.closeWith(1006);
+    await waitFor("the second connection", () => script.host.connects() === 2);
+    await waitFor("it is back", () => script.host.stderr().length === 2);
+    script.closeWith(1006);
+    await waitFor("the third connection", () => script.host.connects() === 3);
+    script.host.interrupt();
+
+    expect(await done).toBe(0);
+    expect(script.host.sleeps().slice(0, 2)).toEqual([250, 250]);
+  });
+
+  test("sends a cancel again after a reconnect when the first one was lost with the connection", async () => {
+    const script = scripted();
+    const done = base(script.host);
+    await waitFor("the greeting", () => script.host.stdout() !== "");
+    script.host.type("hi");
+    await waitFor("the prompt", () => script.host.sent().length === 3);
+    script.frame({
+      v: 1,
+      type: "result",
+      id: script.host.sent()[2]?.["id"],
+      name: "bot.prompt",
+      result: { turn: "t1" },
+    });
+
+    script.host.interrupt();
+    await waitFor("the cancel", () =>
+      names(script.host).includes("bot.cancel"),
+    );
+    script.closeWith(1006);
+    await waitFor(
+      "the second cancel",
+      () =>
+        names(script.host).filter((name) => name === "bot.cancel").length === 2,
+    );
+    script.host.interrupt();
+
+    expect(await done).toBe(0);
+    const cancels = script.host
+      .sent()
+      .filter((frame) => frame["name"] === "bot.cancel");
+    expect(cancels.map((frame) => frame["payload"])).toEqual([
+      { bot: "chief", turn: "t1" },
+      { bot: "chief", turn: "t1" },
+    ]);
+  });
+
+  test("stops the pause between attempts when the chat ends", async () => {
+    const host = testHost(() => Promise.reject(new Error("refused")));
+    const done = base(host);
+    await waitFor("two sleeps", () => host.sleeps().length >= 2);
+    host.interrupt();
+
+    expect(await done).toBe(0);
+    expect(host.sleepSignals().at(-1)?.aborted).toBe(true);
   });
 });
