@@ -85,11 +85,13 @@ export type EventBody = {
 export type EventFrame = Envelope<"event"> & { seq: number } & EventBody;
 export type ResumeFrame = Envelope<"resume"> & { cursor: Cursor | null };
 export type ResyncFrame = Envelope<"resync"> & { cursor: Cursor };
+export type LiveFrame = Envelope<"live"> & { cursor: Cursor };
 export type FrameError = { code: ErrorCode; message: string; id?: CommandId };
 export type ErrorFrame = Envelope<"error"> & FrameError;
 
 export type ClientFrame = CommandFrame | ResumeFrame;
-export type ServerFrame = ResultFrame | EventFrame | ResyncFrame | ErrorFrame;
+export type ServerFrame =
+  ResultFrame | EventFrame | ResyncFrame | LiveFrame | ErrorFrame;
 
 function envelope<Type extends string, Shape extends z.ZodRawShape>(
   type: Type,
@@ -157,6 +159,15 @@ export const serverFrame = z.discriminatedUnion("type", [
   envelope("resync", "Tells a client that it can't catch up.", {
     cursor: cursor.describe("Where the client continues after it reloads."),
   }),
+  envelope(
+    "live",
+    "Tells a client that the server has replayed everything after its cursor and now sends events as they happen.",
+    {
+      cursor: cursor.describe(
+        "The position of the last event the server replayed.",
+      ),
+    },
+  ),
   envelope("error", "Rejects a frame.", {
     code: z.enum(errorCodes).describe("Why the frame was rejected."),
     message: z.string().describe("Fixed text that is safe to log."),

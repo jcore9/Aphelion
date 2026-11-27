@@ -60,6 +60,7 @@ const serverFrames: ServerFrame[] = [
   { v: 1, type: "result", id, name: "ping", result: {} },
   event,
   { v: 1, type: "resync", cursor },
+  { v: 1, type: "live", cursor },
   { v: 1, type: "error", code: "malformed", message: "bad", id },
   { v: 1, type: "error", code: "unsupported-version", message: "bad" },
   { v: 1, type: "result", id, name: "bot.prompt", result: { turn } },

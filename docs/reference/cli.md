@@ -19,6 +19,7 @@
 | `aphelion tool update [NAME]` | Moves an installed AI tool, or every installed AI tool, to the version the list pins |
 | `aphelion tool check` | Asks each AI tool's vendor for its newest version and compares it with the list's |
 | `aphelion tool remove NAME` | Removes an installed AI tool |
+| `aphelion chat BOT` | Chats with a bot in plain lines. See [`aphelion chat BOT`](#aphelion-chat-bot). |
 | `aphelion key add NAME` | Reads an API key for the AI tool `NAME` from standard input and stores it encrypted |
 | `aphelion key test NAME` | Asks the tool's provider whether it accepts the stored key |
 | `aphelion key replace NAME` | Reads a new API key for `NAME` and stores it in place of the old one |
@@ -40,6 +41,9 @@
 | `--approve DIGEST` | `plugin install`, `plugin update`, `plugin enable` | none | The value the preview printed. It approves exactly what the preview showed. |
 | `--compose FILE` | `config check` | none | The output of `docker compose config` to check, or `-` to read it from standard input |
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
+| `--url ADDRESS` | `chat` | `ws://127.0.0.1:7400/ws` | The server's address: `ws://HOST:PORT/ws`, or `http://HOST:PORT`. Also accepts `https` and `wss`. |
+| `--token-file PATH` | `chat` | none | A file that holds the device token and that only you can read. Without it, a terminal asks for the token. |
+| `--cursor-file PATH` | `chat` | none | A file that keeps the last event shown. A new run carries on from it. |
 | `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
 | `--bot-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the [bot runner](bot-runner.md)'s pipes, from 3 up and not the plugin runner's. The server reads the bot runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
 | `--plugin-dev FOLDER` | `--headless` | none | An absolute path. Turns on [dev mode](plugins.md#dev-mode): `plugin dev` can reload the approved plugin in `FOLDER` through the server's [control socket](plugins.md#control-socket). Needs `--plugin-runner-fds` to have any effect. |
@@ -237,6 +241,16 @@ Asks the running server, through the [control socket](plugins.md#control-socket)
 | `Restarted ID, but it isn't running: STATE. The server log says why.` | The run reached another state, such as `crashed`. Standard error, exit code 1. |
 | `The server didn't restart ID: REASON.` | The server refused, for example because the plugin isn't installed or its files changed since they were approved. Standard error, exit code 1. |
 | `The server isn't running, so ID starts on its approved version when the server starts.` | Nothing to do now. Standard output, exit code 0. |
+
+## `aphelion chat BOT`
+
+Opens a plain-line chat with bot `BOT` over the server's WebSocket. It shows streaming text and a line for each tool, permission, usage and turn event. After a dropped connection it reconnects and shows the events it missed, each once. [The test client guide](../guides/test-client.md) shows a session.
+
+The token comes from `--token-file`, or from a hidden prompt when standard input is a terminal. Otherwise the command exits with status 2. Ctrl-C, Ctrl-D or a `SIGINT` signal at the prompt prints `aphelion: no device token entered` and exits 0. There is no `--token` option and no environment variable, so the token never shows in a process list. The command refuses a token file that other users can read, and it never prints the token. Its error messages use fixed text, so they never repeat a path or a name you typed.
+
+Each line you type is sent as one message. Ctrl-C cancels the running turn and, a second time or with no turn running, leaves. Ctrl-D leaves. A `SIGINT` signal does what Ctrl-C does, even when standard input isn't a terminal. The command exits 0 when you leave, and 1 when the server refuses the token or can't be used. Its exit code is not 130 for Ctrl-C.
+
+On the host, [`sudo aphelion chat BOT`](host-command.md) runs it for you.
 
 ## `aphelion device add NAME`
 

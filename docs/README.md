@@ -21,6 +21,7 @@ This folder holds the Aphelion documentation: the plan, guides, reference pages,
 
 - [Install the headless server](guides/install.md) covers the host, the image, `aphelion.service`, plugins, the network check and upgrades. A headless server runs without a desktop window.
 - [Write your first server plugin](guides/write-your-first-server-plugin.md) shows how to create a plugin from the template, test it, build it and reload it in dev mode.
+- [Chat with a bot from the command line](guides/test-client.md) shows the plain-line test client, `aphelion chat`.
 - [How a release happens](guides/releasing.md) covers the release pull requests, the version overrides and the first tag.
 
 ## Working on the repository

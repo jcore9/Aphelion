@@ -3,6 +3,7 @@ import { CliConfig, CliError, Command, GlobalFlag } from "effect/cli";
 import { createLogger } from "../log";
 import { brokerClient } from "../secrets/broker-client";
 import { version } from "../version";
+import { chat, chatCommand } from "./chat/command";
 import { configCheck, configCheckCommand } from "./config-check";
 import {
   deviceAdd,
@@ -77,6 +78,7 @@ export interface Handlers {
   readonly keyTest: Parameters<typeof keyTestCommand>[0];
   readonly keyRemove: Parameters<typeof keyRemoveCommand>[0];
   readonly restoreFinish: Parameters<typeof restoreFinishCommand>[0];
+  readonly chat: Parameters<typeof chatCommand>[0];
 }
 
 const toolListFile = () =>
@@ -105,6 +107,7 @@ const handlers: Handlers = {
   keyTest: (options) => keyTest(options, brokerClient()),
   keyRemove: (options) => keyRemove(options, brokerClient()),
   restoreFinish,
+  chat,
 };
 
 const shortCluster = /^-[^-]/;
@@ -182,6 +185,7 @@ export const makeCli = (handle: Handlers) => {
       group("restore", "Finish a restore from a backup.", [
         restoreFinishCommand(handle.restoreFinish),
       ]),
+      chatCommand(handle.chat),
     ]),
   );
   const parse = Command.runWith(root, { version });

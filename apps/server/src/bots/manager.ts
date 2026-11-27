@@ -920,6 +920,14 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             ),
           );
           if (Option.isSome(answered)) return { turn, outcome: answered.value };
+          yield* Effect.suspend(() =>
+            channelFailed
+              ? Deferred.await(channelTeardownDone).pipe(
+                  Effect.timeoutOption(stopDeadlineMs),
+                  Effect.asVoid,
+                )
+              : Effect.void,
+          );
           return { turn, outcome: yield* expire(slot, turnRequest) };
         });
 

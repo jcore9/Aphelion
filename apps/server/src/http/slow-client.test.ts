@@ -90,12 +90,20 @@ it.effect(
         })),
       );
       yield* slow.closed;
+      const framesOf = (type: string) =>
+        fast.written.filter(
+          (item) =>
+            typeof item === "string" &&
+            (JSON.parse(item) as { type: string }).type === type,
+        );
       yield* Effect.repeat(Effect.yieldNow, {
-        until: () => fast.written.length === limit + 3,
+        until: () => framesOf("event").length >= limit + 3,
       });
 
       expect(slow.written.at(-1)).toEqual(closeReasons.tooSlow);
-      expect(fast.written).toHaveLength(limit + 3);
+      expect(framesOf("live")).toHaveLength(1);
+      expect(framesOf("event")).toHaveLength(limit + 3);
+      expect(fast.written).toHaveLength(limit + 4);
       expect(fast.written.some((item) => typeof item !== "string")).toBe(false);
     }).pipe(Effect.scoped),
 );
