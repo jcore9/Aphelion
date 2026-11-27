@@ -71,8 +71,8 @@ The server closes the WebSocket in these cases. The close code and reason are fi
 | A frame has a protocol version that the server doesn't speak | `1007` | `unsupported version` |
 | The token is revoked or expires | `1008` | `token no longer valid` |
 | A saved event can't be read | `1011` | `history could not be read` |
-| A message is larger than 1 MiB | `1009` | Set by Bun |
-| Unread messages from the client pass 2 MiB | `1008` | `Inbound message buffer limit exceeded`, set by the listener |
+| A message is larger than 1,573,888 bytes | `1009` | Set by Bun |
+| Unread messages from the client pass 3,147,776 bytes | `1008` | `Inbound message buffer limit exceeded`, set by the listener |
 
 The server checks the token again every 5 seconds while the WebSocket is open, so a revoked or expired token closes it within 5 seconds. The server also checks the token before it runs each `bot.prompt` or `bot.cancel`, so a revoked device can't start or cancel a turn in that window ([`device-revoked`](protocol.md#errors)).
 
@@ -80,14 +80,14 @@ These limits are set in [`apps/server/src/adapters/http-server.ts`](https://gith
 
 | Limit | Value | Why |
 | --- | --- | --- |
-| Largest message | 1 MiB | Room for the largest prompt, 256 KiB, after JSON escapes. Bun's default is 16 MiB. |
-| Unread messages from the client | 2 MiB | Bun can't pause a client, so the listener closes one that sends faster than the server reads. The default is no limit. |
+| Largest message | 1,573,888 bytes | Room for the longest prompt, 262,144 characters, with every character written as a 6-byte JSON escape, plus 1,024 bytes for the rest of the frame. A prompt that is too long for the bot then gets `prompt-too-long` instead of a closed socket. Bun's default is 16 MiB. |
+| Unread messages from the client | 3,147,776 bytes | Bun can't pause a client, so the listener closes one that sends faster than the server reads. The default is no limit. |
 | Unsent messages to the client | 1 MiB, then the WebSocket closes | A client that stops reading can't make the server hold its messages without limit. Bun's default is 16 MiB, and it keeps the connection open. |
 | Idle time | 60 seconds | Bun pings the client shortly before, so a client that answers stays connected. Bun's default is 120 seconds. |
 
 Compression stays off, so a small compressed message can't expand into a large one.
 
-The server also limits the work of each device, across all of the device's connections. A device can have 8 commands running at once, and it can send 60 `bot.prompt` and `bot.cancel` commands a minute. A command over either limit gets `rate-limited` before the server saves anything ([errors](protocol.md#errors)). A `history.read` page holds at most 256 KiB of encoded events.
+The server also limits the work of each device, across all of the device's connections. A device can have 8 commands running at once, and it can send 60 `bot.prompt` and `bot.cancel` commands a minute. A `bot.prompt` or `bot.cancel` keeps its place until the server has saved its result, even when the client has disconnected. A command over either limit gets `rate-limited` before the server saves anything ([errors](protocol.md#errors)). A `history.read` page holds at most 256 KiB of encoded events.
 
 ## The Compose port rule
 

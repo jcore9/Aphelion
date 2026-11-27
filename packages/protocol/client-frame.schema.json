@@ -84,7 +84,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 262144,
-                  "description": "The prompt. The server refuses one over 256 KiB of UTF-8 with `prompt-too-long`."
+                  "description": "The prompt. The server refuses one over 256 KiB of UTF-8, or one whose line to the bot is over 1 MiB after JSON escapes, with `prompt-too-long`."
                 }
               },
               "required": [

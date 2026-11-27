@@ -1,7 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adapterMethods, sessionRef } from "@aphelion/plugin-sdk";
+import {
+  adapterMethods,
+  maxPluginLineBytes,
+  request,
+  sessionRef,
+} from "@aphelion/plugin-sdk";
 import { fakeAdapter, type FakeScript } from "@aphelion/plugin-sdk/testing";
 import {
   commandId,
@@ -24,6 +29,7 @@ import {
   failureMessages,
   openCommandLedger,
 } from "../commands";
+import { webSocketLimits } from "../adapters/http-server";
 import { addDevice, revokeDevice } from "../devices";
 import { openEventStore, runBots } from "../history";
 import { createLogger } from "../log";
@@ -352,14 +358,90 @@ it.live(
     }),
 );
 
-it.live("closes the socket with 1009 for a message over 1 MiB", () =>
+const controlCharsThatFit = () => {
+  const empty = JSON.stringify(
+    request(Number.MAX_SAFE_INTEGER, adapterMethods.turnStart, {
+      turn: "0192f0a1-3b7d-7c5e-9a21-0d4e6f8a1b23",
+      text: "",
+    }),
+  );
+  return Math.floor(
+    (maxPluginLineBytes - new TextEncoder().encode(empty).byteLength) / 6,
+  );
+};
+
+it.live(
+  "starts a turn for an escape-heavy prompt whose encoded line is just under 1 MiB",
+  () =>
+    Effect.gen(function* () {
+      const path = tempDb();
+      const token = deviceToken(path);
+      const server = yield* startServer(path, [finishes]);
+      const client = yield* connectClient(server.url, token);
+
+      client.send(prompt("c1", "\u0001".repeat(controlCharsThatFit())));
+      const [answer] = yield* client.until(1);
+      client.close();
+
+      expect(answer).toMatchObject({ type: "result", name: "bot.prompt" });
+      expect(server.turnsStarted()).toBe(1);
+      yield* server.stop;
+    }),
+);
+
+it.live(
+  "answers prompt-too-long, and keeps the socket, when the encoded line is just over 1 MiB",
+  () =>
+    Effect.gen(function* () {
+      const path = tempDb();
+      const token = deviceToken(path);
+      const server = yield* startServer(path, [finishes]);
+      const client = yield* connectClient(server.url, token);
+
+      client.send(prompt("c1", "\u0001".repeat(controlCharsThatFit() + 1)));
+      const [answer] = yield* client.until(1);
+      client.send(prompt("c2"));
+      const [, next] = yield* client.until(2);
+      client.close();
+
+      expect(answer).toMatchObject({
+        type: "error",
+        id: "c1",
+        code: "prompt-too-long",
+      });
+      expect(next).toMatchObject({ type: "result", id: "c2" });
+      expect(server.turnsStarted()).toBe(1);
+      yield* server.stop;
+    }),
+);
+
+it.live(
+  "answers prompt-too-long, not a 1009 close, for the longest prompt written as escapes",
+  () =>
+    Effect.gen(function* () {
+      const path = tempDb();
+      const token = deviceToken(path);
+      const server = yield* startServer(path, [finishes]);
+      const client = yield* connectClient(server.url, token);
+
+      client.send(prompt("c1", "\u0001".repeat(256 * 1024)));
+      const [answer] = yield* client.until(1);
+      client.close();
+
+      expect(answer).toMatchObject({ type: "error", code: "prompt-too-long" });
+      expect(server.turnsStarted()).toBe(0);
+      yield* server.stop;
+    }),
+);
+
+it.live("closes the socket with 1009 for a message over the limit", () =>
   Effect.gen(function* () {
     const path = tempDb();
     const token = deviceToken(path);
     const server = yield* startServer(path, [finishes]);
     const client = yield* connectClient(server.url, token);
 
-    client.send(prompt("c1", "\u0001".repeat(256 * 1024)));
+    client.send(prompt("c1", "a".repeat(webSocketLimits.maxPayloadLength + 1)));
 
     expect(yield* client.closeCode).toBe(1009);
     expect(server.turnsStarted()).toBe(0);

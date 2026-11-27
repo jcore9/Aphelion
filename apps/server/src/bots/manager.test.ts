@@ -1,4 +1,7 @@
 import {
+  adapterMethods,
+  maxPluginLineBytes,
+  request,
   sessionRef,
   turnId,
   type AdapterContext,
@@ -182,6 +185,63 @@ const ledgerCalls = () => {
   };
   return { calls, turns };
 };
+
+const controlCharsThatFit = () => {
+  const empty = JSON.stringify(
+    request(Number.MAX_SAFE_INTEGER, adapterMethods.turnStart, {
+      turn: "0192f0a1-3b7d-7c5e-9a21-0d4e6f8a1b23",
+      text: "",
+    }),
+  );
+  return Math.floor(
+    (maxPluginLineBytes - new TextEncoder().encode(empty).byteLength) / 6,
+  );
+};
+
+describe("a prompt's encoded line to the runner", () => {
+  it.live("accepts a prompt of escapes whose line is just under 1 MiB", () =>
+    Effect.gen(function* () {
+      const { manager, reach } = yield* system(recording([sessionTurn]).bot);
+      yield* manager.start("chief");
+      yield* reach("running");
+
+      const started = yield* manager.startTurn(
+        "chief",
+        "\u0001".repeat(controlCharsThatFit()),
+      );
+
+      expect(started.outcome).toBe("accepted");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "answers too-long, and sends nothing, when the line is over 1 MiB",
+    () =>
+      Effect.gen(function* () {
+        const { calls, turns } = ledgerCalls();
+        const { sent, shape } = yield* silentStarts();
+        const { manager, reach } = yield* system(
+          recording([sessionTurn]).bot,
+          () => Effect.void,
+          "fake",
+          memorySessionRefs,
+          turns,
+          shape,
+        );
+        yield* manager.start("chief");
+        yield* reach("running");
+
+        const started = yield* manager.startTurn(
+          "chief",
+          "\u0001".repeat(controlCharsThatFit() + 1),
+        );
+
+        expect(started.outcome).toBe("too-long");
+        expect(sent.filter(({ type }) => type === "turn.start")).toEqual([]);
+        expect(calls).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+});
 
 describe("a turn start that the adapter hasn't answered", () => {
   it.live("makes another prompt wait as busy, not start a second turn", () =>

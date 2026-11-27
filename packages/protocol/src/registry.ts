@@ -2,7 +2,7 @@ import { z } from "zod";
 import { botEventPayload, botName, turnId } from "./bot-events.ts";
 
 const maxHistoryLimit = 500;
-const maxPromptLength = 256 * 1024;
+export const maxPromptLength = 256 * 1024;
 
 export const commands = {
   ping: {
@@ -17,7 +17,7 @@ export const commands = {
         .min(1)
         .max(maxPromptLength)
         .describe(
-          "The prompt. The server refuses one over 256 KiB of UTF-8 with `prompt-too-long`.",
+          "The prompt. The server refuses one over 256 KiB of UTF-8, or one whose line to the bot is over 1 MiB after JSON escapes, with `prompt-too-long`.",
         ),
     }),
     result: z.strictObject({

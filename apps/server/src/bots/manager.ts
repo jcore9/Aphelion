@@ -1,5 +1,8 @@
 import { randomUUIDv7 } from "node:crypto";
 import {
+  adapterMethods,
+  pluginLineFits,
+  request,
   turnId,
   turnStartParams,
   type AdapterEnvelope,
@@ -187,6 +190,16 @@ export interface BotManagerOptions {
 }
 
 export const turnAcceptDeadlineMs = 30_000;
+
+const promptFitsRunnerLine = (turn: TurnId, text: string) =>
+  pluginLineFits(
+    JSON.stringify(
+      request(Number.MAX_SAFE_INTEGER, adapterMethods.turnStart, {
+        turn,
+        text,
+      }),
+    ),
+  );
 
 const stoppedStates = new Set(["stopped", "given up"]);
 
@@ -611,7 +624,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const slot = slots.get(name);
           if (slot === undefined)
             return { turn, outcome: "not-running" as const };
-          if (!turnStartParams.safeParse({ turn, text }).success) {
+          if (
+            !turnStartParams.safeParse({ turn, text }).success ||
+            !promptFitsRunnerLine(turn, text)
+          ) {
             return { turn, outcome: "too-long" as const };
           }
           if (slot.recovering) return { turn, outcome: "busy" as const };

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Duration, Effect, Exit, Scope } from "effect";
 import { HttpServer } from "effect/http";
 import { afterAll } from "vitest";
+import { webSocketLimits } from "../adapters/http-server";
 import { addDevice, revokeDevice } from "../devices";
 import { finishRestore } from "../restore";
 import { openEventStore } from "../history";
@@ -298,10 +299,10 @@ layer(
     }),
   );
 
-  it.effect("closes a WebSocket whose message is over 1 MiB", () =>
+  it.effect("closes a WebSocket whose message is over the limit", () =>
     Effect.gen(function* () {
       const socket = yield* openLive(bearer(valid));
-      socket.socket.send("x".repeat(1024 * 1024 + 1));
+      socket.socket.send("x".repeat(webSocketLimits.maxPayloadLength + 1));
       expect((yield* closedBy(socket)).code).toBe(1009);
     }),
   );

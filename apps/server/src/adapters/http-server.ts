@@ -1,11 +1,17 @@
 import { BunHttpServer } from "@effect/platform-bun";
+import { maxPromptLength } from "@aphelion/protocol";
 import type { Config } from "../config";
 
 export type Listen = Pick<Config["server"], "address" | "port">;
 
+const jsonEscapeBytes = 6;
+const commandEnvelopeBytes = 1024;
+const maxCommandBytes =
+  maxPromptLength * jsonEscapeBytes + commandEnvelopeBytes;
+
 export const webSocketLimits = {
-  maxPayloadLength: 1024 * 1024,
-  highWaterMark: 2 * 1024 * 1024,
+  maxPayloadLength: maxCommandBytes,
+  highWaterMark: 2 * maxCommandBytes,
   backpressureLimit: 1024 * 1024,
   closeOnBackpressureLimit: true,
   idleTimeout: 60,

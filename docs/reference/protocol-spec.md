@@ -90,7 +90,7 @@ A `command` frame carries a command's `payload`, and the `result` frame that ans
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `bot` | string matching `^[a-z][a-z0-9-]{0,62}$` | yes | The bot to give the prompt to. |
-| `text` | string | yes | The prompt. The server refuses one over 256 KiB of UTF-8 with `prompt-too-long`. |
+| `text` | string | yes | The prompt. The server refuses one over 256 KiB of UTF-8, or one whose line to the bot is over 1 MiB after JSON escapes, with `prompt-too-long`. |
 
 `result` has these fields:
 

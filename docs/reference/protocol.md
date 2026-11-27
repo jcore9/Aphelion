@@ -37,14 +37,14 @@ These codes answer a command that the server read and then couldn't finish. Each
 | Code | Meaning |
 | --- | --- |
 | `bot-not-running` | The bot isn't running, the server doesn't know its name, or the server runs no bots. |
-| `bot-busy` | The bot is still in another turn, or the bot hasn't yet said whether it accepts the turn before this one. |
-| `prompt-too-long` | The prompt is over 262,144 bytes (256 KiB) of UTF-8. |
-| `bot-not-responding` | The bot didn't accept the turn within 30 seconds. The server ends the turn as refused. |
+| `bot-busy` | The bot is still in another turn, the bot hasn't yet said whether it accepts the turn before this one, or the server is restarting the bot after it didn't answer a turn in time. |
+| `prompt-too-long` | The prompt is over 262,144 bytes (256 KiB) of UTF-8, or the line that carries it to the bot is over 1 MiB after JSON escapes. |
+| `bot-not-responding` | The bot didn't accept the turn within 30 seconds. The server ends the turn as refused and restarts the bot. |
 | `prompt-refused` | The bot refused the turn, the turn had already ended, or the server couldn't save it. |
 | `interrupted` | The server stopped while it ran this command, so it can't say whether the command took effect. It doesn't run the command again. Check the bot's history before you send the command with a new `id` ([command ids](#command-ids)). |
 | `storage-failed` | The server ran the command but couldn't save its result, even after it tried again. The command did take effect. A repeat of the `id` gets `interrupted`. Check the bot's history before you send the command with a new `id`. |
 | `device-revoked` | The device's token was revoked or expired since the connection opened. The server checks before it runs each `bot.prompt` or `bot.cancel`, sends this error, and closes the socket with code 1008. It runs nothing and saves no `id`. |
-| `rate-limited` | The device has 8 commands running, or it sent more than 60 `bot.prompt` and `bot.cancel` commands in the last minute. Both limits count all of the device's connections together. The server runs nothing and saves no `id`, so the client can wait and send the same command again. `ping` is not counted. |
+| `rate-limited` | The device has 8 commands running, or it sent more than 60 `bot.prompt` and `bot.cancel` commands in the last minute. Both limits count all of the device's connections together. A `bot.prompt` or `bot.cancel` counts as running until the server has saved its result, even when the client has disconnected. The server runs nothing and saves no `id`, so the client can wait and send the same command again. `ping` is not counted. |
 | `id-reused` | The `id` already ran a different command. |
 | `internal` | The server failed in a way it didn't expect. |
 
@@ -119,11 +119,11 @@ A client sends a `command` frame and gets one `result` frame, or one `error` fra
 
 The payload is `{ "bot": "chief", "text": "Hello" }`. The server starts a turn and answers with the turn's id, a UUIDv7 that the server makes. The answer comes when the bot accepts the turn, not when the bot finishes it. The turn's events arrive as [`bot.event` frames](#the-botevent-frame) for a client that has sent `resume`. A repeat of the command with the same `id` returns the same turn and starts no second one.
 
-The prompt can hold up to 262,144 bytes (256 KiB) of UTF-8. A longer prompt gets `prompt-too-long`, and the socket stays open. A prompt of more than 262,144 characters can't fit, so the server reads it as `malformed` and closes the socket with code 1007.
+The prompt can hold up to 262,144 bytes (256 KiB) of UTF-8. The server also sends the prompt to the bot as one JSON line, and a line can hold at most 1 MiB (1,048,576 bytes). The line is the prompt after JSON escapes, plus up to 128 bytes of fixed text. JSON writes a control character as 6 bytes, so a prompt of control characters fits only up to 174,741 of them. A prompt that is over either limit gets `prompt-too-long`, and the socket stays open. A prompt of more than 262,144 characters can't fit, so the server reads it as `malformed` and closes the socket with code 1007.
 
-The server reads a message of up to 1 MiB (1,048,576 bytes) after JSON encoding. It closes the socket with code 1009 when a message is larger. A 256 KiB prompt fits, unless most of its characters are ones that JSON writes as escapes, such as control characters, which take up to 6 bytes each.
+The server reads a message of up to 1,573,888 bytes after JSON encoding. That is 6 bytes for each of the 262,144 characters of the longest prompt, plus 1,024 bytes for the rest of the frame. It closes the socket with code 1009 when a message is larger. A prompt that is too long for the bot gets `prompt-too-long`, not a closed socket.
 
-A bot takes one new turn at a time. While the server waits for the bot to accept a turn, another `bot.prompt` for that bot gets `bot-busy`. The server waits at most 30 seconds. After that it ends the turn as refused and answers `bot-not-responding`. If the bot accepts the turn later, the server tells it to cancel the turn.
+A bot takes one new turn at a time. While the server waits for the bot to accept a turn, another `bot.prompt` for that bot gets `bot-busy`. The server waits at most 30 seconds, even when the bot or its runner is stuck. After that it answers `bot-not-responding`, ends the turn as refused, stops the bot's run and starts it again with the saved session. The bot answers `bot-busy` until the new run is up.
 
 The command fails with `bot-not-running`, `bot-busy`, `bot-not-responding`, `prompt-too-long` or `prompt-refused`. A client that wants to try again sends the prompt with a new `id`.
 
