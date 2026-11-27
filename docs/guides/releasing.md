@@ -33,7 +33,7 @@ ghcr.io/jcore9/aphelion@sha256:<64 letters and digits>
 
 When a host can download the published image, `aphelion upgrade` and the installer pull it by that line and refuse any image whose fingerprint differs ([decision 0063](../decisions/0063-m1-planning-answers.md)).
 
-**Optional: making the package public.** GitHub creates the `aphelion` package as private, and the workflow can't change that. Making it public is optional. While the package stays private, hosts that aren't signed in to `ghcr.io` can't download the image, so `aphelion upgrade` builds the image on the server instead. If you later want hosts to download the published image without signing in, open the package from **Packages** on your GitHub profile, go to **Package settings**, and set the visibility to **Public**. GitHub doesn't let you make a public package private again.
+**Optional: making the package public.** GitHub creates the `aphelion` package as private, and the workflow can't change that. Making it public is optional. While the package stays private, hosts that aren't signed in to `ghcr.io` can't download the image, so `aphelion upgrade` and the installer build the image on the server instead. If you later want hosts to download the published image without signing in, open the package from **Packages** on your GitHub profile, go to **Package settings**, and set the visibility to **Public**. GitHub doesn't let you make a public package private again.
 
 To check it yourself:
 

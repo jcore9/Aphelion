@@ -546,15 +546,38 @@ wait_for_health() {
   done
 }
 
+restore_checkout() {
+  local repo=$1 previous=$2 previous_branch=$3
+  if [[ -n $previous_branch ]]; then
+    git -C "$repo" switch --quiet -- "${previous_branch#refs/heads/}" ||
+      echo "aphelion: couldn't put $repo back on ${previous_branch#refs/heads/}" >&2
+  else
+    git -C "$repo" -c advice.detachedHead=false checkout --quiet --detach "$previous" ||
+      echo "aphelion: couldn't put $repo back on $previous" >&2
+  fi
+  echo "aphelion: moved $repo back to $previous, where it was before" >&2
+}
+
 cmd_upgrade() {
-  local repo dirty before tag after sha_body digests pulled=""
-  repo=$(realpath -m -- "$APHELION_DEPLOY/..")
-  git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+  local repo offender dirty previous previous_branch before tag tag_commit at_tag=0 moved=0 after
+  repo=$APHELION_DEPLOY
+  while [[ $repo == */ && $repo != / ]]; do repo=${repo%/}; done
+  repo=$(dirname -- "$repo")
+  [[ ! -L $repo && ! -L $repo/.git ]] ||
+    fail "$repo or $repo/.git is a symbolic link, so upgrade can't check what it points to"
+  [[ -d $repo/.git ]] ||
     fail "$repo isn't a git checkout"
-  dirty=$(git -C "$repo" status --porcelain) ||
+  offender=$(find "$repo" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit) ||
+    fail "couldn't read the files in $repo"
+  [[ -z $offender ]] ||
+    fail "$offender must be owned by root and writable only by root"
+  dirty=$(git --no-optional-locks -C "$repo" status --porcelain) ||
     fail "couldn't check $repo for local changes"
   [[ -z $dirty ]] ||
     fail "$repo has local changes. Clean or stash them before upgrading."
+  previous=$(git -C "$repo" rev-parse HEAD) ||
+    fail "couldn't read the commit that $repo is on"
+  previous_branch=$(git -C "$repo" symbolic-ref -q HEAD) || previous_branch=""
   before=$(git -C "$repo" describe --tags --exact-match 2>/dev/null || git -C "$repo" rev-parse --short HEAD) ||
     fail "couldn't read the current version in $repo"
   if [[ -n ${1:-} ]]; then
@@ -562,39 +585,37 @@ cmd_upgrade() {
   else
     tag=$(latest_release_tag)
   fi
-  [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ && $tag != *..* ]] ||
+  [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && $tag != *..* ]] ||
     fail "'$tag' isn't a release tag, such as v0.1.0-alpha.2"
-  git -C "$repo" fetch --tags ||
-    fail "git fetch --tags failed in $repo"
-  git -C "$repo" rev-parse --verify --quiet "refs/tags/$tag^{commit}" >/dev/null ||
-    fail "tag $tag doesn't exist in $repo"
-  if sha_body=$(curl --fail --silent --show-error --location --max-time 30 \
-    "https://github.com/$github_repo/releases/download/$tag/aphelion-image.sha256" 2>/dev/null); then
-    sha_body=${sha_body%$'\r'}
-    if [[ $(printf '%s\n' "$sha_body" | wc -l) != 1 || ! $sha_body =~ ^ghcr\.io/jcore9/aphelion@sha256:[0-9a-f]{64}$ ]]; then
-      fail "aphelion-image.sha256 for $tag has an unexpected format. Refusing it; nothing changed."
-    fi
-    if docker pull "$sha_body"; then
-      digests=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$sha_body" 2>/dev/null) ||
-        fail "couldn't read the digest of the pulled image $sha_body. Nothing changed."
-      grep -qxF -- "$sha_body" <<<"$digests" ||
-        fail "the pulled image digest doesn't match $sha_body. Refusing it; nothing changed."
-      pulled=$sha_body
-    else
-      echo "Couldn't pull $sha_body; building the image locally." >&2
-    fi
+  tag_commit=$(git -C "$repo" rev-parse --verify --quiet "refs/tags/$tag^{commit}" 2>/dev/null) || tag_commit=""
+  if [[ -n $tag_commit && $tag_commit == "$previous" ]]; then
+    at_tag=1
   else
-    echo "No published image digest for $tag; building the image locally." >&2
+    git -C "$repo" fetch --tags ||
+      fail "git fetch --tags failed in $repo"
+    tag_commit=$(git -C "$repo" rev-parse --verify --quiet "refs/tags/$tag^{commit}" 2>/dev/null) ||
+      fail "tag $tag doesn't exist in $repo"
+    if [[ $tag_commit == "$previous" ]]; then
+      at_tag=1
+    fi
   fi
-  git -C "$repo" checkout --detach "refs/tags/$tag" ||
-    fail "git checkout $tag failed"
-  if [[ -n $pulled ]]; then
-    docker tag "$pulled" aphelion:local ||
-      fail "docker tag $pulled aphelion:local failed"
-  else
-    compose build || fail "docker compose build failed"
+  if ((!at_tag)); then
+    git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" ||
+      fail "git checkout $tag failed"
+    moved=1
   fi
-  "$APHELION_DEPLOY/host/install" || fail "host/install failed"
+  if [[ ! -x $APHELION_DEPLOY/host/get-image ]]; then
+    ((!moved)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    fail "$tag has no $APHELION_DEPLOY/host/get-image"
+  fi
+  if ! "$APHELION_DEPLOY/host/get-image" "$tag"; then
+    ((!moved)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    exit 1
+  fi
+  if ! "$APHELION_DEPLOY/host/install"; then
+    ((!moved)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    fail "host/install failed"
+  fi
   systemctl restart "$service" || fail "restarting $service failed"
   after=$(git -C "$repo" describe --tags --exact-match 2>/dev/null || echo "$tag")
   echo "Upgraded Aphelion from $before to $after."

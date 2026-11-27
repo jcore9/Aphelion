@@ -7,6 +7,7 @@ import { pluginInstalls } from "./0005-plugin-installs";
 import { pluginVersions } from "./0006-plugin-versions";
 import { pluginEnabled } from "./0007-plugin-enabled";
 import { messageHistory } from "./0008-message-history";
+import { commandLedger } from "./0009-command-ledger";
 
 export const migrations: readonly Migration[] = [
   auditLog,
@@ -17,4 +18,5 @@ export const migrations: readonly Migration[] = [
   pluginVersions,
   pluginEnabled,
   messageHistory,
+  commandLedger,
 ];

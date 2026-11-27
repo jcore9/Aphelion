@@ -80,14 +80,13 @@ Unknown flags or invalid values print usage and exit with 2. The command never r
 
 ## `upgrade`
 
-`sudo aphelion upgrade [TAG]` moves the host checkout and server image to `TAG`. With no `TAG`, it reads GitHub's releases API for `jcore9/Aphelion` and picks the newest non-draft release (including pre-releases while Aphelion is before v1.0). In order, it:
+`sudo aphelion upgrade [TAG]` moves the host checkout and server image to `TAG`. With no `TAG`, it reads GitHub's releases API for `jcore9/Aphelion` and picks the newest release that isn't a draft. That includes pre-releases while Aphelion is before v1.0. In order, it does these steps:
 
-1. Refuses if the checkout in `/opt/aphelion` (the parent of `$APHELION_DEPLOY`) has local changes.
-2. Fetches tags with `git fetch --tags` and stops if `refs/tags/TAG` doesn't exist.
-3. Downloads `aphelion-image.sha256` from the release if present. If the file exists, it validates the single line `ghcr.io/jcore9/aphelion@sha256:<64 hex characters>`, runs `docker pull` on that digest, and verifies `RepoDigests` includes the exact digest. A malformed file or a digest mismatch stops the upgrade and changes nothing.
-4. If the release has no `aphelion-image.sha256` file or `docker pull` fails (for example when the `ghcr.io` package is private), falls back to building the image locally with `docker compose build`.
-5. Checks out `refs/tags/TAG` detached in `/opt/aphelion`, tags the verified pulled image as `aphelion:local` (or builds it), runs `host/install`, and restarts `aphelion.service`.
-6. Prints the version before and after (`Upgraded Aphelion from BEFORE to AFTER.`), waits up to 30 seconds for `/health`, and runs `aphelion check`.
+1. Checks `/opt/aphelion`, the parent of `$APHELION_DEPLOY`. It refuses a symbolic link for `/opt/aphelion` or `/opt/aphelion/.git`, any file that root doesn't own or that others can write, or local changes checked with `git --no-optional-locks status --porcelain`.
+2. Compares `HEAD` with `refs/tags/TAG^{commit}`. If they differ, it fetches tags with `git fetch --tags`, stops if `refs/tags/TAG` doesn't exist, and checks out `refs/tags/TAG` detached.
+3. Runs [`deploy/host/get-image`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/get-image) `TAG` from the checked-out release. That script downloads `aphelion-image.sha256` from the release, checks that the file holds one `ghcr.io/jcore9/aphelion@sha256:<64 hex characters>` line, pulls the image by that digest, checks `RepoDigests`, and tags it as `aphelion:local`. If `aphelion:local` already carries that digest, it changes nothing. If the release has no digest file or `docker pull` fails, for example while the `ghcr.io` package stays private, it builds `aphelion:local` with `docker compose build`.
+4. Runs [`deploy/host/install`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/install) to update the service file and link while keeping the bootstrap key. If step 3 or step 4 fails after step 2 moved the checkout, `upgrade` puts `/opt/aphelion` back on its earlier branch or commit and leaves `aphelion:local` unchanged.
+5. Restarts `aphelion.service`, prints `Upgraded Aphelion from BEFORE to AFTER.`, waits up to 30 seconds for `/health`, and runs `aphelion check`.
 
 ## `network-check`
 
@@ -190,6 +189,6 @@ Compose's own `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` pass through to every ca
 | `sign-in NAME` | `docker compose exec --user aphelion-bot aphelion <the tool's sign-in command>`, attached to your terminal |
 | `backup`, `restore` | `systemctl`, `docker compose config --images`, `docker volume`, and `docker run` for the packing, the unpacking and `aphelion restore finish`. [Back up](../guides/install.md#back-up) and [Restore on the new host](../guides/install.md#restore-on-the-new-host) list them. |
 | `logs` | `journalctl -u aphelion --no-pager`, with validated `--follow`, `--lines` and `--since` flags |
-| `upgrade [TAG]` | `git`, `curl`, `docker pull` and `docker image inspect` and `docker tag` (or `docker compose build`), `host/install`, `systemctl restart aphelion`, and `aphelion check` |
+| `upgrade [TAG]` | `git`, `curl`, [`deploy/host/get-image`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/get-image), [`deploy/host/install`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/install), `systemctl restart aphelion`, and `aphelion check` |
 | `network-check [TARGETS...]` | [`deploy/host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check): `iptables`, `ip6tables`, reading `/etc/default/ufw` and `/etc/ufw/ufw.conf`, and with six targets `docker compose exec -T --user aphelion-bot aphelion …` |
 | `status`, `check` | `systemctl`, `curl`, `deploy/host/network-check` (`iptables`, `ip6tables` and ufw config), `docker compose ps`, `docker inspect`, and for each installed tool `docker compose exec -T --user aphelion-bot aphelion <status command>` |
