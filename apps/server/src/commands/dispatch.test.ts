@@ -33,9 +33,18 @@ const logs = () => {
   return { lines, logger };
 };
 
+const temporaryFolder = () => {
+  const dir = mkdtempSync(join(tmpdir(), "aphelion-dispatch-"));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true });
+  });
+  return dir;
+};
+
 interface SetupOptions {
   readonly admission?: Admission;
   readonly hold?: Effect.Effect<void>;
+  readonly dir?: string;
 }
 
 const setup = (
@@ -44,10 +53,7 @@ const setup = (
   options: SetupOptions = {},
 ) =>
   Effect.gen(function* () {
-    const dir = mkdtempSync(join(tmpdir(), "aphelion-dispatch-"));
-    onTestFinished(() => {
-      rmSync(dir, { recursive: true });
-    });
+    const dir = options.dir ?? temporaryFolder();
     const db = openStore(join(dir, "aphelion.db"));
     onTestFinished(() => {
       db.close();
@@ -124,6 +130,30 @@ describe("bot.prompt", () => {
       expect(again).toEqual(first);
       expect(calls.prompts).toEqual([{ bot: "chief", text: "Hello" }]);
     }),
+  );
+
+  it.effect(
+    "answers a repeat after a server restart with the same turn and starts no second one",
+    () =>
+      Effect.gen(function* () {
+        const dir = temporaryFolder();
+        const before = yield* setup("accepted", true, { dir });
+        const first = yield* before.send("bot.prompt", {
+          bot: "chief",
+          text: "Hello",
+        });
+        before.db.close();
+
+        const after = yield* setup("accepted", true, { dir });
+        const again = yield* after.send("bot.prompt", {
+          bot: "chief",
+          text: "Hello",
+        });
+
+        expect(again).toEqual(first);
+        expect(before.calls.prompts).toHaveLength(1);
+        expect(after.calls.prompts).toEqual([]);
+      }),
   );
 
   it.effect(
