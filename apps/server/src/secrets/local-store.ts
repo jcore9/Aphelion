@@ -94,6 +94,10 @@ async function recipientOf(key: Secret): Promise<string> {
   }
 }
 
+export async function validateBootstrapKey(key: Secret): Promise<void> {
+  await recipientOf(key);
+}
+
 const entryFile = (name: string) =>
   `${createHash("sha256").update(name).digest("hex")}.age`;
 
