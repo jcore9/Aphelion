@@ -249,13 +249,104 @@ esac
 FAKE
 cat >"$fakebin/curl" <<'FAKE'
 #!/bin/bash
-[[ ${FAKE_CONTAINER:-up} == up && ${*: -1} == http://100.100.5.1:7400/health ]] || exit 7
-echo '{"status":"ok"}'
+url=${*: -1}
+echo "curl $*" >>"${FAKE_CALLS:-/dev/null}"
+case $url in
+  http://100.100.5.1:7400/health)
+    [[ ${FAKE_CONTAINER:-up} == up ]] || exit 7
+    echo '{"status":"ok"}'
+    ;;
+  https://api.github.com/repos/jcore9/Aphelion/releases?per_page=20)
+    [[ -z ${FAKE_RELEASES_FAIL:-} ]] || exit 22
+    if [[ -n ${FAKE_RELEASES_JSON:-} ]]; then
+      printf '%s\n' "$FAKE_RELEASES_JSON"
+    else
+      cat <<'JSON'
+[{"tag_name":"v0.1.0-alpha.99","draft":true,"prerelease":true},{"tag_name":"v0.1.0-alpha.2","draft":false,"prerelease":true,"body":"Example \"tag_name\": \"v9.9.9\", \"draft\": false"},{"tag_name":"v0.1.0-alpha.1","draft":false,"prerelease":true}]
+JSON
+    fi
+    ;;
+  https://github.com/jcore9/Aphelion/releases/download/*/aphelion-image.sha256)
+    [[ -z ${FAKE_DIGEST_MISSING:-} ]] || exit 22
+    printf '%s\n' "${FAKE_DIGEST_BODY:-ghcr.io/jcore9/aphelion@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    ;;
+  *)
+    exit 7
+    ;;
+esac
+FAKE
+cat >"$fakebin/journalctl" <<'FAKE'
+#!/bin/bash
+echo "journalctl $*" >>"${FAKE_CALLS:-/dev/null}"
+if [[ -n ${FAKE_JOURNALCTL_ARGS:-} ]]; then
+  printf '%s\n' "$@" >"$FAKE_JOURNALCTL_ARGS"
+fi
+echo "fake journal line"
+exit "${FAKE_JOURNALCTL_EXIT:-0}"
+FAKE
+cat >"$fakebin/git" <<'FAKE'
+#!/bin/bash
+echo "git $*" >>"${FAKE_CALLS:-/dev/null}"
+args=("$@")
+i=0
+while ((i < ${#args[@]})); do
+  if [[ ${args[$i]} == -C ]]; then
+    i=$((i + 2))
+  else
+    break
+  fi
+done
+sub=${args[$i]:-}
+rest=("${args[@]:$((i + 1))}")
+head_file=${FAKE_GIT_HEAD_FILE:-/tmp/fake-git-head}
+case $sub in
+  rev-parse)
+    case "${rest[*]}" in
+      "--is-inside-work-tree") exit 0 ;;
+      "--short HEAD") echo "abc1234"; exit 0 ;;
+      "--verify --quiet refs/tags/"*)
+        ref=${rest[-1]}
+        tag=${ref#refs/tags/}
+        tag=${tag%\^\{commit\}}
+        [[ " ${FAKE_GIT_TAGS:-v0.1.0-alpha.1 v0.1.0-alpha.2} " == *" $tag "* ]]
+        exit ;;
+    esac
+    exit 1 ;;
+  status)
+    [[ -z ${FAKE_GIT_DIRTY:-} ]] || echo " M deploy/compose.yaml"
+    exit 0 ;;
+  describe)
+    cat "$head_file" 2>/dev/null || echo "v0.1.0-alpha.1"
+    exit 0 ;;
+  fetch)
+    exit "${FAKE_GIT_FETCH_EXIT:-0}" ;;
+  checkout)
+    ref=${rest[-1]}
+    tag=${ref#refs/tags/}
+    printf '%s\n' "$tag" >"$head_file"
+    exit "${FAKE_GIT_CHECKOUT_EXIT:-0}" ;;
+esac
+exit 1
 FAKE
 cat >"$fakebin/docker" <<'FAKE'
 #!/bin/bash
 echo "docker $*" >>"${FAKE_CALLS:-/dev/null}"
 case " $* " in
+  *" pull "*)
+    exit "${FAKE_PULL_EXIT:-0}" ;;
+  *" image inspect "*)
+    printf '%s\n' "${FAKE_INSPECT_DIGESTS:-ghcr.io/jcore9/aphelion@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    exit "${FAKE_INSPECT_EXIT:-0}" ;;
+  *" tag "*)
+    exit "${FAKE_TAG_EXIT:-0}" ;;
+  *" inspect "*"ReadonlyRootfs"*)
+    echo 'true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true"]'
+    exit 0 ;;
+  *" inspect "*"Mounts"*)
+    echo '[]'
+    exit 0 ;;
+  *" build "*)
+    exit "${FAKE_BUILD_EXIT:-0}" ;;
   *" ps "*)
     [[ ${FAKE_CONTAINER:-up} == up ]] && echo fake-container-id
     exit 0 ;;
@@ -304,6 +395,21 @@ case " $* " in
     exit ;;
   *" --user harness aphelion test -L "*)
     exit 1 ;;
+  *" --user aphelion-bot aphelion true "*)
+    [[ ${FAKE_CONTAINER:-up} == up ]]
+    exit ;;
+  *" --user aphelion-bot aphelion getent hosts api.anthropic.com "*)
+    [[ -z ${FAKE_DNS_FAIL:-} ]]
+    exit ;;
+  *" --user aphelion-bot aphelion timeout "*)
+    if [[ -n ${FAKE_NETNS_EXEC:-} ]]; then
+      while (($#)); do
+        if [[ $1 == aphelion ]]; then shift; break; fi
+        shift
+      done
+      exec nsenter --net=/run/netns/bot "$@"
+    fi
+    exit 0 ;;
   *" --user aphelion-bot aphelion "*" auth login "* | *" --user aphelion-bot aphelion "*" login --device-auth "*)
     echo "SECRET-FROM-THE-TOOL"
     exit "${FAKE_SIGN_IN_EXIT:-0}" ;;
@@ -362,14 +468,17 @@ error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" status 2>&1 >
 [[ $status == 2 && $error == "Run it with sudo: sudo aphelion status" ]] ||
   fail "the command didn't refuse a user other than root with status 2: $status $error"
 help=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" --help) || fail "--help needs root"
-[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* && $help == *"aphelion tool install NAME"* ]] ||
+[[ $help == *"aphelion status"* && $help == *"aphelion check"* && $help == *"aphelion device add NAME"* && $help == *"aphelion tool install NAME"* && $help == *"aphelion logs"* && $help == *"aphelion upgrade"* && $help == *"aphelion network-check"* ]] ||
   fail "--help doesn't list the commands: $help"
 pass "the command refuses a user other than root with status 2, and --help works for everyone"
 
 for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b" tool "tool frobnicate" "tool list extra" "tool install" "tool install a b" "tool remove" "tool remove a b" "tool update a b" "tool check a" "tool check now please" \
   sign-in "sign-in a b" "backup extra" "backup --to" "backup --to a b" "restore a b" \
   plugin "plugin frobnicate" "plugin install" "plugin install a b" "plugin install a --approve" "plugin install a --other x" \
-  "plugin update" "plugin update a --other x" "plugin enable a b" "plugin rollback" "plugin rollback a b" "plugin restart a b" "plugin dev" "plugin dev a b"; do
+  "plugin update" "plugin update a --other x" "plugin enable a b" "plugin rollback" "plugin rollback a b" "plugin restart a b" "plugin dev" "plugin dev a b" \
+  "logs extra" "logs --bogus" "logs --lines" "logs --lines 0" "logs --lines -5" "logs --lines abc" "logs --since" \
+  "upgrade v0.1.0 extra" "upgrade --bogus" \
+  "network-check 1.2.3.4:80" "network-check 1 2 3 4 5 6 7"; do
   status=0
   read -ra words <<<"$bad" || true
   error=$(as_root_aphelion "${words[@]}" 2>&1 >/dev/null) || status=$?
@@ -721,3 +830,180 @@ for bad in "my-plugin/.." "my-plugin/../my-plugin/.." ".." linked-plugin linked-
   ! called " cp " && ! called "plugin install" || fail "plugin install went on with '$bad'"
 done
 pass "plugin install refuses a name that isn't a plain folder name, a symlink, a parent folder, a file, and a folder that doesn't exist"
+
+jargs=$(mktemp)
+reset_calls
+out=$(FAKE_JOURNALCTL_ARGS=$jargs as_root_aphelion logs) || fail "logs failed: $out"
+[[ $out == "fake journal line" ]] || fail "logs printed something else: $out"
+[[ $(cat "$jargs") == $'-u\naphelion\n--no-pager' ]] || fail "logs didn't call journalctl -u aphelion --no-pager: $(cat "$jargs")"
+[[ $out != *100.100.5.1* && $out != *AGE-SECRET-KEY* ]] || fail "logs printed .env or credential content"
+status=0
+out=$(FAKE_JOURNALCTL_ARGS=$jargs as_root_aphelion logs --follow --lines 50 --since "1 hour ago") || status=$?
+[[ $status == 0 && $(cat "$jargs") == $'-u\naphelion\n--no-pager\n--follow\n--lines\n50\n--since\n1 hour ago' ]] ||
+  fail "logs didn't pass validated flags with TIME as one argument ($status): $(cat "$jargs")"
+status=0
+FAKE_JOURNALCTL_EXIT=3 as_root_aphelion logs >/dev/null || status=$?
+[[ $status == 3 ]] || fail "logs didn't pass journalctl's exit code through: $status"
+status=0
+as_root_aphelion logs --since "" >/dev/null 2>&1 || status=$?
+[[ $status == 2 ]] || fail "logs accepted an empty --since value: $status"
+pass "logs validates flags, passes them to journalctl -u aphelion --no-pager with TIME as one argument, and passes the exit code through"
+
+iptables -t filter -N DOCKER
+iptables -t nat -N DOCKER
+out=$(as_root_aphelion network-check 2>&1) || fail "network-check failed with all rules and chains in place: $out"
+[[ $out != *FAIL* ]] || fail "network-check printed FAIL when everything is in place: $out"
+out=$(as_root_aphelion check 2>&1) || fail "check failed with all rules and chains in place: $out"
+grep -qx "ok    the firewall chains exist" <<<"$out" || fail "check didn't pass the firewall check: $out"
+pass "network-check and check pass when Aphelion's rules, jumps, IPv6 rules, Docker's chains and ufw settings are in place"
+
+iptables -t mangle -D FORWARD -j APHELION-FORWARD
+status=0
+out=$(as_root_aphelion network-check 2>&1) || status=$?
+[[ $status == 1 && $out == *"FAIL"* && $out == *"FORWARD"* && $out == *"APHELION-FORWARD"* ]] ||
+  fail "network-check didn't name the missing FORWARD jump ($status): $out"
+status=0
+chk=$(as_root_aphelion check 2>&1) || status=$?
+[[ $status == 1 && $chk == *"FAIL  the firewall chains exist:"*"APHELION-FORWARD"* ]] ||
+  fail "check didn't fail when the FORWARD jump was missing ($status): $chk"
+iptables -t mangle -I FORWARD 1 -j APHELION-FORWARD
+
+iptables -t mangle -D INPUT -j APHELION-INPUT
+status=0
+out=$(as_root_aphelion network-check 2>&1) || status=$?
+[[ $status == 1 && $out == *"FAIL"* && $out == *"INPUT"* && $out == *"APHELION-INPUT"* ]] ||
+  fail "network-check didn't name the missing INPUT jump ($status): $out"
+iptables -t mangle -I INPUT 1 -j APHELION-INPUT
+
+iptables -t mangle -D APHELION-FORWARD -i aphelion0 -d 10.0.0.0/8 -j DROP
+status=0
+out=$(as_root_aphelion network-check 2>&1) || status=$?
+[[ $status == 1 && $out == *"FAIL"* && $out == *"10.0.0.0/8"* ]] ||
+  fail "network-check didn't name a deleted rule inside APHELION-FORWARD ($status): $out"
+/opt/aphelion/deploy/host/firewall >/dev/null
+
+if ip6tables -w 10 -t mangle -n -L INPUT >/dev/null 2>&1; then
+  ip6tables -w 10 -t mangle -D FORWARD -i aphelion0 -j DROP
+  status=0
+  out=$(as_root_aphelion network-check 2>&1) || status=$?
+  [[ $status == 1 && $out == *"FAIL"* && $out == *"ip6tables"* && $out == *"FORWARD"* ]] ||
+    fail "network-check didn't name a deleted ip6tables rule ($status): $out"
+  /opt/aphelion/deploy/host/firewall >/dev/null
+fi
+
+iptables -t filter -X DOCKER
+status=0
+out=$(as_root_aphelion network-check 2>&1) || status=$?
+[[ $status == 1 && $out == *"FAIL"* && $out == *"filter DOCKER"* ]] ||
+  fail "network-check didn't name the missing filter DOCKER chain ($status): $out"
+status=0
+chk=$(as_root_aphelion check 2>&1) || status=$?
+[[ $status == 1 && $chk == *"FAIL  the firewall chains exist:"*"DOCKER"* ]] ||
+  fail "check didn't fail when the filter DOCKER chain was missing ($status): $chk"
+iptables -t filter -N DOCKER
+
+iptables -t nat -X DOCKER
+status=0
+out=$(as_root_aphelion network-check 2>&1) || status=$?
+[[ $status == 1 && $out == *"FAIL"* && $out == *"nat DOCKER"* ]] ||
+  fail "network-check didn't name the missing nat DOCKER chain ($status): $out"
+iptables -t nat -N DOCKER
+
+mkdir -p /etc/ufw
+printf 'ENABLED=yes\n' >/etc/ufw/ufw.conf
+printf 'MANAGE_BUILTINS=yes\n' >/etc/default/ufw
+status=0
+out=$(as_root_aphelion network-check 2>&1) || status=$?
+[[ $status == 1 && $out == *"FAIL"* && $out == *"MANAGE_BUILTINS=yes"* ]] ||
+  fail "network-check didn't report ufw MANAGE_BUILTINS=yes ($status): $out"
+status=0
+chk=$(as_root_aphelion check 2>&1) || status=$?
+[[ $status == 1 && $chk == *"FAIL  the firewall chains exist:"*"MANAGE_BUILTINS"* ]] ||
+  fail "check didn't fail on ufw MANAGE_BUILTINS=yes ($status): $chk"
+rm -f /etc/ufw/ufw.conf /etc/default/ufw
+pass "network-check and check name missing jumps, missing chain rules, missing ip6tables rules, missing Docker chains and ufw MANAGE_BUILTINS=yes"
+
+out=$(FAKE_NETNS_EXEC=1 as_root_aphelion network-check 10.9.0.2:80 10.9.0.1:22 100.100.5.1:22 100.100.5.2:22 172.30.73.1:22 203.0.113.2:443 2>&1) ||
+  fail "network-check with 6 targets failed: $out"
+[[ $out == *"ok    10.9.0.2:80 is blocked"* && $out == *"ok    203.0.113.2:443 is reachable"* && $out == *"ok    names resolve inside the container"* ]] ||
+  fail "network-check with 6 targets didn't run the probes: $out"
+iptables -t mangle -D FORWARD -j APHELION-FORWARD
+status=0
+out=$(FAKE_NETNS_EXEC=1 as_root_aphelion network-check 10.9.0.2:80 10.9.0.1:22 100.100.5.1:22 100.100.5.2:22 172.30.73.1:22 203.0.113.2:443 2>&1) || status=$?
+[[ $status == 1 && $out == *"FAIL"* && $out == *"APHELION-FORWARD"* ]] ||
+  fail "network-check with 6 targets didn't run the firewall check first ($status): $out"
+iptables -t mangle -I FORWARD 1 -j APHELION-FORWARD
+pass "network-check with six targets runs the firewall check first, then probes the targets and DNS"
+
+good_digest=ghcr.io/jcore9/aphelion@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+wrong_digest=ghcr.io/jcore9/aphelion@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+printf 'v0.1.0-alpha.1\n' >/tmp/fake-git-head
+
+reset_calls
+status=0
+out=$(FAKE_GIT_DIRTY=1 as_root_aphelion upgrade 2>&1) || status=$?
+[[ $status == 1 && $out == *"local changes"* ]] || fail "upgrade didn't refuse local changes ($status): $out"
+! called "git fetch" && ! called "git checkout" && ! called "docker" && ! called "systemctl" ||
+  fail "upgrade ran commands with local changes: $(cat "$FAKE_CALLS")"
+pass "upgrade refuses when /opt/aphelion has local changes"
+
+reset_calls
+out=$(FAKE_DIGEST_BODY=$good_digest FAKE_INSPECT_DIGESTS=$good_digest as_root_aphelion upgrade 2>&1) ||
+  fail "upgrade with matching digest failed: $out"
+[[ $out == *"v0.1.0-alpha.1"* && $out == *"v0.1.0-alpha.2"* && $out == *"checks passed"* ]] ||
+  fail "upgrade didn't print before/after versions and run check: $out"
+[[ $(cat /tmp/fake-git-head) == v0.1.0-alpha.2 ]] || fail "upgrade didn't check out v0.1.0-alpha.2"
+ordered "git -C /opt/aphelion fetch --tags" "docker pull $good_digest" &&
+  ordered "docker pull $good_digest" "git -C /opt/aphelion checkout --detach refs/tags/v0.1.0-alpha.2" &&
+  ordered "git -C /opt/aphelion checkout --detach refs/tags/v0.1.0-alpha.2" "docker tag $good_digest aphelion:local" &&
+  ordered "docker tag $good_digest aphelion:local" "systemctl daemon-reload" &&
+  ordered "systemctl daemon-reload" "systemctl restart aphelion" ||
+  fail "upgrade didn't run fetch, pull, checkout, tag, install, restart in order: $(cat "$FAKE_CALLS")"
+! called " build" || fail "upgrade built locally even though the pulled image matched"
+pass "upgrade resolves the newest non-draft release, verifies the digest, tags aphelion:local, installs, restarts and runs check"
+
+printf 'v0.1.0-alpha.1\n' >/tmp/fake-git-head
+reset_calls
+status=0
+out=$(FAKE_DIGEST_BODY=$good_digest FAKE_INSPECT_DIGESTS=$wrong_digest as_root_aphelion upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 1 && $out == *"digest"* ]] || fail "upgrade didn't refuse a digest mismatch ($status): $out"
+[[ $(cat /tmp/fake-git-head) == v0.1.0-alpha.1 ]] || fail "upgrade changed the git checkout on a digest mismatch"
+! called "git -C /opt/aphelion checkout" && ! called "docker tag" && ! called " build" && ! called "systemctl" ||
+  fail "upgrade changed something after a digest mismatch: $(cat "$FAKE_CALLS")"
+
+reset_calls
+status=0
+out=$(FAKE_DIGEST_BODY="not-a-valid-digest" as_root_aphelion upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 1 && $out == *"aphelion-image.sha256"* ]] || fail "upgrade accepted a malformed digest file ($status): $out"
+! called "docker pull" && ! called "git -C /opt/aphelion checkout" && ! called "docker tag" && ! called " build" && ! called "systemctl" ||
+  fail "upgrade changed something after a malformed digest file: $(cat "$FAKE_CALLS")"
+pass "upgrade refuses a digest mismatch or malformed digest file and changes nothing"
+
+printf 'v0.1.0-alpha.1\n' >/tmp/fake-git-head
+reset_calls
+out=$(FAKE_DIGEST_BODY=$good_digest FAKE_PULL_EXIT=1 as_root_aphelion upgrade v0.1.0-alpha.2 2>&1) ||
+  fail "upgrade didn't fall back to build when pull failed: $out"
+[[ $(cat /tmp/fake-git-head) == v0.1.0-alpha.2 && $out == *"v0.1.0-alpha.1"* && $out == *"v0.1.0-alpha.2"* ]] ||
+  fail "upgrade fallback didn't check out and print versions: $out"
+ordered "docker pull $good_digest" "git -C /opt/aphelion checkout --detach refs/tags/v0.1.0-alpha.2" &&
+  ordered "git -C /opt/aphelion checkout --detach refs/tags/v0.1.0-alpha.2" "docker compose --project-directory /opt/aphelion/deploy build" &&
+  ordered "docker compose --project-directory /opt/aphelion/deploy build" "systemctl restart aphelion" ||
+  fail "upgrade fallback ran steps out of order: $(cat "$FAKE_CALLS")"
+! called "docker tag" || fail "upgrade tagged an image after a failed pull"
+
+printf 'v0.1.0-alpha.1\n' >/tmp/fake-git-head
+reset_calls
+out=$(FAKE_DIGEST_MISSING=1 as_root_aphelion upgrade v0.1.0-alpha.2 2>&1) ||
+  fail "upgrade didn't fall back to build when aphelion-image.sha256 is missing: $out"
+called "docker compose --project-directory /opt/aphelion/deploy build" && ! called "docker pull" && ! called "docker tag" ||
+  fail "upgrade didn't build locally when aphelion-image.sha256 was missing: $(cat "$FAKE_CALLS")"
+pass "upgrade falls back to docker compose build when the pull fails or no digest asset exists"
+
+printf 'v0.1.0-alpha.1\n' >/tmp/fake-git-head
+reset_calls
+status=0
+out=$(as_root_aphelion upgrade v9.9.9 2>&1) || status=$?
+[[ $status == 1 && $out == *"v9.9.9"* ]] || fail "upgrade accepted a tag that doesn't exist ($status): $out"
+! called "docker pull" && ! called "git -C /opt/aphelion checkout" && ! called " build" && ! called "systemctl" ||
+  fail "upgrade changed something for a missing tag: $(cat "$FAKE_CALLS")"
+pass "upgrade stops before changing anything when the requested tag doesn't exist"

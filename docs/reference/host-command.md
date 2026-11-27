@@ -9,6 +9,9 @@ It is not the server's [`aphelion` command](cli.md). That one runs inside the co
 | Command | What it does |
 | --- | --- |
 | `sudo aphelion status` | Shows the service, the container, `/health` and each installed AI tool |
+| `sudo aphelion logs [--follow] [--lines N] [--since TIME]` | Shows the service logs from `journalctl` |
+| `sudo aphelion upgrade [TAG]` | Moves `/opt/aphelion` and the server image to `TAG`, or to the newest published release |
+| `sudo aphelion network-check [TARGETS...]` | Checks the firewall rules, Docker's chains and ufw's setting, and with six `IP:PORT` targets probes them from the container |
 | `sudo aphelion device add NAME [--days N]` | Adds a device and prints its token. The token is the only line on standard output. |
 | `sudo aphelion device list` | Lists the devices |
 | `sudo aphelion device revoke ID` | Stops a device's token at once |
@@ -35,11 +38,11 @@ Run any other command without root, and it prints `Run it with sudo: sudo apheli
 
 | Code | Meaning |
 | --- | --- |
-| 0 | The command worked. For `status`, the service runs and `/health` answers. For `check`, every check passed. |
-| 1 | `status` found the service or `/health` down. `check` found a failed check. |
-| 2 | The command was misused, or it wasn't run as root. |
+| 0 | The command worked. For `status`, the service runs and `/health` answers. For `check` and `network-check`, every check passed. |
+| 1 | `status` found the service or `/health` down. `check` or `network-check` found a failed check. `upgrade` refused or a step failed. |
+| 2 | The command was misused, or it wasn't run as root. For `network-check` with six targets, also when a target is malformed, the host can't reach a target, or the container isn't running. |
 
-A `device`, `tool` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `sign-in` exits with the code of the tool's own sign-in. `sign-in`, `backup` and `restore` exit with 1 when they refuse or a step fails. `plugin install` exits with 1 when it refuses.
+A `device`, `tool` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `logs` exits with `journalctl`'s code. `sign-in` exits with the code of the tool's own sign-in. `sign-in`, `backup`, `restore` and `upgrade` exit with 1 when they refuse or a step fails. `plugin install` exits with 1 when it refuses.
 
 ## `status`
 
@@ -64,6 +67,44 @@ For each installed tool that has a status command, Aphelion runs that command as
 | `claude` | `claude auth status --text` | `claude: signed in` |
 | `codex` | `codex login status` | `codex: signed in` |
 | `grok`, `opencode` | none that is reliable | `<name>: installed, sign-in state unknown` |
+
+## `logs`
+
+`sudo aphelion logs [--follow] [--lines N] [--since TIME]` runs `journalctl -u aphelion --no-pager` and passes through the validated flags:
+
+- `--follow` streams new log entries until you stop it.
+- `--lines N` prints the last `N` lines. `N` must be a positive whole number.
+- `--since TIME` passes `TIME` as one argument to `journalctl --since`. `TIME` must be non-empty.
+
+Unknown flags or invalid values print usage and exit with 2. The command never reads or prints `deploy/.env` or the bootstrap credential.
+
+## `upgrade`
+
+`sudo aphelion upgrade [TAG]` moves the host checkout and server image to `TAG`. With no `TAG`, it reads GitHub's releases API for `jcore9/Aphelion` and picks the newest non-draft release (including pre-releases while Aphelion is before v1.0). In order, it:
+
+1. Refuses if the checkout in `/opt/aphelion` (the parent of `$APHELION_DEPLOY`) has local changes.
+2. Fetches tags with `git fetch --tags` and stops if `refs/tags/TAG` doesn't exist.
+3. Downloads `aphelion-image.sha256` from the release if present. If the file exists, it validates the single line `ghcr.io/jcore9/aphelion@sha256:<64 hex characters>`, runs `docker pull` on that digest, and verifies `RepoDigests` includes the exact digest. A malformed file or a digest mismatch stops the upgrade and changes nothing.
+4. If the release has no `aphelion-image.sha256` file or `docker pull` fails (for example when the `ghcr.io` package is private), falls back to building the image locally with `docker compose build`.
+5. Checks out `refs/tags/TAG` detached in `/opt/aphelion`, tags the verified pulled image as `aphelion:local` (or builds it), runs `host/install`, and restarts `aphelion.service`.
+6. Prints the version before and after (`Upgraded Aphelion from BEFORE to AFTER.`), waits up to 30 seconds for `/health`, and runs `aphelion check`.
+
+## `network-check`
+
+`sudo aphelion network-check [TARGETS...]` runs [`deploy/host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check).
+
+With no arguments, it runs only the read-only firewall check:
+
+- `APHELION-FORWARD` and `APHELION-INPUT` exist in the IPv4 `mangle` table.
+- `FORWARD` jumps to `APHELION-FORWARD`, and `INPUT` jumps to `APHELION-INPUT` (`iptables -C`).
+- Every rule installed by `deploy/host/firewall` exists in `APHELION-FORWARD` and `APHELION-INPUT` (`iptables -C`).
+- When IPv6 `mangle` is available, the three `aphelion0` `DROP` rules exist in `INPUT` and `FORWARD` (`ip6tables -C`).
+- Docker's `DOCKER` chain exists in the `filter` and `nat` tables.
+- `/etc/default/ufw` and `/etc/ufw/ufw.conf` don't have ufw enabled with `MANAGE_BUILTINS=yes`.
+
+Each missing chain or rule prints a `FAIL` line naming it, followed by the recovery commands.
+
+With six `IP:PORT` targets, it runs the firewall check first, verifies the host reaches each target, then probes the first five targets (must time out), the sixth target (must connect), and DNS (`getent hosts api.anthropic.com`) as `aphelion-bot` inside the running container.
 
 ## `sign-in`
 
@@ -120,10 +161,10 @@ FAIL  the bootstrap credential exists: /etc/credstore.encrypted/aphelion-bootstr
 | `config check` accepts the Compose file | `aphelion config check --compose -` passes on the rendered Compose file, as [`host/preflight`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/preflight) runs it |
 | The container is hardened | `docker inspect` shows a read-only root, `no-new-privileges`, no privileged mode, all capabilities dropped except `SETUID`, `SETGID` and `KILL`, and no Docker socket |
 | The bootstrap credential exists | `/etc/credstore.encrypted/aphelion-bootstrap` is a file |
-| The firewall chains exist | `iptables -t mangle -S` finds `APHELION-FORWARD` and `APHELION-INPUT` |
+| The firewall chains exist | The read-only check in `aphelion network-check` passes: `APHELION-FORWARD` and `APHELION-INPUT` chains and rules, their `FORWARD` and `INPUT` jumps, IPv6 drop rules, Docker's `filter` and `nat` `DOCKER` chains, and ufw's `MANAGE_BUILTINS` setting |
 | The processor has `sse4_2` | `/proc/cpuinfo` lists it. Only on x86-64, because Bun needs it. |
 
-`check` doesn't run what needs a second machine, a reboot, a bot or a key. That leaves out the WebSocket sign-in, which would make a device token, and [`host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check), which needs addresses to test.
+`check` doesn't run what needs a second machine, a reboot, a bot or a key. That leaves out the WebSocket sign-in, which would make a device token, and the six active probes in `aphelion network-check`, which need addresses to test.
 
 ## Settings
 
@@ -148,4 +189,7 @@ Compose's own `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` pass through to every ca
 | `plugin …` (other) | `docker compose exec -T --user harness aphelion aphelion plugin …`, with output and exit code passed through |
 | `sign-in NAME` | `docker compose exec --user aphelion-bot aphelion <the tool's sign-in command>`, attached to your terminal |
 | `backup`, `restore` | `systemctl`, `docker compose config --images`, `docker volume`, and `docker run` for the packing, the unpacking and `aphelion restore finish`. [Back up](../guides/install.md#back-up) and [Restore on the new host](../guides/install.md#restore-on-the-new-host) list them. |
-| `status`, `check` | `systemctl`, `curl`, `iptables -t mangle -S`, `docker compose ps`, `docker inspect`, and for each installed tool `docker compose exec -T --user aphelion-bot aphelion <status command>` |
+| `logs` | `journalctl -u aphelion --no-pager`, with validated `--follow`, `--lines` and `--since` flags |
+| `upgrade [TAG]` | `git`, `curl`, `docker pull` and `docker image inspect` and `docker tag` (or `docker compose build`), `host/install`, `systemctl restart aphelion`, and `aphelion check` |
+| `network-check [TARGETS...]` | [`deploy/host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check): `iptables`, `ip6tables`, reading `/etc/default/ufw` and `/etc/ufw/ufw.conf`, and with six targets `docker compose exec -T --user aphelion-bot aphelion …` |
+| `status`, `check` | `systemctl`, `curl`, `deploy/host/network-check` (`iptables`, `ip6tables` and ufw config), `docker compose ps`, `docker inspect`, and for each installed tool `docker compose exec -T --user aphelion-bot aphelion <status command>` |
