@@ -134,6 +134,7 @@ function flood(spec: NonNullable<FakeBot["floods"]>) {
 
 export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
   const runs: FakeRun[] = [];
+  const starts: BotSpec[] = [];
   const killCalls: string[] = [];
   const killAttempts: string[] = [];
 
@@ -228,6 +229,7 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
   const layer = Layer.succeed(BotProcesses, {
     start: (spec) =>
       Effect.gen(function* () {
+        starts.push(spec);
         const bot = bots[spec.bot];
         if (bot === undefined) {
           return yield* new SpawnFailed({ reason: "no such fake bot" });
@@ -246,7 +248,7 @@ export function fakeBotProcesses(bots: Readonly<Record<string, FakeBot>>) {
 
   const latest = (bot: string) => runs.findLast((run) => run.spec.bot === bot);
 
-  return { layer, runs, killCalls, killAttempts, latest };
+  return { layer, runs, starts, killCalls, killAttempts, latest };
 }
 
 export const memorySessionRefs = Layer.sync(SessionRefs, () => {

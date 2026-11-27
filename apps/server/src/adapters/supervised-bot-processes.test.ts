@@ -14,6 +14,7 @@ import {
   type SupervisorRequest,
 } from "../cgroups/protocol";
 import { createLogger } from "../log";
+import { Secret } from "../secrets";
 import { memoryLinkPair, type Framing } from "../plugins/link";
 import { supervisedBotProcesses } from "./supervised-bot-processes";
 
@@ -98,6 +99,50 @@ describe("the bot runner's supervised processes", () => {
 
         yield* kill;
         expect(Option.isNone(yield* Queue.poll(a.incoming))).toBe(true);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "puts the spec's API key in the supervisor's start frame, and sends no key field when the spec has none",
+    () =>
+      Effect.gen(function* () {
+        const { a, b } = yield* memoryLinkPair<
+          SupervisorRequest,
+          SupervisorReply
+        >(framing(supervisorRequestSchema), framing(supervisorReplySchema));
+        const next = Queue.take(a.incoming).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.orDie,
+        );
+        yield* a.send({ type: "ready" });
+        const services = yield* Layer.build(
+          supervisedBotProcesses(b, createLogger({ write: () => undefined })),
+        );
+        const processes = Context.get(services, BotProcesses);
+        const fakeKey = "sk-ant-fake-supervised-0123456789";
+        const apiKey = Secret.make(fakeKey, { label: "API key" });
+        yield* processes
+          .start({
+            bot: "alpha",
+            adapter: "claude",
+            folder: "/srv/alpha",
+            apiKey,
+          })
+          .pipe(Effect.forkScoped);
+        const keyed = yield* next;
+        expect(keyed.type === "start" && keyed.apiKey === fakeKey).toBe(true);
+        expect(apiKey.wiped).toBe(false);
+        yield* processes
+          .start({ bot: "beta", adapter: "claude", folder: "/srv/beta" })
+          .pipe(Effect.forkScoped);
+        const plain = yield* next;
+        expect(Object.keys(plain).sort()).toEqual([
+          "adapter",
+          "bot",
+          "folder",
+          "run",
+          "type",
+        ]);
       }).pipe(Effect.scoped),
   );
 });

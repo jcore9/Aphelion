@@ -4,6 +4,7 @@ import {
   botManagerLayer,
   type BotManagerOptions,
 } from "../bots/manager";
+import { brokerClient } from "../secrets/broker-client";
 import type { EventStore } from "./event-store";
 import { persistBotEvents } from "./persist";
 
@@ -12,6 +13,7 @@ export const runBots = (options: BotManagerOptions, history: EventStore) =>
     const botsScope = yield* Scope.make();
     const services = yield* Layer.buildWithScope(
       botManagerLayer({
+        apiKeys: brokerClient(),
         ...options,
         turns: { open: history.openTurn, end: history.endTurn },
       }),

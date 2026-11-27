@@ -34,6 +34,8 @@ import {
   type RestartPolicy,
 } from "../plugins/lifecycle";
 import type { Link } from "../plugins/link";
+import { apiKeyRef, apiKeyTools, type ApiKeyTool } from "../secrets/api-key";
+import type { Secret } from "../secrets/secret";
 import type {
   RunnerNotice,
   RunnerReply,
@@ -51,6 +53,16 @@ export const cgroupsUnsafe =
 
 export const stopFailed =
   "the bot's processes couldn't be removed, so the bot stays stopping and the server tries again";
+
+export const apiKeyReadFailed =
+  "the server couldn't read the bot's API key from the secrets broker, so the bot starts without it";
+
+export interface ApiKeySource {
+  readonly read: (ref: string) => Promise<Secret | undefined>;
+}
+
+const keyTool = (provider: string): ApiKeyTool | undefined =>
+  apiKeyTools.find((tool) => tool === provider);
 
 export const resumeFailed =
   "the saved session could not be resumed, so the bot started a new one";
@@ -208,6 +220,7 @@ export interface BotManagerOptions {
   readonly logger: Logger;
   readonly policy?: RestartPolicy;
   readonly adapters?: Readonly<Record<string, string>>;
+  readonly apiKeys?: ApiKeySource;
   readonly stopDeadlineMs?: number;
   readonly drainDeadlineMs?: number;
   readonly turnAcceptDeadlineMs?: number;
@@ -461,17 +474,40 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }
         });
 
+      const readApiKey = (bot: BotDefinition) => {
+        const tool = keyTool(bot.provider);
+        const source = options.apiKeys;
+        if (tool === undefined || source === undefined) {
+          return Effect.succeed(undefined);
+        }
+        return Effect.tryPromise(() => source.read(apiKeyRef(tool))).pipe(
+          Effect.catch(() =>
+            Effect.sync(() => {
+              logger.warn(apiKeyReadFailed, { bot: bot.name });
+              return undefined;
+            }),
+          ),
+        );
+      };
+
       const sendStart = (slot: Slot, run: number) =>
-        Effect.suspend(() =>
-          sendToRunner({
-            type: "start",
-            bot: slot.bot.name,
-            run,
-            provider: slot.bot.provider,
-            adapter: slot.adapter,
-            folder: slot.bot.folder,
-            resume: slot.resume,
-          }),
+        Effect.acquireUseRelease(
+          readApiKey(slot.bot),
+          (apiKey) =>
+            sendToRunner({
+              type: "start",
+              bot: slot.bot.name,
+              run,
+              provider: slot.bot.provider,
+              adapter: slot.adapter,
+              folder: slot.bot.folder,
+              resume: slot.resume,
+              ...(apiKey === undefined ? {} : { apiKey: apiKey.reveal() }),
+            }),
+          (apiKey) =>
+            Effect.sync(() => {
+              apiKey?.wipe();
+            }),
         );
 
       const run = (slot: Slot, command: LifecycleCommand) =>

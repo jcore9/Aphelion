@@ -31,15 +31,26 @@ const framing = <T>(schema: Framing<T>["schema"]): Framing<T> => ({
 const runA = "0197a3c2-5f1e-7a2b-8c3d-4e5f60718293";
 const runB = "0197a3c2-5f1e-7a2b-9c3d-4e5f60718294";
 
+const keyVariable = "ANTHROPIC_API_KEY";
+
 const adapters = {
   fake: { bundle: "/adapters/fake.js", env: { HOME: "/home/bots" } },
+  keyed: {
+    bundle: "/adapters/keyed.js",
+    env: { HOME: "/home/bots" },
+    apiKeyVariable: keyVariable,
+  },
   probe: { bundle: "/adapters/probe.js", env: { HOME: "/tmp" } },
 };
+
+const fakeKey = "sk-ant-fake-supervisor-canary-0123456789";
 
 interface FakeChild {
   readonly run: string;
   readonly bot: string;
   readonly bundle: string;
+  readonly envNames: readonly string[];
+  readonly keyBytes: number | undefined;
   readonly placed: Deferred.Deferred<boolean>;
   readonly exit: Deferred.Deferred<ProcessExit>;
 }
@@ -47,6 +58,7 @@ interface FakeChild {
 interface HostOptions {
   readonly failStep?: string;
   readonly holdPlacement?: boolean;
+  readonly spawnFails?: boolean;
   readonly killFails?: { readonly run: string; times: number };
   readonly killGate?: {
     readonly run: string;
@@ -80,10 +92,16 @@ const fakeHost = (options: HostOptions = {}) =>
         Effect.gen(function* () {
           const run = runOf(paths);
           calls.push(`spawn ${run} ${entry.bundle} ${bot} ${folder} ${kind}`);
+          if (options.spawnFails === true && kind === "bot") {
+            return yield* new HostFailed({ step: "spawn", errno: "ENOENT" });
+          }
+          const key = entry.env[keyVariable];
           const child: FakeChild = {
             run,
             bot,
             bundle: entry.bundle,
+            envNames: Object.keys(entry.env).sort(),
+            keyBytes: key === undefined ? undefined : Buffer.byteLength(key),
             placed: yield* Deferred.make<boolean>(),
             exit: yield* Deferred.make<ProcessExit>(),
           };
@@ -145,9 +163,10 @@ const supervisor = (options: HostOptions = {}) =>
       framing(supervisorReplySchema),
       framing(supervisorRequestSchema),
     );
+    const logs: string[] = [];
     yield* runSupervisor(b, {
       adapters,
-      logger: createLogger({ write: () => undefined }),
+      logger: createLogger({ write: (line) => logs.push(line) }),
     }).pipe(Effect.provideService(CgroupHost, fake.host), Effect.forkScoped);
     const frames: SupervisorReply[] = [];
     const unread: SupervisorReply[] = [];
@@ -173,7 +192,7 @@ const supervisor = (options: HostOptions = {}) =>
           yield* Effect.sleep("5 millis");
         }
       }).pipe(Effect.timeout("2 seconds"), Effect.orDie);
-    return { ...fake, frames, until, send, childAt };
+    return { ...fake, frames, logs, until, send, childAt };
   });
 
 const is =
@@ -484,4 +503,78 @@ describe("the cgroup supervisor", () => {
         }).pipe(Effect.scoped),
     );
   }
+
+  it.live(
+    "puts a start's API key in the adapter's environment under the table's variable, and keeps it out of the table, the replies and the log",
+    () =>
+      Effect.gen(function* () {
+        const { until, send, childAt, frames, logs } = yield* supervisor();
+        yield* until(is("ready"));
+        yield* send({ ...start(runA, "keyed"), apiKey: fakeKey });
+        yield* until(is("started", runA));
+        const child = yield* childAt(1);
+        expect(child.envNames).toEqual(["ANTHROPIC_API_KEY", "HOME"]);
+        expect(child.keyBytes).toBe(fakeKey.length);
+        expect(Object.keys(adapters.keyed.env)).toEqual(["HOME"]);
+        yield* send({ type: "kill", run: runA });
+        yield* until(is("killed", runA));
+        expect(JSON.stringify(frames)).not.toContain(fakeKey);
+        expect(logs.join("\n")).not.toContain(fakeKey);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "starts a keyed adapter without the variable when the start carries no key, and the probe never gets one",
+    () =>
+      Effect.gen(function* () {
+        const { until, send, childAt } = yield* supervisor();
+        yield* until(is("ready"));
+        yield* send(start(runA, "keyed"));
+        yield* until(is("started", runA));
+        expect((yield* childAt(0)).envNames).toEqual(["HOME"]);
+        expect((yield* childAt(1)).envNames).toEqual(["HOME"]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "refuses a key for an adapter whose table entry names no variable, and never spawns it",
+    () =>
+      Effect.gen(function* () {
+        const { calls, until, send, logs } = yield* supervisor();
+        yield* until(is("ready"));
+        calls.length = 0;
+        yield* send({ ...start(runA), apiKey: fakeKey });
+        expect(yield* until(is("start-failed", runA))).toEqual({
+          type: "start-failed",
+          run: runA,
+          reason: "that adapter takes no API key",
+        });
+        yield* send({ ...start(runB, "probe", probeBot), apiKey: fakeKey });
+        expect(yield* until(is("start-failed", runB))).toMatchObject({
+          reason: probeReserved,
+        });
+        expect(calls).toEqual([]);
+        expect(logs.join("\n")).not.toContain(fakeKey);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps the key out of the failure it logs and sends when the spawn fails",
+    () =>
+      Effect.gen(function* () {
+        const { until, send, frames, logs } = yield* supervisor({
+          spawnFails: true,
+        });
+        yield* until(is("ready"));
+        yield* send({ ...start(runA, "keyed"), apiKey: fakeKey });
+        expect(yield* until(is("start-failed", runA))).toMatchObject({
+          reason: "spawn: ENOENT",
+        });
+        expect(logs.join("\n")).toContain(
+          "the supervisor couldn't start an adapter",
+        );
+        expect(JSON.stringify(frames)).not.toContain(fakeKey);
+        expect(logs.join("\n")).not.toContain(fakeKey);
+      }).pipe(Effect.scoped),
+  );
 });

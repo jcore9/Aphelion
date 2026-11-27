@@ -6,6 +6,7 @@ import {
   turnStartParams,
 } from "@aphelion/plugin-sdk";
 import { z } from "zod";
+import { apiKeyText } from "../secrets/api-key";
 
 export const maxFrameBytes = 8 * maxPluginLineBytes;
 
@@ -23,6 +24,7 @@ export const runnerRequestSchema = z.discriminatedUnion("type", [
     adapter: bot,
     folder: absolutePath,
     resume: sessionRef.nullable(),
+    apiKey: apiKeyText.optional(),
   }),
   z.strictObject({
     type: z.literal("turn.start"),

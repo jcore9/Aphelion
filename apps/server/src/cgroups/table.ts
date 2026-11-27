@@ -7,6 +7,7 @@ export const adapterTable = (
   claude: {
     bundle: "/usr/local/lib/aphelion/adapters/claude/adapter.js",
     env: botEnvironment("claude", home),
+    apiKeyVariable: "ANTHROPIC_API_KEY",
   },
   [probeAdapter]: {
     bundle: "/usr/local/lib/aphelion/cgroup-probe.js",
