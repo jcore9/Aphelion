@@ -140,6 +140,15 @@ const testSupervisor = (
 ) =>
   Effect.gen(function* () {
     const children = new Map<string, ChildProcess>();
+    const killRun = (child: ChildProcess | undefined) => {
+      const root = child?.pid === undefined ? undefined : read(child.pid);
+      freezeAndKill(() => (root ? [root] : []));
+    };
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        for (const child of children.values()) killRun(child);
+      }),
+    );
     yield* link.send({ type: "ready" });
     const handle = (request: SupervisorRequest) =>
       Effect.promise(async () => {
@@ -181,9 +190,7 @@ const testSupervisor = (
           );
           return;
         }
-        const child = children.get(request.run);
-        const root = child?.pid === undefined ? undefined : read(child.pid);
-        freezeAndKill(() => (root ? [root] : []));
+        killRun(children.get(request.run));
         for (const pid of sleepers()) process.kill(pid, "SIGKILL");
         await Effect.runPromise(
           link.send({ type: "killed", run: request.run }),

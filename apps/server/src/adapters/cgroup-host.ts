@@ -25,6 +25,7 @@ export interface BunCgroupHostOptions {
   readonly tree: string;
   readonly runs: string;
   readonly entry: string;
+  readonly bun: string;
   readonly botUid: number;
   readonly logger: Logger;
 }
@@ -34,6 +35,7 @@ export const shippedCgroupHost = {
   tree: "bots",
   runs: "/run/aphelion-runs",
   entry: "/usr/local/lib/aphelion/run-adapter",
+  bun: "/usr/local/bin/bun",
   botUid: 10002,
 } as const;
 
@@ -52,6 +54,14 @@ const failed = (step: string, errno: string) =>
 const statusOf = (pid: number) => {
   try {
     return readFileSync(`/proc/${String(pid)}/status`, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+const programOf = (pid: number) => {
+  try {
+    return readFileSync(`/proc/${String(pid)}/cmdline`, "utf8").split("\0")[0];
   } catch {
     return undefined;
   }
@@ -216,13 +226,11 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
         });
         probes.set(paths.folder, pipes);
         const uid = String(options.botUid);
-        let status = statusOf(pid);
-        for (let tries = 0; tries < 500; tries++) {
-          if (status === undefined) return yield* failed("drop", "ESRCH");
-          if (field(status, "Uid")[0] === uid) break;
+        for (let tries = 0; programOf(pid) !== options.bun; tries++) {
+          if (tries >= 500) return yield* failed("drop", "ETIMEDOUT");
           yield* Effect.sleep("10 millis");
-          status = statusOf(pid);
         }
+        const status = statusOf(pid);
         if (status === undefined) return yield* failed("drop", "ESRCH");
         const same = (values: readonly string[]) =>
           values.length === 4 && values.every((value) => value === uid);
