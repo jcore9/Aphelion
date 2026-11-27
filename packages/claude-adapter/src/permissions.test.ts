@@ -13,11 +13,12 @@ import type {
   PermissionUpdate,
   PreToolUseHookInput,
 } from "@anthropic-ai/claude-agent-sdk";
-import { folderRule } from "@aphelion/plugin-sdk";
+import { folderRule, type Decider } from "@aphelion/plugin-sdk";
 import { checkStream, runTurn } from "@aphelion/plugin-sdk/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { claudeAdapter } from "./adapter.ts";
 import { realpathOrMissing } from "./files.ts";
+import { givenTools } from "./options.ts";
 import { scriptedQuery, sdk, type ScriptStep } from "./scripted-query.ts";
 
 type Verdict = "allow" | "deny";
@@ -254,7 +255,10 @@ const sessionWide: PermissionUpdate[] = [
 
 const rule = folderRule(realpathOrMissing);
 
-const runCases = async (all: readonly Case[]) => {
+const runCases = async <T>(
+  all: readonly Case[],
+  during: (hook: HookCallback) => Promise<T>,
+) => {
   const steps: ScriptStep[] = [{ send: sdk.init() }];
   all.forEach((entry, index) => {
     const id = `toolu_${String(index)}`;
@@ -272,18 +276,46 @@ const runCases = async (all: readonly Case[]) => {
       { send: sdk.toolResult(id, entry.expected === "deny") },
     );
   });
-  steps.push({ send: sdk.result() });
-  const scripted = scriptedQuery([steps]);
+  return duringTurn(steps, during);
+};
+
+const duringTurn = async <T>(
+  steps: readonly ScriptStep[],
+  during: (hook: HookCallback) => Promise<T>,
+  turnRule: Decider = rule,
+) => {
+  const reached = Promise.withResolvers<undefined>();
+  const release = Promise.withResolvers<undefined>();
+  const scripted = scriptedQuery([
+    [
+      ...steps,
+      {
+        hold: {
+          reached: () => {
+            reached.resolve(undefined);
+          },
+          release: release.promise,
+        },
+      },
+      { send: sdk.result() },
+    ],
+  ]);
   const adapter = claudeAdapter({
     query: scripted.query,
     env: {},
-    rule,
+    rule: turnRule,
     interruptWaitMs: 50,
     closeWaitMs: 100,
   });
-  const run = await runTurn(adapter, { decider: rule, folder });
-  return { scripted, run };
+  const running = runTurn(adapter, { decider: turnRule, folder });
+  await reached.promise;
+  const asked = await during(hookOf(scripted.runs[0]?.options));
+  release.resolve(undefined);
+  const run = await running;
+  return { scripted, run, asked };
 };
+
+const nothing = () => Promise.resolve(undefined);
 
 const hookOf = (options: { hooks?: unknown } | undefined): HookCallback => {
   const hooks = options?.hooks as
@@ -323,22 +355,26 @@ const ask = (hook: HookCallback, tool: string, input: unknown, id: string) =>
 describe("the first bot's fixed rule", () => {
   it("gives the answer each case expects, the same from the hook and from canUseTool", async () => {
     const all = cases();
-    const { scripted, run } = await runCases(all);
-    const hook = hookOf(scripted.runs[0]?.options);
+    const {
+      scripted,
+      run,
+      asked: fromHook,
+    } = await runCases(all, (hook) =>
+      Promise.all(
+        all.map(async (entry, index): Promise<Verdict> => {
+          const answer = await ask(
+            hook,
+            entry.tool,
+            entry.input,
+            `toolu_${String(index)}`,
+          );
+          return "hookSpecificOutput" in answer ? "deny" : "allow";
+        }),
+      ),
+    );
 
     const fromCanUseTool = scripted.answers.map((answer): Verdict =>
       answer?.behavior === "allow" ? "allow" : "deny",
-    );
-    const fromHook = await Promise.all(
-      all.map(async (entry, index): Promise<Verdict> => {
-        const answer = await ask(
-          hook,
-          entry.tool,
-          entry.input,
-          `toolu_${String(index)}`,
-        );
-        return "hookSpecificOutput" in answer ? "deny" : "allow";
-      }),
     );
 
     const expected = all.map(({ name, expected }) => `${name}: ${expected}`);
@@ -350,7 +386,7 @@ describe("the first bot's fixed rule", () => {
   });
 
   it("never returns the suggested session-wide rule or mode change", async () => {
-    const { scripted } = await runCases(cases());
+    const { scripted } = await runCases(cases(), nothing);
     for (const answer of scripted.answers) {
       expect([
         { behavior: "allow" },
@@ -359,9 +395,9 @@ describe("the first bot's fixed rule", () => {
     }
   });
 
-  it("announces each canUseTool decision as decided by the rule", async () => {
+  it("announces each canUseTool decision as decided by the rule, and refuses a tool outside the seven before asking", async () => {
     const all = cases();
-    const { run } = await runCases(all);
+    const { run } = await runCases(all, nothing);
     const reasons = run.events.flatMap(({ event }) =>
       event.type === "permission.decision"
         ? [`${event.by} ${event.decision} ${event.reason}`]
@@ -369,45 +405,39 @@ describe("the first bot's fixed rule", () => {
     );
     expect(reasons).toContain("rule allow inside-folder");
     expect(reasons).toContain("rule deny outside-folder");
-    expect(reasons).toContain("rule deny web");
     expect(reasons).toContain("rule allow shell");
-    expect(reasons).toContain("rule deny unknown-tool");
-    expect(reasons).toHaveLength(all.length);
+    expect(reasons).toHaveLength(
+      all.filter(({ tool }) => givenTools.has(tool)).length,
+    );
   });
 });
 
 describe("the PreToolUse hook", () => {
   it("stops a denied tool with the SDK's deny answer, and passes an allowed one on to canUseTool", async () => {
-    const { scripted } = await runCases([]);
-    const hook = hookOf(scripted.runs[0]?.options);
-    expect(
+    const { asked } = await runCases([], async (hook) => [
       await ask(hook, "Read", { file_path: "/etc/passwd" }, "toolu_1"),
-    ).toEqual(denied);
-    expect(
       await ask(
         hook,
         "Read",
         { file_path: join(folder, "notes.md") },
         "toolu_2",
       ),
-    ).toEqual({});
-    expect(await ask(hook, "Bash", { command: "ls" }, "toolu_3")).toEqual({});
+      await ask(hook, "Bash", { command: "ls" }, "toolu_3"),
+    ]);
+    expect(asked).toEqual([denied, {}, {}]);
   });
 
   it("ends a call the hook stopped as an error, since canUseTool never announced a deny", async () => {
     const secret = { file_path: join(outside, "secret.txt") };
-    const scripted = scriptedQuery([
+    const { run, asked } = await duringTurn(
       [
         { send: sdk.init() },
         { send: sdk.toolUse("toolu_1", "Read", secret) },
         { send: sdk.toolResult("toolu_1", true) },
-        { send: sdk.result() },
       ],
-    ]);
-    const adapter = claudeAdapter({ query: scripted.query, env: {}, rule });
-    const run = await runTurn(adapter, { decider: rule, folder });
-    const hook = hookOf(scripted.runs[0]?.options);
-    expect(await ask(hook, "Read", secret, "toolu_1")).toEqual(denied);
+      (hook) => ask(hook, "Read", secret, "toolu_1"),
+    );
+    expect(asked).toEqual(denied);
     expect(
       run.events.find(({ event }) => event.type === "tool.end")?.event,
     ).toEqual({ type: "tool.end", call: "toolu_1", outcome: "error" });
@@ -418,41 +448,31 @@ describe("the PreToolUse hook", () => {
   });
 
   it("denies a call it can't read", async () => {
-    const { scripted } = await runCases([]);
-    const hook = hookOf(scripted.runs[0]?.options);
-    expect(await ask(hook, "Bash", "ls", "toolu_1")).toEqual(denied);
-    expect(await ask(hook, "Read", null, "toolu_1")).toEqual(denied);
-    expect(
+    const { asked } = await runCases([], async (hook) => [
+      await ask(hook, "Bash", "ls", "toolu_1"),
+      await ask(hook, "Read", null, "toolu_1"),
       await ask(hook, "Read", { file_path: "notes.md" }, "bad id"),
-    ).toEqual(denied);
-    expect(
       await ask(hook, "bad name", { file_path: "notes.md" }, "toolu_1"),
-    ).toEqual(denied);
+      await ask(hook, "Read", { file_path: "notes.md" }, "toolu_2"),
+    ]);
+    expect(asked).toEqual([denied, denied, denied, denied, {}]);
   });
 
   it("judges paths against the bot's folder, not the cwd the hook reports", async () => {
-    const { scripted } = await runCases([]);
-    const hook = hookOf(scripted.runs[0]?.options);
     const secret = { file_path: join(outside, "secret.txt") };
     const moved = { ...hookInput("Read", secret, "toolu_1"), cwd: outside };
-    expect(
-      await hook(moved, "toolu_1", { signal: new AbortController().signal }),
-    ).toEqual(denied);
+    const { asked } = await runCases([], (hook) =>
+      hook(moved, "toolu_1", { signal: new AbortController().signal }),
+    );
+    expect(asked).toEqual(denied);
   });
 
   it("denies when the rule fails", async () => {
-    const scripted = scriptedQuery([
-      [{ send: sdk.init() }, { send: sdk.result() }],
-    ]);
-    const adapter = claudeAdapter({
-      query: scripted.query,
-      env: {},
-      rule: () => Promise.reject(new Error("disk gone")),
-    });
-    await runTurn(adapter, { folder });
-    const hook = hookOf(scripted.runs[0]?.options);
-    expect(
-      await ask(hook, "Read", { file_path: "notes.md" }, "toolu_1"),
-    ).toEqual(denied);
+    const { asked } = await duringTurn(
+      [{ send: sdk.init() }],
+      (hook) => ask(hook, "Read", { file_path: "notes.md" }, "toolu_1"),
+      () => Promise.reject(new Error("disk gone")),
+    );
+    expect(asked).toEqual(denied);
   });
 });

@@ -28,7 +28,7 @@ A test fails when the SDK's own `claudeCodeVersion` differs from the version the
 
 ## Sessions and turns
 
-A **query** is one running Claude Code process that the SDK talks to. The adapter starts one query when the bot runner opens the session, and keeps it for every turn. A turn sends the prompt into the running query and reads the SDK's messages until that turn's result.
+A **query** is one running Claude Code process that the SDK talks to. The adapter starts one query when the bot runner opens the session, and keeps it for every turn. When the owner stored an API key, opening the session first runs the sign-in check that [The environment Claude Code gets](#the-environment-claude-code-gets) describes. No query, and so no tool call, exists until that check ends. A turn sends the prompt into the running query and reads the SDK's messages until that turn's result.
 
 - When the query has stopped, the next turn starts a new query that resumes the last session id Claude Code reported. The first query resumes the `resume` ref that the bot runner saved, if it has the form of a Claude session id.
 - On shutdown, the adapter closes the query's input and waits up to 5 seconds for Claude Code to exit, then aborts it.
@@ -42,16 +42,61 @@ A **query** is one running Claude Code process that the SDK talks to. The adapte
 | `permissionMode` | `default`. The adapter stops a turn whose Claude Code reports another mode. |
 | `canUseTool` | Asks the turn's `decide` about each tool call. See [Permissions](#permissions). |
 | `tools` | `Read`, `Write`, `Edit`, `NotebookEdit`, `Glob`, `Grep` and `Bash`. The model sees no other tool. `TodoWrite` is left out because the rule would deny it. |
-| `disallowedTools` | `WebFetch`, `WebSearch` and `Agent` |
+| `disallowedTools` | `WebFetch`, `WebSearch`, `Agent` and `Skill` |
+| `skills` | `[]`, so the model sees no skill and the `Skill` tool runs none |
 | `allowedTools` | Never set. A tool on that list runs without asking `canUseTool`. |
 | `hooks` | One `PreToolUse` hook that applies the fixed rule to every tool call, with `onFailure: "block"`. See [The hook](#the-hook). |
 | `settingSources` | `[]`, so Claude Code reads no user or project settings files |
+| `settings` | Thirteen keys that keep out what the signed-in account and Claude Code would add. See [What the adapter turns off](#what-the-adapter-turns-off). |
+| `strictMcpConfig` | `true`, so Claude Code starts only the MCP servers in `mcpServers`. The adapter never sets `mcpServers`, so a bot has no MCP server. |
 | `verbatimPrompts` | `true`, so each prompt reaches Claude Code exactly as typed. See [Prompts are passed as typed](#prompts-are-passed-as-typed). |
 | `includePartialMessages` | `true`, so text arrives in small pieces |
 | `resume` | The session to resume, when there is one |
-| `env` | Built from the allow list below |
+| `env` | Built from the allow list below. It holds `ANTHROPIC_API_KEY` only when there is no working sign-in. |
 | `stderr` | Counts the lines Claude Code writes to its error output, and keeps none of them |
 | `executable` | `bun` |
+
+### What the adapter turns off
+
+Claude Code adds tools, skills and plugins from the claude.ai account it is signed in with, even with `settingSources: []`. In the first recorded turn, the session listed 123 tools instead of 7. The extra 116 were the account's claude.ai connectors, such as Notion and Gmail. Those tools act as the owner's account, outside the bot's folder, and their definitions filled most of each request's context.
+
+Under [decision 0058](../decisions/0058-specialized-bots.md), a bot has only the connectors and plugins that Aphelion gives it. So the adapter passes these keys in `settings`. Claude Code reads them as if they came from its `--settings` flag.
+
+| Key | Value | What it stops |
+| --- | --- | --- |
+| `disableClaudeAiConnectors` | `true` | The account's claude.ai connectors. Claude Code doesn't fetch or connect them. |
+| `syncClaudeAiSkills` | `false` | The skills the account enabled on claude.ai |
+| `syncClaudeAiPlugins` | `false` | The plugins the account enabled on claude.ai |
+| `disableBundledSkills` | `true` | The skills and workflows that ship with Claude Code |
+| `disableSkillShellExecution` | `true` | Shell commands written inside a skill or slash command. Claude Code shows a placeholder instead of running them. |
+| `autoMemoryEnabled` | `false` | Claude Code's auto memory, which reads and writes notes in a folder under `HOME` and adds them to the prompt |
+| `autoDreamEnabled` | `false` | Auto-dream, which tidies the auto memory in the background. It has its own default on Anthropic's side, so turning off auto memory doesn't turn it off. |
+| `disableWorkflows` | `true` | Workflows, Claude Code's multi-agent runs |
+| `enableWorkflows` | `false` | Workflows again, as the account-level switch |
+| `workflowKeywordTriggerEnabled` | `false` | The keyword that turns a prompt into a workflow run |
+| `enableArtifact` | `false` | Artifacts, the claude.ai pages Claude Code can publish |
+| `crossSessionInbound` | `"refuse"` | Messages from the account's other Claude Code sessions. Without it, a message from another session in the same permission mode reaches the bot. |
+| `autoUploadSessions` | `false` | A copy of each session on claude.ai |
+
+Each key is in the SDK's `Settings` type at version 0.3.330 with the meaning above. A test checks that the adapter passes all thirteen.
+
+Claude Code also loads its built-in plugins, whose path is `builtin` and whose name starts with `cc-plugin-`. The SDK documents no setting that turns them off from `--settings`, so they stay.
+
+The adapter then checks every `init` message the session sends. Claude Code sends one at the start of each turn, and may send another when the session changes, even between turns. The adapter stops the query when an `init` lists any of these:
+
+- a tool other than the seven in `tools`
+- any MCP server
+- a plugin unless its path is `builtin` and its name starts with `cc-plugin-`
+
+An `init` that has no `tools`, `mcp_servers` or `plugins` list, or a plugin with no name, is stopped the same way. When a turn is running, it ends with `error` (`vendor`). When no turn is running, the next turn starts a new query. The log line gives the counts and no names.
+
+Trust lasts one turn. Each turn starts unchecked, and every tool call waits until the adapter has checked that turn's `init`. A call whose `init` fails is denied. A call also stops waiting, and is denied, when Claude Code cancels it. A call that comes when no turn is running, or after shutdown starts, is denied. A call is also denied when its turn ends before the rule answers, or before that turn's `init` is checked, even when the next turn's `init` is clean. Once the adapter has stopped a query, it denies every later call from that query, including one that was already waiting for the rule.
+
+### Skills
+
+The adapter passes `skills: []` and disallows the `Skill` tool, so the model sees no skill and can't run one. A skill's files can still be on disk, where `Read` and `Bash` can reach them.
+
+The `init` also lists skill names. The adapter logs how many there are, with no names, but doesn't stop a session that lists any. Whether a bot's `init` lists none with these settings is a live check: the owner's next recording settles it. Once that recording shows an empty list, the adapter can stop a session that lists a skill.
 
 ### Prompts are passed as typed
 
@@ -67,7 +112,7 @@ The SDK's `env` option replaces Claude Code's whole environment. The adapter cop
 
 An `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` in the adapter's environment never reaches Claude Code. Claude Code finds its sign-in in `HOME`.
 
-`ANTHROPIC_API_KEY` reaches Claude Code only when there is no working sign-in. The supervisor sets it in the adapter's environment when the owner stored a Claude API key ([the API key at start](bot-runner.md#the-api-key-at-start)). Claude Code uses an `ANTHROPIC_API_KEY` ahead of its sign-in, so the adapter checks the sign-in first. Before its first query, it runs `claude auth status` once, with the variables above and without the key, a 5-second limit, and its output thrown away. It runs the check from `/`, not from the bot's folder, so a `.claude/settings.json` in that folder, such as one with an `apiKeyHelper`, can't make the check pass. Turns read no settings files, so such a check would keep the key out of turns that then fail to sign in. Exit status 0 means a working sign-in. The adapter then leaves the key out of every query's environment, and the subscription pays. Exit status 1, a missing CLI, or no answer within 5 seconds means no working sign-in, and the adapter passes the key. Without a key, the adapter runs no check.
+`ANTHROPIC_API_KEY` reaches Claude Code only when there is no working sign-in. The supervisor sets it in the adapter's environment when the owner stored a Claude API key ([the API key at start](bot-runner.md#the-api-key-at-start)). Claude Code uses an `ANTHROPIC_API_KEY` ahead of its sign-in, so the adapter checks the sign-in first. Before its first query, it runs `claude auth status` once, with the variables above and without the key, a 5-second limit, and its output thrown away. It runs the check from `/`, not from the bot's folder, so a `.claude/settings.json` in that folder, such as one with an `apiKeyHelper`, can't make the check pass. Turns read no settings files, so such a check would keep the key out of turns that then fail to sign in. Exit status 0 means a working sign-in. The adapter then leaves the key out of every query's environment, and the subscription pays. Exit status 1, a missing CLI, or no answer within 5 seconds means no working sign-in, and the adapter passes the key. Without a key, the adapter runs no check. The key changes nothing about which tool calls run: each turn still starts unchecked, and its `init` check works the same with or without the key.
 
 `claudeEnv` in `packages/claude-adapter/src/options.ts` makes that choice, and `sessionEnv` in `packages/claude-adapter/src/sign-in.ts` runs the check. The check runs once per adapter process, so a sign-in that stops working brings the key in only at the next adapter start, such as after a cancel or a bot restart. Whether `claude auth status` reports an expired sign-in as signed out isn't measured yet. The owner's live check with a throwaway key covers it.
 
@@ -75,7 +120,7 @@ An `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` in the adapter's environm
 
 | SDK message | Event |
 | --- | --- |
-| `system` with subtype `init` | `session`, the first time and again when the id changes. An `init` with another permission mode or Claude Code version, or one with no readable mode or version, stops the query and ends the turn with `error` (`vendor`). |
+| `system` with subtype `init` | `session`, the first time and again when the id changes. An `init` with another permission mode or Claude Code version, or one with no readable mode or version, stops the query and ends the turn with `error` (`vendor`). So does an `init` that lists more than the adapter gave the session, as [What the adapter turns off](#what-the-adapter-turns-off) describes. The adapter checks an `init` that arrives between turns too. |
 | A `text_delta` in a `stream_event` | `text.delta`, split into pieces of at most 16 KiB |
 | A `tool_use` block in an `assistant` message | `tool.start`, once per call id, with the kind from the table below |
 | A `tool_result` block in a `user` message | `tool.end` with `ok`, or `error` when Claude Code marks the result as an error, or `denied` when this turn's `decide` denied that call and the runtime announced the deny with a `permission.decision` event |
@@ -98,7 +143,7 @@ The adapter drops a message from a sub-agent, which has a `parent_tool_use_id`, 
 | Claude Code exits or the SDK throws during a turn | `cli-exited` |
 | A sign-in problem: the assistant error `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold` or `verification_required`, an `auth_status` error, or status 401 | `signed-out` |
 | A rate limit: the assistant error `rate_limit` or `billing_error`, a rejected `rate_limit_event`, or status 429 | `rate-limited` |
-| Claude Code reports another permission mode or version than 2.1.330, a result the adapter can't read, or any other failure | `vendor` |
+| Claude Code reports another permission mode or version than 2.1.330, a tool, MCP server or plugin that Aphelion didn't give it, a result the adapter can't read, or any other failure | `vendor` |
 
 ### Tool kinds
 
@@ -149,6 +194,8 @@ Claude Code calls the SDK's `canUseTool` callback before it runs a tool that nee
 - `command` is the command of a `shell` tool.
 - A path or a command longer than 4096 bytes is cut, and `truncated` is `true`.
 
+Before it asks, the adapter denies a call for a tool other than the seven in `tools`, and a call that an MCP server serves, which the SDK marks with `mcpServer`. Those calls get no `permission.request` event, so they end with `error`.
+
 The hook allows the call only when `decide` answers `allow`. It answers `allow` with nothing else, so no rule outlives the call. Every other path returns a deny with the fixed message `Aphelion denied this tool call.`: a `deny` answer, a request whose ids don't fit the contract, a hook call outside a turn, a cancel, and an error in `decide`. The hook never returns `null`, which would leave the tool waiting with no deadline.
 
 Claude Code carries on after a deny, so a turn never ends with `denied`. A tool that Claude Code refuses by itself, such as a disallowed tool, ends with `error`, because no decision exists for it.
@@ -157,6 +204,7 @@ Claude Code carries on after a deny, so a turn never ends with `denied`. A tool 
 
 Claude Code may run a read-only tool, such as a `Read` inside its working folder, without asking `canUseTool`. So the adapter also registers a `PreToolUse` hook, which Claude Code runs before every tool call. The hook builds the same `PermissionRequest` and asks the same rule.
 
+- A call for a tool other than the seven, or one that an MCP server serves (`mcp_server` in the hook's input), is denied without asking the rule.
 - When the rule denies, the hook answers `permissionDecision: "deny"` with the same fixed message, and the tool doesn't run.
 - When the rule allows, the hook answers nothing, so Claude Code goes on to ask `canUseTool` when it would. The hook never answers `allow`, because that would skip `canUseTool`.
 - An input the hook can't read, or a failure in the rule, is a deny. The matcher also sets `onFailure: "block"`, so a hook that throws blocks the call.
@@ -169,7 +217,7 @@ When the runtime aborts the turn's signal, the adapter asks Claude Code to inter
 
 ## Logs
 
-Nothing that Claude Code or the SDK prints reaches an event or a log line. Events carry fixed codes, errors are mapped by their type, and the error output is only counted. A test runs a turn with a fake key in the environment, in Claude Code's error output and in a thrown error, and checks that no event and no log line holds it.
+Nothing that Claude Code or the SDK prints reaches an event or a log line. Events carry fixed codes, errors are mapped by their type, and the error output is only counted. A test runs a turn with a fake key in the environment, in Claude Code's error output and in a thrown error, and checks that no event and no log line holds it. Another passes the key to a session whose `init` the adapter stops, and checks that the log line holds no key.
 
 The adapter writes these lines to the log:
 
@@ -177,6 +225,8 @@ The adapter writes these lines to the log:
 - `the Claude CLI didn't start: <class>`
 - `the CLI wrote <n> lines to stderr`
 - `the CLI didn't start as Claude Code 2.1.330 in default permission mode, so the adapter stopped it`
+- `the session reported <n> tools, <n> MCP servers and <n> plugins that Aphelion didn't give it, so the adapter stopped it`
+- `the session reported <n> skills`, only when `init` lists at least one
 - `the saved session ref isn't a Claude session id, so the bot starts a new session`
 
 ## Record a stream for the replay tests
