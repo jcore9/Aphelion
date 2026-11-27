@@ -29,13 +29,21 @@ import {
 import { describe } from "vitest";
 import { createLogger } from "../log";
 import type { RestartPolicy } from "../plugins/lifecycle";
-import type { RunnerReply, RunnerRequest } from "./runner-protocol";
+import { pipeLink } from "../plugins/link";
+import {
+  maxFrameBytes,
+  runnerReplySchema,
+  runnerRequestSchema,
+  type RunnerReply,
+  type RunnerRequest,
+} from "./runner-protocol";
 import { openStore, readServerId } from "../store";
 import {
   BotManager,
   botManagerLayer,
   BotRunnerLink,
   resumeFailed,
+  runnerChannelFailedMessage,
   runnerNotices,
   type BotEvent,
   type BotManagerOptions,
@@ -403,6 +411,281 @@ describe("a turn start that the adapter hasn't answered", () => {
 
         expect(sent.filter(({ type }) => type === "turn.cancel")).toEqual([]);
         expect(yield* manager.status("chief")).toEqual({ state: "running" });
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "never sends a queued turn that expired before dispatch, even after spawned and started",
+    () =>
+      Effect.gen(function* () {
+        const { calls, turns } = ledgerCalls();
+        const startGate = yield* Deferred.make<undefined>();
+        const startReached = yield* Deferred.make<undefined>();
+        const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+        const sent: RunnerRequest[] = [];
+        const logs: Record<string, unknown>[] = [];
+        const logger = createLogger({
+          write: (line) =>
+            logs.push(JSON.parse(line) as Record<string, unknown>),
+        });
+        const link: Context.Service.Shape<typeof BotRunnerLink> = {
+          incoming,
+          send: (message) =>
+            Effect.gen(function* () {
+              sent.push(message);
+              if (message.type === "start") {
+                yield* Deferred.succeed(startReached, undefined);
+                yield* Deferred.await(startGate);
+                return;
+              }
+              if (message.type === "stop") {
+                yield* Queue.offer(incoming, {
+                  type: "stopped",
+                  bot: message.bot,
+                  run: message.run,
+                });
+                return;
+              }
+              if (message.type === "turn.start") {
+                yield* Queue.offer(incoming, {
+                  type: "turn.accepted",
+                  bot: message.bot,
+                  run: message.run,
+                  turn: message.turn,
+                });
+              }
+            }),
+        };
+        const services = yield* Layer.build(
+          botManagerLayer({
+            bots: [{ name: "chief", provider: "fake", folder }],
+            logger,
+            policy,
+            adapters: { fake: "/adapters/fake/adapter.js" },
+            turns,
+            turnAcceptDeadlineMs: 40,
+          }).pipe(
+            Layer.provideMerge(memorySessionRefs),
+            Layer.provide(Layer.succeed(BotRunnerLink, link)),
+          ),
+        );
+        const manager = Context.get(services, BotManager);
+
+        yield* manager.start("chief");
+        yield* Deferred.await(startReached);
+        yield* Queue.offer(incoming, {
+          type: "spawned",
+          bot: "chief",
+          run: 1,
+        });
+        yield* Queue.offer(incoming, {
+          type: "started",
+          bot: "chief",
+          run: 1,
+        });
+        yield* Effect.sleep("15 millis");
+
+        const expired = yield* manager.startTurn("chief", "expired prompt");
+        expect(expired.outcome).toBe("no-answer");
+        expect(calls).toEqual([
+          `open ${expired.turn}`,
+          `end ${expired.turn} refused`,
+        ]);
+
+        yield* Deferred.succeed(startGate, undefined);
+        yield* manager
+          .waitFor("chief", (state) => state.state === "running")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+        yield* Effect.sleep("40 millis");
+
+        expect(sent.filter(({ type }) => type === "turn.start")).toEqual([]);
+        expect(sent.filter(({ type }) => type === "stop")).toEqual([]);
+        expect(sent.filter(({ type }) => type === "start")).toHaveLength(1);
+
+        const fresh = yield* manager.startTurn("chief", "fresh prompt");
+        expect(fresh.outcome).toBe("accepted");
+        expect(sent.filter(({ type }) => type === "turn.start")).toEqual([
+          {
+            type: "turn.start",
+            bot: "chief",
+            run: 1,
+            turn: fresh.turn,
+            text: "fresh prompt",
+          },
+        ]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "bounds a stuck runner write, tears down the channel, ends pending turns, and lets another bot succeed after recovery",
+    () =>
+      Effect.gen(function* () {
+        const { calls, turns } = ledgerCalls();
+        const logs: Record<string, unknown>[] = [];
+        const logger = createLogger({
+          write: (line) =>
+            logs.push(JSON.parse(line) as Record<string, unknown>),
+        });
+        let blockWrites = false;
+        let tornDown = false;
+        let channelFailed = 0;
+        const encoder = new TextEncoder();
+        let repliesController:
+          ReadableStreamDefaultController<Uint8Array> | undefined;
+        const repliesStream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            repliesController = controller;
+          },
+        });
+        const emitReply = (reply: RunnerReply) => {
+          if (!tornDown) {
+            repliesController?.enqueue(
+              encoder.encode(`${JSON.stringify(reply)}\n`),
+            );
+          }
+        };
+        const baseLink = yield* pipeLink(
+          repliesStream,
+          (line) => {
+            if (blockWrites) return new Promise(() => undefined);
+            const message = JSON.parse(line) as RunnerRequest;
+            if (message.type === "start") {
+              emitReply({
+                type: "spawned",
+                bot: message.bot,
+                run: message.run,
+              });
+              emitReply({
+                type: "started",
+                bot: message.bot,
+                run: message.run,
+              });
+            }
+            return Promise.resolve();
+          },
+          {
+            schema: runnerReplySchema,
+            maxBytes: maxFrameBytes,
+            onDrop: () => Effect.void,
+          },
+          runnerRequestSchema,
+        );
+        const gatedLink = {
+          incoming: baseLink.incoming,
+          send: baseLink.send,
+          close: Effect.sync(() => {
+            if (tornDown) return;
+            tornDown = true;
+            repliesController?.close();
+          }),
+        };
+
+        const bots = [
+          {
+            name: "alpha",
+            provider: "fake",
+            folder: "/var/lib/aphelion-bots/alpha",
+          },
+          {
+            name: "beta",
+            provider: "fake",
+            folder: "/var/lib/aphelion-bots/beta",
+          },
+        ];
+        const services = yield* Layer.build(
+          botManagerLayer({
+            bots,
+            logger,
+            policy,
+            adapters: { fake: "/adapters/fake/adapter.js" },
+            turns,
+            turnAcceptDeadlineMs: 5_000,
+            writeDeadlineMs: 60,
+            onChannelFailed: () =>
+              Effect.sync(() => {
+                channelFailed += 1;
+              }),
+          }).pipe(
+            Layer.provideMerge(memorySessionRefs),
+            Layer.provide(Layer.succeed(BotRunnerLink, gatedLink)),
+          ),
+        );
+        const manager = Context.get(services, BotManager);
+        yield* manager.start("alpha");
+        yield* manager.start("beta");
+        yield* manager
+          .waitFor("alpha", (state) => state.state === "running")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+        yield* manager
+          .waitFor("beta", (state) => state.state === "running")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+
+        blockWrites = true;
+        const alphaFiber = yield* manager
+          .startTurn("alpha", "stuck")
+          .pipe(Effect.forkScoped);
+        yield* Effect.sleep("15 millis");
+        const betaFiber = yield* manager
+          .startTurn("beta", "blocked")
+          .pipe(Effect.forkScoped);
+
+        const [alphaResult, betaResult] = yield* Effect.all([
+          Fiber.join(alphaFiber),
+          Fiber.join(betaFiber),
+        ]).pipe(Effect.timeout("1 second"), Effect.orDie);
+
+        expect(alphaResult.outcome).toBe("not-running");
+        expect(betaResult.outcome).toBe("not-running");
+        expect(tornDown).toBe(true);
+        expect(channelFailed).toBe(1);
+        expect(calls).toContain(`end ${alphaResult.turn} refused`);
+        expect(calls).toContain(`end ${betaResult.turn} refused`);
+        expect(
+          logs.some(
+            (entry) =>
+              entry["level"] === "error" &&
+              entry["msg"] === runnerChannelFailedMessage,
+          ),
+        ).toBe(true);
+        expect(yield* manager.status("alpha")).toEqual({ state: "stopped" });
+        expect(yield* manager.status("beta")).toEqual({ state: "stopped" });
+
+        const alphaRec = recording([sessionTurn]);
+        const betaRec = recording([sessionTurn]);
+        const recoveredFake = fakeBotProcesses({
+          alpha: alphaRec.bot,
+          beta: betaRec.bot,
+        });
+        const recoveredLink = yield* fakeRunnerLink(recoveredFake, logger);
+        const recoveredServices = yield* Layer.build(
+          botManagerLayer({
+            bots,
+            logger,
+            policy,
+            adapters: { fake: "/adapters/fake/adapter.js" },
+          }).pipe(
+            Layer.provideMerge(memorySessionRefs),
+            Layer.provide(Layer.succeed(BotRunnerLink, recoveredLink)),
+          ),
+        );
+        const recovered = Context.get(recoveredServices, BotManager);
+        yield* recovered.start("beta");
+        yield* recovered
+          .waitFor("beta", (state) => state.state === "running")
+          .pipe(Effect.timeout("2 seconds"), Effect.orDie);
+
+        const next = yield* recovered.startTurn("beta", "after recovery");
+        expect(next.outcome).toBe("accepted");
+        expect(
+          recoveredFake
+            .latest("beta")
+            ?.received.some(
+              (msg) =>
+                msg.method === adapterMethods.turnStart &&
+                (msg.params as { text?: string } | undefined)?.text ===
+                  "after recovery",
+            ),
+        ).toBe(true);
       }).pipe(Effect.scoped),
   );
 });

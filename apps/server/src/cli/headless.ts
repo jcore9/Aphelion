@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { Context, Effect, Layer } from "effect";
+import { Context, Deferred, Effect, Layer } from "effect";
 import type { BotDefinition } from "../bots/manager";
 import { botRunnerPipeLink } from "../bots/runner-pipe";
 import { sqliteSessionRefs } from "../bots/sqlite-session-refs";
@@ -65,12 +65,16 @@ const startPlugins = (
     }
   });
 
+export const botRunnerChannelFailedMessage =
+  "the bot runner channel failed, so the server is stopping";
+
 const startBots = (
   bots: readonly BotDefinition[],
   fds: RunnerPipeFds,
   logger: Logger,
   db: Database,
   history: EventStore,
+  onChannelFailed: () => Effect.Effect<void>,
 ) =>
   Effect.gen(function* () {
     const links = yield* Layer.build(
@@ -79,7 +83,7 @@ const startBots = (
         sqliteSessionRefs(db, history.serverId),
       ),
     );
-    return yield* runBots({ bots, logger }, history).pipe(
+    return yield* runBots({ bots, logger, onChannelFailed }, history).pipe(
       Effect.provideContext(links),
     );
   });
@@ -123,6 +127,7 @@ export const headless = (
           );
         }
         const ledger = yield* openCommandLedger(db, logger);
+        const runnerFailed = yield* Deferred.make<undefined>();
         const bots =
           options.botRunnerFds === undefined
             ? undefined
@@ -132,6 +137,8 @@ export const headless = (
                 logger,
                 db,
                 history,
+                () =>
+                  Deferred.succeed(runnerFailed, undefined).pipe(Effect.asVoid),
               );
         yield* Layer.build(
           serveHttp({ address, port }, db, history, {
@@ -157,8 +164,11 @@ export const headless = (
         }
         if (bots === undefined) {
           logger.info("bots are off: no bot runner pipe was given");
+          return yield* Effect.never;
         }
-        return yield* Effect.never;
+        yield* Deferred.await(runnerFailed);
+        logger.error(botRunnerChannelFailedMessage);
+        return yield* failed;
       }).pipe(
         Effect.scoped,
         Effect.onInterrupt(() =>

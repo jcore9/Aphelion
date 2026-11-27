@@ -28,6 +28,8 @@ The bot runner checks every line from an adapter against the adapter wire, and d
 
 The bot runner holds at most 4 MiB of one adapter's output that it hasn't handled yet. When an adapter writes faster than the bot runner can pass its messages on, the bot runner stops reading that adapter until the backlog drains. The adapter then waits on its own writes. This is called back-pressure. It keeps one bot's flood from filling the bot runner's memory, and the other bots' messages keep moving.
 
+Every write from the server to the bot runner pipe has a 10-second deadline. If a write does not finish within 10 seconds, or if the bot runner pipe closes while the server is running, the server treats the channel as failed. It ends every pending turn request with `not-running`, closes the pipe descriptors, logs `a write to the bot runner timed out, so the channel is closed` or `the bot runner's pipe closed` along with `the bot runner channel failed, so the server is stopping`, and exits with code 1. The launcher then stops the container and `aphelion.service` restarts both the server and the bot runner.
+
 ## What a bot process gets
 
 The bot runner starts `bun --no-env-file --preload /usr/local/lib/aphelion/adapter-launcher.js <adapter file>` in the bot's folder from `bots.yaml`, and creates the folder with mode `0750` if it is missing. If the adapter file isn't there, the start fails at once, and the server's log line names the file. The launcher runs first in the same process. It sets the process non-dumpable, then Bun loads the adapter file ([how one bot is kept from another](#how-one-bot-is-kept-from-another)). The process gets only its standard input, output and error. It gets this environment and nothing else:
