@@ -2,6 +2,7 @@ import { Cause, Effect, Layer } from "effect";
 import { CliConfig, CliError, Command, GlobalFlag } from "effect/cli";
 import { createLogger } from "../log";
 import { version } from "../version";
+import { chat, chatCommand } from "./chat/command";
 import { configCheck, configCheckCommand } from "./config-check";
 import {
   deviceAdd,
@@ -62,6 +63,7 @@ export interface Handlers {
   readonly toolUpdate: Parameters<typeof toolUpdateCommand>[0];
   readonly toolCheck: Parameters<typeof toolCheckCommand>[0];
   readonly restoreFinish: Parameters<typeof restoreFinishCommand>[0];
+  readonly chat: Parameters<typeof chatCommand>[0];
 }
 
 const toolListFile = () =>
@@ -86,6 +88,7 @@ const handlers: Handlers = {
   toolUpdate: (options) => toolUpdate(options, toolListFile()),
   toolCheck: () => toolCheck(toolListFile(), fetch),
   restoreFinish,
+  chat,
 };
 
 const shortCluster = /^-[^-]/;
@@ -157,6 +160,7 @@ export const makeCli = (handle: Handlers) => {
       group("restore", "Finish a restore from a backup.", [
         restoreFinishCommand(handle.restoreFinish),
       ]),
+      chatCommand(handle.chat),
     ]),
   );
   const parse = Command.runWith(root, { version });
