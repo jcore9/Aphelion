@@ -52,7 +52,7 @@ The image has no `sudo`. The build removes the Ubuntu image's default `ubuntu` u
 | `/opt/aphelion/plugins` | `harness:harness` | `0755` | Volume `plugin-files` | The installed plugins: the folders you copied in, and a folder `<id>@<version>` for each release that [`plugin update`](plugins.md#updates) installed |
 | `/opt/aphelion/tools` | `harness:harness` | `0755` | Volume `ai-tools` | The installed [AI tools](cli.md#aphelion-tool-install-name), one folder per tool. The [backup](../guides/install.md#back-up-and-restore) doesn't hold it, because `tool install` rebuilds it from the list. |
 | `/run/aphelion-secrets` | `aphelion-secrets:harness` | `2710` | Memory | The broker's socket |
-| `/run/aphelion-runs` | `aphelion-cgroups:aphelion-runs` | `0750` | Memory | One folder per adapter run, with the run's three pipes |
+| `/run/aphelion-runs` | `aphelion-cgroups:aphelion-runs` | `0750` | Memory | One folder per adapter run, with the run's three pipes. The start check's folder stays `0700` ([how a run starts](bot-runner.md#how-a-run-starts)). |
 | `/sys/fs/cgroup/bots` | `root:root` | `0755` | The container's cgroup tree | The [bots' cgroups](bot-runner.md#the-cgroup-supervisor). The launcher creates it. |
 | `/run/secrets/bootstrap` | `root:root` | `0400` | File from the host's `/run/credentials/aphelion.service/` | The [bootstrap key](secrets.md#the-bootstrap-key). It is a file, not a folder. |
 | `/run` | `root:root` | `0755` | Memory | Runtime files |
@@ -118,7 +118,7 @@ If the server, either runner, the supervisor or the broker exits while the conta
 
 The container is never privileged, and it never gets the Docker socket.
 
-Root in the container holds only `SETUID`, `SETGID` and `KILL`. So root can't read the other users' folders, and only `tini`, the launcher and an administrator's `docker compose exec` run as root. Run `aphelion` commands as `harness`:
+Root in the container holds only `SETUID`, `SETGID` and `KILL`. So root can't read the other users' folders, and only `tini`, the launcher and an administrator's `docker compose exec` run as root. `tini` and the launcher keep those three capabilities for as long as they run. Run `aphelion` commands as `harness`:
 
 ```sh
 sudo docker compose exec -T --user harness aphelion aphelion device list

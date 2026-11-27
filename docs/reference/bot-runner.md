@@ -24,7 +24,8 @@ Each message is one JSON object on one line, at most 8 MiB. Every message names 
 | Bot runner | `log` | One line the adapter wrote to its standard error |
 | Bot runner | `notice` | A note from the bot runner about the adapter, as a code: `line-too-long`, `not-a-message`, `stopped-reading` or `too-much-log` |
 | Bot runner | `exited` | The adapter process ended without a stop, with its exit code or signal |
-| Bot runner | `stopped` | The stop finished |
+| Bot runner | `stopped` | The stop finished, and the bot's processes are gone |
+| Bot runner | `stop-failed` | The supervisor couldn't remove the bot's processes, so the stop didn't finish ([how a bot stops](#how-a-bot-stops)) |
 
 The bot runner checks every line from an adapter against the adapter wire, and drops a line that doesn't fit and sends a `notice` with code `not-a-message`. It never reads a bot id from an adapter. It tags each message with the bot it started that process for.
 
@@ -48,20 +49,21 @@ The supervisor is `cgroup-supervisor.js`. It runs as `aphelion-cgroups` with exa
 
 | From | Message | What it does |
 | --- | --- | --- |
-| Bot runner | `start` | Starts an adapter, with a new run id, the bot id and the adapter name |
+| Bot runner | `start` | Starts an adapter, with a new run id, the bot id, the adapter name and the bot's folder from `bots.yaml` |
 | Bot runner | `kill` | Kills a run's cgroup and removes it |
 | Supervisor | `ready`, `unsafe` | The start check passed, or failed at a named step with an error code |
 | Supervisor | `started`, `start-failed` | The run started, with the paths of its three pipes, or didn't start |
 | Supervisor | `exited` | The run's adapter process ended, with its exit code or signal |
 | Supervisor | `killed`, `kill-failed` | The run's processes are gone and its cgroup is removed, or not |
 
-The supervisor checks every request. A run id must be a UUIDv7, an adapter name must be in its table, and a bot id must be a bot id. It refuses a second `start` for a run it knows. A `kill` finds the run only in the supervisor's own list of live runs, so a request never names a path.
+The supervisor checks every request. A run id must be a UUIDv7, an adapter name must be in its table, and a bot id must be a bot id. A bot's folder must be an absolute path of at most 4096 bytes, with no `.` or `..` part, no double or trailing `/`, and no control character such as NUL or a newline. The supervisor has no list of allowed folders. Bots share one user ([decision 0006](../decisions/0006-shared-bot-user.md)), so a list would keep no bot from another bot's files. The launcher creates the folder as `aphelion-bot`, so the file permissions of `aphelion-bot` decide where a folder can be. It refuses a second `start` for a run it knows. A `kill` finds the run only in the supervisor's own list of live runs, so a request never names a path.
 
 ### How a run starts
 
-1. The supervisor creates the run's cgroup and a run folder, `/run/aphelion-runs/<run id>/`. The folder holds three named pipes, `stdin`, `stdout` and `stderr`. Only the supervisor and the bot runner can open them, through the `aphelion-runs` group.
-2. The supervisor starts `/usr/local/lib/aphelion/run-adapter`, a short script that only `root` can change. The script first writes its own process id into the run's `cgroup.procs`, and exits if it can't. It then tells the supervisor it is placed, opens the three pipes, and switches to `aphelion-bot` with no groups, no capabilities and `no_new_privs`. Last, it starts Bun with the adapter.
-3. The supervisor replies `started` only after the script says it is placed. The bot runner then opens its ends of the pipes.
+1. The supervisor creates the run's cgroup and a run folder, `/run/aphelion-runs/<run id>/`. The folder holds three named pipes, `stdin`, `stdout` and `stderr`. The folder starts with mode `0700` and the pipes with mode `0600`, so at first only the supervisor can open them.
+2. For a real bot, the supervisor then gives the folder and the pipes to the `aphelion-runs` group, with modes `0750` and `0660`, so the bot runner can open them too. The probe's folder and pipes ([the start check](#the-start-check)) stay the supervisor's alone.
+3. The supervisor starts `/usr/local/lib/aphelion/run-adapter`, a short script that only `root` can change. The script first writes its own process id into the run's `cgroup.procs`, and exits if it can't. It then tells the supervisor it is placed, opens the three pipes, and switches to `aphelion-bot` with no groups, no capabilities and `no_new_privs`. Last, it starts Bun with the adapter, the bot id and the bot's folder.
+4. The supervisor replies `started` only after the script says it is placed. The bot runner then opens its ends of the pipes.
 
 The adapter is in its cgroup before any of its code runs. Until it switches users, it runs as `aphelion-cgroups`, so no bot can signal it or read it.
 
@@ -69,11 +71,11 @@ The adapter is in its cgroup before any of its code runs. Until it switches user
 
 On `kill`, the supervisor waits until the run's script has said it is placed, or has exited. Then it writes `1` to the run's `cgroup.kill`, waits until `cgroup.events` shows `populated 0`, and removes the cgroup and the run folder. It replies `killed` only then. Two kills of one run share one answer. A kill never holds up another run.
 
-If the processes don't all exit within 5 seconds, or the cgroup can't be removed, the supervisor replies `kill-failed`. The bot runner logs `the cgroup supervisor couldn't remove the bot's processes, so the bot stays stopped`, with the bot and the reason. The bot then stays stopped: a later `start` for it fails with `the bot's last processes couldn't be removed`.
+If the processes don't all exit within 5 seconds, or the cgroup can't be removed, the supervisor replies `kill-failed`. It keeps the run in its list of live runs, so a later `kill` tries again. The bot runner logs `the cgroup supervisor couldn't remove the bot's processes, so the bot stays stopped`, with the bot and the reason. Until a later kill of that run succeeds, a `start` for that bot fails with `the bot's last processes couldn't be removed`. [How a bot stops](#how-a-bot-stops) says what a failed kill does to a stop.
 
 ### The start check
 
-When the supervisor starts, it runs one fake bot, the probe, through the same start and kill as a real bot. The probe adapter, `cgroup-probe.js`, only answers one request and then waits. The supervisor checks each step:
+When the supervisor starts, it runs one fake bot, the probe, through the same start and kill as a real bot. The probe adapter, `cgroup-probe.js`, only answers one request and then waits. The probe's run folder and pipes are open only to the supervisor, so no other process, the bot runner included, can answer for the probe. The supervisor checks each step:
 
 | Step | Passes when |
 | --- | --- |
@@ -81,9 +83,11 @@ When the supervisor starts, it runs one fake bot, the probe, through the same st
 | `start` | The probe run starts |
 | `placed` | The probe's process id is in its run's `cgroup.procs` |
 | `drop` | The probe runs as `aphelion-bot`, with no groups, no capabilities and `NoNewPrivs` |
-| `bot-denied` | The probe, as `aphelion-bot`, gets `EACCES` or `EPERM` when it writes any file in the tree, creates a folder in it, or opens the run folder, while its own cgroup and run folder still exist |
+| `bot-denied` | The probe, as `aphelion-bot`, gets `EACCES` or `EPERM` when it writes any file in the tree, creates a folder in it, or opens the run folder, while its own cgroup and run folder still exist. It must also be able to list the tree and find its own cgroup. |
 | `kill` | The kill succeeds |
 | `gone` | The probe has exited, and its cgroup and run folder are gone |
+
+The probe answers with one line, `{"allowed":[...]}`, which lists each check that wasn't refused, at most 64 of them. A check passes when that list is empty. The supervisor reads at most 64 KiB of the line. Any other answer fails the step with `bot-denied: EPROTO`. While `aphelion check` runs, other bots' runs can end. The probe skips the cgroup of another run that is removed while it walks the tree. Any other path that is missing fails the check.
 
 If every step passes, the supervisor logs `the cgroup check passed, so bots can start`. If one fails, it logs `the cgroup check failed, so no bot starts` with the step and the error code, and it refuses every start. The bot runner refuses too. For each bot, the server logs `bots can't start, because the cgroup check failed`, with the bot and the step, such as `own-cgroup: ENOENT`.
 
@@ -91,7 +95,7 @@ The usual cause is a Docker that doesn't allow writable cgroups ([the install gu
 
 ## What a bot process gets
 
-The adapter process runs `bun --no-env-file --preload /usr/local/lib/aphelion/adapter-launcher.js <adapter file> <bot>`. The adapter launcher runs first in the same process. It sets the process non-dumpable, creates the bot's folder `/var/lib/aphelion-bots/<bot>` with mode `0750` if it is missing, and moves into it. Then Bun loads the adapter file ([how one bot is kept from another](#how-one-bot-is-kept-from-another)). The adapter learns the folder from `bots.yaml` in `initialize`. A folder in `bots.yaml` other than `/var/lib/aphelion-bots/<bot>` isn't created for it.
+The adapter process runs `bun --no-env-file --preload /usr/local/lib/aphelion/adapter-launcher.js <adapter file> <bot> <folder>`. The folder is the bot's folder from `bots.yaml`, usually `/var/lib/aphelion-bots/<bot>`. The adapter launcher runs first in the same process. It sets the process non-dumpable, creates the bot's folder and any missing parent folders with mode `0750` as `aphelion-bot`, and moves into it. If it can't, the adapter doesn't start. Then Bun loads the adapter file ([how one bot is kept from another](#how-one-bot-is-kept-from-another)). The adapter also learns the folder in `initialize`.
 
 The process gets only its standard input, output and error, which are the run's three pipes. It gets this environment and nothing else:
 
@@ -171,7 +175,7 @@ The bot runner also kills an adapter that stops reading its input for 5 seconds.
 
 On `turn.cancel` for the turn that is open, the bot runner first sends the adapter `turn.cancel`. The adapter's runtime ends the turn within 5 seconds, usually with `turn.end` and reason `cancelled`. The bot runner waits for that `turn.end`, for at most 6 seconds. Then it asks the supervisor to kill the run, so every command the turn started dies with the adapter, including background commands and daemons. The bot runner finishes the stream as for a dead process: a call still open gets `tool.end` with outcome `cancelled`.
 
-Next the bot runner starts a fresh adapter in a new run, with the bot's latest session as `resume`. The server sees no new start. The bot stays running, and the fresh adapter's events continue the same `seq` numbers. Until the fresh adapter has answered `initialize`, the bot runner refuses every new prompt for that bot with `busy`. If the fresh adapter fails, the bot runner sends `exited`, and the server restarts the bot.
+Next the bot runner starts a fresh adapter in a new run, with the bot's latest session as `resume`. The server sees no new start. The bot stays running, and the fresh adapter's events continue the same `seq` numbers. Until the fresh adapter has answered `initialize`, the bot runner refuses every new prompt for that bot with `busy`. The fresh adapter has 10 seconds to answer, the same as at a first start. If it doesn't answer in time, the bot runner logs `the replacement adapter didn't answer initialize in time, so the runner killed it`, has the supervisor kill the run, and sends `exited`. If the fresh adapter fails in another way, the bot runner also sends `exited`. The server then restarts the bot.
 
 A cancel kills only that bot's run. Every other bot keeps its processes.
 
@@ -179,15 +183,19 @@ A cancel kills only that bot's run. Every other bot keeps its processes.
 
 On `stop`, the bot runner sends the adapter `shutdown` and gives it 5 seconds to exit. Then it asks the supervisor to kill the run, whether the adapter exited or not. Nothing the bot started survives the stop. An adapter that exits by itself gets the same kill before the bot runner sends `exited`, so a crashed bot leaves nothing behind either.
 
+The bot runner sends `stopped` only after the kill succeeds. If the kill fails, it sends `stop-failed` instead and keeps the run. The bot stays in the stopping state. The bot runner refuses its prompts with `not-running` and refuses a new start for it. The server logs `the bot's processes couldn't be removed, so the bot stays stopping and the server tries again`. After its stop grace time of 10 seconds, the server sends `stop` again, and the bot runner asks the supervisor for the kill again. The server keeps asking until a kill succeeds.
+
 When the server stops, it stops every bot, with at most 15 seconds for all of them. The bot runner exits when the server closes the pipe, and kills any bot that is left. The supervisor then exits too, and kills any run that is left.
 
 ## Tests
 
-- `apps/server/src/cgroups/supervisor.test.ts` runs the supervisor with a fake host. It checks the request checks (a run id that isn't a UUIDv7, an unknown adapter, a bad bot id, a second start, a kill for an unknown run), that `started` and the kill both wait for placement, that kills of one run share one answer and don't hold up another run, and that a failed start check at any step refuses every start.
-- `apps/server/src/bots/runner.test.ts` runs the bot runner with the SDK's runtime and fake adapters in the same process. It checks a start, a turn and a stop, resume, the repaired stream, the isolation rules, the refusals, a cancel that replaces the adapter, a failed kill, and a failed start check.
-- `apps/server/src/bots/runner-process.test.ts` runs the real bot runner over named pipes, with a test supervisor and a real Bun adapter. It checks that the adapter gets exactly the environment above, holds none of the runner's pipes, and can't read the bot runner's descriptors or environment, and that another process of the same user can't open the adapter's descriptors.
-- `apps/server/src/bots/manager.test.ts` runs the server's bot manager against the bot runner. It checks restart with resume, giving up, the retry without a session, the folder check, an unknown provider, and the log line for a failed start check.
-- [`deploy/test/image-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/image-contract.sh) checks the shipped image with the Compose settings. The runner and the supervisor run as their own users in their own cgroups, the supervisor with only `CAP_SETUID` and `CAP_SETGID`. Through the real launcher, supervisor and runner, two fake adapter bots each start `setsid` and double-fork daemons and a fork loop. After a cancel and after a stop, a process listing as `root` shows none of that bot's processes, and the other bot keeps its own. Neither bot can write the cgroup tree or signal the runner or the supervisor. Without `writable-cgroups`, no bot starts and the server logs the fixed line. `aphelion check` runs the start check.
+- `apps/server/src/cgroups/supervisor.test.ts` runs the supervisor with a fake host. It checks the request checks (a run id that isn't a UUIDv7, an unknown adapter, a bad bot id, a bot folder that isn't an absolute, normalized path, a second start, a kill for an unknown run), that `started` and the kill both wait for placement, that kills of one run share one answer and don't hold up another run, that a run whose kill failed can be killed again, and that a failed start check at any step refuses every start.
+- `apps/server/src/bots/runner.test.ts` runs the bot runner with the SDK's runtime and fake adapters in the same process. It checks a start, a turn and a stop, resume, the repaired stream, the isolation rules, the refusals, a cancel that replaces the adapter, a replacement adapter that never answers `initialize`, a stop whose kill failed and its retry, and a failed start check.
+- `apps/server/src/adapters/cgroup-host.test.ts` checks that a run folder and its pipes start open only to the supervisor and that the probe's stay that way, and that the supervisor refuses a probe answer with the wrong shape, more than 64 entries or a line over 64 KiB. `apps/server/src/adapters/cgroup-check.test.ts` checks that the probe skips another run's cgroup that ends while it walks, and fails when its own cgroup or another path is missing.
+- `apps/server/src/adapters/supervised-bot-processes.test.ts` checks that the bot runner asks the supervisor again after a failed kill, and stops asking after a kill succeeds.
+- `apps/server/src/bots/runner-process.test.ts` runs the real bot runner over named pipes, with a test supervisor and a real Bun adapter. It checks that the adapter gets exactly the environment above, holds none of the runner's pipes, and can't read the bot runner's descriptors or environment, that another process of the same user can't open the adapter's descriptors, and that a custom folder on a fresh volume is created and used as the working folder.
+- `apps/server/src/bots/manager.test.ts` runs the server's bot manager against the bot runner. It checks restart with resume, giving up, the retry without a session, the folder check, an unknown provider, the log line for a failed start check, and a stop that the server sends again after a failed kill.
+- [`deploy/test/image-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/image-contract.sh) checks the shipped image with the Compose settings. The runner and the supervisor run as their own users in their own cgroups, the supervisor with only `CAP_SETUID` and `CAP_SETGID`. Through the real launcher, supervisor and runner, two fake adapter bots each start `setsid` and double-fork daemons and a fork loop. One of the bots runs in a custom folder that the launcher creates on a fresh volume. After a cancel and after a stop, a process listing as `root` shows none of that bot's processes, and the other bot keeps its own. Neither bot can write the cgroup tree or signal the runner or the supervisor. While the start check runs, a process in the `aphelion-runs` group can't list the probe's run folder or open its pipes. Without `writable-cgroups`, no bot starts and the server logs the fixed line. `aphelion check` runs the start check.
 
 ## Code
 
