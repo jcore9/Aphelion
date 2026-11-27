@@ -5,6 +5,7 @@ import { sessionRef } from "@aphelion/plugin-sdk";
 import {
   streamId,
   type EventFrame,
+  type LiveFrame,
   type ResyncFrame,
 } from "@aphelion/protocol";
 import { expect, it } from "@effect/vitest";
@@ -58,7 +59,7 @@ const sayAll = (store: EventStore, count: number, from = 1) =>
     yield* store.flush;
   });
 
-type Sent = EventFrame | ResyncFrame;
+type Sent = EventFrame | ResyncFrame | LiveFrame;
 
 const watch = (log: EventLog, seq: number | null, stream = log.streamId) =>
   Effect.gen(function* () {
@@ -77,15 +78,17 @@ const watch = (log: EventLog, seq: number | null, stream = log.streamId) =>
 const settle = Effect.repeat(Effect.yieldNow, { times: 20 });
 
 const positions = (sent: readonly Sent[]) =>
-  sent.map((frame) => (frame.type === "event" ? frame.seq : -1));
+  sent.flatMap((frame) => (frame.type === "event" ? [frame.seq] : []));
+
+const kinds = (sent: readonly Sent[]) => sent.map((frame) => frame.type);
 
 const texts = (sent: readonly Sent[]) =>
-  sent.map((frame) =>
+  sent.flatMap((frame) =>
     frame.type === "event" &&
     frame.name === "bot.event" &&
     frame.payload.event.type === "text.delta"
-      ? frame.payload.event.text
-      : "",
+      ? [frame.payload.event.text]
+      : [],
   );
 
 it.effect(
@@ -125,6 +128,61 @@ const saySession = (store: EventStore, ref: string) =>
     event: { type: "session", ref: sessionRef.parse(ref) },
   });
 
+it.effect("sends live after the replay and before any live event", () =>
+  Effect.gen(function* () {
+    const { store } = yield* openAt(tempPath());
+    yield* sayAll(store, 3);
+
+    const { sent } = yield* watch(store, 1);
+    yield* settle;
+    expect(kinds(sent)).toEqual(["event", "event", "live"]);
+    expect(sent[2]).toEqual({
+      v: 1,
+      type: "live",
+      cursor: { stream: store.streamId, seq: 3 },
+    });
+
+    yield* sayAll(store, 1, 4);
+    yield* settle;
+    expect(kinds(sent)).toEqual(["event", "event", "live", "event"]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "sends live with the position of the last saved event, even a hidden one",
+  () =>
+    Effect.gen(function* () {
+      const { store } = yield* openAt(tempPath());
+      yield* say(store, "m1");
+      yield* saySession(store, "s-secret-1");
+      yield* store.flush;
+
+      const { sent } = yield* watch(store, 0);
+      yield* settle;
+      expect(sent.at(-1)).toEqual({
+        v: 1,
+        type: "live",
+        cursor: { stream: store.streamId, seq: 2 },
+      });
+    }).pipe(Effect.scoped),
+);
+
+it.effect("sends live once, after every page of a long replay", () =>
+  Effect.gen(function* () {
+    const { store } = yield* openAt(tempPath());
+    yield* sayAll(store, replayPage + 3);
+
+    const { sent } = yield* watch(store, 0);
+    yield* settle;
+    expect(kinds(sent).filter((kind) => kind === "live")).toHaveLength(1);
+    expect(sent.at(-1)).toEqual({
+      v: 1,
+      type: "live",
+      cursor: { stream: store.streamId, seq: replayPage + 3 },
+    });
+  }).pipe(Effect.scoped),
+);
+
 it.effect(
   "never sends the vendor session ref to a client, whether it replays or follows live",
   () =>
@@ -150,18 +208,21 @@ it.effect(
 );
 
 it.effect(
-  "sends nothing to a client that is up to date, and then follows live events",
+  "sends only live to a client that is up to date, and then follows live events",
   () =>
     Effect.gen(function* () {
       const { store } = yield* openAt(tempPath());
       yield* sayAll(store, 2);
       const { sent } = yield* watch(store, 2);
       yield* settle;
-      expect(sent).toEqual([]);
+      expect(sent).toEqual([
+        { v: 1, type: "live", cursor: { stream: store.streamId, seq: 2 } },
+      ]);
 
       yield* sayAll(store, 1, 3);
       yield* settle;
       expect(positions(sent)).toEqual([3]);
+      expect(kinds(sent)).toEqual(["live", "event"]);
     }).pipe(Effect.scoped),
 );
 
@@ -344,10 +405,10 @@ it.effect(
       yield* sayAll(store, liveBufferLimit + 5);
       const error = yield* Fiber.join(stalled);
       yield* Effect.repeat(Effect.yieldNow, {
-        until: () => healthy.sent.length === liveBufferLimit + 5,
+        until: () => positions(healthy.sent).length === liveBufferLimit + 5,
       });
 
       expect(error).toBeInstanceOf(LiveBufferFullError);
-      expect(healthy.sent).toHaveLength(liveBufferLimit + 5);
+      expect(positions(healthy.sent)).toHaveLength(liveBufferLimit + 5);
     }).pipe(Effect.scoped),
 );

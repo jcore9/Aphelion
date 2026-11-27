@@ -11,7 +11,7 @@ Every frame is one JSON object with these fields. A frame with a field that its 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `v` | `1` | yes | The protocol version. |
-| `type` | `"command"` or `"resume"` or `"result"` or `"event"` or `"resync"` or `"error"` | yes | The frame type. |
+| `type` | `"command"` or `"resume"` or `"result"` or `"event"` or `"resync"` or `"live"` or `"error"` | yes | The frame type. |
 
 ## Frames a client sends
 
@@ -62,6 +62,14 @@ Tells a client that it can't catch up.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `cursor` | [`Cursor`](#cursor) | yes | Where the client continues after it reloads. |
+
+### `live` frame
+
+Tells a client that the server has replayed everything after its cursor and now sends events as they happen.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `cursor` | [`Cursor`](#cursor) | yes | The position of the last event the server replayed. |
 
 ### `error` frame
 

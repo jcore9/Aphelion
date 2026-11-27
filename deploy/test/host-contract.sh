@@ -478,7 +478,7 @@ pass "the command refuses a user other than root with status 2 and a fixed line,
 
 for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b" tool "tool frobnicate" "tool list extra" "tool install" "tool install a b" "tool remove" "tool remove a b" "tool update a b" "tool check a" "tool check now please" \
   key "key add" "key add a b" "key replace" "key test" "key test a b" "key remove" "key remove a b" "key frobnicate claude" \
-  sign-in "sign-in a b" "backup extra" "backup --to" "backup --to a b" "restore a b" \
+  sign-in "sign-in a b" chat "chat a b" "backup extra" "backup --to" "backup --to a b" "restore a b" \
   plugin "plugin frobnicate" "plugin install" "plugin install a b" "plugin install a --approve" "plugin install a --other x" \
   "plugin update" "plugin update a --other x" "plugin enable a b" "plugin rollback" "plugin rollback a b" "plugin restart a b" "plugin dev" "plugin dev a b" \
   "logs extra" "logs --bogus" "logs --lines" "logs --lines 0" "logs --lines -5" "logs --lines abc" "logs --since" \
@@ -614,6 +614,36 @@ out=$(FAKE_TOOLS=claude FAKE_NO_SIGNIN=1 with_terminal /opt/aphelion/deploy/host
 [[ $status == 1 && $out == *"gave no sign-in command for claude"* ]] || fail "sign-in ran with an empty sign-in command ($status, $out)"
 ! called "aphelion-bot" || fail "sign-in ran compose exec with no command"
 pass "sign-in refuses an unknown tool, a tool that isn't installed, a run without a terminal, and an empty sign-in command"
+
+reset_calls
+out=$(with_terminal /opt/aphelion/deploy/host/aphelion chat chief) || fail "chat failed with a terminal: $out"
+called "docker run --rm -it --pull never --network host --entrypoint  --user harness --cap-drop ALL --security-opt no-new-privileges:true aphelion:test aphelion chat chief --url ws://100.100.5.1:7400/ws" ||
+  fail "chat didn't run the client in a throwaway container on the host network: $(cat "$FAKE_CALLS")"
+! called "compose exec" || fail "chat ran inside the service's container"
+reset_calls
+status=0
+out=$(as_root_aphelion chat chief </dev/null 2>&1) || status=$?
+[[ $status == 1 && $out == "aphelion: chat needs a terminal. Run it in a shell on the host, not through a pipe or a script." ]] ||
+  fail "chat didn't refuse without a terminal ($status, $out)"
+! called "docker run" || fail "chat started a container without a terminal"
+status=0
+out=$(with_terminal /opt/aphelion/deploy/host/aphelion chat Chief 2>&1) || status=$?
+[[ $status == 1 && $out == "aphelion: that isn't a bot name. A bot name is lower case letters, digits and hyphens, like chief." ]] ||
+  fail "chat accepted a name that isn't a bot name, or repeated it ($status, $out)"
+! called "docker run" || fail "chat started a container for a name that isn't a bot name"
+canary=aph_dev_0123456789abcdef_secret
+status=0
+out=$(with_terminal /opt/aphelion/deploy/host/aphelion chat "$canary" 2>&1) || status=$?
+[[ $status == 1 && $out != *"$canary"* && $out != *aph_dev_* ]] || fail "chat repeated a bot name that looks like a token ($status, $out)"
+! called "docker run" || fail "chat started a container for a token in place of a bot name"
+cp /opt/aphelion/deploy/.env /opt/aphelion/deploy/.env.saved
+: >/opt/aphelion/deploy/.env
+status=0
+out=$(with_terminal /opt/aphelion/deploy/host/aphelion chat chief 2>&1) || status=$?
+mv /opt/aphelion/deploy/.env.saved /opt/aphelion/deploy/.env
+[[ $status == 1 && $out == *"set APHELION_TAILNET_ADDRESS"* ]] || fail "chat went on without a tailnet address ($status, $out)"
+! called "docker run" || fail "chat started a container without a tailnet address"
+pass "chat runs the client in a throwaway container on the host network at the tailnet address, and refuses without a terminal, with a bad bot name, or without the address"
 
 fake_key=sk-ant-fake-host-canary-0123456789abcdef
 key_input=$(mktemp)

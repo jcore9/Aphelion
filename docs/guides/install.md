@@ -107,6 +107,8 @@ Do these steps by hand if you want to see each one, or if the installer stopped 
    sudo aphelion device add laptop
    ```
 
+   To try a bot, [chat with it from the command line](test-client.md).
+
 9. Check the host. `check` prints `ok` or `FAIL` for each check the host can run alone, and how many passed. You should see no `FAIL`. `sudo aphelion status` shows whether the service, the container and each installed AI tool are up.
 
    ```sh
@@ -123,6 +125,16 @@ Run every `docker compose` command in this guide from `/opt/aphelion/deploy`, so
 cd /opt/aphelion/deploy
 sudo docker compose exec -T --user harness aphelion aphelion device add laptop
 ```
+
+`chat` starts a short-lived container from the service's image on the host's network, as the `harness` user, with no mounts and all capabilities dropped. It needs a terminal, and the token is typed at its prompt:
+
+```sh
+sudo docker run --rm -it --pull never --network host --entrypoint "" --user harness \
+  --cap-drop ALL --security-opt no-new-privileges:true IMAGE \
+  aphelion chat chief --url ws://ADDRESS:7400/ws
+```
+
+`IMAGE` is the first line of `docker compose config --images`, and `ADDRESS` is `APHELION_TAILNET_ADDRESS` in `.env`. [The test client guide](test-client.md) shows a session.
 
 `sign-in`, `backup`, `restore`, `plugin`, `logs`, `upgrade` and `network-check` run the host and Docker commands for you too. [Back up](#back-up), [Restore on the new host](#restore-on-the-new-host), [Install a plugin](#install-a-plugin), [Install an AI tool](#install-an-ai-tool), [Check the network boundary](#check-the-network-boundary), [Logs](#logs) and [Upgrade](#upgrade) show the commands under each one.
 

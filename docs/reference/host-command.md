@@ -2,7 +2,7 @@
 
 `aphelion` on the host is a root-only script, [`deploy/host/aphelion`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/aphelion). It runs the Docker steps of the [install guide](../guides/install.md) for you, so you type no Docker words. [`deploy/host/install`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/install) links it to `/usr/local/bin/aphelion`, a folder on root's PATH, which is the list of folders the shell searches for commands.
 
-It is not the server's [`aphelion` command](cli.md). That one runs inside the container. The host command runs it for the `device`, `tool`, `key` and `plugin` commands.
+It is not the server's [`aphelion` command](cli.md). That one runs inside the container. The host command runs it for the `device`, `tool`, `key` and `plugin` commands. `chat` runs it in a short-lived container on the host's network, because a chat inside the service's container would end when the service restarts. `chat` refuses without a terminal, and connects to the server at `APHELION_TAILNET_ADDRESS`.
 
 ## Commands
 
@@ -21,6 +21,7 @@ It is not the server's [`aphelion` command](cli.md). That one runs inside the co
 | `sudo aphelion tool check` | Asks each AI tool's vendor for its newest version |
 | `sudo aphelion tool remove NAME` | Removes an installed AI tool |
 | `sudo aphelion sign-in NAME` | Signs in to an installed AI tool, on your terminal |
+| `sudo aphelion chat BOT` | Chats with a bot in plain lines, on your terminal. Asks for a device token. |
 | `sudo aphelion key add NAME` | Asks for an API key for `claude`, `codex` or `grok` on your terminal and stores it encrypted |
 | `sudo aphelion key test NAME` | Asks the tool's provider whether it accepts the stored key |
 | `sudo aphelion key replace NAME` | Asks for a new API key and stores it in place of the old one |
@@ -46,7 +47,7 @@ Run any other command without root, and it prints `Run it with sudo, for example
 | 1 | `status` found the service or `/health` down. `check` or `network-check` found a failed check. `upgrade` refused or a step failed. |
 | 2 | The command was misused, or it wasn't run as root. For `network-check` with six targets, also when a target is malformed, the host can't reach a target, or the container isn't running. |
 
-A `device`, `tool`, `key` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `logs` exits with `journalctl`'s code. `sign-in` exits with the code of the tool's own sign-in. `sign-in`, `key add`, `key replace`, `backup`, `restore` and `upgrade` exit with 1 when they refuse or a step fails. A `key` command exits with 2 when it refuses the tool name. `plugin install` exits with 1 when it refuses.
+A `device`, `tool`, `key` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `logs` exits with `journalctl`'s code. `sign-in` exits with the code of the tool's own sign-in. `chat` exits with the code of [`aphelion chat`](cli.md#aphelion-chat-bot): 0 when you leave, 1 when the server refuses the token, and 2 when the client is misused. `sign-in`, `key add`, `key replace`, `chat`, `backup`, `restore` and `upgrade` exit with 1 when they refuse or a step fails, and `chat` refuses without a terminal, with a name that isn't a bot name, or without `APHELION_TAILNET_ADDRESS`. A `key` command exits with 2 when it refuses the tool name. `plugin install` exits with 1 when it refuses.
 
 ## `status`
 
@@ -218,6 +219,7 @@ Compose's own `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` pass through to every ca
 | `plugin install FOLDER` | `docker compose cp FOLDER aphelion:/opt/aphelion/plugins/NAME`, then `docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/NAME …` |
 | `plugin …` (other) | `docker compose exec -T --user harness aphelion aphelion plugin …`, with output and exit code passed through |
 | `sign-in NAME` | `docker compose exec --user aphelion-bot aphelion <the tool's sign-in command>`, attached to your terminal |
+| `chat BOT` | `docker run --rm -it --pull never --network host --entrypoint "" --user harness --cap-drop ALL --security-opt no-new-privileges:true IMAGE aphelion chat BOT --url ws://ADDRESS:7400/ws`, with the image from `docker compose config --images` and `ADDRESS` from `APHELION_TAILNET_ADDRESS`. It mounts nothing, and the token is typed at the prompt, so it never shows in the command line. |
 | `backup`, `restore` | `systemctl`, `docker compose config --images`, `docker volume`, and `docker run` for the packing, the unpacking and `aphelion restore finish`. [Back up](../guides/install.md#back-up) and [Restore on the new host](../guides/install.md#restore-on-the-new-host) list them. |
 | `logs` | `journalctl -u aphelion --no-pager`, with validated `--follow`, `--lines` and `--since` flags |
 | `upgrade [TAG]` | `git`, `curl`, [`deploy/host/get-image`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/get-image), [`deploy/host/install`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/install), `systemctl restart aphelion`, and `aphelion check` |

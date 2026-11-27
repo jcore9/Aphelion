@@ -36,6 +36,7 @@ const parsed = async (argv: string[]) => {
     keyTest: record("keyTest"),
     keyRemove: record("keyRemove"),
     restoreFinish: record("restoreFinish"),
+    chat: record("chat"),
   };
   const result = await capture(makeCli(handlers)(argv));
   return { ...result, calls };
@@ -300,6 +301,34 @@ describe("accepted command lines", () => {
       { kind: "restore finish", stateDir: "/data" },
     ],
     [
+      ["chat", "chief"],
+      {
+        kind: "chat",
+        bot: "chief",
+        url: "ws://127.0.0.1:7400/ws",
+        tokenFile: undefined,
+        cursorFile: undefined,
+      },
+    ],
+    [
+      [
+        "chat",
+        "chief",
+        "--url",
+        "http://100.71.226.67:7400",
+        "--token-file=/t",
+        "--cursor-file",
+        "/c",
+      ],
+      {
+        kind: "chat",
+        bot: "chief",
+        url: "ws://100.71.226.67:7400/ws",
+        tokenFile: "/t",
+        cursorFile: "/c",
+      },
+    ],
+    [
       ["device", "revoke", "0123456789abcdef"],
       {
         kind: "device revoke",
@@ -453,6 +482,17 @@ describe("refused command lines", () => {
     [
       ["restore", "finish", "--approve", "abc"],
       '--approve isn\'t an option of "restore finish"',
+    ],
+    [["chat"], '"chat" needs a bot'],
+    [["chat", "a", "b"], '"chat" takes one bot, but got 2'],
+    [["chat", "Chief"], "the bot name must be lower case letters"],
+    [
+      ["chat", "chief", "--url", "ftp://host"],
+      "--url must be an http, https, ws or wss address",
+    ],
+    [
+      ["chat", "chief", "--state-dir", "/s"],
+      '--state-dir isn\'t an option of "chat"',
     ],
     [
       ["plugin", "rollback", "weather", "--approve", "abc"],

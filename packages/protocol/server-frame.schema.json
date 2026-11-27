@@ -440,6 +440,36 @@
         },
         "type": {
           "type": "string",
+          "const": "live",
+          "description": "The frame type."
+        },
+        "cursor": {
+          "description": "The position of the last event the server replayed.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Cursor"
+            }
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "cursor"
+      ],
+      "additionalProperties": false,
+      "description": "Tells a client that the server has replayed everything after its cursor and now sends events as they happen."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1,
+          "description": "The protocol version."
+        },
+        "type": {
+          "type": "string",
           "const": "error",
           "description": "The frame type."
         },
