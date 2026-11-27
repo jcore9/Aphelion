@@ -991,6 +991,76 @@ describe("the bot runner", () => {
         }).pipe(Effect.scoped),
     );
 
+    const keyedStart = (bot: string) => ({
+      ...startFrame(bot),
+      apiKey: fakeKey,
+    });
+
+    it.live("wipes the key when the adapter crashes and the run ends", () =>
+      Effect.gen(function* () {
+        const alpha = scripted([[{ hang: true }]]);
+        const { fake, until, send } = yield* runner({ alpha: alpha.bot });
+        yield* send(keyedStart("alpha"));
+        yield* until(is("started"));
+        fake.latest("alpha")?.crash();
+        yield* until(is("exited"));
+        expect(keyOf(fake.runs[0] ?? { spec: {} })?.wiped).toBe(true);
+      }).pipe(Effect.scoped),
+    );
+
+    it.live(
+      "wipes the key of a run kept after its kill failed, before any retried stop",
+      () =>
+        Effect.gen(function* () {
+          const alpha = scripted([reply]);
+          const { fake, until, send } = yield* runner({
+            alpha: {
+              ...alpha.bot,
+              killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+            },
+          });
+          yield* send(keyedStart("alpha"));
+          yield* until(is("started"));
+          yield* send({ type: "stop", bot: "alpha", run: 1 });
+          yield* until(is("stop-failed"));
+          expect(keyOf(fake.runs[0] ?? { spec: {} })?.wiped).toBe(true);
+        }).pipe(Effect.scoped),
+    );
+
+    it.live(
+      "wipes the key of a run whose process was lost and couldn't be killed",
+      () =>
+        Effect.gen(function* () {
+          const alpha = scripted([[{ hang: true }]]);
+          const { fake, until, send } = yield* runner({
+            alpha: {
+              ...alpha.bot,
+              killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+            },
+          });
+          yield* send(keyedStart("alpha"));
+          yield* until(is("started"));
+          fake.latest("alpha")?.closeStdout();
+          yield* until(is("stop-failed"));
+          expect(keyOf(fake.runs[0] ?? { spec: {} })?.wiped).toBe(true);
+        }).pipe(Effect.scoped),
+    );
+
+    it.live("wipes the key of a live run when the runner shuts down", () =>
+      Effect.gen(function* () {
+        const alpha = scripted([[{ hang: true }]]);
+        const key = yield* Effect.gen(function* () {
+          const { fake, until, send } = yield* runner({ alpha: alpha.bot });
+          yield* send(keyedStart("alpha"));
+          yield* until(is("started"));
+          const held = keyOf(fake.runs[0] ?? { spec: {} });
+          expect(held?.wiped).toBe(false);
+          return held;
+        }).pipe(Effect.scoped);
+        expect(key?.wiped).toBe(true);
+      }),
+    );
+
     it.live(
       "starts without a key when the start has none, and wipes a key whose spawn failed",
       () =>

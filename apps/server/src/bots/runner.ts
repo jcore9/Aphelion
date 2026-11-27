@@ -208,16 +208,16 @@ export const runBotRunner = (
       Effect.gen(function* () {
         yield* Queue.end(events);
         yield* FiberSet.awaitEmpty(launches);
+        for (const slot of slots.values()) {
+          forget(slot.start);
+          forget(slot.next);
+        }
         yield* Effect.forEach(
           [...slots.values()],
           (slot) =>
             slot.process ? kill(slot.start.bot, slot.process) : Effect.void,
           { concurrency: "unbounded", discard: true },
         );
-        for (const slot of slots.values()) {
-          forget(slot.start);
-          forget(slot.next);
-        }
       }),
     );
 
@@ -446,7 +446,7 @@ export const runBotRunner = (
       yield* FiberSet.run(launches, launch(slot));
     });
 
-    const close = Effect.fnUntraced(function* (slot: Slot) {
+    const sendEnd = Effect.fnUntraced(function* (slot: Slot) {
       slots.delete(slot.start.bot);
       forget(slot.start);
       if (slot.failure !== undefined) {
@@ -463,8 +463,19 @@ export const runBotRunner = (
       for (let count = 0; count < slot.stopReplies; count++) {
         yield* link.send({ type: "stopped", ...frameOf(slot) });
       }
-      if (slot.next !== undefined) yield* begin(slot.next);
     });
+
+    const close = (slot: Slot) =>
+      sendEnd(slot).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            forget(slot.next);
+          }),
+        ),
+        Effect.andThen(() =>
+          slot.next === undefined ? Effect.void : begin(slot.next),
+        ),
+      );
 
     const reap = Effect.fnUntraced(function* (slot: Slot, exit: ProcessExit) {
       slot.phase = "stopping";
@@ -590,6 +601,7 @@ export const runBotRunner = (
       slot.phase = "unkilled";
       slot.cancel = undefined;
       slot.restarting = false;
+      forget(slot.start);
       const queued = slot.next;
       slot.next = undefined;
       forget(queued);
