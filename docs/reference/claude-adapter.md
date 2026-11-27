@@ -90,7 +90,7 @@ The adapter then checks every `init` message the session sends. Claude Code send
 
 An `init` that has no `tools`, `mcp_servers` or `plugins` list, or a plugin with no name, is stopped the same way. When a turn is running, it ends with `error` (`vendor`). When no turn is running, the next turn starts a new query. The log line gives the counts and no names.
 
-Trust lasts one turn. Each turn starts unchecked, and every tool call waits until the adapter has checked that turn's `init`. A call whose `init` fails is denied. A call also stops waiting, and is denied, when Claude Code cancels it. Once the adapter has stopped a query, it denies every later call from that query, including one that was already waiting for the rule.
+Trust lasts one turn. Each turn starts unchecked, and every tool call waits until the adapter has checked that turn's `init`. A call whose `init` fails is denied. A call also stops waiting, and is denied, when Claude Code cancels it. A call that comes when no turn is running, or after shutdown starts, is denied. A call is also denied when its turn ends before the rule answers, or before that turn's `init` is checked, even when the next turn's `init` is clean. Once the adapter has stopped a query, it denies every later call from that query, including one that was already waiting for the rule.
 
 ### Skills
 
