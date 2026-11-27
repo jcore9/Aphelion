@@ -1,6 +1,6 @@
 # 0068. Each adapter run gets its own cgroup, which only a small supervisor can write
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-27
 - Proposed by: the #216 design, in the PR that adds this record
 - Answers: how a cancel or a stop of a bot leaves no process of that bot alive ([#216](https://github.com/jcore9/Aphelion/issues/216))
@@ -31,7 +31,7 @@ Each adapter run gets its own cgroup. A small process, the **cgroup supervisor**
 
 | User | Process | Capabilities | Cgroup rights |
 | --- | --- | --- | --- |
-| `root` | `tini` and the launcher | The container's three, at start only | Builds the tree once, places the supervisor and the bot runner, then hands the tree over |
+| `root` | `tini` and the launcher | The container's three, `CAP_SETUID`, `CAP_SETGID` and `CAP_KILL`, for as long as `tini` and the launcher run | Builds the tree once, places the supervisor and the bot runner, then hands the tree over |
 | `aphelion-cgroups` (new, 10005) | The cgroup supervisor | Only `CAP_SETUID` and `CAP_SETGID`, used to switch each new adapter to `aphelion-bot` | The only writer of `/sys/fs/cgroup/bots/`, through the `aphelion-cgroups` group |
 | `aphelion-runner` (new, 10006) | The bot runner, which reads the bots' output | None | None |
 | `aphelion-bot` | Every adapter and every tool it starts | None | None |
@@ -42,10 +42,10 @@ These rules follow:
 - The tree is `/sys/fs/cgroup/bots/`, with `system/runner`, `system/supervisor` and one leaf `work/<run id>` per adapter run. The run id is a UUIDv7. No controller is turned on below `bots/`.
 - The supervisor reads only the bot runner's requests, over a private pipe that the launcher makes. A request names an adapter by a key in a fixed table, never by a path. The supervisor checks every run id, and finds a run to kill only in its own list of live runs.
 - An adapter process writes its own process id into its leaf before it runs anything else, through a root-owned entry script. Only then does it open its pipes and switch to `aphelion-bot` with no groups, no capabilities and `no_new_privs`.
-- A kill waits until the run's process has confirmed its placement or has exited. Then the supervisor writes `cgroup.kill`, waits for `populated 0`, and removes the leaf. A failed removal keeps the bot stopped, with one fixed log line.
-- A cancel first asks the adapter to end the turn, for at most the runtime's 5-second cancel limit. Then the bot runner kills the run and starts a fresh adapter that resumes the session.
-- At start, the supervisor runs one fake bot through the real start and kill, and checks each step. If one step fails, no bot starts, and the server logs one fixed line that names the step and the error code. `sudo aphelion check` runs the same check.
-- The bot runner moves off `aphelion-bot`, so a bot can't signal or stop it. The run folders with each run's pipes are open only to the supervisor and the bot runner, through the `aphelion-runs` group (10007).
+- A kill waits until the run's process has confirmed its placement or has exited. Then the supervisor writes `cgroup.kill`, waits for `populated 0`, and removes the leaf. A failed removal finishes no stop, cancel or crash. The bot runner keeps the run, answers `stop-failed` and refuses the bot's turns and starts. The server moves the bot to stopping from any state, starts no new run of it, and asks for the kill again until one succeeds, with one fixed log line per failed stop.
+- A cancel first asks the adapter to end the turn. The adapter's runtime ends it within 5 seconds, and the bot runner waits at most 6 seconds for that `turn.end`. Then the bot runner kills the run and starts a fresh adapter that resumes the session. If that kill fails, no fresh adapter starts, and the failed-removal rule above applies.
+- At start, the supervisor runs one fake bot through the real start and kill, and checks each step. The probe's folder is `/tmp/aphelion-probe-<run id>`, new for each check. The supervisor refuses a start from the bot runner that names the probe adapter or the probe's bot id. If one step fails, no bot starts, and the server logs one fixed line that names the step and the error code. `sudo aphelion check` runs the same check.
+- The bot runner moves off `aphelion-bot`, so a bot can't signal or stop it. The run folders with each run's pipes are open only to the supervisor and the bot runner, through the `aphelion-runs` group (10007). The start check's run folder and pipes are open only to the supervisor.
 
 What stays: Docker's default seccomp profile, no extra namespaces, and Codex without its own sandbox, as decision 0045 says. Bots still share one user ([decision 0006](0006-shared-bot-user.md)), so a bot can still signal another bot's processes. Separate users per bot are later work.
 
@@ -54,6 +54,6 @@ What stays: Docker's default seccomp profile, no extra namespaces, and Codex wit
 - Compose gains `writable-cgroups=true` and a memory folder `/run/aphelion-runs`. The image gains two users and a group. `deploy/test/image-contract.sh` and `aphelion check` check both.
 - The host's Docker must support `writable-cgroups`, and the host must use cgroup v2. Docker 29.10 supports it. Earlier versions, rootless Docker and `userns-remap` weren't tested. The [install guide](../guides/install.md) says so and shows the error.
 - A command that a bot left running in the background dies when the bot stops, when a turn is cancelled, and when the adapter exits.
-- The bot's folder is created as `/var/lib/aphelion-bots/<bot>`. A folder elsewhere in `bots.yaml` isn't created for the bot.
+- The adapter launcher creates the bot's folder from `bots.yaml` as `aphelion-bot`, so the file permissions of `aphelion-bot` decide where that folder can be.
 - Per-bot limits ([#47](https://github.com/jcore9/Aphelion/issues/47)) and per-plugin limits can build on the same tree. That needs a controller turned on below `bots/`, which this record doesn't do.
 - Revisit when bots get separate users, or when a host can't offer `writable-cgroups`.
