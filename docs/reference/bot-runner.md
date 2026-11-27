@@ -12,7 +12,7 @@ Each message is one JSON object on one line, at most 8 MiB. Every message names 
 
 | From | Message | What it does |
 | --- | --- | --- |
-| Server | `start` | Starts the bot's adapter with the bot's provider, adapter name, folder and the session to resume, or `null`. The adapter name is a key in the supervisor's adapter table, such as `claude`, never a path. |
+| Server | `start` | Starts the bot's adapter with the bot's provider, adapter name, folder and the session to resume, or `null`. The adapter name is a key in the supervisor's adapter table, such as `claude`, never a path. When an API key is stored for the bot's provider, `apiKey` holds it ([the API key at start](#the-api-key-at-start)). |
 | Server | `turn.start` | Sends the bot one prompt, at most 256 KiB |
 | Server | `turn.cancel` | Cancels the turn, then replaces the adapter ([how a cancel works](#how-a-cancel-works)) |
 | Server | `stop` | Stops the bot |
@@ -51,7 +51,7 @@ The supervisor is `cgroup-supervisor.js`. It runs as `aphelion-cgroups` with exa
 
 | From | Message | What it does |
 | --- | --- | --- |
-| Bot runner | `start` | Starts an adapter, with a new run id, the bot id, the adapter name and the bot's folder from `bots.yaml` |
+| Bot runner | `start` | Starts an adapter, with a new run id, the bot id, the adapter name, the bot's folder from `bots.yaml`, and the API key when the server sent one |
 | Bot runner | `kill` | Kills a run's cgroup and removes it |
 | Supervisor | `ready`, `unsafe` | The start check passed, or failed at a named step with an error code |
 | Supervisor | `started`, `start-failed` | The run started, with the paths of its three pipes, or didn't start |
@@ -109,10 +109,27 @@ The process gets only its standard input, output and error, which are the run's 
 | `TZ` | `UTC` |
 | `TMPDIR` | `/tmp` |
 | `DISABLE_AUTOUPDATER` | `1`, for a `claude` bot only, so Claude Code doesn't update itself |
+| `ANTHROPIC_API_KEY` | The stored Claude API key, for a `claude` bot only, and only when a key is stored ([the API key at start](#the-api-key-at-start)) |
 
 `HTTPS_PROXY` and `NO_PROXY` are never set. The bot's network goes out as the container's does ([decision 0022](../decisions/0022-bot-network-boundary.md)). A later proxy changes only these two variables.
 
 The server picks the adapter name by the bot's `provider`, and the supervisor maps the name to a file and an environment from a fixed table. Today one name starts a bot: `claude` runs `/usr/local/lib/aphelion/adapters/claude/adapter.js`. The table's other entry, `probe`, is the start check's fake bot, and the supervisor refuses it from the bot runner. A bot whose provider has no adapter doesn't start. The server logs `no adapter in this image runs the bot's provider, so the bot won't start` with the bot and the provider.
+
+## The API key at start
+
+The owner stores an API key with [`aphelion key add`](cli.md#aphelion-key-add-name). The next start of a bot whose provider takes that key hands the key to the bot:
+
+1. Each time the server sends `start`, it reads `local://apikey/<provider>` from the [secrets broker](secrets.md#api-keys-for-ai-tools). It reads only the entry named after the bot's own provider, and only for `claude`, `codex` and `grok`. A bot never gets the key of another provider.
+2. When no key is stored, the bot starts without one. When the broker fails or doesn't answer, the bot also starts without one, and the server logs `the server couldn't read the bot's API key from the secrets broker, so the bot starts without it` with the bot. The line never holds the key or the broker's error.
+3. The server puts the key in the `apiKey` field of `start` and wipes its copy once the message is written. It keeps the key nowhere else: not with the bot's state, not in the database and not in a log.
+4. The bot runner wraps the key in a `Secret` and passes it in the supervisor's `start`. It keeps the key while the run lasts, because a [cancel](#how-a-cancel-works) starts a new adapter that needs it again. It wipes the key when the run ends.
+5. The supervisor sets the key in the adapter's environment under the variable its adapter table names, and wipes its copy after the spawn. The table names `ANTHROPIC_API_KEY` for `claude` and no variable for any other adapter, because no Codex or Grok adapter exists yet. For an adapter with no variable, the supervisor refuses the start with `that adapter takes no API key`. The start check's probe never gets a key.
+
+The key never goes on a command line, into a file, the bot's folder, a log, the audit log or an error. A new, changed or removed key takes effect at the bot's next start, such as after `sudo systemctl restart aphelion`.
+
+The adapter decides whether its AI tool uses the key. The Claude adapter lets a working sign-in win ([the environment Claude Code gets](claude-adapter.md#the-environment-claude-code-gets)).
+
+**The limit, stated plainly.** A bot that runs on a key can read its own key, as it can read its sign-in token today, so a tricked bot could leak it. Under the shared `aphelion-bot` user ([decision 0006](../decisions/0006-shared-bot-user.md)), another bot can read it too, because Claude Code is dumpable ([below](#how-one-bot-is-kept-from-another)) and its environment holds the key. When the sign-in wins, Claude Code never gets the key, and only the non-dumpable adapter holds it. A proxy that adds the key to each request on its way out, option 2 of [decision 0022](../decisions/0022-bot-network-boundary.md), can remove this later, so that no bot holds the key.
 
 ## How one bot is kept from another
 

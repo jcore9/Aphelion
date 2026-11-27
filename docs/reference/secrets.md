@@ -91,7 +91,9 @@ Every failure is a `BrokerError` with a fixed message, such as `can't reach the 
 | `codex` | `local://apikey/codex` | An OpenAI API key |
 | `grok` | `local://apikey/grok` | An xAI API key |
 
-The command wraps the key in a `Secret` as soon as it reads it, and wipes it when it is done. It reads the value in only two places: to build the request to the broker, and to build the header of `aphelion key test`. Bots don't get the key yet. The hand-off at bot start comes in a later change for [#181](https://github.com/jcore9/Aphelion/issues/181).
+The command wraps the key in a `Secret` as soon as it reads it, and wipes it when it is done. It reads the value in only two places: to build the request to the broker, and to build the header of `aphelion key test`. At bot start, the server reads the key for the bot's provider with the broker client and hands it to that bot's adapter ([the API key at start](bot-runner.md#the-api-key-at-start)). The server reads the value only to build the `start` message, and wipes it once the message is written.
+
+A bot that runs on a key can read its own key, as it can read its sign-in token today, so a tricked bot could leak it. Under the shared `aphelion-bot` user ([decision 0006](../decisions/0006-shared-bot-user.md)), another bot can read it too. A proxy that adds the key to each request on its way out, option 2 of [decision 0022](../decisions/0022-bot-network-boundary.md), can remove this later.
 
 ## Code
 

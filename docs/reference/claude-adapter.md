@@ -65,7 +65,11 @@ The cost: Claude Code also skips the context it would normally attach at the sta
 
 The SDK's `env` option replaces Claude Code's whole environment. The adapter copies only these variables from its own environment: `HOME`, `PATH`, `LANG`, `TZ`, `TMPDIR`, and the proxy variables `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and `ALL_PROXY` in upper and lower case. It then sets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so Claude Code doesn't update itself and runs no command in the background.
 
-No key passes. An `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` in the bot process's environment never reaches Claude Code. Claude Code finds its sign-in in `HOME`. [#181](https://github.com/jcore9/Aphelion/issues/181) adds an API key for a bot that has no sign-in.
+An `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` in the adapter's environment never reaches Claude Code. Claude Code finds its sign-in in `HOME`.
+
+`ANTHROPIC_API_KEY` reaches Claude Code only when there is no working sign-in. The supervisor sets it in the adapter's environment when the owner stored a Claude API key ([the API key at start](bot-runner.md#the-api-key-at-start)). Claude Code uses an `ANTHROPIC_API_KEY` ahead of its sign-in, so the adapter checks the sign-in first. Before its first query, it runs `claude auth status` once, with the variables above and without the key, a 5-second limit, and its output thrown away. Exit status 0 means a working sign-in. The adapter then leaves the key out of every query's environment, and the subscription pays. Exit status 1, a missing CLI, or no answer within 5 seconds means no working sign-in, and the adapter passes the key. Without a key, the adapter runs no check.
+
+`claudeEnv` in `packages/claude-adapter/src/options.ts` makes that choice, and `sessionEnv` in `packages/claude-adapter/src/sign-in.ts` runs the check. The check runs once per adapter process, so a sign-in that stops working brings the key in only at the next adapter start, such as after a cancel or a bot restart. Whether `claude auth status` reports an expired sign-in as signed out isn't measured yet. The owner's live check with a throwaway key covers it.
 
 ## How messages become events
 
