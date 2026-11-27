@@ -237,9 +237,14 @@ printf 'APHELION_TAILNET_ADDRESS=100.100.5.1\n' >/opt/aphelion/deploy/.env
 fakebin=$(mktemp -d)
 cat >"$fakebin/systemctl" <<'FAKE'
 #!/bin/bash
+echo "systemctl $*" >>"${FAKE_CALLS:-/dev/null}"
 case $1 in
   is-enabled) echo enabled ;;
   is-active) echo "${FAKE_SERVICE:-active}"; [[ ${FAKE_SERVICE:-active} == active ]] ;;
+  start)
+    if [[ -n ${FAKE_DAMAGE_ARCHIVES:-} ]]; then
+      echo damage >>"$(ls -d "$FAKE_DAMAGE_ARCHIVES"/aphelion-backup-*/ | tail -n 1)aphelion-data.tar.gz"
+    fi ;;
 esac
 FAKE
 cat >"$fakebin/curl" <<'FAKE'
@@ -249,37 +254,83 @@ echo '{"status":"ok"}'
 FAKE
 cat >"$fakebin/docker" <<'FAKE'
 #!/bin/bash
+echo "docker $*" >>"${FAKE_CALLS:-/dev/null}"
 case " $* " in
   *" ps "*)
     [[ ${FAKE_CONTAINER:-up} == up ]] && echo fake-container-id
     exit 0 ;;
+  *" config --images "*)
+    echo aphelion:test
+    exit 0 ;;
+  *" volume ls "*)
+    for volume in ${FAKE_VOLUMES:-}; do echo "$volume"; done
+    exit "${FAKE_VOLUME_LS_EXIT:-0}" ;;
+  *" volume create "*)
+    echo "${*: -1}"
+    exit 0 ;;
+  *" cp "*)
+    exit "${FAKE_CP_EXIT:-0}" ;;
   *" --user harness aphelion aphelion device "*)
     echo "the-token"
     echo "Added device" >&2
     exit "${FAKE_DEVICE_EXIT:-0}" ;;
   *" --user harness aphelion aphelion tool list"*)
-    printf 'NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\n'
-    for entry in "claude 2.1.330 claude auth status --text" "codex 0.172.0 codex login status" "grok 1.0.92 -" "opencode 2.4.1 -"; do
-      read -r name version status <<<"$entry"
+    declare -A version=([claude]=2.1.330 [codex]=0.172.0 [grok]=1.0.92 [opencode]=2.4.1)
+    declare -A check=([claude]="claude auth status --text" [codex]="codex login status" [grok]=- [opencode]=-)
+    declare -A signin=([claude]="claude auth login" [codex]="codex login --device-auth" [grok]="grok login --device-auth" [opencode]="opencode auth login")
+    printf 'NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\tSIGN-IN-COMMAND\n'
+    [[ -z ${FAKE_NO_SIGNIN:-} ]] || signin=([claude]="" [codex]="" [grok]="" [opencode]="")
+    for name in claude codex grok opencode; do
       state="not installed" installed=-
       if [[ " ${FAKE_TOOLS:-} " == *" $name "* ]]; then
-        state=installed installed=$version
+        state=installed installed=${version[$name]}
       elif [[ " ${FAKE_OLD_TOOLS:-} " == *" $name "* ]]; then
         state="update available" installed=0.1.0
       fi
-      printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$version" "$installed" "$state" "$status"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "${version[$name]}" "$installed" "$state" "${check[$name]}" "${signin[$name]}"
     done
     exit "${FAKE_TOOL_EXIT:-0}" ;;
   *" --user harness aphelion aphelion tool "*)
     all="$*"
     echo "ran tool ${all##* aphelion tool }"
     exit "${FAKE_TOOL_EXIT:-0}" ;;
+  *" --user harness aphelion aphelion plugin "*)
+    all="$*"
+    echo "ran plugin ${all##* aphelion plugin }"
+    exit "${FAKE_PLUGIN_EXIT:-0}" ;;
+  *" --user harness aphelion test -e "*)
+    last=${*: -1}
+    [[ " ${FAKE_PLUGINS:-} " == *" ${last##*/} "* ]]
+    exit ;;
+  *" --user harness aphelion test -L "*)
+    exit 1 ;;
+  *" --user aphelion-bot aphelion "*" auth login "* | *" --user aphelion-bot aphelion "*" login --device-auth "*)
+    echo "SECRET-FROM-THE-TOOL"
+    exit "${FAKE_SIGN_IN_EXIT:-0}" ;;
   *" --user aphelion-bot aphelion "*)
     all="$*"
     rest=${all#*--user aphelion-bot aphelion }
     echo "SECRET-FROM-THE-TOOL"
     [[ " ${FAKE_SIGNED_IN:-} " == *" ${rest%% *} "* ]]
     exit ;;
+  *" run "*)
+    mount=""
+    for argument in "$@"; do
+      case $argument in
+        *:/backup | *:/backup:ro) mount=${argument%%:/backup*} ;;
+      esac
+    done
+    case " $* " in
+      *" tar --create "*)
+        [[ -z ${FAKE_PACK_FAIL:-} ]] || exit 1
+        echo "an archive of the volumes" | gzip >"$mount/aphelion-data.tar.gz" ;;
+      *" tar --extract "*)
+        exit "${FAKE_UNPACK_EXIT:-0}" ;;
+      *" aphelion restore finish "* | *" aphelion restore finish")
+        printf 'Restore finished. Every device token is revoked.\nEnroll a device: aphelion device add NAME\n'
+        exit "${FAKE_FINISH_EXIT:-0}" ;;
+    esac
+    exit 0 ;;
 esac
 FAKE
 chmod +x "$fakebin"/*
@@ -315,7 +366,10 @@ help=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" --help) || fai
   fail "--help doesn't list the commands: $help"
 pass "the command refuses a user other than root with status 2, and --help works for everyone"
 
-for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b" tool "tool frobnicate" "tool list extra" "tool install" "tool install a b" "tool remove" "tool remove a b" "tool update a b" "tool check a" "tool check now please"; do
+for bad in "" bogus "status extra" device "device frobnicate" "check now" "device add" "device list extra" "device revoke" "device revoke a b" tool "tool frobnicate" "tool list extra" "tool install" "tool install a b" "tool remove" "tool remove a b" "tool update a b" "tool check a" "tool check now please" \
+  sign-in "sign-in a b" "backup extra" "backup --to" "backup --to a b" "restore a b" \
+  plugin "plugin frobnicate" "plugin install" "plugin install a b" "plugin install a --approve" "plugin install a --other x" \
+  "plugin update" "plugin update a --other x" "plugin enable a b" "plugin rollback" "plugin rollback a b" "plugin restart a b" "plugin dev" "plugin dev a b"; do
   status=0
   read -ra words <<<"$bad" || true
   error=$(as_root_aphelion "${words[@]}" 2>&1 >/dev/null) || status=$?
@@ -387,7 +441,7 @@ status=0
 out=$(FAKE_TOOL_EXIT=4 as_root_aphelion tool remove claude 2>&1) || status=$?
 [[ $status == 4 && $out == "ran tool remove claude" ]] || fail "tool remove changed the exit code or output ($status, $out)"
 rows=$(FAKE_TOOLS=grok as_root_aphelion tool list) || fail "tool list failed"
-grep -qP "^grok\t1\.0\.92\t1\.0\.92\tinstalled\t-$" <<<"$rows" || fail "tool list didn't pass the server's table through: $rows"
+grep -qP "^grok\t1\.0\.92\t1\.0\.92\tinstalled\t-\tgrok login --device-auth$" <<<"$rows" || fail "tool list didn't pass the server's table through: $rows"
 pass "tool list, install and remove run the server's command as harness and pass its output and exit code through"
 
 out=$(as_root_aphelion tool update) || fail "tool update with no name failed"
@@ -400,3 +454,270 @@ status=0
 out=$(FAKE_TOOL_EXIT=1 as_root_aphelion tool check 2>&1) || status=$?
 [[ $status == 1 && $out == "ran tool check" ]] || fail "tool check changed the exit code or output ($status, $out)"
 pass "tool update and tool check run the server's command as harness and pass its output and exit code through"
+
+export FAKE_CALLS=/tmp/fake-calls
+reset_calls() { : >"$FAKE_CALLS"; }
+position() { grep -nF -- "$1" "$FAKE_CALLS" | head -n 1 | cut -d: -f1; }
+called() { [[ -n $(position "$1") ]]; }
+ordered() {
+  local first second
+  first=$(position "$1") second=$(position "$2")
+  [[ -n $first && -n $second ]] && ((first < second))
+}
+exec_line="docker compose --project-directory /opt/aphelion/deploy exec"
+with_terminal() {
+  script --quiet --return --command "$(printf '%q ' env "PATH=$fakebin:$PATH" "$@")" /dev/null </dev/null | tr -d '\r'
+}
+
+export FAKE_TOOLS="claude codex grok opencode"
+for entry in "claude auth login" "codex login --device-auth" "grok login --device-auth" "opencode auth login"; do
+  reset_calls
+  status=0
+  out=$(with_terminal FAKE_SIGN_IN_EXIT=7 /opt/aphelion/deploy/host/aphelion sign-in "${entry%% *}") || status=$?
+  [[ $status == 7 && $out == SECRET-FROM-THE-TOOL ]] ||
+    fail "sign-in ${entry%% *} didn't pass the tool's output and exit code to the terminal ($status, $out)"
+  grep -qxF "$exec_line --user aphelion-bot aphelion $entry" "$FAKE_CALLS" ||
+    fail "sign-in ${entry%% *} didn't run '$entry' as aphelion-bot with a terminal: $(cat "$FAKE_CALLS")"
+done
+pass "sign-in runs each tool's own sign-in command as aphelion-bot on the owner's terminal, and passes its output and exit code through"
+
+reset_calls
+status=0
+out=$(with_terminal /opt/aphelion/deploy/host/aphelion sign-in frobnicate 2>&1) || status=$?
+[[ $status == 1 && $out == *"frobnicate isn't on the list of AI tools"* ]] || fail "sign-in accepted an unknown tool ($status, $out)"
+status=0
+out=$(FAKE_TOOLS="codex" with_terminal /opt/aphelion/deploy/host/aphelion sign-in claude 2>&1) || status=$?
+[[ $status == 1 && $out == *"claude isn't installed. Install it first: sudo aphelion tool install claude"* ]] ||
+  fail "sign-in accepted a tool that isn't installed ($status, $out)"
+! called "aphelion-bot" || fail "sign-in ran a command in the container for a tool that can't sign in"
+status=0
+out=$(as_root_aphelion sign-in claude </dev/null 2>&1) || status=$?
+[[ $status == 1 && $out == "aphelion: sign-in needs a terminal. Run it in a shell on the host, not through a pipe or a script." ]] ||
+  fail "sign-in didn't refuse without a terminal ($status, $out)"
+! called "aphelion-bot" || fail "sign-in ran the tool without a terminal"
+status=0
+out=$(FAKE_TOOLS=claude FAKE_NO_SIGNIN=1 with_terminal /opt/aphelion/deploy/host/aphelion sign-in claude 2>&1) || status=$?
+[[ $status == 1 && $out == *"gave no sign-in command for claude"* ]] || fail "sign-in ran with an empty sign-in command ($status, $out)"
+! called "aphelion-bot" || fail "sign-in ran compose exec with no command"
+pass "sign-in refuses an unknown tool, a tool that isn't installed, a run without a terminal, and an empty sign-in command"
+
+bk=$(mktemp -d)/backups
+export APHELION_BACKUP_DIR=$bk
+unset FAKE_TOOLS
+reset_calls
+folder=$(as_root_aphelion backup) || fail "backup failed"
+[[ $folder == "$bk"/aphelion-backup-????????-?????? && -d $folder ]] || fail "backup printed something other than the new folder: $folder"
+[[ $(stat -c %a "$bk" "$folder") == $'700\n700' ]] || fail "the backup folders aren't private"
+[[ $(readlink "$bk/latest") == "$(basename "$folder")" ]] || fail "latest doesn't point at the new folder"
+(cd "$folder" && sha256sum --check --status aphelion-data.tar.gz.sha256) || fail "the new backup's checksum doesn't match"
+[[ $(ls -A "$folder") == $'aphelion-data.tar.gz\naphelion-data.tar.gz.sha256' ]] || fail "the backup folder holds other files: $(ls -A "$folder")"
+ordered "systemctl stop aphelion" "docker run" && ordered "docker run" "systemctl start aphelion" ||
+  fail "backup didn't stop the service, pack, then start the service: $(cat "$FAKE_CALLS")"
+pack=$(grep -F "tar --create" "$FAKE_CALLS")
+for volume in config state bots secrets plugin-data plugin-files; do
+  [[ $pack == *"-v aphelion_$volume:/data/$volume:ro "* ]] || fail "backup didn't mount aphelion_$volume read-only: $pack"
+done
+[[ $pack == "docker run --rm --pull never --network none --entrypoint  "* && $pack == *" -v $folder:/backup aphelion:test tar --create --gzip --numeric-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data ." ]] ||
+  fail "backup packed with another command: $pack"
+pass "backup stops the service, packs the six volumes read-only from the service's image into a new private folder, checks it, starts the service and prints the folder"
+
+first=$folder
+sleep 1
+second=$(as_root_aphelion backup) || fail "a second backup failed"
+[[ $second != "$first" && -d $first && $(readlink "$bk/latest") == "$(basename "$second")" ]] ||
+  fail "the second backup didn't keep the first and move latest"
+sleep 1
+third=$(as_root_aphelion backup) || fail "a third backup failed"
+[[ ! -e $first && -d $second && -d $third && $(readlink "$bk/latest") == "$(basename "$third")" ]] ||
+  fail "the third backup didn't keep only the last two: $(ls "$bk")"
+pass "each backup is a new folder, latest moves to it, and only the new folder and the one before it stay"
+
+sleep 1
+reset_calls
+status=0
+out=$(FAKE_PACK_FAIL=1 as_root_aphelion backup 2>&1) || status=$?
+[[ $status == 1 && -d $second && -d $third && $(readlink "$bk/latest") == "$(basename "$third")" && $(ls "$bk" | wc -l) == 3 ]] ||
+  fail "a failed pack changed the earlier backups or left a folder ($status): $(ls "$bk")"
+called "systemctl start aphelion" || fail "a failed pack left the service stopped"
+sleep 1
+reset_calls
+status=0
+out=$(FAKE_DAMAGE_ARCHIVES=$bk as_root_aphelion backup 2>&1) || status=$?
+[[ $status == 1 && $out == *"didn't pass its check"* ]] || fail "backup didn't fail when the archive changed after the checksum ($status, $out)"
+[[ -d $second && -d $third && $(readlink "$bk/latest") == "$(basename "$third")" && $(ls "$bk" | wc -l) == 3 ]] ||
+  fail "a backup that failed its check moved latest or removed the earlier copies: $(ls "$bk")"
+called "systemctl start aphelion" || fail "a failed check left the service stopped"
+pass "a backup that fails keeps both earlier copies and latest, removes its own folder and starts the service again"
+
+reset_calls
+elsewhere=$(mktemp -d)/elsewhere
+out=$(FAKE_SERVICE=inactive as_root_aphelion backup --to "$elsewhere") || fail "backup --to failed"
+[[ $out == "$elsewhere"/aphelion-backup-* && -f $out/aphelion-data.tar.gz && -L $elsewhere/latest ]] ||
+  fail "backup --to didn't write into the folder it was given: $out"
+! called "systemctl stop" && ! called "systemctl start" || fail "backup touched a service that wasn't running"
+existing=$(mktemp -d)
+chmod 1777 "$existing"
+FAKE_SERVICE=inactive as_root_aphelion backup --to "$existing" >/dev/null || fail "backup --to an existing folder failed"
+[[ $(stat -c %a "$existing") == 1777 ]] || fail "backup --to changed the mode of a folder that existed: $(stat -c %a "$existing")"
+pass "backup --to writes into the given folder, keeps the mode of a folder that exists, and leaves a service that isn't running alone"
+
+reset_calls
+status=0
+out=$(as_root_aphelion restore 2>&1) || status=$?
+[[ $status == 0 ]] || fail "restore failed ($status): $out"
+[[ $out == *"Restore finished. Every device token is revoked."* ]] || fail "restore didn't show what restore finish printed: $out"
+ordered "systemctl stop aphelion" "volume ls" && ordered "volume ls" "volume create" && ordered "volume create" "tar --extract" &&
+  ordered "tar --extract" "aphelion restore finish" && ordered "aphelion restore finish" "systemctl start aphelion" ||
+  fail "restore ran its steps in another order: $(cat "$FAKE_CALLS")"
+for volume in config state bots secrets plugin-data plugin-files; do
+  grep -qF "volume create --label com.docker.compose.project=aphelion --label com.docker.compose.volume=$volume aphelion_$volume" "$FAKE_CALLS" ||
+    fail "restore didn't create aphelion_$volume with the Compose labels"
+done
+extract=$(grep -F "tar --extract" "$FAKE_CALLS")
+[[ $extract == *"-v $bk/$(basename "$third"):/backup:ro aphelion:test tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data" && $extract == *"-v aphelion_state:/data/state "* ]] ||
+  fail "restore unpacked with another command: $extract"
+grep -qF "run --rm --pull never --network none --entrypoint  --user harness -v aphelion_state:/var/lib/aphelion aphelion:test aphelion restore finish" "$FAKE_CALLS" ||
+  fail "restore didn't run restore finish as harness on the state volume: $(cat "$FAKE_CALLS")"
+pass "restore stops the service, creates the six labelled volumes, unpacks the latest backup, runs restore finish as harness and starts the service"
+
+reset_calls
+out=$(COMPOSE_PROJECT_NAME=other as_root_aphelion restore "$second/aphelion-data.tar.gz" 2>&1) || fail "restore of an archive path failed: $out"
+grep -qF "volume create --label com.docker.compose.project=other --label com.docker.compose.volume=state other_state" "$FAKE_CALLS" &&
+  grep -qF -- "-v $second:/backup:ro" "$FAKE_CALLS" ||
+  fail "restore didn't take the project name and the archive path it was given: $(cat "$FAKE_CALLS")"
+reset_calls
+as_root_aphelion restore "$second" >/dev/null 2>&1 || fail "restore of a folder path failed"
+grep -qF -- "-v $second:/backup:ro" "$FAKE_CALLS" || fail "restore didn't use the folder it was given"
+pass "restore takes a backup folder or an archive, and the project name from COMPOSE_PROJECT_NAME"
+
+reset_calls
+status=0
+out=$(FAKE_VOLUMES="aphelion_state aphelion_other unrelated_state" as_root_aphelion restore 2>&1) || status=$?
+[[ $status == 1 && $out == *"aphelion_state"* && $out != *"aphelion_other"* && $out == *"docker compose down"* && $out == *"docker volume rm aphelion_state"* ]] ||
+  fail "restore didn't refuse over an existing volume and print the commands that remove it ($status, $out)"
+! called "volume create" && ! called "tar --extract" && ! called "systemctl start" ||
+  fail "restore went on over an existing volume: $(cat "$FAKE_CALLS")"
+pass "restore refuses when a volume exists, prints the commands that remove it, and changes nothing"
+
+damaged=$(mktemp -d)
+cp -r "$third/." "$damaged/"
+echo damage >>"$damaged/aphelion-data.tar.gz"
+reset_calls
+status=0
+out=$(as_root_aphelion restore "$damaged" 2>&1) || status=$?
+[[ $status == 1 && $out == *"checksum"* ]] || fail "restore accepted an archive that doesn't match its checksum ($status, $out)"
+! called "systemctl" && ! called "volume" && ! called " run " || fail "restore touched the host after a bad checksum: $(cat "$FAKE_CALLS")"
+rm "$damaged/aphelion-data.tar.gz.sha256"
+status=0
+out=$(as_root_aphelion restore "$damaged" 2>&1) || status=$?
+[[ $status == 1 && $out == *"aphelion-data.tar.gz.sha256"* ]] || fail "restore accepted an archive with no checksum file ($status, $out)"
+status=0
+out=$(as_root_aphelion restore "$damaged/none" 2>&1) || status=$?
+[[ $status == 1 ]] || fail "restore accepted a path that doesn't exist"
+status=0
+out=$(as_root_aphelion restore "$damaged/none" 2>&1) || status=$?
+[[ $status == 1 && $out == *"doesn't exist"* ]] || fail "restore didn't say a missing path doesn't exist ($status, $out)"
+mkdir "$damaged/swapped"
+cp "$third/aphelion-data.tar.gz" "$damaged/swapped/"
+echo "other" >"$damaged/swapped/other"
+(cd "$damaged/swapped" && sha256sum other >aphelion-data.tar.gz.sha256)
+reset_calls
+status=0
+out=$(as_root_aphelion restore "$damaged/swapped" 2>&1) || status=$?
+[[ $status == 1 && $out == *"checksum"* ]] || fail "restore accepted a checksum file that names another file ($status, $out)"
+! called "systemctl" && ! called "volume" || fail "restore touched the host after a checksum for another file"
+mkdir "$damaged/-dash"
+cp "$third/." "$damaged/-dash/" -r
+reset_calls
+as_root_aphelion restore "$damaged/-dash/aphelion-data.tar.gz" >/dev/null 2>&1 || fail "restore failed for a good archive in a folder with a leading dash"
+reset_calls
+status=0
+out=$(FAKE_VOLUME_LS_EXIT=1 as_root_aphelion restore 2>&1) || status=$?
+[[ $status == 1 && $out == *"docker volume ls failed"* ]] || fail "restore went on after docker volume ls failed ($status, $out)"
+! called "volume create" && ! called "tar --extract" && ! called "systemctl start" || fail "restore changed things after docker volume ls failed"
+pass "restore refuses an archive whose checksum is wrong, missing or for another file, a missing path, and a failed volume list, before it changes anything"
+
+reset_calls
+status=0
+out=$(FAKE_FINISH_EXIT=1 as_root_aphelion restore 2>&1) || status=$?
+[[ $status == 1 && $out == *"stays stopped"* ]] || fail "restore didn't say that the service stays stopped ($status, $out)"
+! called "systemctl start" || fail "restore started the service after restore finish failed"
+reset_calls
+status=0
+out=$(FAKE_UNPACK_EXIT=1 as_root_aphelion restore 2>&1) || status=$?
+[[ $status == 1 && $out == *"docker volume rm aphelion_config aphelion_state aphelion_bots"* ]] || fail "restore didn't print how to start over after a failed unpack ($status, $out)"
+! called "restore finish" && ! called "systemctl start" || fail "restore went on after a failed unpack"
+reset_calls
+FAKE_SERVICE=inactive as_root_aphelion restore >/dev/null 2>&1 || fail "restore failed with the service stopped"
+! called "systemctl stop" && called "systemctl start aphelion" || fail "restore stopped a service that wasn't running, or didn't start it"
+pass "restore leaves the service stopped when a step fails, and starts it only after restore finish exits 0"
+
+for subcommand in update enable rollback restart; do
+  reset_calls
+  out=$(as_root_aphelion plugin "$subcommand" my-plugin) || fail "plugin $subcommand failed"
+  [[ $out == "ran plugin $subcommand my-plugin" ]] || fail "plugin $subcommand printed something else: $out"
+  grep -qxF "$exec_line -T --user harness aphelion aphelion plugin $subcommand my-plugin" "$FAKE_CALLS" ||
+    fail "plugin $subcommand didn't run the server's command as harness: $(cat "$FAKE_CALLS")"
+done
+out=$(as_root_aphelion plugin update my-plugin --approve abc123) || fail "plugin update --approve failed"
+[[ $out == "ran plugin update my-plugin --approve abc123" ]] || fail "plugin update --approve printed something else: $out"
+status=0
+out=$(FAKE_PLUGIN_EXIT=3 as_root_aphelion plugin rollback my-plugin 2>&1) || status=$?
+[[ $status == 3 && $out == "ran plugin rollback my-plugin" ]] || fail "plugin rollback changed the exit code or output ($status, $out)"
+reset_calls
+as_root_aphelion plugin dev /opt/aphelion/dev-plugin >/dev/null || fail "plugin dev failed"
+grep -qxF "$exec_line --user harness aphelion aphelion plugin dev /opt/aphelion/dev-plugin" "$FAKE_CALLS" ||
+  fail "plugin dev didn't run without -T: $(cat "$FAKE_CALLS")"
+pass "plugin update, enable, rollback, restart and dev run the server's command as harness and pass its output and exit code through"
+
+source_folder=$(mktemp -d)/my-plugin
+mkdir "$source_folder"
+reset_calls
+out=$(as_root_aphelion plugin install "$source_folder/") || fail "plugin install failed"
+[[ $out == "ran plugin install /opt/aphelion/plugins/my-plugin" ]] || fail "plugin install printed something else: $out"
+ordered "test -e /opt/aphelion/plugins/my-plugin" "cp $source_folder aphelion:/opt/aphelion/plugins/my-plugin" &&
+  ordered "cp $source_folder" "plugin install /opt/aphelion/plugins/my-plugin" ||
+  fail "plugin install didn't check, copy, then install: $(cat "$FAKE_CALLS")"
+export FAKE_PLUGINS=my-plugin
+reset_calls
+status=0
+out=$(as_root_aphelion plugin install "$source_folder" 2>&1) || status=$?
+[[ $status == 1 && $out == *"my-plugin is already in the container"* ]] || fail "plugin install copied over a folder that exists ($status, $out)"
+! called " cp " && ! called "plugin install" || fail "plugin install went on over a folder that exists"
+reset_calls
+out=$(as_root_aphelion plugin install "$source_folder" --approve abc123) || fail "plugin install --approve failed"
+[[ $out == *"ran plugin install /opt/aphelion/plugins/my-plugin --approve abc123"* && $out == *"sudo systemctl restart aphelion"* ]] ||
+  fail "plugin install --approve didn't pass through and name the next step: $out"
+! called " cp " || fail "plugin install --approve copied the folder again"
+status=0
+out=$(FAKE_PLUGIN_EXIT=1 as_root_aphelion plugin install "$source_folder" --approve abc123 2>&1) || status=$?
+[[ $status == 1 && $out != *"systemctl restart"* ]] || fail "plugin install named the next step after a failure ($status, $out)"
+unset FAKE_PLUGINS
+reset_calls
+status=0
+out=$(FAKE_CONTAINER=down as_root_aphelion plugin install "$source_folder" 2>&1) || status=$?
+[[ $status == 1 && $out == *"isn't running"* ]] || fail "plugin install went on with the container stopped ($status, $out)"
+! called " cp " && ! called "plugin install" || fail "plugin install copied into a stopped container"
+pass "plugin install copies a host folder into the container, refuses a stopped container and a folder that is already there, and after --approve names the next step"
+
+mkdir -p "$(dirname "$source_folder")/bad name" "$(dirname "$source_folder")/-flag" "$(dirname "$source_folder")/my-plugin@1.0.0"
+touch "$(dirname "$source_folder")/a-file"
+for bad in "bad name" -flag my-plugin@1.0.0 a-file missing; do
+  reset_calls
+  status=0
+  out=$(as_root_aphelion plugin install "$(dirname "$source_folder")/$bad" 2>&1) || status=$?
+  [[ $status == 1 && $out == "aphelion: "* ]] || fail "plugin install accepted '$bad' ($status, $out)"
+  ! called " cp " && ! called "plugin install" || fail "plugin install went on with '$bad'"
+done
+ln -s "$source_folder" "$(dirname "$source_folder")/linked-plugin"
+for bad in "my-plugin/.." "my-plugin/../my-plugin/.." ".." linked-plugin linked-plugin/; do
+  reset_calls
+  status=0
+  case $bad in
+    ..) out=$(cd "$(dirname "$source_folder")/my-plugin" && as_root_aphelion plugin install .. 2>&1) || status=$? ;;
+    *) out=$(as_root_aphelion plugin install "$(dirname "$source_folder")/$bad" 2>&1) || status=$? ;;
+  esac
+  [[ $status == 1 && $out == "aphelion: "* ]] || fail "plugin install accepted '$bad' ($status, $out)"
+  ! called " cp " && ! called "plugin install" || fail "plugin install went on with '$bad'"
+done
+pass "plugin install refuses a name that isn't a plain folder name, a symlink, a parent folder, a file, and a folder that doesn't exist"
