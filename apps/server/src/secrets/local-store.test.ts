@@ -218,6 +218,31 @@ describe("local secret store", () => {
     expect(await readdir(directory)).toEqual([]);
   });
 
+  it("deletes an entry, keeps the others and answers false for a missing one", async () => {
+    const store = await open();
+    await write(store, "delete-canary");
+    const other = Secret.make("kept-canary");
+    try {
+      await store.write("test/kept", other);
+    } finally {
+      other.wipe();
+    }
+
+    expect(await store.delete(name)).toBe(true);
+    expect(await store.read(name)).toBeUndefined();
+    expect(await (await open()).read(name)).toBeUndefined();
+    expect(await store.delete(name)).toBe(false);
+    const kept = await store.read("test/kept");
+    try {
+      expect(kept?.reveal()).toBe("kept-canary");
+    } finally {
+      kept?.wipe();
+    }
+    expect(
+      (await readdir(directory)).filter((entry) => entry.endsWith(".age")),
+    ).toHaveLength(1);
+  });
+
   it("refuses unsafe permissions", async () => {
     await chmod(directory, 0o750);
     await expect(open()).rejects.toThrow("Unsafe secrets store directory");

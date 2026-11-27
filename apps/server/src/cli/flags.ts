@@ -39,6 +39,10 @@ export const operands = {
   "tool remove": "tool name",
   "tool update": "tool name",
   "tool check": undefined,
+  "key add": "tool name",
+  "key replace": "tool name",
+  "key test": "tool name",
+  "key remove": "tool name",
   "restore finish": undefined,
 } as const;
 

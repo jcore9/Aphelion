@@ -1,6 +1,7 @@
 import { Cause, Effect, Layer } from "effect";
 import { CliConfig, CliError, Command, GlobalFlag } from "effect/cli";
 import { createLogger } from "../log";
+import { brokerClient } from "../secrets/broker-client";
 import { version } from "../version";
 import { configCheck, configCheckCommand } from "./config-check";
 import {
@@ -14,6 +15,16 @@ import {
 import { CliFailure, failed, usage } from "./failure";
 import { headless, rootCommand } from "./headless";
 import { CliIo } from "./io";
+import {
+  keyAdd,
+  keyAddCommand,
+  keyRemove,
+  keyRemoveCommand,
+  keyReplace,
+  keyReplaceCommand,
+  keyTest,
+  keyTestCommand,
+} from "./key";
 import { hint, presenter } from "./output";
 import { pluginInstall, pluginInstallCommand } from "./plugin";
 import { pluginDev, pluginDevCommand } from "./plugin-dev";
@@ -61,6 +72,10 @@ export interface Handlers {
   readonly toolRemove: Parameters<typeof toolRemoveCommand>[0];
   readonly toolUpdate: Parameters<typeof toolUpdateCommand>[0];
   readonly toolCheck: Parameters<typeof toolCheckCommand>[0];
+  readonly keyAdd: Parameters<typeof keyAddCommand>[0];
+  readonly keyReplace: Parameters<typeof keyReplaceCommand>[0];
+  readonly keyTest: Parameters<typeof keyTestCommand>[0];
+  readonly keyRemove: Parameters<typeof keyRemoveCommand>[0];
   readonly restoreFinish: Parameters<typeof restoreFinishCommand>[0];
 }
 
@@ -85,6 +100,10 @@ const handlers: Handlers = {
   toolRemove,
   toolUpdate: (options) => toolUpdate(options, toolListFile()),
   toolCheck: () => toolCheck(toolListFile(), fetch),
+  keyAdd: (options) => keyAdd(options, brokerClient()),
+  keyReplace: (options) => keyReplace(options, brokerClient()),
+  keyTest: (options) => keyTest(options, brokerClient()),
+  keyRemove: (options) => keyRemove(options, brokerClient()),
   restoreFinish,
 };
 
@@ -153,6 +172,12 @@ export const makeCli = (handle: Handlers) => {
         toolUpdateCommand(handle.toolUpdate),
         toolCheckCommand(handle.toolCheck),
         toolRemoveCommand(handle.toolRemove),
+      ]),
+      group("key", "Add, test, replace and remove API keys for AI tools.", [
+        keyAddCommand(handle.keyAdd),
+        keyTestCommand(handle.keyTest),
+        keyReplaceCommand(handle.keyReplace),
+        keyRemoveCommand(handle.keyRemove),
       ]),
       group("restore", "Finish a restore from a backup.", [
         restoreFinishCommand(handle.restoreFinish),

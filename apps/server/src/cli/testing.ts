@@ -10,6 +10,7 @@ import {
 } from "effect";
 import type { Command } from "effect/cli";
 import { ChildProcessSpawner } from "effect/process";
+import { apiKeyFromInput } from "../secrets/api-key";
 import { cli, CliFailure, CliIo } from "./index";
 
 export const cliEnvironment = Layer.mergeAll(
@@ -43,6 +44,8 @@ export async function capture(
     out: (line) => Effect.sync(() => void out.push(line)),
     err: (line) => Effect.sync(() => void err.push(line)),
     stdin: Effect.succeed(stdin),
+    readApiKey: () =>
+      Effect.sync(() => apiKeyFromInput(new TextEncoder().encode(stdin))),
   });
   const exit = await Effect.runPromiseExit(
     program.pipe(Effect.provide(Layer.merge(io, cliEnvironment))),

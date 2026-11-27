@@ -76,6 +76,24 @@ switch (process.argv[2]) {
       JSON.stringify(value),
     ]);
     break;
+  case "delete":
+    assert.deepEqual(await send(JSON.stringify({ op: "delete", ref })), [
+      204,
+      "",
+    ]);
+    assert.deepEqual(await send(JSON.stringify({ op: "read", ref })), [
+      404,
+      "",
+    ]);
+    assert.deepEqual(await send(JSON.stringify({ op: "delete", ref })), [
+      404,
+      "",
+    ]);
+    assert.deepEqual(
+      await send(JSON.stringify({ op: "delete", ref: "op://vault/item" })),
+      [400, ""],
+    );
+    break;
   case "denied": {
     const connected = new Promise((resolve, reject) => {
       const socket = createConnection(socketPath);
