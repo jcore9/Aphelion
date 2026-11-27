@@ -466,6 +466,18 @@ key_command=(docker exec --user harness "$container" aphelion key)
 typed_key() {
   printf '%s\n' "$1" | docker exec -i --user harness "$container" aphelion key "$2" claude 2>&1
 }
+chief_adapter() {
+  docker exec --privileged "$container" bash -c 'for p in /proc/[0-9]*; do
+    [[ ${p#/proc/} == "$$" ]] && continue
+    [[ $(tr "\0" " " <$p/cmdline 2>/dev/null) == *"/adapters/claude/adapter.js chief-of-staff "* ]] && echo ${p#/proc/}; done; true'
+}
+adapter_key_hash() {
+  docker exec --privileged "$container" bash -c 'tr "\0" "\n" <"/proc/$1/environ" | sed -n "s/^ANTHROPIC_API_KEY=//p" | sha256sum' _ "$1"
+}
+no_key=$(printf '' | sha256sum)
+keyless=$(chief_adapter)
+[[ $keyless =~ ^[0-9]+$ ]] || fail "no single Claude adapter process for chief-of-staff: $keyless"
+[[ $(adapter_key_hash "$keyless") == "$no_key" ]] || fail "the adapter got ANTHROPIC_API_KEY while no key was stored"
 out=$(typed_key "$fake_key" add) || fail "key add failed: $out"
 [[ $out == "Stored the claude API key. Test it with: aphelion key test claude" ]] || fail "key add printed something else: $out"
 out=$(typed_key sk-ant-fake-wrong-key add) && fail "key add replaced a stored key"
@@ -473,6 +485,24 @@ out=$(typed_key sk-ant-fake-wrong-key add) && fail "key add replaced a stored ke
   fail "key add over a stored key printed something else: $out"
 out=$(typed_key sk-ant-fake-wrong-key replace) || fail "key replace failed: $out"
 [[ $out == "Replaced the claude API key. Test it with: aphelion key test claude" ]] || fail "key replace printed something else: $out"
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+sleep 1
+docker exec --privileged "$container" kill -KILL "$keyless"
+wait_for_log "\"msg\":\"the bot runner started the bot's process\",\"bot\":\"chief-of-staff\""
+keyed=
+for ((tries = 0; tries < 100; tries++)); do
+  keyed=$(chief_adapter)
+  [[ $keyed =~ ^[0-9]+$ && $keyed != "$keyless" ]] && break
+  sleep 0.1
+done
+[[ $keyed =~ ^[0-9]+$ && $keyed != "$keyless" ]] || fail "the server didn't restart chief-of-staff's adapter: $keyed"
+[[ $(adapter_key_hash "$keyed") == "$(printf '%s\n' sk-ant-fake-wrong-key | sha256sum)" ]] ||
+  fail "the restarted adapter doesn't hold the stored key as ANTHROPIC_API_KEY"
+if "${compose[@]}" logs --no-color --since "$since" 2>&1 | grep -F "couldn't read the bot's API key" >/dev/null; then
+  fail "the server couldn't read the stored key at bot start"
+fi
+probe aphelion-plugins "[[\"read\", \"/proc/$keyed/environ\", \"EACCES\"]]"
+pass "a bot started after key add gets the stored key as ANTHROPIC_API_KEY, a bot started before it had none, and aphelion-plugins can't read the adapter's environment"
 docker network disconnect aphelion-contract "$container"
 status=0
 out=$("${key_command[@]}" test claude 2>&1) || status=$?
