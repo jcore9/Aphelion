@@ -3,6 +3,7 @@ import { Deferred, Effect, Queue } from "effect";
 import { describe } from "vitest";
 import type { z } from "zod";
 import { createLogger } from "../log";
+import { maskKnownValues } from "../log/masks";
 import { memoryLinkPair, type Framing } from "../plugins/link";
 import type { ProcessExit } from "../plugins/processes";
 import {
@@ -520,6 +521,28 @@ describe("the cgroup supervisor", () => {
         yield* until(is("killed", runA));
         expect(JSON.stringify(frames)).not.toContain(fakeKey);
         expect(logs.join("\n")).not.toContain(fakeKey);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "wipes the key as soon as the spawn returns, before the adapter joins its cgroup",
+    () =>
+      Effect.gen(function* () {
+        const heldKey = "sk-ant-fake-supervisor-held-0123456789";
+        const held = () => maskKnownValues(heldKey, "#") !== heldKey;
+        const { until, send, childAt } = yield* supervisor({
+          holdPlacement: true,
+        });
+        yield* Deferred.succeed((yield* childAt(0)).placed, true);
+        yield* until(is("ready"));
+        yield* send({ ...start(runA, "keyed"), apiKey: heldKey });
+        const child = yield* childAt(1);
+        expect(child.keyBytes).toBe(heldKey.length);
+        yield* Effect.sleep("20 millis");
+        const heldWhileJoining = held();
+        yield* Deferred.succeed(child.placed, true);
+        yield* until(is("started", runA));
+        expect(heldWhileJoining).toBe(false);
       }).pipe(Effect.scoped),
   );
 

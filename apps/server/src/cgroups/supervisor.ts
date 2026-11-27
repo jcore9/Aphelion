@@ -198,7 +198,10 @@ export const runSupervisor = (
         record.paths = paths;
         const child = yield* host
           .spawn(paths, keyedEntry(entry, apiKey), bot, folder, kind)
-          .pipe(Effect.tapError(() => Effect.ignore(host.removeRun(paths))));
+          .pipe(
+            Effect.ensuring(Effect.sync(() => apiKey?.wipe())),
+            Effect.tapError(() => Effect.ignore(host.removeRun(paths))),
+          );
         record.child = child;
         if (yield* child.placed) return { paths, child } satisfies Started;
         yield* child.abort;
@@ -215,7 +218,6 @@ export const runSupervisor = (
           }),
         ),
         Effect.ensuring(Deferred.succeed(record.settled, undefined)),
-        Effect.ensuring(Effect.sync(() => apiKey?.wipe())),
       );
 
     const finishKill = (run: string, record: RunRecord) =>
@@ -336,7 +338,7 @@ export const runSupervisor = (
           return yield* failed(registered.failure.reason);
         }
         const { record, entry } = registered.success;
-        yield* FiberSet.run(
+        const launching = yield* FiberSet.run(
           work,
           launch(
             request.run,
@@ -374,6 +376,7 @@ export const runSupervisor = (
             }),
           ),
         );
+        launching.addObserver(() => apiKey?.wipe());
       });
 
     const killRequest = (run: string) =>
