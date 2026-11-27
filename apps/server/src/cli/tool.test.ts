@@ -164,8 +164,8 @@ test("tool list shows each tool, its state and its status command", async () => 
   expect(await invoke(listArgs())).toEqual({
     code: 0,
     out: [
-      "NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND",
-      "claude\t1.2.3\t-\tnot installed\tclaude auth status",
+      "NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\tSIGN-IN-COMMAND",
+      "claude\t1.2.3\t-\tnot installed\tclaude auth status\tclaude auth login",
     ],
     err: [],
   });
@@ -179,7 +179,7 @@ test("tool list says unavailable for a tool with no build for this processor", a
     builds: {},
   });
   expect((await invoke(listArgs())).out[1]).toBe(
-    "claude\t1.2.3\t-\tunavailable\tclaude auth status",
+    "claude\t1.2.3\t-\tunavailable\tclaude auth status\tclaude auth login",
   );
   const refused = await install();
   expect(refused.code).toBe(1);
@@ -202,7 +202,7 @@ test("tool install downloads a binary, checks it, and bots can run it", async ()
   expect((await run(program)).stdout).toBe("hello from the tool\n");
   expect(await readlink(join(toolsDir, "claude", "current"))).toBe("1.2.3");
   expect(await stateOf()).toBe(
-    "claude\t1.2.3\t1.2.3\tinstalled\tclaude auth status",
+    "claude\t1.2.3\t1.2.3\tinstalled\tclaude auth status\tclaude auth login",
   );
   expect(await readdir(toolsDir)).toEqual(["claude"]);
 });
@@ -329,7 +329,7 @@ test("a new list version replaces the old one, and leftovers from a crash are cl
   const next = { ...binary, bytes: Buffer.from("#!/bin/sh\necho second\n") };
   await writeList(next, { version: "1.3.0" });
   expect(await stateOf()).toBe(
-    "claude\t1.3.0\t1.2.3\tupdate available\tclaude auth status",
+    "claude\t1.3.0\t1.2.3\tupdate available\tclaude auth status\tclaude auth login",
   );
   expect((await install()).out[0]).toBe("Installed claude 1.3.0.");
   expect((await readdir(join(toolsDir, "claude"))).sort()).toEqual([
@@ -446,7 +446,7 @@ test("on arm64, a tool with only an x86_64 build is unavailable and install refu
   served.set("/claude", script);
   const listed = await onProcessor("arm64", () => invoke(listArgs()));
   expect(listed.out[1]).toBe(
-    "claude\t1.2.3\t-\tunavailable\tclaude auth status",
+    "claude\t1.2.3\t-\tunavailable\tclaude auth status\tclaude auth login",
   );
   const refused = await onProcessor("arm64", install);
   expect(refused.code).toBe(1);
@@ -509,7 +509,7 @@ test("tool update installs the version the list pins and removes the old one", a
     (await run(join(toolsDir, "claude", "current", "claude"))).stdout,
   ).toBe("second\n");
   expect(await stateOf()).toBe(
-    "claude\t1.3.0\t1.3.0\tinstalled\tclaude auth status",
+    "claude\t1.3.0\t1.3.0\tinstalled\tclaude auth status\tclaude auth login",
   );
 });
 
@@ -552,9 +552,9 @@ test("tool update with no name goes through every tool on the list, one line eac
     err: [],
   });
   expect((await invoke(listArgs())).out.slice(1)).toEqual([
-    "claude\t1.3.0\t1.3.0\tinstalled\tclaude auth status",
-    "codex\t0.5.0\t-\tnot installed\tcodex auth status",
-    "grok\t1.0.0\t1.0.0\tinstalled\tgrok auth status",
+    "claude\t1.3.0\t1.3.0\tinstalled\tclaude auth status\tclaude auth login",
+    "codex\t0.5.0\t-\tnot installed\tcodex auth status\tcodex auth login",
+    "grok\t1.0.0\t1.0.0\tinstalled\tgrok auth status\tgrok auth login",
   ]);
 });
 
@@ -646,7 +646,7 @@ test("a current link that points outside the tool's folder counts as not install
   await mkdir(join(toolsDir, "claude"));
   await symlink("../../etc", join(toolsDir, "claude", "current"));
   expect(await stateOf()).toBe(
-    "claude\t1.2.3\t-\tnot installed\tclaude auth status",
+    "claude\t1.2.3\t-\tnot installed\tclaude auth status\tclaude auth login",
   );
   expect((await update("claude")).out).toEqual(["claude isn't installed"]);
   expect(requests).toEqual([]);

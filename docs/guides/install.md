@@ -24,6 +24,36 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
 ## Install
 
+### Install with one command
+
+The installer does everything under [Install step by step](#install-step-by-step) except one thing: it asks you to save the recovery key. Run it on an Ubuntu host that has Tailscale signed in. Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`. The first release that has the installer is `v0.1.0-alpha.2`:
+
+```sh
+tag=v0.1.0-alpha.2
+script=$(mktemp) && curl -fsSLo "$script" "https://raw.githubusercontent.com/jcore9/Aphelion/$tag/deploy/install.sh" && sudo bash "$script" --tag "$tag"
+```
+
+The command saves the installer script of that release to a file, and runs it as root only if the download worked. A download that fails or stops halfway runs nothing. To read the script first, open [`deploy/install.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/install.sh). The script does these steps in order. Each step checks first and skips itself when it is already done.
+
+1. It stops, before it changes anything, if the host isn't Ubuntu, if an x86-64 processor hides SSE4.2 ([What you need](#what-you-need) explains the setting), if Tailscale has no address for the host, or if ufw is enabled with `MANAGE_BUILTINS=yes`. It also looks at an existing `/opt/aphelion`, and stops if root doesn't own it, if others can write to it, if its origin isn't the Aphelion repository, or if it has local changes. It never writes firewall rules.
+2. It installs Docker Engine and the Compose plugin from Docker's Ubuntu repository, if Compose isn't there.
+3. It clones the tag to `/opt/aphelion`. If the clone is already there, it moves a clean clone to the tag.
+4. It writes `/opt/aphelion/deploy/.env` with the host's tailnet address, unless the file exists. It never changes an existing file.
+5. It gets the image. It tries to download the image that the release published, and refuses the download if the image's digest differs from the one in the release's `aphelion-image.sha256` file. If there is no such file, or the download fails, it builds the image on the host. The image package is private today, so expect the build. It takes a while. This step runs every time, so a run that finds a stale image replaces it. If the image fails the digest check after the installer moved an existing clone to another tag, the installer moves the clone back to the commit it was on.
+6. It runs `host/install`, which creates the bootstrap key and installs the service.
+7. It shows the bootstrap key on your screen, so you can save a recovery copy. You type `saved` to go on. The key goes to your terminal only, never to a file or a pipe.
+8. It starts the service. The service runs `host/preflight` itself first, and the start fails if a check fails. The installer doesn't run the preflight, because the check needs the bootstrap key that only the running service has.
+
+Run the same command again, and each step says it is already done and changes nothing. With a built image, the build step runs again, and Docker's cache makes it quick. The installer doesn't restart a running service. It refuses `--no-start` and a different tag while the service runs, and changes nothing. To move a running server to a newer release, see [Upgrade](#upgrade).
+
+The installer reads your answers from the terminal, not from the pipe. With no terminal, it does steps 1 to 6, then stops before the key and the start. It says what to run to finish: print and save the key, then `sudo systemctl start aphelion`.
+
+To install without starting the service, add `--no-start` after `--tag "$tag"`. Use it on a host where you restore a backup next ([Restore on new hardware](#restore-on-new-hardware)). With `--no-start`, the installer skips steps 7 and 8. It refuses `--no-start` while the service runs: stop the service first with `sudo systemctl stop aphelion`.
+
+### Install step by step
+
+Do these steps by hand if you want to see each one, or if the installer stopped and you want to continue from there.
+
 1. Clone the latest release to `/opt/aphelion` as root. A release is a tag, which is a name fixed to one commit. You install a version that was tested, not whatever is on `main` today. The service runs the files in that folder, so only root may change them. Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`:
 
    ```sh
@@ -58,7 +88,7 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
    The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens the store. The bootstrap key unlocks the store ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
 
-   The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a whole key, the script stops and leaves the file and the service as they are.
+   The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a valid key, the script stops and leaves the file and the service as they are. The script asks the image's own `aphelion-secrets --check-key`, the same check the broker makes when it starts. A key with a typo is caught here and not at the first start.
 
    When it creates the key, the script may print `Credential secret file '/var/lib/systemd/credential.secret' is not located on encrypted media, using anyway.` `systemd-creds` prints this when its host key sits on a disk that isn't encrypted. The host key is the key that `systemd-creds` encrypts the bootstrap key with. A TPM is a security chip on the motherboard. On a host without a TPM, the host key is the only protection. Anyone who copies the whole disk can then decrypt the bootstrap key. [Decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md#what-it-protects) accepts this. Encrypting the host's disk closes the gap.
 
@@ -100,6 +130,8 @@ Run every `docker compose` command in this guide from `/opt/aphelion/deploy`, so
 cd /opt/aphelion/deploy
 sudo docker compose exec -T --user harness aphelion aphelion device add laptop
 ```
+
+`sign-in`, `backup`, `restore` and `plugin` run Docker for you too. [Back up](#back-up), [Restore on the new host](#restore-on-the-new-host), [Install a plugin](#install-a-plugin) and [Install an AI tool](#install-an-ai-tool) show the Docker commands under each one.
 
 `status` and `check` ask `systemctl`, `docker compose ps`, `docker inspect`, `curl` and `iptables` read-only questions. [The host command](../reference/host-command.md) lists each one.
 
@@ -151,7 +183,7 @@ Put the bootstrap key on the new host before you run `host/install`, so that the
    sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap - | grep -cEx 'AGE-SECRET-KEY-1[0-9A-Z]{58}'
    ```
 
-5. Follow [Install](#install) steps 1 to 4. Stop there and don't start the service. If you start it now, the secrets broker creates an empty store. Don't reboot either, because `host/install` enables the service, so it starts at boot. Then follow [Back up and restore](#back-up-and-restore) to put your data back.
+5. Run the installer with `--no-start` ([Install with one command](#install-with-one-command)), or follow [Install step by step](#install-step-by-step) steps 1 to 4. Stop there and don't start the service. If you start it now, the secrets broker creates an empty store. Don't reboot either, because `host/install` enables the service, so it starts at boot. Then follow [Back up and restore](#back-up-and-restore) to put your data back.
 
 The key alone restores nothing. The secrets themselves are in the `secrets` volume. [Back up and restore](#back-up-and-restore) moves that volume and the other five to a new host. The commands were run with Docker on a development machine and test data. The M0 exit test restored test data from an Ubuntu 26.04 VM on an existing Ubuntu 24.04 machine. That machine also held the backup, so the archive was copied locally instead of fetched over `ssh`. All three checks passed. The guide has not yet been tested on a host that holds real secrets.
 
@@ -181,156 +213,127 @@ You keep two things, in two places:
 
 The archive holds the database and the bot folders as plain files. Only the `secrets` volume inside it is encrypted, by the bootstrap key. Store the archive on encrypted storage, and keep it apart from the key's copy. Someone who has both reads every secret.
 
-The commands use `tar`, a program that packs a folder into one file. `--numeric-owner` and `--preserve-permissions` keep the user numbers and access modes that Aphelion's checks need. Each command runs in a short-lived container made from the `aphelion:local` image, so nothing is downloaded. Run every command from `/opt/aphelion/deploy`.
+`tar` is a program that packs a folder into one file. Aphelion runs it in a short-lived container made from the same image as the server, so nothing is downloaded.
 
 ### Back up
 
-1. Stop the service. A running server writes to the database, and a copy taken meanwhile can be broken.
+1. Run the backup. It stops the service, packs the six volumes into an archive, writes a checksum (a short fingerprint that shows later whether the file changed or broke in a copy), starts the service again, and checks the archive against the checksum. It prints the folder it made. It starts the service again even when the backup fails.
 
    ```sh
-   sudo systemctl stop aphelion
+   sudo aphelion backup
    ```
 
-2. Make a private folder for the archive.
+   You should see one line, such as `/var/backups/aphelion/aphelion-backup-20261123-120000`. The folder holds `aphelion-data.tar.gz` and `aphelion-data.tar.gz.sha256`, and only root can read it. A link named `latest` in `/var/backups/aphelion` points at the newest backup. Each run makes a new folder and keeps the one before it, so a backup that fails never destroys the last good one. Older folders are deleted. To write somewhere else, use `sudo aphelion backup --to FOLDER`.
+
+2. Copy the archive and its checksum file off the host, for example to a machine you can reach with `ssh`. The command makes a new folder named after the date and time, which only you can read, and prints its name. A failed copy never replaces an older backup, because each copy gets its own folder.
 
    ```sh
-   sudo install -d -m 0700 /var/backups/aphelion
+   d=aphelion-backup-$(date +%Y%m%d-%H%M%S) && sudo tar --create --directory /var/backups/aphelion/latest --file - aphelion-data.tar.gz aphelion-data.tar.gz.sha256 | ssh you@backup-machine "umask 077 && mkdir $d && tar --extract --directory $d --file -" && echo "$d"
    ```
 
-3. Write the archive. You should see no output.
-
-   ```sh
-   sudo docker run --rm --pull never --network none --entrypoint "" \
-     -v aphelion_config:/data/config:ro \
-     -v aphelion_state:/data/state:ro \
-     -v aphelion_bots:/data/bots:ro \
-     -v aphelion_secrets:/data/secrets:ro \
-     -v aphelion_plugin-data:/data/plugin-data:ro \
-     -v aphelion_plugin-files:/data/plugin-files:ro \
-     -v /var/backups/aphelion:/backup \
-     aphelion:local \
-     tar --create --gzip --numeric-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data .
-   ```
-
-4. Write a checksum, a short fingerprint that shows later whether the file changed or broke in a copy.
-
-   ```sh
-   sudo sh -c 'cd /var/backups/aphelion && sha256sum aphelion-data.tar.gz > aphelion-data.tar.gz.sha256'
-   ```
-
-5. Start the service again.
-
-   ```sh
-   sudo systemctl start aphelion
-   ```
-
-6. Copy the archive and its checksum file off the host, for example to a machine you can reach with `ssh`. The command makes a new folder named after the date and time, which only you can read, and prints its name. A failed copy never replaces an older backup, because each copy gets its own folder.
-
-   ```sh
-   d=aphelion-backup-$(date +%Y%m%d-%H%M%S) && sudo tar --create --directory /var/backups/aphelion --file - aphelion-data.tar.gz aphelion-data.tar.gz.sha256 | ssh you@backup-machine "umask 077 && mkdir $d && tar --extract --directory $d --file -" && echo "$d"
-   ```
-
-7. Check the copy on the backup machine. Put the folder name that step 6 printed in place of `aphelion-backup-20261123-120000`. You should see `aphelion-data.tar.gz: OK`. Only `OK` means the backup is ready. If you see anything else, the copy or the `ssh` connection failed. Run step 6 again.
+3. Check the copy on the backup machine. Put the folder name that step 2 printed in place of `aphelion-backup-20261123-120000`. You should see `aphelion-data.tar.gz: OK`. Only `OK` means the backup is ready. If you see anything else, the copy or the `ssh` connection failed. Run step 2 again.
 
    ```sh
    ssh you@backup-machine 'cd aphelion-backup-20261123-120000 && sha256sum --check aphelion-data.tar.gz.sha256'
    ```
 
+#### What the backup runs underneath
+
+`aphelion backup` runs these steps as root, from `/opt/aphelion/deploy`. `docker compose config --images` gives the image name, `aphelion:local` on a real host.
+
+```sh
+sudo systemctl stop aphelion
+sudo docker run --rm --pull never --network none --entrypoint "" \
+  -v aphelion_config:/data/config:ro \
+  -v aphelion_state:/data/state:ro \
+  -v aphelion_bots:/data/bots:ro \
+  -v aphelion_secrets:/data/secrets:ro \
+  -v aphelion_plugin-data:/data/plugin-data:ro \
+  -v aphelion_plugin-files:/data/plugin-files:ro \
+  -v /var/backups/aphelion/aphelion-backup-20261123-120000:/backup \
+  aphelion:local \
+  tar --create --gzip --numeric-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data .
+sudo sh -c 'cd /var/backups/aphelion/aphelion-backup-20261123-120000 && sha256sum aphelion-data.tar.gz > aphelion-data.tar.gz.sha256'
+sudo systemctl start aphelion
+```
+
 ### Restore on the new host
 
-Start from a host that has the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap` ([Restore on new hardware](#restore-on-new-hardware)) and has finished [Install](#install) steps 1 to 4. The service must not have started. The first start creates empty volumes, and the secrets broker writes a new store in them.
+Start from a host that has the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap` ([Restore on new hardware](#restore-on-new-hardware)) and has finished the installer with `--no-start`, or [Install step by step](#install-step-by-step) steps 1 to 4. The service must not have started. The first start creates empty volumes, and the secrets broker writes a new store in them.
 
-1. Check that no Aphelion volume exists. The command should print nothing.
-
-   ```sh
-   sudo docker volume ls --quiet --filter name=aphelion_
-   ```
-
-   If it prints names, an earlier start made them. Restoring over them would mix old and new files. Continue only if they hold nothing you need. Stop the service and remove the stopped container, which still holds the volumes. `down` without `-v` keeps the volumes, so you remove them one by one after.
+1. Put the archive and its checksum file in a private folder on the new host. For example, run these on the new host to fetch them from the backup machine. Put the name of the backup folder in place of `aphelion-backup-20261123-120000`.
 
    ```sh
-   sudo systemctl stop aphelion
+   sudo install -d -m 0700 /var/backups/aphelion/from-backup-machine
    ```
 
    ```sh
-   sudo docker compose down
+   ssh you@backup-machine 'tar --create --directory aphelion-backup-20261123-120000 --file - aphelion-data.tar.gz aphelion-data.tar.gz.sha256' | sudo tar --extract --no-same-owner --directory /var/backups/aphelion/from-backup-machine --file -
    ```
 
-   Then remove each volume with `sudo docker volume rm <name>`.
-
-2. Put the archive and its checksum file in a private folder on the new host.
+2. Run the restore with the folder.
 
    ```sh
-   sudo install -d -m 0700 /var/backups/aphelion
+   sudo aphelion restore /var/backups/aphelion/from-backup-machine
    ```
 
-   For example, run this on the new host to fetch them from the backup machine. Put the name of the backup folder in place of `aphelion-backup-20261123-120000`.
+   The command works in this order:
 
-   ```sh
-   ssh you@backup-machine 'tar --create --directory aphelion-backup-20261123-120000 --file - aphelion-data.tar.gz aphelion-data.tar.gz.sha256' | sudo tar --extract --no-same-owner --directory /var/backups/aphelion --file -
-   ```
+   1. It checks the archive against its checksum, and stops if they differ.
+   2. It stops the service if it runs.
+   3. It refuses if any of the six Aphelion volumes already exists. Restoring over them would mix old and new files. It prints the commands that remove them, and removes nothing itself. Run them only if the volumes hold nothing you need, then run the restore again.
+   4. It creates the six volumes with the labels that Compose puts on its own, so Compose doesn't warn that it didn't create them.
+   5. It unpacks the archive into them.
+   6. It finishes the restore. This revokes every device token in the restored database and switches every plugin off, so the server starts with nobody enrolled and no plugin running. A backup can be old, and a device you removed since then comes back with it. The step doesn't need the bootstrap key.
+   7. It starts the service, only if step 6 worked. If a step fails, the command says so and leaves the service stopped.
 
-3. Check the archive. You should see `aphelion-data.tar.gz: OK`.
+   Without a folder, `sudo aphelion restore` uses the `latest` backup in `/var/backups/aphelion`. You can also give the path of an archive file.
 
-   ```sh
-   sudo sh -c 'cd /var/backups/aphelion && sha256sum --check aphelion-data.tar.gz.sha256'
-   ```
-
-4. Create the six volumes with the labels that Compose puts on its own. Without the labels, Compose warns that it didn't create them, and `docker compose down -v` skips them. You should see the six volume names.
-
-   ```sh
-   for v in config state bots secrets plugin-data plugin-files; do
-     sudo docker volume create --label com.docker.compose.project=aphelion --label com.docker.compose.volume=$v aphelion_$v
-   done
-   ```
-
-5. Unpack the archive into the volumes. You should see no output.
-
-   ```sh
-   sudo docker run --rm --pull never --network none --entrypoint "" \
-     -v aphelion_config:/data/config \
-     -v aphelion_state:/data/state \
-     -v aphelion_bots:/data/bots \
-     -v aphelion_secrets:/data/secrets \
-     -v aphelion_plugin-data:/data/plugin-data \
-     -v aphelion_plugin-files:/data/plugin-files \
-     -v /var/backups/aphelion:/backup:ro \
-     aphelion:local \
-     tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data
-   ```
-
-6. Finish the restore. This revokes every device token in the restored database and switches every plugin off, so the server starts with nobody enrolled and no plugin running. A backup can be old, and a device you removed since then comes back with it. The command runs in a throwaway container, like step 5, and doesn't need the bootstrap key.
-
-   ```sh
-   sudo docker run --rm --pull never --network none --entrypoint "" --user harness \
-     -v aphelion_state:/var/lib/aphelion \
-     aphelion:local \
-     aphelion restore finish
-   ```
-
-   It prints one line for each plugin, with the command that switches it on, and then the command that enrolls a device. For the test data you should see:
+   Step 6 prints one line for each plugin, with the command that switches it on, and then the command that enrolls a device. For the test data you should see:
 
    ```text
    Restore finished. Every device token is revoked.
    Plugin aphelion-test-plugin is switched off. Switch it on: aphelion plugin enable aphelion-test-plugin
    Enroll a device: aphelion device add NAME
+   Started aphelion.
    ```
 
-   Running it again prints the same lines and revokes every device again, including any you enrolled in between. Enroll that device again afterwards.
+   Don't start the service by hand before `Restore finished` appears. If step 6 fails, the restored tokens and plugins are still live, so the service stays stopped. To start over, run the commands that the failure message prints, which remove the volumes, and run the restore again.
 
-   Don't start the service until this step prints `Restore finished`. If it fails, the restored tokens and plugins are still live, so fix the cause and run it again first.
-
-7. Start the service.
-
-   ```sh
-   sudo systemctl start aphelion
-   ```
-
-Then enroll a device and switch each plugin back on with the commands from step 6 ([Check the restore](#check-the-restore) shows them).
+Then enroll a device and switch each plugin back on with the commands that the restore printed ([Check the restore](#check-the-restore) shows them).
 
 If the key doesn't match the restored `secrets` volume, the container exits and systemd tries again every 10 seconds. `sudo journalctl -u aphelion` shows `The bootstrap key does not match this secrets store`. The key and the archive came from different installs. Stop the service with `sudo systemctl stop aphelion`, put the right key in place with [Restore on new hardware](#restore-on-new-hardware) steps 2 to 4, and start it again. The volumes stay as they are.
 
-A plugin can come back in two ways. Restoring `plugin-files` brings its files back as they were. You can also install it again and skip `plugin-files`. Either way, the plugin starts switched off, because `restore finish` switches it off in step 6. Its approval stays in the database and records the plugin's folder, and a digest of its files. `aphelion plugin enable` shows the permissions it already has and, when you approve, switches it on. The digest is a fingerprint made from each file's path inside the plugin folder and its contents, and [the plugin reference](../reference/plugins.md#permissions) describes it. A plugin that you install again must go in the same folder, with the same files, byte for byte. A file that differs in one byte stops `plugin enable`, and you approve the plugin again with [Install a plugin](#install-a-plugin). The `plugin-data` volume holds data that a plugin stores, and a new install doesn't recreate it, so restore that volume either way.
+A plugin can come back in two ways. Restoring `plugin-files` brings its files back as they were. You can also install it again and skip `plugin-files`. Either way, the plugin starts switched off, because the restore switches it off in step 2. Its approval stays in the database and records the plugin's folder, and a digest of its files. `aphelion plugin enable` shows the permissions it already has and, when you approve, switches it on. The digest is a fingerprint made from each file's path inside the plugin folder and its contents, and [the plugin reference](../reference/plugins.md#permissions) describes it. A plugin that you install again must go in the same folder, with the same files, byte for byte. A file that differs in one byte stops `plugin enable`, and you approve the plugin again with [Install a plugin](#install-a-plugin). The `plugin-data` volume holds data that a plugin stores, and a new install doesn't recreate it, so restore that volume either way.
+
+#### What the restore runs underneath
+
+`aphelion restore` runs these steps as root, from `/opt/aphelion/deploy`:
+
+```sh
+sudo systemctl stop aphelion
+sudo docker volume ls --quiet --filter name=aphelion_
+for v in config state bots secrets plugin-data plugin-files; do
+  sudo docker volume create --label com.docker.compose.project=aphelion --label com.docker.compose.volume=$v aphelion_$v
+done
+sudo docker run --rm --pull never --network none --entrypoint "" \
+  -v aphelion_config:/data/config \
+  -v aphelion_state:/data/state \
+  -v aphelion_bots:/data/bots \
+  -v aphelion_secrets:/data/secrets \
+  -v aphelion_plugin-data:/data/plugin-data \
+  -v aphelion_plugin-files:/data/plugin-files \
+  -v /var/backups/aphelion/from-backup-machine:/backup:ro \
+  aphelion:local \
+  tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file /backup/aphelion-data.tar.gz --directory /data
+sudo docker run --rm --pull never --network none --entrypoint "" --user harness \
+  -v aphelion_state:/var/lib/aphelion \
+  aphelion:local \
+  aphelion restore finish
+sudo systemctl start aphelion
+```
+
+The project name comes from `COMPOSE_PROJECT_NAME`, and is `aphelion` when that is unset.
 
 ### Check the restore
 
@@ -351,7 +354,7 @@ Run three checks from `/opt/aphelion/deploy` once the service has started. They 
    Preview the plugin, then repeat the command with the `--approve` value it printed. You should see `Switched on aphelion-test-plugin. It runs.`
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion plugin enable aphelion-test-plugin
+   sudo aphelion plugin enable aphelion-test-plugin
    ```
 
 3. The device history is there, and every token is revoked. You should see the device `drill-laptop` with the same ID that `device add` printed on the old host, and the status `revoked`. Then enroll a device. Its token works, and the old one gets a 401.
@@ -388,17 +391,17 @@ Use this on the old host, before [Back up](#back-up). It makes one secret, one a
    mkdir ~/aphelion-test-plugin && tar -xf /opt/aphelion/apps/server/src/plugins/updates/fixtures/aphelion-test-plugin/v1.0.0/aphelion-plugin.tar -C ~/aphelion-test-plugin && chmod -R a+rX,go-w ~/aphelion-test-plugin
    ```
 
-4. Copy the folder into the `plugin-files` volume, and preview its permissions.
+4. Copy the folder into the container, and preview its permissions.
 
    ```sh
-   sudo docker compose cp ~/aphelion-test-plugin aphelion:/opt/aphelion/plugins/aphelion-test-plugin
+   sudo aphelion plugin install ~/aphelion-test-plugin
    ```
+
+5. Repeat the command with the `--approve` value it printed. You should see `Plugin approved.`
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/aphelion-test-plugin
+   sudo aphelion plugin install ~/aphelion-test-plugin --approve <value>
    ```
-
-5. Repeat the second command with the `--approve` value it printed. You should see `Plugin approved.`
 
 6. Restart the service, so the server starts the plugin.
 
@@ -439,7 +442,7 @@ Always start the server with `systemctl`. A plain `docker compose up` skips the 
 
 ## Install a plugin
 
-Plugins live in the `plugin-files` volume. A volume is a folder that Docker keeps for the container, and it survives an image rebuild. The container sees this one at `/opt/aphelion/plugins`. Plugins can read it, but can't change it. Run these steps in `/opt/aphelion/deploy` while the service runs.
+Plugins live in the `plugin-files` volume. A volume is a folder that Docker keeps for the container, and it survives an image rebuild. The container sees this one at `/opt/aphelion/plugins`. Plugins can read it, but can't change it. Run these steps while the service runs.
 
 1. Unpack the plugin into a folder named after it, then make every file readable by everyone and writable only by you.
 
@@ -447,43 +450,49 @@ Plugins live in the `plugin-files` volume. A volume is a folder that Docker keep
    chmod -R a+rX,go-w <name>
    ```
 
-2. Copy the folder into the volume. Docker gives the copy to `root`, so the plugin can't change its own files.
+2. Preview its permissions. The command copies the folder into the volume, where Docker gives the copy to `root`, so the plugin can't change its own files. It refuses a folder name that holds anything but letters, digits, dots, dashes and underscores, and a plugin that is already in the volume. To change an installed plugin, use [Update a plugin](#update-a-plugin).
 
    ```sh
-   sudo docker compose cp <name> aphelion:/opt/aphelion/plugins/<name>
+   sudo aphelion plugin install <name>
    ```
 
-3. Preview its permissions.
+3. If you accept the permissions, repeat the command with the `--approve` value it printed. The command doesn't copy the folder a second time. The approval covers every file in the folder, so approve again after any file changes.
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/<name>
+   sudo aphelion plugin install <name> --approve <value>
    ```
 
-4. If you accept the permissions, repeat the command with the `--approve` value it printed. The approval covers every file in the folder, so approve again after any file changes.
-5. Restart the service. The server starts every approved plugin when it starts.
+4. Restart the service. The server starts every approved plugin when it starts. The command prints this step when the approval worked.
 
    ```sh
    sudo systemctl restart aphelion
    ```
 
+Underneath, steps 2 and 3 run these commands from `/opt/aphelion/deploy`:
+
+```sh
+sudo docker compose cp <name> aphelion:/opt/aphelion/plugins/<name>
+sudo docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/<name>
+```
+
 [Running plugins on the server](../reference/plugins.md#permissions) explains the approval. To write a plugin, see [Write your first server plugin](write-your-first-server-plugin.md).
 
 ## Update a plugin
 
-A plugin whose manifest names a GitHub `repository` updates from that repository's releases. Aphelion checks that GitHub's release workflow built each release, and installs it only after you approve it. The server keeps running while the plugin switches version. Run these steps in `/opt/aphelion/deploy` while the service runs.
+A plugin whose manifest names a GitHub `repository` updates from that repository's releases. Aphelion checks that GitHub's release workflow built each release, and installs it only after you approve it. The server keeps running while the plugin switches version. Run these steps while the service runs.
 
 1. Check for a newer release and preview it. Use the plugin's `id`, such as `aphelion-test-plugin`.
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion plugin update <id>
+   sudo aphelion plugin update <id>
    ```
 
-   When the latest release is the installed version, the command prints `<id> is already on <version>, the latest release. If the server still runs an older version, run aphelion plugin restart <id>.` and you are done. The server can still run an older version if an earlier `--approve` run stopped after it installed the release and before it restarted the plugin. In that case, run `sudo docker compose exec -T --user harness aphelion aphelion plugin restart <id>`. If the latest release is not the installed version, the command prints the two versions, the permissions the new version adds or drops, and an `--approve` value.
+   When the latest release is the installed version, the command prints `<id> is already on <version>, the latest release. If the server still runs an older version, run aphelion plugin restart <id>.` and you are done. The server can still run an older version if an earlier `--approve` run stopped after it installed the release and before it restarted the plugin. In that case, run `sudo aphelion plugin restart <id>`. If the latest release is not the installed version, the command prints the two versions, the permissions the new version adds or drops, and an `--approve` value.
 
 2. If you accept the changes, repeat the command with the `--approve` value it printed.
 
    ```sh
-   sudo docker compose exec -T --user harness aphelion aphelion plugin update <id> --approve <value>
+   sudo aphelion plugin update <id> --approve <value>
    ```
 
    The command installs the release and restarts the plugin on it. It prints `Updated <id> from <old version> to <new version>.` and then `<id> <new version> runs.`
@@ -497,7 +506,7 @@ The command refuses a release that GitHub's attestation doesn't vouch for, with 
 Aphelion keeps the version before the current one. To go back to it, run:
 
 ```sh
-sudo docker compose exec -T --user harness aphelion aphelion plugin rollback <id>
+sudo aphelion plugin rollback <id>
 ```
 
 The command prints `Went back from <id> <current version> to <earlier version>.` and then `<id> <earlier version> runs.` It deletes the version it left, so you can go back only once. To return to the newer version, [update the plugin](#update-a-plugin) again.
@@ -522,13 +531,13 @@ Tools live in the `ai-tools` volume, which the container sees at `/opt/aphelion/
 
    The command downloads the file, checks it, and prints `Installed claude <version>.` and the command that signs in. If the checksum or size is wrong, it installs nothing and says what differed. Running the command again for the installed version changes nothing, and running it after an interrupted install finishes the job.
 
-3. Sign in as the `aphelion-bot` user, with the command step 2 printed. For Claude Code, run this in `/opt/aphelion/deploy`:
+3. Sign in. The command runs the tool's own sign-in as the `aphelion-bot` user, on your terminal, so the tool's prompts and links show on your screen. Run it in a shell on the host, not through a pipe or a script, because it refuses without a terminal. It refuses a tool that isn't installed.
 
    ```sh
-   sudo docker compose exec --user aphelion-bot aphelion claude auth login
+   sudo aphelion sign-in claude
    ```
 
-   The sign-in commands are `claude auth login`, `codex login --device-auth`, `grok login --device-auth` and `opencode auth login`. The login stays in the `bots` volume, which the backup holds.
+   The tool's own sign-in is `claude auth login`, `codex login --device-auth`, `grok login --device-auth` or `opencode auth login`. Aphelion never reads, copies or logs what the tool prints, such as a code or a token ([decision 0019](../decisions/0019-cli-subscription-use.md)). The login stays in the `bots` volume, which the backup holds. Underneath, the command runs `docker compose exec --user aphelion-bot aphelion <the tool's sign-in command>` from `/opt/aphelion/deploy`.
 
 4. Check the result. `sudo aphelion status` lists each installed tool and whether it is signed in. Grok Build and OpenCode show `sign-in state unknown`, because Aphelion has no command that checks them.
 
@@ -569,8 +578,8 @@ A tool's version changes only when the list changes. You see whether a newer ver
    ```
 
    ```text
-   NAME    VERSION  INSTALLED  STATE             STATUS-COMMAND
-   claude  2.1.332  2.1.330    update available  claude auth status --text
+   NAME    VERSION  INSTALLED  STATE             STATUS-COMMAND            SIGN-IN-COMMAND
+   claude  2.1.332  2.1.330    update available  claude auth status --text  claude auth login
    ```
 
    `sudo aphelion status` adds `(update available: 2.1.330 -> 2.1.332)` to the tool's line.

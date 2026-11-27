@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  commandFailures,
   commandId,
   encodeFrame,
   parseClientFrame,
@@ -11,11 +12,40 @@ import {
 
 const id = commandId.parse("0b6f4c2e-7d1a-4a57-9a0c-3f5e8d2b1c90");
 const cursor = { stream: streamId.parse("s1"), seq: 4 };
+const turn = "0192f0a1-3b7d-7c5e-9a21-0d4e6f8a1b23";
 
 const clientFrames: ClientFrame[] = [
   { v: 1, type: "command", id, name: "ping", payload: {} },
   { v: 1, type: "resume", cursor },
   { v: 1, type: "resume", cursor: null },
+  {
+    v: 1,
+    type: "command",
+    id,
+    name: "bot.prompt",
+    payload: { bot: "chief", text: "Hello" },
+  },
+  {
+    v: 1,
+    type: "command",
+    id,
+    name: "bot.cancel",
+    payload: { bot: "chief", turn },
+  },
+  {
+    v: 1,
+    type: "command",
+    id,
+    name: "history.read",
+    payload: { bot: "chief", limit: 100 },
+  },
+  {
+    v: 1,
+    type: "command",
+    id,
+    name: "history.read",
+    payload: { bot: "chief", after: 7, limit: 500 },
+  },
 ];
 
 const event: ServerFrame = {
@@ -32,6 +62,36 @@ const serverFrames: ServerFrame[] = [
   { v: 1, type: "resync", cursor },
   { v: 1, type: "error", code: "malformed", message: "bad", id },
   { v: 1, type: "error", code: "unsupported-version", message: "bad" },
+  { v: 1, type: "result", id, name: "bot.prompt", result: { turn } },
+  { v: 1, type: "result", id, name: "bot.cancel", result: {} },
+  {
+    v: 1,
+    type: "result",
+    id,
+    name: "history.read",
+    result: {
+      events: [
+        {
+          seq: 8,
+          payload: {
+            bot: "chief",
+            turn,
+            format: 1,
+            event: { type: "text.delta", text: "Hi" },
+          },
+        },
+      ],
+      next: 9,
+      more: true,
+    },
+  },
+  ...commandFailures.map((code): ServerFrame => ({
+    v: 1,
+    type: "error",
+    code,
+    message: "no",
+    id,
+  })),
 ];
 
 describe("parsing frames", () => {
@@ -53,6 +113,30 @@ describe("parsing frames", () => {
     [
       "a command id with a space",
       `{"v":1,"type":"command","id":"a b","name":"ping","payload":{}}`,
+    ],
+    [
+      "a prompt with no text",
+      `{"v":1,"type":"command","id":"a","name":"bot.prompt","payload":{"bot":"chief","text":""}}`,
+    ],
+    [
+      "a prompt for a bot name with capitals",
+      `{"v":1,"type":"command","id":"a","name":"bot.prompt","payload":{"bot":"Chief","text":"hi"}}`,
+    ],
+    [
+      "a history read with limit 0",
+      `{"v":1,"type":"command","id":"a","name":"history.read","payload":{"bot":"chief","limit":0}}`,
+    ],
+    [
+      "a history read with limit 501",
+      `{"v":1,"type":"command","id":"a","name":"history.read","payload":{"bot":"chief","limit":501}}`,
+    ],
+    [
+      "a history read with no limit",
+      `{"v":1,"type":"command","id":"a","name":"history.read","payload":{"bot":"chief"}}`,
+    ],
+    [
+      "a history read from a negative position",
+      `{"v":1,"type":"command","id":"a","name":"history.read","payload":{"bot":"chief","after":-1,"limit":10}}`,
     ],
     [
       "a negative cursor",

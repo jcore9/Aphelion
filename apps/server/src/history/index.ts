@@ -6,6 +6,7 @@ export {
   type NewEvent,
 } from "./event-store";
 export {
+  clientEvent,
   eventFrame,
   follow,
   liveBufferLimit,

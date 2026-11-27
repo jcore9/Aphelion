@@ -11,7 +11,7 @@ The server and every client, such as the web app or the desktop app, talk over o
 | `packages/protocol/src/registry.ts` | The commands and events. Add new ones here. |
 | `packages/protocol/src/frames.ts` | The frame schemas and types, `parseClientFrame`, `parseServerFrame` and `encodeFrame` |
 | `packages/protocol/src/bot-events.ts` | The schemas of the `bot.event` payload. They copy the adapter events so the package needs no `plugin-sdk`. |
-| `packages/protocol/src/command-ledger.ts` | `CommandLedger`, which applies each command id once |
+| `packages/protocol/src/command-ledger.ts` | `CommandLedger`, which applies each command id once in memory, for clients and tests |
 | `packages/protocol/src/spec.ts` | `renderSpec` and `schemaFiles`, which turn the schemas into the protocol spec and the JSON Schema files |
 
 ## Frames
@@ -30,9 +30,25 @@ The test fails in CI until the regenerated files are committed.
 
 ## Errors
 
-The error codes are `malformed` and `unsupported-version`. `malformed` covers text that isn't JSON, an unknown frame type, an unknown command or event name, and a payload that doesn't match its schema. `unsupported-version` means that `v` isn't 1. When a rejected frame has a valid command `id`, the error carries it, so the client knows which command failed.
+Two error codes cover a frame the server can't read. `malformed` covers text that isn't JSON, an unknown frame type, an unknown command or event name, and a payload that doesn't match its schema. `unsupported-version` means that `v` isn't 1. When a rejected frame has a valid command `id`, the error carries it, so the client knows which command failed.
 
-An error `message` is fixed text. For bad JSON it is `frame is not valid JSON`, and for another version it is `unsupported frame version; expected v 1`. For a frame with the wrong shape, it is the path of each bad field and a fixed reason, such as `cursor.seq: out of range` or `unknown field`. It never repeats a field name or a value that the sender chose, so it is safe to log.
+These codes answer a command that the server read and then couldn't finish. Each error frame carries the command's `id`:
+
+| Code | Meaning |
+| --- | --- |
+| `bot-not-running` | The bot isn't running, the server doesn't know its name, or the server runs no bots. |
+| `bot-busy` | The bot is still in another turn, the bot hasn't yet said whether it accepts the turn before this one, or the server is restarting the bot after it didn't answer a turn in time. |
+| `prompt-too-long` | The prompt is over 262,144 bytes (256 KiB) of UTF-8, or the line that carries it to the bot is over 1 MiB after JSON escapes. |
+| `bot-not-responding` | The bot didn't accept the turn within 30 seconds. The server ends the turn as refused and restarts the bot. |
+| `prompt-refused` | The bot refused the turn, the turn had already ended, or the server couldn't save it. |
+| `interrupted` | The server stopped while it ran this command, so it can't say whether the command took effect. It doesn't run the command again. Check the bot's history before you send the command with a new `id` ([command ids](#command-ids)). |
+| `storage-failed` | The server ran the command but couldn't save its result, even after it tried again. The command did take effect. A repeat of the `id` gets `interrupted`. Check the bot's history before you send the command with a new `id`. |
+| `device-revoked` | The device's token was revoked or expired since the connection opened. The server checks before it runs each `bot.prompt` or `bot.cancel`, sends this error, and closes the socket with code 1008. It runs nothing and saves no `id`. |
+| `rate-limited` | The device has 8 commands running, or it sent more than 60 `bot.prompt` and `bot.cancel` commands in the last minute. Both limits count all of the device's connections together. A `bot.prompt` or `bot.cancel` counts as running until the server has saved its result, even when the client has disconnected. The server runs nothing and saves no `id`, so the client can wait and send the same command again. `ping` is not counted. |
+| `id-reused` | The `id` already ran a different command. |
+| `internal` | The server failed in a way it didn't expect. |
+
+An error `message` is fixed text. For bad JSON it is `frame is not valid JSON`, and for another version it is `unsupported frame version; expected v 1`. For a frame with the wrong shape, it is the path of each bad field and a fixed reason, such as `cursor.seq: out of range` or `unknown field`. For a failed command it is one fixed sentence per code. It never repeats a field name or a value that the sender chose, such as a prompt, so it is safe to log.
 
 ## Sequence numbers and replay
 
@@ -88,10 +104,61 @@ One `bot.event` frame carries one event of one bot. Its payload has the bot's na
 
 The frame carries the text of the conversation. The server never writes it to a log line.
 
+## Commands
+
+A client sends a `command` frame and gets one `result` frame, or one `error` frame, with the same `id`. A client can send the next command before the answer to the last one arrives, and the answers can arrive in any order. [The protocol spec](protocol-spec.md#commands) lists every field.
+
+| Command | Does | Result |
+| --- | --- | --- |
+| `ping` | Nothing. It checks that the server answers. | `{}` |
+| `bot.prompt` | Gives a bot a prompt and starts a turn. | `{ "turn": "..." }` |
+| `bot.cancel` | Asks a bot to cancel a turn. | `{}` |
+| `history.read` | Reads one page of a bot's saved events. | `{ "events": [...], "next": 9, "more": true }` |
+
+### `bot.prompt`
+
+The payload is `{ "bot": "chief", "text": "Hello" }`. The server starts a turn and answers with the turn's id, a UUIDv7 that the server makes. The answer comes when the bot accepts the turn, not when the bot finishes it. The turn's events arrive as [`bot.event` frames](#the-botevent-frame) for a client that has sent `resume`. A repeat of the command with the same `id` returns the same turn and starts no second one.
+
+The prompt can hold up to 262,144 bytes (256 KiB) of UTF-8. The server also sends the prompt to the bot as one JSON line, and a line can hold at most 1 MiB (1,048,576 bytes). The line is the prompt after JSON escapes, plus up to 128 bytes of fixed text. JSON writes a control character as 6 bytes, so a prompt of control characters fits only up to 174,741 of them. A prompt that is over either limit gets `prompt-too-long`, and the socket stays open. A prompt of more than 262,144 characters can't fit, so the server reads it as `malformed` and closes the socket with code 1007.
+
+The server reads a message of up to 1,573,888 bytes after JSON encoding. That is 6 bytes for each of the 262,144 characters of the longest prompt, plus 1,024 bytes for the rest of the frame. It closes the socket with code 1009 when a message is larger. A prompt that is too long for the bot gets `prompt-too-long`, not a closed socket.
+
+A bot takes one new turn at a time. While the server waits for the bot to accept a turn, another `bot.prompt` for that bot gets `bot-busy`. The server waits at most 30 seconds, even when the bot or its runner is stuck. After that it answers `bot-not-responding`, ends the turn as refused, stops the bot's run and starts it again with the saved session. The bot answers `bot-busy` until the new run is up.
+
+The command fails with `bot-not-running`, `bot-busy`, `bot-not-responding`, `prompt-too-long` or `prompt-refused`. A client that wants to try again sends the prompt with a new `id`.
+
+### `bot.cancel`
+
+The payload is `{ "bot": "chief", "turn": "0192f0a1-3b7d-7c5e-9a21-0d4e6f8a1b23" }`. The command succeeds with `{}` as soon as the server has passed the request on. It also succeeds when the bot isn't in that turn, so a client can send it without checking first. The turn ends with a `turn.end` event whose reason is `cancelled`, and a bot that ignores the cancel doesn't end the turn.
+
+### `history.read`
+
+The payload is `{ "bot": "chief", "after": 7, "limit": 100 }`. `after` is a position, as in the `seq` of an event frame, and it is optional. Leave it out to start at the oldest event. `limit` is from 1 to 500.
+
+The result holds up to `limit` events of that bot, in order, each as `{ "seq": 8, "payload": { ... } }`. The `payload` is the payload of the matching `bot.event` frame. The server shows the same events that a replay shows and leaves out the same ones, so a client never gets the vendor's session reference. An event has the same `seq` in a page and in a replay, so a client that uses both can drop a repeat by `seq`.
+
+`next` is the position to send as `after` for the next page. It can be higher than the last event in the page, because the server counts the events it skips. `more` is `true` when the server holds more saved events of this bot after `next`. A page holds at most 256 KiB of encoded events. The server stops the page before the event that would pass that size, except that a page always holds the first event that a client may see. A page can hold fewer than `limit` events, or none, while `more` is `true`, so a client reads until `more` is `false`.
+
+The command only reads. The server doesn't save its `id`, and a repeat reads the history again, so it sees events saved since. The command fails with `internal` when the server can't read a saved event ([store](store.md#the-server-id-turns-and-events)).
+
 ## Command ids
 
 A client gives every command an `id` of 1 to 64 letters, digits, hyphens or underscores. A UUID, which is a universally unique identifier, from `crypto.randomUUID()` fits. When a client gets no answer, it sends the same command again with the same `id`.
 
-`CommandLedger` applies each id once. A retry gets the first run's outcome, whether that was a result or a failure. A command that throws before it returns counts as a failure too. A retry that arrives while the first run is still going waits for that run.
+### What the server does with an id
 
-The ledger keeps every id whose command is still running, plus the most recently finished ids, up to `capacity` ids in all. It forgets finished ids in the order they finished. It never forgets a running one, so it holds more than `capacity` ids while more than `capacity` commands run at once. For example, at a capacity of 1, if `b` finishes while an older `a` is still running, the ledger forgets `b` and keeps `a`. A forgotten id runs again if a client sends it. A client that wants a command to run twice sends two ids.
+The server saves the `id` and the outcome of `bot.prompt` and `bot.cancel` in its database for 24 hours, so a repeat never runs twice, also after a restart. `ping` and `history.read` change nothing, so the server doesn't save them.
+
+- The server saves the `id` before it runs the command, and the result when the command ends. When saving the result fails, the server tries again up to three times, after 0.1, 0.5 and 2 seconds, without running the command again. It sends the result only after it has saved it. The key is the device and the `id`, so two devices can use the same `id` without meeting.
+- A repeat within 24 hours gets the saved outcome, whether that was a result or an error. A repeat that arrives while the first run is still going waits for that run. A client that disconnects after it sends a command doesn't stop it. The client reconnects, sends the same `id`, and gets the outcome.
+- The server doesn't know what happened to a command that was still running when the server stopped. The prompt may have reached the bot. A repeat gets the error `interrupted`, and the command doesn't run again. The client sends it with a new `id` if it still wants it, after it checks the bot's history.
+- A repeat that names a different command than the first run of that `id` gets `id-reused`. The server doesn't compare the payloads, so a client must not give two commands with one name the same `id`.
+- A repeat after 24 hours counts as a new command. The server deletes its saved rows when it starts and then once an hour. It deletes a row that is still `running` once it is 24 hours old. It measures the time with its own clock, so a clock set back keeps a row longer.
+
+A client that wants a command to run twice sends two ids.
+
+### The ledger in the package
+
+`@aphelion/protocol` also has `CommandLedger`, which keeps outcomes in memory for clients and tests. It applies each id once. A retry gets the first run's outcome, whether that was a result or a failure. A command that throws before it returns counts as a failure too. A retry that arrives while the first run is still going waits for that run.
+
+The ledger keeps every id whose command is still running, plus the most recently finished ids, up to `capacity` ids in all. It forgets finished ids in the order they finished. It never forgets a running one, so it holds more than `capacity` ids while more than `capacity` commands run at once. For example, at a capacity of 1, if `b` finishes while an older `a` is still running, the ledger forgets `b` and keeps `a`. A forgotten id runs again if a client sends it. The server doesn't use this class. Its ledger is in `apps/server/src/commands/` and keeps its rows in SQLite.

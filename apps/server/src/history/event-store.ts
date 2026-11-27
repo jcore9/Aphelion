@@ -25,6 +25,11 @@ export interface EventLog {
   readonly head: () => number;
   readonly firstKept: () => number;
   readonly read: (after: number, limit: number) => readonly SavedEvent[];
+  readonly readBot: (
+    bot: string,
+    after: number,
+    limit: number,
+  ) => readonly SavedEvent[];
   readonly subscribe: Effect.Effect<
     PubSub.Subscription<SavedEvent>,
     never,
@@ -273,6 +278,14 @@ export const openEventStore = (
         )
         .map(decodeEvent);
 
+    const readBot = (bot: string, after: number, limit: number) =>
+      db
+        .all(
+          `SELECT ${eventColumns} FROM events WHERE bot = ? AND position > ? ORDER BY position LIMIT ?`,
+          [bot, after, limit],
+        )
+        .map(decodeEvent);
+
     const openTurn = (bot: string, turn: string) =>
       Effect.flatMap(Clock.currentTimeMillis, (at) =>
         Effect.sync(() => {
@@ -316,6 +329,7 @@ export const openEventStore = (
       head,
       firstKept,
       read,
+      readBot,
       subscribe: PubSub.subscribe(live),
       record,
       appendNow,

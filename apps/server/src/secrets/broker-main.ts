@@ -9,7 +9,11 @@ import { join } from "node:path";
 import { generateIdentity } from "age-encryption";
 import { z } from "zod";
 import { createLogger } from "../log";
-import { LocalStoreRefusal, openLocalStore } from "./local-store";
+import {
+  LocalStoreRefusal,
+  openLocalStore,
+  validateBootstrapKey,
+} from "./local-store";
 import { parseSecretReference } from "./reference";
 import { Secret } from "./secret";
 
@@ -32,7 +36,7 @@ class BrokerRefusal extends Error {
 
   constructor(
     readonly reason:
-      | "The secrets broker takes no arguments except --new-key"
+      | "The secrets broker takes no arguments except --new-key and --check-key"
       | "The bootstrap key is missing from standard input"
       | "The bootstrap key is longer than 1 KiB",
   ) {
@@ -139,9 +143,19 @@ async function run(args: readonly string[]): Promise<void> {
     process.stdout.write(`${await generateIdentity()}\n`);
     return;
   }
+  if (args.length === 1 && args[0] === "--check-key") {
+    const key = readBootstrapKey();
+    try {
+      await validateBootstrapKey(key);
+    } finally {
+      key.wipe();
+    }
+    process.stdout.write("The bootstrap key is a valid age identity\n");
+    return;
+  }
   if (args.length > 0) {
     throw new BrokerRefusal(
-      "The secrets broker takes no arguments except --new-key",
+      "The secrets broker takes no arguments except --new-key and --check-key",
     );
   }
   if (process.platform !== "linux" || process.getuid?.() !== brokerUid) {

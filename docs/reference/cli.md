@@ -282,10 +282,10 @@ Stops the token of the device with this id. A WebSocket that uses it closes with
 Prints a header line and one tab-separated line per tool on the list. The list is the copy of [`deploy/ai-tools.json`](https://github.com/jcore9/Aphelion/blob/main/deploy/ai-tools.json) that the image ships.
 
 ```
-NAME	VERSION	INSTALLED	STATE	STATUS-COMMAND
-claude	2.1.332	2.1.330	update available	claude auth status --text
-codex	0.172.0	0.172.0	installed	codex login status
-grok	1.0.92	-	not installed	-
+NAME	VERSION	INSTALLED	STATE	STATUS-COMMAND	SIGN-IN-COMMAND
+claude	2.1.332	2.1.330	update available	claude auth status --text	claude auth login
+codex	0.172.0	0.172.0	installed	codex login status	codex login --device-auth
+grok	1.0.92	-	not installed	-	grok login --device-auth
 ```
 
 `VERSION` is the version the list pins. `INSTALLED` is the version `<tools folder>/<name>/current` points at, or `-` when the tool isn't installed. `STATE` is one of:
@@ -298,6 +298,8 @@ grok	1.0.92	-	not installed	-
 | `unavailable` | The list has no build for this processor. |
 
 `STATUS-COMMAND` is the command that exits with 0 when the tool is signed in, or `-` when Aphelion has none for the tool.
+
+`SIGN-IN-COMMAND` is the tool's own sign-in command, which [`sudo aphelion sign-in NAME`](host-command.md#sign-in) runs on the host.
 
 ## `aphelion tool install NAME`
 

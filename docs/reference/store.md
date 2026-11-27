@@ -73,6 +73,7 @@ Bun opens a `file:` name as an ordinary file today, so the last rule is a precau
 | 6 | `plugin-versions` | Replaces the plugin tables. `plugin_versions` has one row per approved version of a plugin, with its source (`folder` or `release`), folder, files digest and repository. `plugin_installs` names each plugin's current version and the one before it. `plugin_grants` holds the grants of each version. The migration drops the earlier approvals, so every installed plugin needs `aphelion plugin install` again ([permissions](plugins.md#permissions)). |
 | 7 | `plugin-enabled` | Adds `plugin_installs.enabled`, `1` by default. A plugin with `0` has no approval and no grants, and [`restore finish`](cli.md#aphelion-restore-finish) sets it for every plugin ([the on and off switch](plugins.md#the-on-and-off-switch)). Every installed plugin stays on when the migration runs. |
 | 8 | `message-history` | The `server_meta`, `turns`, `events` and `bot_sessions` tables ([the server ID, turns and events](#the-server-id-turns-and-events)). `server_meta` starts with `next_position` at 1 and `boot_epoch` at 0. `openStore` adds the `server_id` row. |
+| 9 | `command-ledger` | The `commands` table ([the command ledger](#the-command-ledger)) and the `events_bot` index on `events (bot, position)`, which `history.read` uses to read one bot's events. |
 
 ## The server ID, turns and events
 
@@ -118,6 +119,22 @@ Boot repair reads each saved event through the same versioned reader that the re
 ### Retention
 
 The server keeps every turn and event. Nothing prunes them yet, so the table grows with every token a bot writes. Pruning is later work. A client whose cursor is more than one behind the oldest retained event gets a `resync`.
+
+## The command ledger
+
+Migration 9 adds the `commands` table, which is `STRICT`. It holds one row for each `bot.prompt` and `bot.cancel` command that a device sent in the last 24 hours ([command ids](protocol.md#command-ids)).
+
+| Column | Holds |
+| --- | --- |
+| `device` and `id` | The device's id and the command's `id` from the frame. Together they are the primary key, so two devices can send the same `id`. |
+| `name` | The command's name. A repeat with another name gets `id-reused`. |
+| `state` | `running`, `done` or `failed`. |
+| `result` | `NULL` while the state is `running`, which the database enforces. For `done`, the result as JSON. For `failed`, the error code, such as `bot-busy` or `interrupted`. |
+| `created_at` | When the server saved the row, in milliseconds, from the server's clock. |
+
+The server inserts the row with state `running` before it runs the command, and updates it when the command ends. When the update fails, the server tries again up to three times. If it still fails, the row stays `running`, and the caller gets `storage-failed`. The next start turns that row into `interrupted`. The row holds the outcome, never the prompt. For `bot.prompt` the result is the turn's id, which is how a repeat after a restart returns the same turn.
+
+At each start the server turns every `running` row into `failed` with `interrupted`, because only a crash or a stop leaves one. It then deletes the rows that are 24 hours old or older. It repeats the delete once an hour, and it deletes a `running` row too once that row is 24 hours old. If a delete fails, the server logs `deleting old commands failed` and tries again an hour later. A lookup ignores a row that is 24 hours old, so a late delete can't bring an old result back.
 
 ## Rules
 

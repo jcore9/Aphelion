@@ -7,12 +7,14 @@ import { join } from "node:path";
 import { Duration, Effect, Exit, Scope } from "effect";
 import { HttpServer } from "effect/http";
 import { afterAll } from "vitest";
+import { webSocketLimits } from "../adapters/http-server";
 import { addDevice, revokeDevice } from "../devices";
 import { finishRestore } from "../restore";
 import { openEventStore } from "../history";
 import { createLogger } from "../log";
 import { openStore, readServerId } from "../store";
 import { serveHttp } from "./index";
+import { idleCommands } from "./test-client";
 
 const live = { excludeTestServices: true };
 const day = 24 * 60 * 60 * 1000;
@@ -155,7 +157,7 @@ const paths = [
 const resume = encodeFrame({ v: 1, type: "resume", cursor: null });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, {
+  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, idleCommands, {
     recheckEvery: Duration.millis(20),
   }),
   live,
@@ -297,10 +299,10 @@ layer(
     }),
   );
 
-  it.effect("closes a WebSocket whose message is over 64 KiB", () =>
+  it.effect("closes a WebSocket whose message is over the limit", () =>
     Effect.gen(function* () {
       const socket = yield* openLive(bearer(valid));
-      socket.socket.send("x".repeat(64 * 1024 + 1));
+      socket.socket.send("x".repeat(webSocketLimits.maxPayloadLength + 1));
       expect((yield* closedBy(socket)).code).toBe(1009);
     }),
   );
@@ -335,7 +337,7 @@ layer(
 });
 
 layer(
-  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, {
+  serveHttp({ address: "127.0.0.1", port: 0 }, db, history, idleCommands, {
     recheckEvery: Duration.millis(20),
   }),
   live,

@@ -3,7 +3,11 @@ set -euo pipefail
 
 readonly APHELION_DEPLOY=${APHELION_DEPLOY:-/opt/aphelion/deploy}
 readonly APHELION_CREDENTIAL=${APHELION_CREDENTIAL:-/etc/credstore.encrypted/aphelion-bootstrap}
+readonly APHELION_BACKUP_DIR=${APHELION_BACKUP_DIR:-/var/backups/aphelion}
 readonly service=aphelion
+readonly volumes=(config state bots secrets plugin-data plugin-files)
+readonly archive_name=aphelion-data.tar.gz
+readonly plugins_dir=/opt/aphelion/plugins
 readonly health_port=7400
 readonly hardening='true false ["ALL"] ["CAP_KILL","CAP_SETGID","CAP_SETUID"] ["no-new-privileges:true","writable-cgroups=true"]'
 
@@ -19,11 +23,21 @@ usage:
   aphelion tool update [NAME]          move an installed AI tool to the version the list pins
   aphelion tool check                  ask each vendor for its newest version
   aphelion tool remove NAME            remove an installed AI tool
+  aphelion sign-in NAME                sign in to an installed AI tool, on your terminal
+  aphelion backup [--to FOLDER]        stop the service, pack the data into a new folder, start the service
+  aphelion restore [PATH]              put a backup into new volumes and start the service
+  aphelion plugin install FOLDER [--approve DIGEST]
+                                       copy a plugin folder into the container and preview or approve it
+  aphelion plugin update|enable ID [--approve DIGEST]
+                                       update a plugin, or switch it on
+  aphelion plugin rollback ID          go back to the version before the current one
+  aphelion plugin restart ID           restart a plugin
+  aphelion plugin dev FOLDER           reload a plugin from a folder in the container while you edit it
   aphelion check                       run every check the host can run alone
   aphelion --help                      show this text
 
 Run it as root: sudo aphelion status
-The device and tool commands run the server's own aphelion command inside the container.
+The device, tool and plugin commands run the server's own aphelion command inside the container.
 USAGE
 }
 
@@ -145,11 +159,11 @@ check_cpu() {
 }
 
 report_ai_tools() {
-  local rows name pinned installed state status line suffix lines=""
+  local rows name pinned installed state status signin line suffix lines=""
   local -a words
   rows=$(in_container harness aphelion tool list 2>/dev/null </dev/null) ||
     { echo "AI tools: unknown, aphelion tool list failed"; return 0; }
-  while IFS=$'\t' read -r name pinned installed state status; do
+  while IFS=$'\t' read -r name pinned installed state status signin; do
     [[ $state == installed || $state == "update available" ]] || continue
     suffix=""
     [[ $state == installed ]] || suffix=" (update available: $installed -> $pinned)"
@@ -232,6 +246,210 @@ cmd_tool() {
   compose exec -T --user harness "$service" aphelion tool "$@"
 }
 
+cmd_sign_in() {
+  local name=$1 rows row_name state signin found=0
+  local -a argv
+  rows=$(in_container harness aphelion tool list </dev/null) ||
+    fail "aphelion tool list failed. Is the service running? Check with: sudo aphelion status"
+  while IFS=$'\t' read -r row_name _ _ state _ signin; do
+    [[ $row_name == "$name" ]] || continue
+    found=1
+    [[ $state == installed || $state == "update available" ]] ||
+      fail "$name isn't installed. Install it first: sudo aphelion tool install $name"
+    read -ra argv <<<"$signin"
+  done < <(tail -n +2 <<<"$rows")
+  ((found)) || fail "$name isn't on the list of AI tools. See the list with: sudo aphelion tool list"
+  ((${#argv[@]})) || fail "aphelion tool list gave no sign-in command for $name. Upgrade Aphelion so the image and this command match."
+  [[ -t 0 && -t 1 ]] ||
+    fail "sign-in needs a terminal. Run it in a shell on the host, not through a pipe or a script."
+  compose exec --user aphelion-bot "$service" "${argv[@]}"
+}
+
+backup_folder="" backup_restart=0
+backup_cleanup() {
+  if ((backup_restart)); then
+    systemctl start "$service" || echo "aphelion: the service didn't start. Start it with: sudo systemctl start $service" >&2
+  fi
+  if [[ -n $backup_folder ]]; then
+    rm -rf -- "$backup_folder"
+  fi
+}
+
+service_image() {
+  local image
+  image=$(compose config --images | sed -n 1p) || fail "docker compose can't read the Compose file in $APHELION_DEPLOY"
+  [[ -n $image ]] || fail "docker compose shows no image for $service"
+  echo "$image"
+}
+
+project_name() {
+  echo "${COMPOSE_PROJECT_NAME:-aphelion}"
+}
+
+check_sum() {
+  local dir=$1 archive=$2 sum_hash sum_file
+  [[ $(wc -l <"$dir/$archive.sha256") == 1 ]] || return 1
+  read -r sum_hash sum_file <"$dir/$archive.sha256"
+  [[ ${sum_file#\*} == "$archive" ]] || return 1
+  (cd "$dir" && sha256sum --check --status -- "$archive.sha256")
+}
+
+verify_backup() {
+  check_sum "$1" "$archive_name" && gzip --test "$1/$archive_name"
+}
+
+cmd_backup() {
+  local dir stamp new previous project image volume name
+  local -a mounts=()
+  dir=$(realpath -m -- "$1")
+  project=$(project_name)
+  image=$(service_image)
+  umask 077
+  [[ -d $dir ]] || install -d -m 0700 "$dir"
+  stamp=$(date +%Y%m%d-%H%M%S)
+  new=$dir/aphelion-backup-$stamp
+  [[ ! -e $new ]] || fail "$new exists. Wait a second and run it again."
+  for volume in "${volumes[@]}"; do
+    mounts+=(-v "${project}_$volume:/data/$volume:ro")
+  done
+  trap backup_cleanup EXIT
+  if [[ $(systemctl is-active "$service" 2>/dev/null) == active ]]; then
+    backup_restart=1
+    systemctl stop "$service"
+  fi
+  install -d -m 0700 "$new"
+  backup_folder=$new
+  docker run --rm --pull never --network none --entrypoint "" \
+    "${mounts[@]}" -v "$new:/backup" "$image" \
+    tar --create --gzip --numeric-owner --preserve-permissions --file "/backup/$archive_name" --directory /data . ||
+    fail "packing the volumes failed"
+  (cd "$new" && sha256sum "$archive_name" >"$archive_name.sha256")
+  if ((backup_restart)); then
+    backup_restart=0
+    systemctl start "$service" || fail "the service didn't start again. Start it with: sudo systemctl start $service"
+  fi
+  verify_backup "$new" || fail "the new backup didn't pass its check, so it was removed. Earlier backups are unchanged."
+  backup_folder=""
+  previous=$(readlink "$dir/latest" 2>/dev/null) || previous=""
+  ln -sfn "$(basename "$new")" "$dir/.latest.$$"
+  mv -T "$dir/.latest.$$" "$dir/latest"
+  for old in "$dir"/aphelion-backup-*; do
+    name=$(basename "$old")
+    [[ -d $old && ! -L $old && $name =~ ^aphelion-backup-[0-9]{8}-[0-9]{6}$ ]] || continue
+    [[ $name == "$(basename "$new")" || $name == "$previous" ]] || rm -rf -- "$old"
+  done
+  echo "$new"
+}
+
+print_volume_commands() {
+  local -a existing=("$@")
+  {
+    echo "To remove them, run:"
+    echo "  cd $APHELION_DEPLOY && sudo docker compose down"
+    echo "  sudo docker volume rm ${existing[*]}"
+  } >&2
+}
+
+cmd_restore() {
+  local source archive dir project image volume have status=0
+  local -a mounts=() existing=() listed
+  source=$(realpath -e -- "${1:-$APHELION_BACKUP_DIR/latest}" 2>/dev/null) || fail "${1:-$APHELION_BACKUP_DIR/latest} doesn't exist"
+  if [[ -d $source ]]; then
+    archive=$source/$archive_name
+  else
+    archive=$source
+  fi
+  [[ -f $archive ]] || fail "there is no archive at $archive"
+  [[ -f $archive.sha256 ]] || fail "there is no checksum file at $archive.sha256"
+  dir=$(dirname "$archive")
+  check_sum "$dir" "$(basename -- "$archive")" ||
+    fail "the archive doesn't match its checksum, so it is damaged or changed. Nothing was restored."
+  project=$(project_name)
+  image=$(service_image)
+  if [[ $(systemctl is-active "$service" 2>/dev/null) == active ]]; then
+    systemctl stop "$service"
+    echo "Stopped $service."
+  fi
+  have=$(docker volume ls --quiet --filter "name=${project}_") ||
+    fail "docker volume ls failed, so the restore can't tell whether the volumes exist. Is Docker running? Nothing was restored."
+  mapfile -t listed <<<"$have"
+  for volume in "${volumes[@]}"; do
+    for have in "${listed[@]}"; do
+      [[ $have != "${project}_$volume" ]] || existing+=("$have")
+    done
+    mounts+=(-v "${project}_$volume:/data/$volume")
+  done
+  if ((${#existing[@]})); then
+    echo "aphelion: these volumes already exist: ${existing[*]}" >&2
+    echo "Restoring over them would mix old and new files. If they hold nothing you need, remove them and run the restore again." >&2
+    print_volume_commands "${existing[@]}"
+    exit 1
+  fi
+  for volume in "${volumes[@]}"; do
+    docker volume create --label "com.docker.compose.project=$project" --label "com.docker.compose.volume=$volume" "${project}_$volume" >/dev/null
+  done
+  start_over() {
+    echo "aphelion: $1. The service stays stopped." >&2
+    echo "To start over, remove the volumes and run the restore again." >&2
+    print_volume_commands "${volumes[@]/#/${project}_}"
+    exit 1
+  }
+  docker run --rm --pull never --network none --entrypoint "" \
+    "${mounts[@]}" -v "$dir:/backup:ro" "$image" \
+    tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file "/backup/$(basename -- "$archive")" --directory /data ||
+    start_over "unpacking the archive failed"
+  docker run --rm --pull never --network none --entrypoint "" --user harness \
+    -v "${project}_state:/var/lib/aphelion" "$image" aphelion restore finish || status=$?
+  ((status == 0)) || start_over "restore finish failed, so the restored device tokens and plugins are still live"
+  systemctl start "$service"
+  echo "Started $service."
+}
+
+cmd_plugin() {
+  local subcommand=$1 folder raw name present test_flag status
+  shift
+  case $subcommand in
+    dev)
+      compose exec --user harness "$service" aphelion plugin dev "$@"
+      ;;
+    install)
+      folder=$1
+      shift
+      raw=$folder
+      while [[ $raw == */ && $raw != / ]]; do raw=${raw%/}; done
+      [[ -d $raw ]] || fail "$folder isn't a folder"
+      [[ ! -L $raw ]] || fail "$folder is a symbolic link. Give the folder itself, so its name is the plugin's name."
+      name=$(basename -- "$raw")
+      [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && $name != *@* ]] ||
+        fail "the folder's name '$name' must be letters, digits, dots, dashes and underscores, and start with a letter or digit. Rename the folder."
+      folder=$(realpath -e -- "$raw")
+      [[ -n $(container_id) ]] || fail "the $service container isn't running. Start it with: sudo systemctl start $service"
+      present=0
+      for test_flag in -e -L; do
+        status=0
+        in_container harness test "$test_flag" "$plugins_dir/$name" || status=$?
+        case $status in
+          0) present=1 ;;
+          1) ;;
+          *) fail "couldn't check the container for $name (exit $status). Check with: sudo aphelion status" ;;
+        esac
+      done
+      if ((present)); then
+        (($#)) || fail "$name is already in the container. To change it, run: sudo aphelion plugin update $name"
+      else
+        compose cp "$folder" "$service:$plugins_dir/$name" || fail "copying $folder into the container failed"
+      fi
+      in_container harness aphelion plugin install "$plugins_dir/$name" "$@"
+      if (($#)); then
+        echo "Next, restart the service so the server starts the plugin: sudo systemctl restart $service"
+      fi
+      ;;
+    *)
+      in_container harness aphelion plugin "$subcommand" "$@"
+      ;;
+  esac
+}
+
 case ${1:-} in
   -h | --help | help)
     usage
@@ -256,6 +474,29 @@ case ${1:-} in
   tool)
     case ${2:-}:$# in
       list:2 | check:2 | update:[23] | install:3 | remove:3) cmd_tool "${@:2}" ;;
+      *) usage_error ;;
+    esac
+    ;;
+  sign-in)
+    (($# == 2)) || usage_error
+    cmd_sign_in "$2"
+    ;;
+  backup)
+    case ${2:-}:$# in
+      :1) cmd_backup "$APHELION_BACKUP_DIR" ;;
+      --to:3) cmd_backup "$3" ;;
+      *) usage_error ;;
+    esac
+    ;;
+  restore)
+    (($# <= 2)) || usage_error
+    cmd_restore "${2:-}"
+    ;;
+  plugin)
+    case ${2:-}:$#:${4:-} in
+      install:3: | install:5:--approve | update:3: | update:5:--approve | enable:3: | enable:5:--approve | rollback:3: | restart:3: | dev:3:)
+        cmd_plugin "${@:2}"
+        ;;
       *) usage_error ;;
     esac
     ;;

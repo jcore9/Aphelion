@@ -37,7 +37,7 @@ cleanup() {
   fi
   docker rm --force aphelion-contract-bots aphelion-contract-nocg >/dev/null 2>&1 || true
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
-  as_root rm -rf /scratch/secrets >/dev/null 2>&1 || true
+  as_root rm -rf /scratch/secrets /scratch/backups >/dev/null 2>&1 || true
   rm -rf "$scratch"
 }
 
@@ -163,6 +163,23 @@ chmod -R a+rX,go-w "$scratch/plugins"
 as_root bash -c 'rm /scratch/secrets/bootstrap && aphelion-secrets --new-key >/scratch/secrets/bootstrap && chmod 0400 /scratch/secrets/bootstrap'
 key=$(as_root cat /scratch/secrets/bootstrap)
 [[ $key == AGE-SECRET-KEY-1* ]] || fail "aphelion-secrets --new-key printed no age identity"
+
+check_key() {
+  docker run --rm -i --pull never --log-driver none --network none --read-only --user aphelion-secrets \
+    --entrypoint /usr/local/bin/aphelion-secrets "$image" --check-key
+}
+shaped=AGE-SECRET-KEY-1$(printf 'Q%.0s' {1..58})
+[[ $shaped =~ ^AGE-SECRET-KEY-1[0-9A-Z]{58}$ ]] || fail "the test key doesn't have the shape the old check accepted"
+accepted=$(printf '%s\n' "$key" | check_key 2>&1) || fail "--check-key refused the key --new-key printed"
+[[ $accepted == "The bootstrap key is a valid age identity" ]] || fail "--check-key printed something else for a good key: $accepted"
+status=0
+refused=$(printf '%s\n' "$shaped" | check_key 2>&1) || status=$?
+[[ $status == 1 && $refused == *"The bootstrap key is not a valid age identity"* && $refused != *"$shaped"* ]] ||
+  fail "--check-key didn't refuse a key with a wrong checksum with a fixed message ($status, $refused)"
+status=0
+refused=$(check_key </dev/null 2>&1) || status=$?
+[[ $status == 1 && $refused == *"missing from standard input"* ]] || fail "--check-key accepted an empty standard input ($status, $refused)"
+pass "aphelion-secrets --check-key accepts the key --new-key printed, refuses a key that only has the right shape, and never prints a key"
 
 "${compose[@]}" config | "${compose[@]}" run --rm -T --user harness "$service" \
   aphelion config check --compose - >/dev/null ||
@@ -572,11 +589,11 @@ as_bot() {
 }
 
 shipped=$(docker exec --user harness "$container" aphelion tool list) || fail "tool list failed on the shipped list"
-[[ $(sed -n 1p <<<"$shipped") == $'NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND' ]] || fail "tool list printed no header: $shipped"
-grep -qP '^claude\t\S+\t-\tnot installed\tclaude auth status --text$' <<<"$shipped" || fail "tool list doesn't show Claude Code as not installed: $shipped"
-grep -qP '^grok\t\S+\t-\tnot installed\t-$' <<<"$shipped" || fail "tool list doesn't show Grok Build with no status command: $shipped"
+[[ $(sed -n 1p <<<"$shipped") == $'NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\tSIGN-IN-COMMAND' ]] || fail "tool list printed no header: $shipped"
+grep -qP '^claude\t\S+\t-\tnot installed\tclaude auth status --text\tclaude auth login$' <<<"$shipped" || fail "tool list doesn't show Claude Code as not installed: $shipped"
+grep -qP '^grok\t\S+\t-\tnot installed\t-\tgrok login --device-auth$' <<<"$shipped" || fail "tool list doesn't show Grok Build with no status command: $shipped"
 [[ $(grep -c . <<<"$shipped") == 5 ]] || fail "tool list doesn't list the four tools: $shipped"
-pass "tool list shows the four pinned tools as not installed"
+pass "tool list shows the four pinned tools as not installed, each with its status and sign-in command"
 
 for _ in {1..50}; do
   docker exec --user harness --env BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 "$container" \
@@ -622,7 +639,7 @@ done
 pass "aphelion-bot can run the installed tool and can't write, replace, remove or re-mode anything in the tools volume"
 
 listed=$(tool_aphelion list-next.json list 2>&1) || fail "tool list failed against the next list: $listed"
-grep -qP '^claude\t9\.9\.10\t9\.9\.9\tupdate available\tclaude auth status$' <<<"$listed" ||
+grep -qP '^claude\t9\.9\.10\t9\.9\.9\tupdate available\tclaude auth status\tclaude auth login$' <<<"$listed" ||
   fail "tool list doesn't say update available once the list names a newer version: $listed"
 status=0
 refused=$(tool_aphelion list-next-wrong-checksum.json update claude 2>&1) || status=$?
@@ -857,6 +874,40 @@ done
 wait_for_log "$test_plugin 1.0.0 started"
 "${compose[@]}" stop >/dev/null 2>&1
 pass "restore finish revokes every device token and switches every plugin off, and plugin enable switches each back on"
+
+volume_files() {
+  docker run --rm --pull never --network none --entrypoint "" -v "${project}_$1:/v:ro" "$image" \
+    sh -c 'cd /v && find . -printf "%p %y %U:%G %m\n" | sort && find . -type f -exec sha256sum {} + | sort -k2'
+}
+snapshot() {
+  local volume
+  for volume in config bots secrets plugin-data plugin-files; do
+    echo "== $volume"
+    volume_files "$volume"
+  done
+}
+before=$(snapshot)
+[[ -n $before ]] || fail "the snapshot of the volumes is empty"
+backups=$scratch/backups
+made=$(host_aphelion backup --to "$backups") || fail "backup failed"
+[[ $made == "$backups"/aphelion-backup-* && $("${host_root[@]}" readlink "$backups/latest") == "$(basename "$made")" ]] ||
+  fail "backup printed something other than its folder: $made"
+"${host_root[@]}" sh -c 'cd "$1" && sha256sum --check --status aphelion-data.tar.gz.sha256' sh "$made" || fail "the backup's checksum doesn't match"
+"${compose[@]}" down --volumes >/dev/null 2>&1
+[[ -z $(docker volume ls --quiet --filter "name=${project}_") ]] || fail "down --volumes left volumes behind"
+status=0
+refused=$(host_aphelion restore "$made/aphelion-data.tar.gz" 2>&1) || status=$?
+[[ $status == 0 && $refused == *"Restore finished. Every device token is revoked."* && $refused == *"aphelion plugin enable $test_plugin"* ]] ||
+  fail "restore didn't finish (exit $status): $refused"
+[[ $(snapshot) == "$before" ]] || fail "the restored volumes differ from the ones that were backed up"
+docker run --rm --pull never --network none --entrypoint "" -v "${project}_state:/v:ro" "$image" test -f /v/aphelion.db ||
+  fail "the restored state volume has no database"
+status=0
+again=$(host_aphelion restore "$made" 2>&1) || status=$?
+[[ $status == 1 && $again == *"already exist"* ]] || fail "restore ran over existing volumes (exit $status): $again"
+"${compose[@]}" create --quiet-pull >/dev/null 2>&1
+container=$("${compose[@]}" ps --all --quiet "$service")
+pass "backup, then restore into new volumes, gives back every file with its owner and mode, and restore refuses over existing volumes"
 
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 sleep 1
