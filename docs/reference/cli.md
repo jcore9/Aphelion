@@ -246,7 +246,7 @@ Asks the running server, through the [control socket](plugins.md#control-socket)
 
 Opens a plain-line chat with bot `BOT` over the server's WebSocket. It shows streaming text and a line for each tool, permission, usage and turn event. After a dropped connection it reconnects and shows the events it missed, each once. [The test client guide](../guides/test-client.md) shows a session.
 
-The token comes from `--token-file`, or from a hidden prompt when standard input is a terminal. Otherwise the command exits with status 2. Ctrl-C or Ctrl-D at the prompt prints `aphelion: no device token entered` and exits 0. There is no `--token` option and no environment variable, so the token never shows in a process list. The command refuses a token file that other users can read, and it never prints the token. Its error messages use fixed text, so they never repeat a path or a name you typed.
+The token comes from `--token-file`, or from a hidden prompt when standard input is a terminal. Otherwise the command exits with status 2. Ctrl-C, Ctrl-D or a `SIGINT` signal at the prompt prints `aphelion: no device token entered` and exits 0. There is no `--token` option and no environment variable, so the token never shows in a process list. The command refuses a token file that other users can read, and it never prints the token. Its error messages use fixed text, so they never repeat a path or a name you typed.
 
 Each line you type is sent as one message. Ctrl-C cancels the running turn and, a second time or with no turn running, leaves. Ctrl-D leaves. A `SIGINT` signal does what Ctrl-C does, even when standard input isn't a terminal. The command exits 0 when you leave, and 1 when the server refuses the token or can't be used. Its exit code is not 130 for Ctrl-C.
 

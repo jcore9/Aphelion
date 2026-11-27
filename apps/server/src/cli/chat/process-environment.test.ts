@@ -52,6 +52,32 @@ describe("a process interrupt", () => {
     runtimeHandler.mockReset();
   });
 
+  test("at the token prompt ends the line and gives nothing, and the runtime doesn't see it", async () => {
+    process.on("SIGINT", runtimeHandler);
+    const { shown, answer } = prompt();
+
+    process.emit("SIGINT");
+
+    expect(await answer).toBeNull();
+    expect(shown.join("")).toBe("Device token: \n");
+    expect(runtimeHandler).not.toHaveBeenCalled();
+
+    process.emit("SIGINT");
+
+    expect(runtimeHandler).toHaveBeenCalledTimes(1);
+  });
+
+  test("after a token was typed goes back to the runtime", async () => {
+    process.on("SIGINT", runtimeHandler);
+    const { input, answer } = prompt();
+
+    input.write(`${tokenText}\n`);
+    await answer;
+    process.emit("SIGINT");
+
+    expect(runtimeHandler).toHaveBeenCalledTimes(1);
+  });
+
   test("goes to the chat and not to the runtime, which would exit 130", () => {
     process.on("SIGINT", runtimeHandler);
     const handler = vi.fn();

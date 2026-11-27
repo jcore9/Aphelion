@@ -22,10 +22,14 @@ export const askForToken = (
     const finish = (answer: string | null) => {
       if (answered) return;
       answered = true;
+      stopProcess();
       write("\n");
       resolve(answer === null ? null : answer.trim());
       rl.close();
     };
+    const stopProcess = interruptFromProcess(() => {
+      finish(null);
+    });
     rl.once("SIGINT", () => {
       finish(null);
     });
