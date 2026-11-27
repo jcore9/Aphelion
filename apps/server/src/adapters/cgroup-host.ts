@@ -180,12 +180,24 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
         chmodSync(paths.folder, 0o750);
       });
 
-    const spawn = (paths: RunPaths, entry: AdapterEntry, bot: string) =>
+    const spawn = (
+      paths: RunPaths,
+      entry: AdapterEntry,
+      bot: string,
+      folder: string,
+    ) =>
       (bot === probeBot ? Effect.void : share(paths)).pipe(
         Effect.andThen(
           attempt("spawn", () =>
             Bun.spawn(
-              [options.entry, paths.leaf, paths.folder, entry.bundle, bot],
+              [
+                options.entry,
+                paths.leaf,
+                paths.folder,
+                entry.bundle,
+                bot,
+                folder,
+              ],
               {
                 cwd: "/",
                 env: { ...entry.env },

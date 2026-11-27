@@ -100,6 +100,10 @@ const expectedEnv = {
   TMPDIR: "/tmp",
   DISABLE_AUTOUPDATER: "1",
 };
+const folders = {
+  alpha: "/var/lib/aphelion-bots/alpha",
+  beta: "/tmp/fresh-volume/bots/beta",
+};
 const sorted = (env) => JSON.stringify(Object.entries(env).sort());
 
 for (const bot of ["alpha", "beta"]) {
@@ -109,7 +113,7 @@ for (const bot of ["alpha", "beta"]) {
     run: 1,
     provider: "claude",
     adapter: "claude",
-    folder: `/var/lib/aphelion-bots/${bot}`,
+    folder: folders[bot],
     resume: null,
   });
 }
@@ -124,8 +128,7 @@ for (const bot of ["alpha", "beta"]) {
   if ((await ended(bot, `${bot}-1`)) !== "completed")
     fail(`${bot}'s first turn didn't complete`);
   if (report.uid !== 10002) fail(`${bot} ran as uid ${report.uid}`);
-  if (report.cwd !== `/var/lib/aphelion-bots/${bot}`)
-    fail(`${bot} ran in ${report.cwd}`);
+  if (report.cwd !== folders[bot]) fail(`${bot} ran in ${report.cwd}`);
   if (sorted(report.env) !== sorted(expectedEnv))
     fail(`${bot} got the environment ${JSON.stringify(report.env)}`);
   if (!/^\/bots\/work\/[0-9a-f-]{36}$/.test(report.leaf))
@@ -139,6 +142,9 @@ for (const bot of ["alpha", "beta"]) {
   first[bot] = report;
 }
 if (first.alpha.leaf === first.beta.leaf) fail("both bots share a cgroup");
+say(
+  `folder: alpha ran in ${folders.alpha}, and beta in ${folders.beta}, which the launcher created on a fresh volume`,
+);
 say(
   `isolation: each bot runs as aphelion-bot in its own cgroup and couldn't write the cgroup tree, list the run folders, or signal the runner or supervisor`,
 );

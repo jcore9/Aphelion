@@ -65,9 +65,15 @@ describe("the bot runner's supervised processes", () => {
         );
         const processes = Context.get(services, BotProcesses);
         const starting = yield* processes
-          .start({ bot: "alpha", adapter: "fake" })
+          .start({ bot: "alpha", adapter: "fake", folder: "/srv/alpha" })
           .pipe(Effect.forkScoped);
         const start = yield* next;
+        expect(start).toMatchObject({
+          type: "start",
+          bot: "alpha",
+          adapter: "fake",
+          folder: "/srv/alpha",
+        });
         if (start.type !== "start") throw new Error("expected a start");
         const { run } = start;
         yield* a.send({ type: "started", run, ...paths });

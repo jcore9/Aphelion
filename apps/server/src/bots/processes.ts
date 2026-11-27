@@ -4,6 +4,7 @@ import type { ProcessExit, SpawnFailed } from "../plugins/processes";
 export interface BotSpec {
   readonly bot: string;
   readonly adapter: string;
+  readonly folder: string;
 }
 
 export class KillFailed extends Data.TaggedError("KillFailed")<{

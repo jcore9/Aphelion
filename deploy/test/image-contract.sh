@@ -408,9 +408,9 @@ for checkpoint in daemons cancelled stopped; do
   check_checkpoint "$checkpoint"
 done
 await_bot_line "bot test passed"
-bot_log | grep -E '^(isolation|cancel|stop):'
+bot_log | grep -E '^(isolation|folder|cancel|stop):'
 docker rm --force "$bots" >/dev/null
-pass "through the shipped launcher, supervisor and runner, a fake adapter's setsid and double-fork daemons and fork loop died on cancel and on stop (ps as root), the other bot kept its processes, and no bot could write the cgroup tree or signal the runner or supervisor"
+pass "through the shipped launcher, supervisor and runner, a bot ran in a custom folder created on a fresh volume, a fake adapter's setsid and double-fork daemons and fork loop died on cancel and on stop (ps as root), the other bot kept its processes, and no bot could write the cgroup tree or signal the runner or supervisor"
 
 probe aphelion-plugins '[
   ["list", "/etc/aphelion", "EACCES"],

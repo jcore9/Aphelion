@@ -355,7 +355,11 @@ export const runBotRunner = (
       const tag = tagOf(slot);
       return Effect.uninterruptible(
         processes
-          .start({ bot: slot.start.bot, adapter: slot.start.adapter })
+          .start({
+            bot: slot.start.bot,
+            adapter: slot.start.adapter,
+            folder: slot.start.folder,
+          })
           .pipe(
             Effect.matchEffect({
               onSuccess: (process) =>

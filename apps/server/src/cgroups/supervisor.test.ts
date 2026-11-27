@@ -45,6 +45,7 @@ interface FakeChild {
 interface HostOptions {
   readonly failStep?: string;
   readonly holdPlacement?: boolean;
+  readonly killFails?: { readonly run: string; times: number };
   readonly killGate?: {
     readonly run: string;
     readonly open: Deferred.Deferred<undefined>;
@@ -73,10 +74,10 @@ const fakeHost = (options: HostOptions = {}) =>
             stderr: `/runs/${run}/stderr`,
           };
         }),
-      spawn: (paths, entry, bot) =>
+      spawn: (paths, entry, bot, folder) =>
         Effect.gen(function* () {
           const run = runOf(paths);
-          calls.push(`spawn ${run} ${entry.bundle} ${bot}`);
+          calls.push(`spawn ${run} ${entry.bundle} ${bot} ${folder}`);
           const child: FakeChild = {
             run,
             bot,
@@ -99,6 +100,14 @@ const fakeHost = (options: HostOptions = {}) =>
         Effect.gen(function* () {
           const run = runOf(paths);
           calls.push(`kill ${run}`);
+          const fails = options.killFails;
+          if (fails?.run === run && fails.times > 0) {
+            fails.times -= 1;
+            return yield* new HostFailed({
+              step: "populated",
+              errno: "ETIMEDOUT",
+            });
+          }
           if (options.killGate?.run === run) {
             yield* Deferred.await(options.killGate.open);
           }
@@ -170,8 +179,12 @@ const is =
     frame.type === type &&
     (run === undefined || ("run" in frame && frame.run === run));
 
-const start = (run: string, adapter = "fake", bot = "alpha") =>
-  ({ type: "start", run, bot, adapter }) as const;
+const start = (
+  run: string,
+  adapter = "fake",
+  bot = "alpha",
+  folder = `/var/lib/aphelion-bots/${bot}`,
+) => ({ type: "start", run, bot, adapter, folder }) as const;
 
 describe("the cgroup supervisor", () => {
   it.live(
@@ -184,7 +197,7 @@ describe("the cgroup supervisor", () => {
         expect(probe?.bundle).toBe("/adapters/probe.js");
         expect(calls).toEqual([
           `make ${probe?.run ?? ""}`,
-          `spawn ${probe?.run ?? ""} /adapters/probe.js aphelion-probe`,
+          `spawn ${probe?.run ?? ""} /adapters/probe.js aphelion-probe /tmp/aphelion-probe`,
           `kill ${probe?.run ?? ""}`,
           `killed ${probe?.run ?? ""}`,
           `remove ${probe?.run ?? ""}`,
@@ -217,7 +230,7 @@ describe("the cgroup supervisor", () => {
         yield* until(is("killed", runA));
         expect(calls).toEqual([
           `make ${runA}`,
-          `spawn ${runA} /adapters/fake.js alpha`,
+          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha`,
           `kill ${runA}`,
           `killed ${runA}`,
           `remove ${runA}`,
@@ -255,6 +268,66 @@ describe("the cgroup supervisor", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.live(
+    "refuses a bot folder that isn't an absolute, normalized path, and passes a custom one through",
+    () =>
+      Effect.gen(function* () {
+        const { calls, until, send } = yield* supervisor();
+        yield* until(is("ready"));
+        calls.length = 0;
+        const bad = [
+          "bots/alpha",
+          "",
+          "/var/lib/aphelion-bots/../aphelion",
+          "/var/lib/./aphelion-bots/alpha",
+          "//var/lib/aphelion-bots/alpha",
+          "/var/lib//aphelion-bots/alpha",
+          "/var/lib/aphelion-bots/alpha/",
+          "/",
+          "/var/lib/aphelion-bots/al\0pha",
+          "/var/lib/aphelion-bots/al\npha",
+          `/${"a".repeat(4096)}`,
+        ];
+        for (const folder of bad) {
+          yield* send(start(runA, "fake", "alpha", folder));
+          expect(yield* until(is("start-failed", runA))).toMatchObject({
+            reason: "the bot folder isn't an absolute, normalized path",
+          });
+        }
+        expect(calls).toEqual([]);
+        yield* send(start(runA, "fake", "alpha", "/srv/volume/alpha"));
+        yield* until(is("started", runA));
+        expect(calls).toEqual([
+          `make ${runA}`,
+          `spawn ${runA} /adapters/fake.js alpha /srv/volume/alpha`,
+        ]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps a run whose kill failed, so a later kill can try again", () =>
+    Effect.gen(function* () {
+      const { calls, until, send } = yield* supervisor({
+        killFails: { run: runA, times: 1 },
+      });
+      yield* until(is("ready"));
+      calls.length = 0;
+      yield* send(start(runA));
+      yield* until(is("started", runA));
+      yield* send({ type: "kill", run: runA });
+      expect(yield* until(is("kill-failed", runA))).toEqual({
+        type: "kill-failed",
+        run: runA,
+        reason: "populated: ETIMEDOUT",
+      });
+      yield* send({ type: "kill", run: runA });
+      yield* until(is("killed", runA));
+      expect(calls.filter((call) => call.startsWith("kill "))).toEqual([
+        `kill ${runA}`,
+        `kill ${runA}`,
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
   it.live("refuses to kill a run it has no record of", () =>
     Effect.gen(function* () {
       const { calls, until, send } = yield* supervisor();
@@ -287,7 +360,7 @@ describe("the cgroup supervisor", () => {
         yield* Effect.sleep("100 millis");
         expect(calls).toEqual([
           `make ${runA}`,
-          `spawn ${runA} /adapters/fake.js alpha`,
+          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha`,
         ]);
         yield* Deferred.succeed((yield* childAt(1)).placed, true);
         yield* until(is("killed", runA));
@@ -321,7 +394,7 @@ describe("the cgroup supervisor", () => {
         yield* until(is("killed", runA));
         expect(calls).toEqual([
           `make ${runA}`,
-          `spawn ${runA} /adapters/fake.js alpha`,
+          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha`,
           `remove ${runA}`,
         ]);
       }).pipe(Effect.scoped),

@@ -1,6 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
-import { botIdPattern } from "../cgroups/protocol";
+import { botIdPattern, isBotFolder } from "../cgroups/protocol";
 import { libc, PR_SET_DUMPABLE } from "./process-tree";
 
 const refuse = (why: string): never => {
@@ -13,12 +12,11 @@ if (libc().prctl(PR_SET_DUMPABLE, 0n, 0n, 0n, 0n) !== 0) {
 }
 
 const bot = process.argv[2] ?? "";
-const home = process.env["HOME"] ?? "";
-if (!botIdPattern.test(bot) || !isAbsolute(home)) {
-  refuse("the adapter was started without a bot id or home");
+const folder = process.argv[3] ?? "";
+if (!botIdPattern.test(bot) || !isBotFolder(folder)) {
+  refuse("the adapter was started without a bot id or folder");
 }
 try {
-  const folder = join(home, bot);
   mkdirSync(folder, { recursive: true, mode: 0o750 });
   process.chdir(folder);
 } catch {

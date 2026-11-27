@@ -62,9 +62,9 @@ describe("the supervisor's cgroup host", () => {
           const cgroups = yield* CgroupHost;
           const probe = yield* cgroups.makeRun(probeRun);
           const created = modes(probe);
-          yield* cgroups.spawn(probe, entry, probeBot);
+          yield* cgroups.spawn(probe, entry, probeBot, "/tmp/aphelion-probe");
           const bot = yield* cgroups.makeRun(botRun);
-          yield* cgroups.spawn(bot, entry, "alpha");
+          yield* cgroups.spawn(bot, entry, "alpha", "/srv/alpha");
           expect(created).toEqual([
             { mode: "700", gid: own },
             { mode: "600", gid: own },

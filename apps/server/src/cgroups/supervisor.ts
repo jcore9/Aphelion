@@ -14,6 +14,7 @@ import type { Link } from "../plugins/link";
 import type { ProcessExit } from "../plugins/processes";
 import {
   botIdPattern,
+  isBotFolder,
   runIdPattern,
   type SupervisorReply,
   type SupervisorRequest,
@@ -56,6 +57,7 @@ export class CgroupHost extends Context.Service<
       paths: RunPaths,
       entry: AdapterEntry,
       bot: string,
+      folder: string,
     ) => Effect.Effect<SupervisedChild, HostFailed>;
     readonly kill: (paths: RunPaths) => Effect.Effect<void, HostFailed>;
     readonly removeRun: (paths: RunPaths) => Effect.Effect<void, HostFailed>;
@@ -80,6 +82,7 @@ export class CgroupHost extends Context.Service<
 
 export const probeBot = "aphelion-probe";
 export const probeAdapter = "probe";
+export const probeFolder = "/tmp/aphelion-probe";
 export const unsafeReason = "the cgroup check failed, so no bot starts";
 
 export interface SupervisorOptions {
@@ -114,7 +117,12 @@ export const runSupervisor = (
     const known = new Set<string>();
     const work = yield* FiberSet.make();
 
-    const register = (run: string, bot: string, adapter: string) =>
+    const register = (
+      run: string,
+      bot: string,
+      adapter: string,
+      folder: string,
+    ) =>
       Effect.gen(function* () {
         if (!runIdPattern.test(run)) {
           return yield* new Refused({ reason: "the run id isn't a UUIDv7" });
@@ -127,6 +135,11 @@ export const runSupervisor = (
         }
         if (!botIdPattern.test(bot)) {
           return yield* new Refused({ reason: "the bot id isn't valid" });
+        }
+        if (!isBotFolder(folder)) {
+          return yield* new Refused({
+            reason: "the bot folder isn't an absolute, normalized path",
+          });
         }
         if (known.has(run)) {
           return yield* new Refused({ reason: "that run was already started" });
@@ -146,6 +159,7 @@ export const runSupervisor = (
     const launch = (
       run: string,
       bot: string,
+      folder: string,
       record: RunRecord,
       entry: AdapterEntry,
     ) =>
@@ -153,7 +167,7 @@ export const runSupervisor = (
         const paths = yield* host.makeRun(run);
         record.paths = paths;
         const child = yield* host
-          .spawn(paths, entry, bot)
+          .spawn(paths, entry, bot, folder)
           .pipe(Effect.tapError(() => Effect.ignore(host.removeRun(paths))));
         record.child = child;
         if (yield* child.placed) return { paths, child } satisfies Started;
@@ -233,8 +247,9 @@ export const runSupervisor = (
             run,
             probeBot,
             probeAdapter,
+            probeFolder,
           );
-          return yield* launch(run, probeBot, record, entry);
+          return yield* launch(run, probeBot, probeFolder, record, entry);
         }),
       );
       const killed = at("kill", kill(run));
@@ -272,7 +287,7 @@ export const runSupervisor = (
           link.send({ type: "start-failed", run: request.run, reason });
         if (unsafe !== undefined) return yield* failed(unsafeReason);
         const registered = yield* Effect.result(
-          register(request.run, request.bot, request.adapter),
+          register(request.run, request.bot, request.adapter, request.folder),
         );
         if (registered._tag === "Failure") {
           return yield* failed(registered.failure.reason);
@@ -280,7 +295,7 @@ export const runSupervisor = (
         const { record, entry } = registered.success;
         yield* FiberSet.run(
           work,
-          launch(request.run, request.bot, record, entry).pipe(
+          launch(request.run, request.bot, request.folder, record, entry).pipe(
             Effect.matchEffect({
               onFailure: (error) => {
                 logger.warn("the supervisor couldn't start an adapter", {

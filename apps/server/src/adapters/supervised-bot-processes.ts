@@ -170,6 +170,7 @@ export const supervisedBotProcesses = (
             run,
             bot: spec.bot,
             adapter: spec.adapter,
+            folder: spec.folder,
           });
           const paths = yield* Deferred.await(waiting.started).pipe(
             Effect.timeoutOrElse({

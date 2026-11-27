@@ -7,6 +7,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  statSync,
   write,
 } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -163,13 +164,14 @@ const testSupervisor = (
             "sh",
             [
               "-c",
-              'exec 1>"$1/stdout" 2>"$1/stderr" 0<"$1/stdin"; unset PWD; exec "$2" --no-env-file --preload "$3" "$4" "$5"',
+              'exec 1>"$1/stdout" 2>"$1/stderr" 0<"$1/stdin"; unset PWD; exec "$2" --no-env-file --preload "$3" "$4" "$5" "$6"',
               "sh",
               folder,
               process.execPath,
               launcher,
               adapters[request.adapter] ?? "",
               request.bot,
+              request.folder,
             ],
             { stdio: "ignore", env: botEnvironment("claude", home) },
           );
@@ -311,14 +313,18 @@ const startRunner = Effect.gen(function* () {
       }
     }).pipe(Effect.timeout("20 seconds"), Effect.orDie);
   const send = (frame: RunnerRequest) => link.send(frame);
-  const start = (run: number, adapter: keyof typeof adapters = "plain") =>
+  const start = (
+    run: number,
+    adapter: keyof typeof adapters = "plain",
+    folder = join(home, "alpha"),
+  ) =>
     send({
       type: "start",
       bot: "alpha",
       run,
       provider: "claude",
       adapter,
-      folder: join(home, "alpha"),
+      folder,
       resume: null,
     });
   const turn = (run: number, id: string) =>
@@ -412,6 +418,31 @@ describe.skipIf(process.platform !== "linux" || isRoot)(
               (n) => n === 0,
             ),
           ).toBe(0);
+        }).pipe(Effect.scoped),
+      30_000,
+    );
+
+    it.live(
+      "creates a custom bot folder on a fresh volume and runs the adapter in it",
+      () =>
+        Effect.gen(function* () {
+          const runner = yield* startRunner;
+          const folder = join(runner.base, "volume", "bots", "alpha");
+          yield* runner.start(1, "plain", folder);
+          yield* runner.until(is("started"));
+          yield* runner.turn(1, "t1");
+          const delta = yield* runner.until(
+            (frame) =>
+              frame.type === "event" &&
+              frame.envelope.event.type === "text.delta",
+          );
+          const event = delta.type === "event" ? delta.envelope.event : null;
+          const { cwd } = JSON.parse(
+            event?.type === "text.delta" ? event.text : "{}",
+          ) as { cwd: string };
+          expect(cwd).toBe(folder);
+          expect((statSync(folder).mode & 0o777).toString(8)).toBe("750");
+          expect(existsSync(join(runner.home, "alpha"))).toBe(false);
         }).pipe(Effect.scoped),
       30_000,
     );

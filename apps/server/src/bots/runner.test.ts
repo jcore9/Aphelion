@@ -127,7 +127,11 @@ describe("the bot runner", () => {
           "spawned",
           "started",
         ]);
-        expect(fake.runs[0]?.spec).toEqual({ bot: "alpha", adapter: "fake" });
+        expect(fake.runs[0]?.spec).toEqual({
+          bot: "alpha",
+          adapter: "fake",
+          folder: "/bots/alpha",
+        });
         expect(alpha.made[0]?.contexts[0]).toMatchObject({
           bot: { id: "alpha" },
           folder: "/bots/alpha",
