@@ -41,7 +41,9 @@ check_checkout_owned() {
 }
 
 inspect_checkout() {
-  [[ -e $root ]] || return 0
+  [[ -e $root || -L $root ]] || return 0
+  [[ ! -L $root && ! -L $root/.git ]] ||
+    stop "$root or $root/.git is a symbolic link, so the installer can't check what it points to. Replace it with the real folder, then run this again"
   [[ -d $root/.git ]] || stop "$root exists and isn't a clone of Aphelion. Move it away first"
   check_checkout_owned
   local origin dirty tag_commit
@@ -52,7 +54,7 @@ inspect_checkout() {
     stop "git status failed in $root, so the installer can't tell whether it has local changes"
   [[ -z $dirty ]] || stop "$root has local changes. Keep or undo them, then run this again"
   previous=$(git -C "$root" rev-parse HEAD) || stop "git can't read the commit that $root is on"
-  previous_branch=$(git -C "$root" symbolic-ref -q --short HEAD) || previous_branch=""
+  previous_branch=$(git -C "$root" symbolic-ref -q HEAD) || previous_branch=""
   tag_commit=$(git -C "$root" rev-parse "refs/tags/$tag^{commit}" 2>/dev/null) || tag_commit=""
   if [[ -n $tag_commit && $tag_commit == "$previous" ]]; then
     at_tag=1
@@ -177,7 +179,7 @@ main() {
   if ! "$root/deploy/host/get-image" "$tag"; then
     if ((moved)); then
       if [[ -n $previous_branch ]]; then
-        git -C "$root" checkout --quiet "$previous_branch"
+        git -C "$root" switch --quiet -- "${previous_branch#refs/heads/}"
       else
         git -C "$root" -c advice.detachedHead=false checkout --quiet --detach "$previous"
       fi

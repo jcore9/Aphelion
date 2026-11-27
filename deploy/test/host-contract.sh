@@ -794,7 +794,12 @@ case $args in
     echo "${FAKE_CLONE_TAG:?}" >"$target/.git/tag" ;;
   *" remote get-url origin "*) echo "${FAKE_ORIGIN:-https://github.com/jcore9/Aphelion.git}" ;;
   *" symbolic-ref "*)
-    [[ -e /opt/aphelion/.git/branch ]] && cat /opt/aphelion/.git/branch || exit 1 ;;
+    [[ -e /opt/aphelion/.git/branch ]] && echo "refs/heads/$(cat /opt/aphelion/.git/branch)" || exit 1 ;;
+  *" switch --quiet -- "*)
+    target=${*: -1}
+    [[ $target == "$(cat /opt/aphelion/.git/branchname 2>/dev/null)" ]] || exit 1
+    echo "$target" >/opt/aphelion/.git/branch
+    cp /opt/aphelion/.git/branchtip /opt/aphelion/.git/tag ;;
   *" describe "*) head_tag ;;
   *" status "*)
     [[ -z ${FAKE_STATUS_FAIL:-} ]] || { echo "fatal: not a git repository" >&2; exit 128; }
@@ -1072,8 +1077,18 @@ chmod 0755 /opt/aphelion/deploy/host/get-image
 chown nobody /opt/aphelion/deploy/host
 refuses_checkout "/opt/aphelion/deploy/host"
 chown root /opt/aphelion/deploy/host
+mv /opt/aphelion/.git /opt/aphelion-git
+ln -s /opt/aphelion-git /opt/aphelion/.git
+refuses_checkout "symbolic link"
+rm /opt/aphelion/.git
+mv /opt/aphelion-git /opt/aphelion/.git
+mv /opt/aphelion /opt/aphelion-real
+ln -s /opt/aphelion-real /opt/aphelion
+refuses_checkout "symbolic link"
+rm /opt/aphelion
+mv /opt/aphelion-real /opt/aphelion
 run_installer --tag v9.9.9 --no-start || fail "the installer refused a checkout that only root can write: $(cat /tmp/installer-out)"
-pass "the installer refuses a checkout with a file that isn't root's or that others can write, naming it, an origin that differs, or a failed git status, before it changes anything"
+pass "the installer refuses a checkout with a file that isn't root's or that others can write, naming it, a symbolic link for the checkout or its .git, an origin that differs, or a failed git status, before it changes anything"
 
 fresh_host
 export FAKE_DIGEST_FILE=present
@@ -1123,6 +1138,7 @@ FAKE_DIGEST_LINE=ghcr.io/jcore9/aphelion@sha256:00000000000000000000000000000000
   run_installer --tag v9.8.8 --no-start || status=$?
 [[ $status != 0 && $(cat /opt/aphelion/.git/tag) == v9.9.9 && $(cat /opt/aphelion/.git/branch 2>/dev/null) == main ]] ||
   fail "a digest mismatch didn't put the checkout back on its branch ($status, branch '$(cat /opt/aphelion/.git/branch 2>/dev/null)'): $(cat /tmp/installer-out)"
+called "git -C /opt/aphelion switch --quiet -- main" || fail "the rollback didn't switch to the branch by name, so a tag of the same name could detach it: $(cat "$FAKE_CALLS")"
 pass "a digest mismatch puts a checkout that was on a branch back on that branch and commit"
 
 fresh_host
