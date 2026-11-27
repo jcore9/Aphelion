@@ -2,7 +2,7 @@
 
 `aphelion` on the host is a root-only script, [`deploy/host/aphelion`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/aphelion). It runs the Docker steps of the [install guide](../guides/install.md) for you, so you type no Docker words. [`deploy/host/install`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/install) links it to `/usr/local/bin/aphelion`, a folder on root's PATH, which is the list of folders the shell searches for commands.
 
-It is not the server's [`aphelion` command](cli.md). That one runs inside the container. The host command runs it for the `device`, `tool` and `plugin` commands.
+It is not the server's [`aphelion` command](cli.md). That one runs inside the container. The host command runs it for the `device`, `tool`, `key` and `plugin` commands.
 
 ## Commands
 
@@ -18,6 +18,10 @@ It is not the server's [`aphelion` command](cli.md). That one runs inside the co
 | `sudo aphelion tool check` | Asks each AI tool's vendor for its newest version |
 | `sudo aphelion tool remove NAME` | Removes an installed AI tool |
 | `sudo aphelion sign-in NAME` | Signs in to an installed AI tool, on your terminal |
+| `sudo aphelion key add NAME` | Asks for an API key for `claude`, `codex` or `grok` on your terminal and stores it encrypted |
+| `sudo aphelion key test NAME` | Asks the tool's provider whether it accepts the stored key |
+| `sudo aphelion key replace NAME` | Asks for a new API key and stores it in place of the old one |
+| `sudo aphelion key remove NAME` | Deletes the stored API key |
 | `sudo aphelion backup [--to FOLDER]` | Stops the service, packs the six volumes into a new folder, starts the service and checks the archive |
 | `sudo aphelion restore [PATH]` | Puts a backup into new volumes, finishes the restore and starts the service |
 | `sudo aphelion plugin install FOLDER [--approve DIGEST]` | Copies a plugin folder into the container, then previews or approves it |
@@ -39,7 +43,7 @@ Run any other command without root, and it prints `Run it with sudo: sudo apheli
 | 1 | `status` found the service or `/health` down. `check` found a failed check. |
 | 2 | The command was misused, or it wasn't run as root. |
 
-A `device`, `tool` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `sign-in` exits with the code of the tool's own sign-in. `sign-in`, `backup` and `restore` exit with 1 when they refuse or a step fails. `plugin install` exits with 1 when it refuses.
+A `device`, `tool`, `key` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `sign-in` exits with the code of the tool's own sign-in. `sign-in`, `key add`, `key replace`, `backup` and `restore` exit with 1 when they refuse or a step fails. `plugin install` exits with 1 when it refuses.
 
 ## `status`
 
@@ -72,6 +76,23 @@ For each installed tool that has a status command, Aphelion runs that command as
 - It refuses a name that isn't on the list, and a tool that isn't installed, and names the command that installs it. It also refuses when the list gives no sign-in command for the tool, which means the image is older than the command.
 - It refuses without a terminal, on standard input or standard output, with `sign-in needs a terminal. Run it in a shell on the host, not through a pipe or a script.`
 - The tool talks to your terminal directly. Aphelion doesn't capture or log what it prints, such as a code or a token ([decision 0019](../decisions/0019-cli-subscription-use.md)).
+
+## `key`
+
+`sudo aphelion key add NAME` and `sudo aphelion key replace NAME` store an API key for the AI tool `NAME`. [`aphelion key add`](cli.md#aphelion-key-add-name) lists which vendor's key each tool takes. Bots don't use the key yet ([#181](https://github.com/jcore9/Aphelion/issues/181)).
+
+```text
+$ sudo aphelion key add claude
+API key for claude:
+Stored the claude API key. Test it with: aphelion key test claude
+```
+
+- It asks `API key for NAME: ` and turns the echo off, so the key doesn't show as you type or paste it. Press Enter after the key.
+- It sends the key to the server's command on standard input. The key never appears on a command line, so it isn't in the shell history or in the list of running processes.
+- It refuses without a terminal on standard input, with `key add needs a terminal, so you can type the key without it showing. Run it in a shell on the host, not through a pipe or a script.`
+- For a name other than `claude`, `codex` or `grok`, it asks for no key. The server's command refuses the name and says why.
+
+`sudo aphelion key test NAME` and `sudo aphelion key remove NAME` run the server's command and pass its output and exit code through.
 
 ## `backup`
 
@@ -143,6 +164,8 @@ Compose's own `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` pass through to every ca
 | --- | --- |
 | `device …` | `docker compose exec -T --user harness aphelion aphelion device …`, with output and exit code passed through |
 | `tool …` | `docker compose exec -T --user harness aphelion aphelion tool …`, with output and exit code passed through |
+| `key add NAME`, `key replace NAME` | Reads the key with `read -s`, then `printf '%s\n' KEY \| docker compose exec -T --user harness aphelion aphelion key add NAME`, or `key replace NAME`. `printf` is built into the shell, so the key isn't on any command line. |
+| `key test NAME`, `key remove NAME` | `docker compose exec -T --user harness aphelion aphelion key …`, with output and exit code passed through |
 | `plugin dev …` | `docker compose exec --user harness aphelion aphelion plugin dev …`, without `-T`, so Ctrl-C stops it |
 | `plugin install FOLDER` | `docker compose cp FOLDER aphelion:/opt/aphelion/plugins/NAME`, then `docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/NAME …` |
 | `plugin …` (other) | `docker compose exec -T --user harness aphelion aphelion plugin …`, with output and exit code passed through |
