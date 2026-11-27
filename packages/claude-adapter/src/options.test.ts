@@ -100,16 +100,33 @@ describe("queryOptions", () => {
       "Grep",
       "Bash",
     ]);
-    expect(options.disallowedTools).toEqual(["WebFetch", "WebSearch", "Agent"]);
+    expect(options.disallowedTools).toEqual([
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Skill",
+    ]);
   });
 
-  it("turns off the account's claude.ai connectors, synced skills and plugins, bundled skills and auto memory", () => {
+  it("enables no skills", () => {
+    expect(build().skills).toEqual([]);
+  });
+
+  it("turns off the account's claude.ai connectors, skills, plugins, memory, workflows, artifacts and session sharing", () => {
     expect(build().settings).toEqual({
       disableClaudeAiConnectors: true,
       syncClaudeAiSkills: false,
       syncClaudeAiPlugins: false,
       disableBundledSkills: true,
+      disableSkillShellExecution: true,
       autoMemoryEnabled: false,
+      autoDreamEnabled: false,
+      disableWorkflows: true,
+      enableWorkflows: false,
+      workflowKeywordTriggerEnabled: false,
+      enableArtifact: false,
+      crossSessionInbound: "refuse",
+      autoUploadSessions: false,
     });
   });
 
