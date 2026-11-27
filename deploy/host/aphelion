@@ -661,7 +661,7 @@ rollback_upgrade() {
   restore_image "$previous_image" || image_back=0
   if ((!image_back)); then
     marker_existed=1
-    echo "aphelion: The earlier image is not back on aphelion:local. Run the same sudo aphelion upgrade command again to finish the upgrade." >&2
+    echo "aphelion: aphelion:local isn't back to what it was before this upgrade. Run the same sudo aphelion upgrade command again to finish the upgrade." >&2
   fi
   ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
 }

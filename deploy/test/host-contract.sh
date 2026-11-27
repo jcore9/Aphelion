@@ -391,6 +391,7 @@ case " $* " in
     fi
     exit ;;
   *" image rm "*)
+    [[ -z ${FAKE_RM_FAIL:-} ]] || exit 1
     rm -f "$FAKE_STATE/local" "$FAKE_STATE/local-id"
     exit 0 ;;
   *" tag "*)
@@ -2047,13 +2048,20 @@ pass "upgrade keeps the checkout and the marker, and puts aphelion:local back, w
 reset_upgrade_repo
 status=0
 out=$(FAKE_TAG_FAIL=sha256:local- FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_CHECK_KEY=reject aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
-[[ $status == 1 && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && -e /opt/aphelion/.git/aphelion-upgrade-pending && $out == *"The earlier image is not back on aphelion:local"* ]] ||
+[[ $status == 1 && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && -e $marker && $out == *"aphelion:local isn't back to what it was before this upgrade"* ]] ||
   fail "a failed image rollback didn't keep the marker or say so ($status): $out"
 status=0
 out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.1 2>&1) || status=$?
-[[ $out != *"already at"* && $out == *"Finished upgrading Aphelion to v0.1.0-alpha.1."* ]] ||
-  fail "a rerun of the old tag after a failed image rollback took the already-at shortcut ($status): $out"
-pass "upgrade keeps the marker when the image rollback fails, so a rerun doesn't say already at"
+[[ $status == 0 && ! -e $marker && $out != *"already at"* && $out == *"Finished upgrading Aphelion to v0.1.0-alpha.1."* ]] ||
+  fail "a rerun of the old tag after a failed image rollback took the already-at shortcut or left the marker ($status): $out"
+
+reset_upgrade_repo
+rm -f "$FAKE_STATE/local" "$FAKE_STATE/local-id"
+status=0
+out=$(FAKE_RM_FAIL=1 FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_CHECK_KEY=reject aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 1 && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && -e $marker && $out == *"couldn't remove the new aphelion:local tag"* && $out == *"aphelion:local isn't back to what it was before this upgrade"* ]] ||
+  fail "a failed removal of a new aphelion:local tag didn't keep the marker or say so ($status): $out"
+pass "upgrade keeps the marker when the image rollback fails, whether it puts an earlier image back or removes a new tag, so a rerun doesn't say already at"
 
 reset_upgrade_repo
 status=0
