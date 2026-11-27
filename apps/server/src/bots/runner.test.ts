@@ -689,6 +689,42 @@ describe("the bot runner", () => {
   );
 
   it.live(
+    "refuses a start queued behind a stop whose kill failed, and never starts it after the retried kill",
+    () =>
+      Effect.gen(function* () {
+        const alpha = scripted([reply]);
+        const { fake, frames, until, send } = yield* runner({
+          alpha: {
+            ...alpha.bot,
+            killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+          },
+        });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        yield* send({ type: "stop", bot: "alpha", run: 1 });
+        yield* send(startFrame("alpha", 2));
+        yield* until(is("stop-failed"));
+        expect(frames.filter(is("start-failed"))).toEqual([
+          {
+            type: "start-failed",
+            bot: "alpha",
+            run: 2,
+            stage: "spawn",
+            reason: wedgedReason,
+          },
+        ]);
+        yield* send({ type: "stop", bot: "alpha", run: 1 });
+        yield* until(is("stopped"));
+        yield* Effect.sleep("300 millis");
+        expect(fake.runs).toHaveLength(1);
+        expect(frames.filter(is("spawned"))).toEqual([
+          { type: "spawned", bot: "alpha", run: 1 },
+        ]);
+      }).pipe(Effect.scoped),
+    10_000,
+  );
+
+  it.live(
     "keeps a cancelled run whose kill failed, ends its turn, answers stop-failed instead of exited, and kills it on the next stop",
     () =>
       Effect.gen(function* () {

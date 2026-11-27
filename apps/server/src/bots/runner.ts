@@ -570,6 +570,17 @@ export const runBotRunner = (
       slot.phase = "unkilled";
       slot.cancel = undefined;
       slot.restarting = false;
+      const queued = slot.next;
+      slot.next = undefined;
+      if (queued !== undefined) {
+        yield* link.send({
+          type: "start-failed",
+          bot: queued.bot,
+          run: queued.run,
+          stage: "spawn",
+          reason: wedgedReason,
+        });
+      }
       yield* link.send({ type: "stop-failed", ...frameOf(slot) });
     });
 
