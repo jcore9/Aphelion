@@ -1,0 +1,51 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly image=aphelion:local
+readonly repository=jcore9/Aphelion
+readonly release_url=https://github.com/$repository/releases/download
+
+if (($# != 1)) || [[ ! $1 =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  echo "usage: get-image TAG   (for example v0.1.0-alpha.2)" >&2
+  exit 2
+fi
+readonly tag=$1
+cd "$(dirname "$0")/.."
+
+say() { echo "get-image: $*"; }
+
+build() {
+  say "building the image on this host"
+  docker compose --project-directory "$PWD" build
+}
+
+carries() {
+  docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$1" 2>/dev/null | grep -qxF "$reference"
+}
+
+if ! reference=$(curl -fsSL --max-time 60 "$release_url/$tag/aphelion-image.sha256" 2>/dev/null); then
+  say "no published image digest for $tag"
+  build
+  exit
+fi
+reference=${reference%$'\n'}
+if [[ ! $reference =~ ^ghcr\.io/jcore9/aphelion@sha256:[0-9a-f]{64}$ ]]; then
+  echo "get-image: the digest file of $tag isn't one ghcr.io/$repository@sha256 reference, so get-image stops" >&2
+  exit 1
+fi
+
+if carries "$image"; then
+  say "$image already is $reference"
+  exit
+fi
+if ! docker pull --quiet "$reference" >/dev/null 2>&1; then
+  say "couldn't download $reference. A private package refuses a download without a sign-in"
+  build
+  exit
+fi
+if ! carries "$reference"; then
+  echo "get-image: what Docker downloaded for $reference doesn't carry that digest, so get-image stops and changes nothing" >&2
+  exit 1
+fi
+docker tag "$reference" "$image"
+say "downloaded and checked $reference, now $image"

@@ -14,7 +14,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateIdentity, identityToRecipient } from "age-encryption";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LocalStoreRefusal, openLocalStore } from "./local-store";
+import {
+  LocalStoreRefusal,
+  openLocalStore,
+  validateBootstrapKey,
+} from "./local-store";
 import { Secret } from "./secret";
 
 const newKey = async () =>
@@ -223,5 +227,22 @@ describe("local secret store", () => {
     await expect(open()).rejects.toThrow("Unsafe secrets store file");
     await chmod(recipientFile(), 0o600);
     await expect(open()).resolves.toBeDefined();
+  });
+});
+
+describe("validateBootstrapKey", () => {
+  it("accepts a generated key", async () => {
+    const key = Secret.make(await generateIdentity());
+    await expect(validateBootstrapKey(key)).resolves.toBeUndefined();
+  });
+
+  it("refuses a key that has the right shape but a wrong checksum, without repeating it", async () => {
+    const shaped = `AGE-SECRET-KEY-1${"Q".repeat(58)}`;
+    expect(shaped).toMatch(/^AGE-SECRET-KEY-1[0-9A-Z]{58}$/);
+    const refusal = await validateBootstrapKey(Secret.make(shaped)).catch(
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(LocalStoreRefusal);
+    expect(String(refusal)).not.toContain(shaped);
   });
 });

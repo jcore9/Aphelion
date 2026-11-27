@@ -31,7 +31,9 @@ if [[ -e $command_link && ! -L $command_link ]]; then
 fi
 
 holds_key() {
-  systemd-creds decrypt --name=bootstrap "$1" - 2>/dev/null | grep -Ex 'AGE-SECRET-KEY-1[0-9A-Z]{58}' >/dev/null
+  systemd-creds decrypt --name=bootstrap "$1" - 2>/dev/null |
+    docker run --rm -i --pull never --log-driver none --network none --read-only --user aphelion-secrets \
+      --entrypoint /usr/local/bin/aphelion-secrets aphelion:local --check-key >/dev/null 2>&1
 }
 
 if [[ -e $credential ]]; then
@@ -56,10 +58,16 @@ else
   echo "install: created the bootstrap key in $credential. Keep a recovery copy. Print it with:"
   echo "  sudo systemd-creds decrypt --name=bootstrap $credential -"
 fi
-install -o root -g root -m 0644 "$root/deploy/host/aphelion.service" "$unit"
+unit_changed=0
+if ! cmp -s "$root/deploy/host/aphelion.service" "$unit"; then
+  install -o root -g root -m 0644 "$root/deploy/host/aphelion.service" "$unit"
+  unit_changed=1
+fi
 [[ $(readlink "$command_link" 2>/dev/null) == "$root/deploy/host/aphelion" ]] ||
   ln -sfn "$root/deploy/host/aphelion" "$command_link"
-systemctl daemon-reload
-systemctl enable aphelion.service
+if ((unit_changed)) || [[ $(systemctl show -p NeedDaemonReload --value aphelion.service 2>/dev/null || true) == yes ]]; then
+  systemctl daemon-reload
+fi
+systemctl is-enabled --quiet aphelion.service 2>/dev/null || systemctl enable aphelion.service
 echo "install: aphelion.service is installed and enabled. Start it with: sudo systemctl start aphelion"
 echo "install: $command_link is the aphelion command. Try: sudo aphelion status"
