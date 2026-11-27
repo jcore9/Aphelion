@@ -33,6 +33,8 @@ export interface RunPaths {
   readonly stderr: string;
 }
 
+export type SpawnKind = "probe" | "bot";
+
 export interface SupervisedChild {
   readonly pid: number;
   readonly placed: Effect.Effect<boolean>;
@@ -58,6 +60,7 @@ export class CgroupHost extends Context.Service<
       entry: AdapterEntry,
       bot: string,
       folder: string,
+      kind: SpawnKind,
     ) => Effect.Effect<SupervisedChild, HostFailed>;
     readonly kill: (paths: RunPaths) => Effect.Effect<void, HostFailed>;
     readonly removeRun: (paths: RunPaths) => Effect.Effect<void, HostFailed>;
@@ -82,7 +85,9 @@ export class CgroupHost extends Context.Service<
 
 export const probeBot = "aphelion-probe";
 export const probeAdapter = "probe";
-export const probeFolder = "/tmp/aphelion-probe";
+export const probeFolderOf = (run: string) => `/tmp/aphelion-probe-${run}`;
+export const probeReserved =
+  "only the supervisor's start probe may use the probe adapter or bot id";
 export const unsafeReason = "the cgroup check failed, so no bot starts";
 
 export interface SupervisorOptions {
@@ -162,12 +167,13 @@ export const runSupervisor = (
       folder: string,
       record: RunRecord,
       entry: AdapterEntry,
+      kind: SpawnKind,
     ) =>
       Effect.gen(function* () {
         const paths = yield* host.makeRun(run);
         record.paths = paths;
         const child = yield* host
-          .spawn(paths, entry, bot, folder)
+          .spawn(paths, entry, bot, folder, kind)
           .pipe(Effect.tapError(() => Effect.ignore(host.removeRun(paths))));
         record.child = child;
         if (yield* child.placed) return { paths, child } satisfies Started;
@@ -240,6 +246,7 @@ export const runSupervisor = (
     const probe = Effect.gen(function* () {
       yield* at("own-cgroup", host.probe.ownCgroup);
       const run = randomUUIDv7();
+      const folder = probeFolderOf(run);
       const { paths, child } = yield* at(
         "start",
         Effect.gen(function* () {
@@ -247,9 +254,9 @@ export const runSupervisor = (
             run,
             probeBot,
             probeAdapter,
-            probeFolder,
+            folder,
           );
-          return yield* launch(run, probeBot, probeFolder, record, entry);
+          return yield* launch(run, probeBot, folder, record, entry, "probe");
         }),
       );
       const killed = at("kill", kill(run));
@@ -286,6 +293,9 @@ export const runSupervisor = (
         const failed = (reason: string) =>
           link.send({ type: "start-failed", run: request.run, reason });
         if (unsafe !== undefined) return yield* failed(unsafeReason);
+        if (request.adapter === probeAdapter || request.bot === probeBot) {
+          return yield* failed(probeReserved);
+        }
         const registered = yield* Effect.result(
           register(request.run, request.bot, request.adapter, request.folder),
         );
@@ -295,7 +305,14 @@ export const runSupervisor = (
         const { record, entry } = registered.success;
         yield* FiberSet.run(
           work,
-          launch(request.run, request.bot, request.folder, record, entry).pipe(
+          launch(
+            request.run,
+            request.bot,
+            request.folder,
+            record,
+            entry,
+            "bot",
+          ).pipe(
             Effect.matchEffect({
               onFailure: (error) => {
                 logger.warn("the supervisor couldn't start an adapter", {

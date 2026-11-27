@@ -1,5 +1,9 @@
 import { mkdirSync } from "node:fs";
-import { botIdPattern, isBotFolder } from "../cgroups/protocol";
+import {
+  botIdPattern,
+  isBotFolder,
+  newFolderVariable,
+} from "../cgroups/protocol";
 import { libc, PR_SET_DUMPABLE } from "./process-tree";
 
 const refuse = (why: string): never => {
@@ -17,7 +21,12 @@ if (!botIdPattern.test(bot) || !isBotFolder(folder)) {
   refuse("the adapter was started without a bot id or folder");
 }
 try {
-  mkdirSync(folder, { recursive: true, mode: 0o750 });
+  mkdirSync(
+    folder,
+    process.env[newFolderVariable] === "1"
+      ? { mode: 0o700 }
+      : { recursive: true, mode: 0o750 },
+  );
   process.chdir(folder);
 } catch {
   refuse("the adapter couldn't enter its bot's folder");

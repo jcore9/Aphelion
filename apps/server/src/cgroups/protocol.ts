@@ -10,6 +10,8 @@ export const botIdPattern = /^[a-z][a-z0-9-]{0,62}$/;
 
 export const maxBotFolderBytes = 4096;
 
+export const newFolderVariable = "APHELION_NEW_FOLDER";
+
 const control = (text: string) => {
   for (let index = 0; index < text.length; index++) {
     const code = text.charCodeAt(index);

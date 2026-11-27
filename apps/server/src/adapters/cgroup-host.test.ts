@@ -1,9 +1,17 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { describe } from "vitest";
+import { newFolderVariable } from "../cgroups/protocol";
 import { CgroupHost, probeBot } from "../cgroups/supervisor";
 import { createLogger } from "../log";
 import { bunCgroupHost, maxProbeAnswerBytes, probeAnswer } from "./cgroup-host";
@@ -21,12 +29,12 @@ const scratch = Effect.acquireRelease(
     }),
 );
 
-const host = (root: string) =>
+const host = (root: string, entry = "/bin/true") =>
   bunCgroupHost({
     mount: join(root, "mount"),
     tree: "bots",
     runs: join(root, "runs"),
-    entry: "/bin/true",
+    entry,
     bun: "/usr/local/bin/bun",
     botUid: 10002,
     logger: createLogger({ write: () => undefined }),
@@ -62,9 +70,15 @@ describe("the supervisor's cgroup host", () => {
           const cgroups = yield* CgroupHost;
           const probe = yield* cgroups.makeRun(probeRun);
           const created = modes(probe);
-          yield* cgroups.spawn(probe, entry, probeBot, "/tmp/aphelion-probe");
+          yield* cgroups.spawn(
+            probe,
+            entry,
+            probeBot,
+            `/tmp/aphelion-probe-${probeRun}`,
+            "probe",
+          );
           const bot = yield* cgroups.makeRun(botRun);
-          yield* cgroups.spawn(bot, entry, "alpha", "/srv/alpha");
+          yield* cgroups.spawn(bot, entry, "alpha", "/srv/alpha", "bot");
           expect(created).toEqual([
             { mode: "700", gid: own },
             { mode: "600", gid: own },
@@ -79,6 +93,50 @@ describe("the supervisor's cgroup host", () => {
             { mode: "660", gid: group },
           ]);
         }).pipe(Effect.provide(host(root)));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps a run folder private by the spawn's kind, not by the bot id, and asks only the probe's launcher for a new folder",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* scratch;
+        const own = process.getgid?.() ?? 0;
+        const script = join(root, "entry");
+        writeFileSync(script, '#!/bin/sh\nenv > "$2/env-seen"\n', {
+          mode: 0o755,
+        });
+        yield* Effect.gen(function* () {
+          const cgroups = yield* CgroupHost;
+          const probe = yield* cgroups.makeRun(probeRun);
+          const probeChild = yield* cgroups.spawn(
+            probe,
+            entry,
+            "alpha",
+            `/tmp/aphelion-probe-${probeRun}`,
+            "probe",
+          );
+          const bot = yield* cgroups.makeRun(botRun);
+          const botChild = yield* cgroups.spawn(
+            bot,
+            entry,
+            probeBot,
+            "/srv/alpha",
+            "bot",
+          );
+          yield* probeChild.exited;
+          yield* botChild.exited;
+          expect(modes(probe)[0]).toEqual({ mode: "700", gid: own });
+          expect(modes(bot)[0]?.mode).toBe("750");
+          const seen = (folder: string) =>
+            readFileSync(join(folder, "env-seen"), "utf8").split("\n");
+          expect(seen(probe.folder)).toContain(`${newFolderVariable}=1`);
+          expect(
+            seen(bot.folder).filter((line) =>
+              line.startsWith(`${newFolderVariable}=`),
+            ),
+          ).toEqual([]);
+        }).pipe(Effect.provide(host(root, script)));
       }).pipe(Effect.scoped),
   );
 

@@ -13,12 +13,13 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { z } from "zod";
 import type { Logger } from "../log";
+import { newFolderVariable } from "../cgroups/protocol";
 import {
   CgroupHost,
   HostFailed,
-  probeBot,
   type AdapterEntry,
   type RunPaths,
+  type SpawnKind,
   type SupervisedChild,
 } from "../cgroups/supervisor";
 import { connectRun, type RunPipes } from "./run-fifos";
@@ -185,8 +186,9 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
       entry: AdapterEntry,
       bot: string,
       folder: string,
+      kind: SpawnKind,
     ) =>
-      (bot === probeBot ? Effect.void : share(paths)).pipe(
+      (kind === "probe" ? Effect.void : share(paths)).pipe(
         Effect.andThen(
           attempt("spawn", () =>
             Bun.spawn(
@@ -200,7 +202,10 @@ export const bunCgroupHost = (options: BunCgroupHostOptions) =>
               ],
               {
                 cwd: "/",
-                env: { ...entry.env },
+                env:
+                  kind === "probe"
+                    ? { ...entry.env, [newFolderVariable]: "1" }
+                    : { ...entry.env },
                 stdin: "ignore",
                 stdout: "pipe",
                 stderr: "ignore",

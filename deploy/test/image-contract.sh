@@ -771,6 +771,14 @@ grep -q "^list .* denied$" <<<"$watched" || fail "the runs-group watcher never s
 if grep " ok$" <<<"$watched"; then fail "a process in the aphelion-runs group reached the probe's run folder or pipes"; fi
 pass "a process in the aphelion-runs group can't list the probe's run folder or open its pipes"
 
+docker exec --user aphelion-bot "$container" touch /tmp/aphelion-probe
+docker exec --user root "$container" /usr/local/lib/aphelion/launch --check-cgroups >/dev/null ||
+  fail "the start check failed while an aphelion-bot file sat at /tmp/aphelion-probe"
+leftover=$(docker exec "$container" find /tmp -maxdepth 1 -name 'aphelion-probe-*')
+[[ -z $leftover ]] || fail "the start check left its folder behind: $leftover"
+docker exec --user aphelion-bot "$container" rm -f /tmp/aphelion-probe
+pass "a file an aphelion-bot process left at /tmp/aphelion-probe doesn't break the start check, and the probe's own folder is gone after it"
+
 status=0
 checked=$(host_aphelion check 2>&1) || status=$?
 read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \2/p' <<<"$checked")

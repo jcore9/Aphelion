@@ -15,6 +15,8 @@ import {
 import {
   CgroupHost,
   HostFailed,
+  probeBot,
+  probeReserved,
   runSupervisor,
   type RunPaths,
   type SupervisedChild,
@@ -74,10 +76,10 @@ const fakeHost = (options: HostOptions = {}) =>
             stderr: `/runs/${run}/stderr`,
           };
         }),
-      spawn: (paths, entry, bot, folder) =>
+      spawn: (paths, entry, bot, folder, kind) =>
         Effect.gen(function* () {
           const run = runOf(paths);
-          calls.push(`spawn ${run} ${entry.bundle} ${bot} ${folder}`);
+          calls.push(`spawn ${run} ${entry.bundle} ${bot} ${folder} ${kind}`);
           const child: FakeChild = {
             run,
             bot,
@@ -197,7 +199,7 @@ describe("the cgroup supervisor", () => {
         expect(probe?.bundle).toBe("/adapters/probe.js");
         expect(calls).toEqual([
           `make ${probe?.run ?? ""}`,
-          `spawn ${probe?.run ?? ""} /adapters/probe.js aphelion-probe /tmp/aphelion-probe`,
+          `spawn ${probe?.run ?? ""} /adapters/probe.js aphelion-probe /tmp/aphelion-probe-${probe?.run ?? ""} probe`,
           `kill ${probe?.run ?? ""}`,
           `killed ${probe?.run ?? ""}`,
           `remove ${probe?.run ?? ""}`,
@@ -230,7 +232,7 @@ describe("the cgroup supervisor", () => {
         yield* until(is("killed", runA));
         expect(calls).toEqual([
           `make ${runA}`,
-          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha`,
+          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha bot`,
           `kill ${runA}`,
           `killed ${runA}`,
           `remove ${runA}`,
@@ -299,8 +301,33 @@ describe("the cgroup supervisor", () => {
         yield* until(is("started", runA));
         expect(calls).toEqual([
           `make ${runA}`,
-          `spawn ${runA} /adapters/fake.js alpha /srv/volume/alpha`,
+          `spawn ${runA} /adapters/fake.js alpha /srv/volume/alpha bot`,
         ]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "refuses a start that names the probe's adapter or bot id, which only its own start probe may use",
+    () =>
+      Effect.gen(function* () {
+        const { calls, until, send } = yield* supervisor();
+        yield* until(is("ready"));
+        calls.length = 0;
+        yield* send(start(runA, "probe"));
+        expect(yield* until(is("start-failed", runA))).toMatchObject({
+          reason: probeReserved,
+        });
+        yield* send(start(runA, "fake", probeBot));
+        expect(yield* until(is("start-failed", runA))).toMatchObject({
+          reason: probeReserved,
+        });
+        yield* send(start(runA, "probe", "alpha", "/tmp/aphelion-probe"));
+        expect(yield* until(is("start-failed", runA))).toMatchObject({
+          reason: probeReserved,
+        });
+        expect(calls).toEqual([]);
+        yield* send(start(runA));
+        yield* until(is("started", runA));
       }).pipe(Effect.scoped),
   );
 
@@ -360,7 +387,7 @@ describe("the cgroup supervisor", () => {
         yield* Effect.sleep("100 millis");
         expect(calls).toEqual([
           `make ${runA}`,
-          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha`,
+          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha bot`,
         ]);
         yield* Deferred.succeed((yield* childAt(1)).placed, true);
         yield* until(is("killed", runA));
@@ -394,7 +421,7 @@ describe("the cgroup supervisor", () => {
         yield* until(is("killed", runA));
         expect(calls).toEqual([
           `make ${runA}`,
-          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha`,
+          `spawn ${runA} /adapters/fake.js alpha /var/lib/aphelion-bots/alpha bot`,
           `remove ${runA}`,
         ]);
       }).pipe(Effect.scoped),
