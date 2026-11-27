@@ -19,7 +19,6 @@ const control = (text: string) => {
 };
 
 export const isBotFolder = (folder: string) =>
-  folder.length > 1 &&
   Buffer.byteLength(folder) <= maxBotFolderBytes &&
   posix.isAbsolute(folder) &&
   !folder.endsWith("/") &&
