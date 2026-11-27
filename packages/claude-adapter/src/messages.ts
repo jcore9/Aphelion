@@ -13,6 +13,9 @@ const initMessage = z.object({
   session_id: z.string(),
   permissionMode: z.string(),
   claude_code_version: z.string(),
+  tools: z.array(z.string()),
+  mcp_servers: z.array(z.unknown()),
+  plugins: z.array(z.object({ path: z.string() })),
 });
 
 const textDelta = z.object({
@@ -108,6 +111,9 @@ export type ClaudeMessage =
       readonly session: string;
       readonly permissionMode: string;
       readonly version: string;
+      readonly tools: readonly string[];
+      readonly mcpServers: number;
+      readonly pluginPaths: readonly string[];
     }
   | { readonly kind: "unreadable-init" }
   | { readonly kind: "text"; readonly text: string }
@@ -156,6 +162,9 @@ export function parseMessage(raw: unknown): ClaudeMessage {
             session: init.data.session_id,
             permissionMode: init.data.permissionMode,
             version: init.data.claude_code_version,
+            tools: init.data.tools,
+            mcpServers: init.data.mcp_servers.length,
+            pluginPaths: init.data.plugins.map((plugin) => plugin.path),
           }
         : initSubtype.safeParse(raw).success
           ? { kind: "unreadable-init" }

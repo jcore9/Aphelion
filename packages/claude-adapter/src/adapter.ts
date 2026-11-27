@@ -18,7 +18,13 @@ import {
 } from "@aphelion/plugin-sdk";
 import { z } from "zod";
 import { channel, drain, type Channel } from "./channel.ts";
-import { preToolUseHook, refusalMessage } from "./hook.ts";
+import {
+  preToolUseHook,
+  refusalMessage,
+  unchecked,
+  untilTrusted,
+  type Trust,
+} from "./hook.ts";
 import {
   parseMessage,
   resultOutcome,
@@ -28,6 +34,7 @@ import {
 import {
   claudeCodeVersion,
   claudeEnv,
+  enabledTools,
   queryOptions,
   type ParentEnv,
 } from "./options.ts";
@@ -70,6 +77,7 @@ interface Live {
   readonly query: ClaudeQuery;
   readonly prompts: Channel<SDKUserMessage>;
   readonly abort: AbortController;
+  readonly trust: Trust;
   readonly done: Promise<void>;
 }
 
@@ -142,6 +150,12 @@ const turnEnd = (reason: TurnEndReason): AdapterEvent => ({
 const lineCount = (data: string) =>
   data.split("\n").filter((line) => line !== "").length;
 
+const givenTools = new Set<string>(enabledTools);
+
+const builtInPlugin = "builtin";
+
+const unexpected = `the CLI didn't start as Claude Code ${claudeCodeVersion} in default permission mode`;
+
 export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
   const interruptWaitMs = options.interruptWaitMs ?? 3000;
   const closeWaitMs = options.closeWaitMs ?? 5000;
@@ -177,6 +191,9 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           try {
             const turn = active;
             if (turn?.live.abort !== abort) return refusal;
+            if (!(await unlessAborted(turn.live.trust.checked, signal))) {
+              return refusal;
+            }
             const request = permissionRequestFor({
               tool,
               input,
@@ -215,6 +232,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         if (lines > 0) {
           context.log(`the CLI wrote ${String(lines)} lines to stderr`);
         }
+        owner.trust.settle(false);
         if (live === owner) live = undefined;
         deliver(owner, last);
       };
@@ -222,6 +240,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
       const start = (): Live | undefined => {
         const abort = new AbortController();
         const prompts = channel<SDKUserMessage>();
+        const trust: Trust = unchecked();
         let stderrLines = 0;
         if (saved === null) costBaseline = 0;
         try {
@@ -232,7 +251,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               resume: saved,
               env,
               canUseTool: canUseTool(abort),
-              preToolUse,
+              preToolUse: untilTrusted(trust, preToolUse),
               stderr: (data) => {
                 stderrLines += lineCount(data);
               },
@@ -243,6 +262,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
             query,
             prompts,
             abort,
+            trust,
             done: Promise.resolve().then(() => pump(owner, () => stderrLines)),
           };
           live = owner;
@@ -254,6 +274,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
       };
 
       const kill = (owner: Live) => {
+        owner.trust.settle(false);
         owner.abort.abort();
         if (live === owner) live = undefined;
       };
@@ -281,10 +302,8 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         yield { type: "error", code };
       }
 
-      function* stopUnexpected(turn: ActiveTurn): Generator<AdapterEvent> {
-        context.log(
-          `the CLI didn't start as Claude Code ${claudeCodeVersion} in default permission mode, so the adapter stopped it`,
-        );
+      function* stop(turn: ActiveTurn, why: string): Generator<AdapterEvent> {
+        context.log(`${why}, so the adapter stopped it`);
         kill(turn.live);
         yield* error(turn, "vendor");
         yield turnEnd("error");
@@ -297,16 +316,30 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
       ): Generator<AdapterEvent, boolean> {
         switch (message.kind) {
           case "unreadable-init":
-            yield* stopUnexpected(turn);
+            yield* stop(turn, unexpected);
             return true;
           case "init": {
             if (
               message.permissionMode !== "default" ||
               message.version !== claudeCodeVersion
             ) {
-              yield* stopUnexpected(turn);
+              yield* stop(turn, unexpected);
               return true;
             }
+            const tools = message.tools.filter(
+              (tool) => !givenTools.has(tool),
+            ).length;
+            const plugins = message.pluginPaths.filter(
+              (path) => path !== builtInPlugin,
+            ).length;
+            if (tools > 0 || message.mcpServers > 0 || plugins > 0) {
+              yield* stop(
+                turn,
+                `the session reported ${String(tools)} tools, ${String(message.mcpServers)} MCP servers and ${String(plugins)} plugins that Aphelion didn't give it`,
+              );
+              return true;
+            }
+            turn.live.trust.settle(true);
             const ref = claudeRef(message.session);
             if (ref && ref !== announced) {
               announced = ref;

@@ -129,6 +129,10 @@ export const sdk = {
       session_id: string;
       permissionMode: string;
       claude_code_version: string;
+      tools: string[];
+      mcp_servers: { name: string; status: string; source?: string }[];
+      skills: string[];
+      plugins: { name: string; path: string; source?: string }[];
     }> = {},
   ) => ({
     type: "system",
@@ -139,6 +143,9 @@ export const sdk = {
     apiKeySource: "none",
     cwd: "/work",
     tools: ["Read", "Bash"],
+    mcp_servers: [],
+    skills: [],
+    plugins: [],
     ...overrides,
   }),
   text: (text: string, parent: string | null = null) => ({

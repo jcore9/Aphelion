@@ -40,3 +40,18 @@ export function preToolUseHook(rule: Decider, folder: string): HookCallback {
     }
   };
 }
+
+export interface Trust {
+  readonly checked: Promise<boolean>;
+  settle(trusted: boolean): void;
+}
+
+export function unchecked(): Trust {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  return { checked: promise, settle: resolve };
+}
+
+export function untilTrusted(trust: Trust, hook: HookCallback): HookCallback {
+  return async (input, toolUseID, options) =>
+    (await trust.checked) ? hook(input, toolUseID, options) : blocked;
+}

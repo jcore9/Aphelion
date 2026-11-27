@@ -13,6 +13,7 @@ import {
   startAdapter,
   type AdapterHarness,
 } from "@aphelion/plugin-sdk/testing";
+import type { HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 import { claudeAdapter } from "./adapter.ts";
 import {
@@ -584,6 +585,202 @@ describe("how a turn ends", () => {
     const run = await runTurn(adapter);
 
     expect(eventsOf(run)).toContainEqual({ type: "text.delta", text: "Hello" });
+    expect(eventsOf(run).at(-1)).toEqual({
+      type: "turn.end",
+      reason: "completed",
+    });
+    expect(checkStream(run.events)).toEqual([]);
+  });
+});
+
+describe("when the session has more than the adapter gave it", () => {
+  const sevenTools = [
+    "Read",
+    "Write",
+    "Edit",
+    "NotebookEdit",
+    "Glob",
+    "Grep",
+    "Bash",
+  ];
+
+  const turnWith = (init: unknown): ScriptStep[] => [
+    { send: init },
+    {
+      ask: {
+        tool: "Read",
+        input: { file_path: "/work/notes.md" },
+        toolUseID: "toolu_01",
+        requestId: "req-1",
+      },
+    },
+    { send: sdk.toolUse("toolu_02", "mcp__example__tool") },
+    { send: sdk.toolResult("toolu_02") },
+    { send: sdk.text("too late") },
+    { send: sdk.result() },
+  ];
+
+  const allowingAdapter = (turns: readonly (readonly ScriptStep[])[]) => {
+    const scripted = scriptedQuery(turns);
+    const adapter = claudeAdapter({
+      query: scripted.query,
+      env: {},
+      rule: allow,
+      interruptWaitMs: 50,
+      closeWaitMs: 100,
+    });
+    return { scripted, adapter };
+  };
+
+  const hookOf = (options: { hooks?: unknown } | undefined): HookCallback => {
+    const hooks = options?.hooks as
+      { PreToolUse?: { hooks: HookCallback[] }[] } | undefined;
+    const hook = hooks?.PreToolUse?.[0]?.hooks[0];
+    if (!hook) throw new Error("no PreToolUse hook");
+    return hook;
+  };
+
+  const blocked = {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "Aphelion denied this tool call.",
+    },
+  };
+
+  const askHook = (hook: HookCallback) =>
+    hook(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sdk.sessionId,
+        transcript_path: "/home/bot/.claude/projects/x.jsonl",
+        cwd: "/work",
+        tool_name: "Read",
+        tool_input: { file_path: "/work/notes.md" },
+        tool_use_id: "toolu_09",
+      },
+      "toolu_09",
+      { signal: new AbortController().signal },
+    );
+
+  const refused = [
+    {
+      name: "a tool outside the seven",
+      init: sdk.init({ tools: [...sevenTools, "mcp__example__tool"] }),
+      log: "the session reported 1 tools, 0 MCP servers and 0 plugins that Aphelion didn't give it, so the adapter stopped it",
+    },
+    {
+      name: "an MCP server",
+      init: sdk.init({
+        mcp_servers: [
+          { name: "example", status: "needs-auth", source: "claudeai" },
+        ],
+      }),
+      log: "the session reported 0 tools, 1 MCP servers and 0 plugins that Aphelion didn't give it, so the adapter stopped it",
+    },
+    {
+      name: "a plugin that isn't built in",
+      init: sdk.init({
+        plugins: [
+          {
+            name: "example-plugin",
+            path: "/home/bot/.claude/plugins/synced/example-plugin",
+          },
+        ],
+      }),
+      log: "the session reported 0 tools, 0 MCP servers and 1 plugins that Aphelion didn't give it, so the adapter stopped it",
+    },
+  ];
+
+  for (const entry of refused) {
+    it(`stops a session that reports ${entry.name}, and runs no tool`, async () => {
+      const { adapter, scripted } = allowingAdapter([turnWith(entry.init)]);
+      const run = await runTurn(adapter, { decider: allow });
+
+      expect(eventsOf(run)).toEqual([
+        { type: "error", code: "vendor" },
+        { type: "turn.end", reason: "error" },
+      ]);
+      expect(scripted.answers).not.toContainEqual({ behavior: "allow" });
+      expect(await askHook(hookOf(scripted.runs[0]?.options))).toEqual(blocked);
+      expect(scripted.runs[0]?.options.abortController?.signal.aborted).toBe(
+        true,
+      );
+      expect(run.logs).toContain(entry.log);
+      expect(run.logs.join("\n")).not.toContain("example");
+      expect(checkStream(run.events)).toEqual([]);
+    });
+  }
+
+  it("stops a session whose init doesn't list its tools, MCP servers or plugins", async () => {
+    for (const field of ["tools", "mcp_servers", "plugins"] as const) {
+      const { [field]: listed, ...missing } = sdk.init();
+      expect(listed).toEqual(field === "tools" ? ["Read", "Bash"] : []);
+      const { adapter, scripted } = allowingAdapter([turnWith(missing)]);
+      const run = await runTurn(adapter, { decider: allow });
+
+      expect(eventsOf(run)).toEqual([
+        { type: "error", code: "vendor" },
+        { type: "turn.end", reason: "error" },
+      ]);
+      expect(scripted.answers).not.toContainEqual({ behavior: "allow" });
+    }
+  });
+
+  it("holds a tool call that comes before the init until the adapter has checked it", async () => {
+    for (const [init, answer] of [
+      [sdk.init(), {}],
+      [sdk.init({ tools: ["mcp__example__tool"] }), blocked],
+    ] as const) {
+      const { adapter, scripted } = allowingAdapter([
+        [{ send: init }, { send: sdk.result() }],
+      ]);
+      const harness = startAdapter(adapter);
+      await harness.initialize();
+      const early = askHook(hookOf(scripted.runs[0]?.options));
+      await harness.startTurn("t1", "hi");
+      await untilTurnEnd(harness, "t1");
+
+      expect(await early).toEqual(answer);
+      await harness.shutdown();
+    }
+  });
+
+  it("runs a session that reports only the seven tools and built-in plugins as before", async () => {
+    const { adapter, scripted } = allowingAdapter([
+      [
+        {
+          send: sdk.init({
+            tools: sevenTools,
+            skills: ["example-skill"],
+            plugins: [{ name: "cc-plugin-example", path: "builtin" }],
+          }),
+        },
+        {
+          send: sdk.toolUse("toolu_01", "Read", {
+            file_path: "/work/notes.md",
+          }),
+        },
+        {
+          ask: {
+            tool: "Read",
+            input: { file_path: "/work/notes.md" },
+            toolUseID: "toolu_01",
+            requestId: "req-1",
+          },
+        },
+        { send: sdk.toolResult("toolu_01") },
+        { send: sdk.result() },
+      ],
+    ]);
+    const run = await runTurn(adapter, { decider: allow });
+
+    expect(scripted.answers).toEqual([{ behavior: "allow" }]);
+    expect(eventsOf(run)).toContainEqual({
+      type: "tool.end",
+      call: "toolu_01",
+      outcome: "ok",
+    });
     expect(eventsOf(run).at(-1)).toEqual({
       type: "turn.end",
       reason: "completed",
