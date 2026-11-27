@@ -594,9 +594,25 @@ latest_release_tag() {
   echo "$tag"
 }
 
+upgrade_marker=aphelion-upgrade-pending
+
+describe_wait() {
+  local seconds=$1
+  if ((seconds == 1)); then
+    echo "1 second"
+  elif ((seconds == 60)); then
+    echo "1 minute"
+  elif ((seconds > 0 && seconds % 60 == 0)); then
+    echo "$((seconds / 60)) minutes"
+  else
+    echo "$seconds seconds"
+  fi
+}
+
 wait_for_health() {
-  local deadline=$((SECONDS + ${APHELION_HEALTH_WAIT:-300}))
-  echo "Waiting up to 5 minutes for the server to answer..."
+  local limit=${APHELION_HEALTH_WAIT:-300}
+  local deadline=$((SECONDS + limit))
+  echo "Waiting up to $(describe_wait "$limit") for the server to answer..."
   until health_answers; do
     ((SECONDS < deadline)) || return 0
     sleep 1
@@ -604,16 +620,18 @@ wait_for_health() {
 }
 
 restore_checkout() {
-  local repo=$1 previous=$2 previous_branch=$3
+  local repo=$1 previous=$2 previous_branch=$3 marker_existed=$4
   if [[ -n $previous_branch ]]; then
     if git -C "$repo" switch --quiet -- "${previous_branch#refs/heads/}"; then
       echo "aphelion: moved $repo back to $previous, where it was before" >&2
+      ((marker_existed)) || rm -f "$repo/.git/$upgrade_marker"
     else
       echo "aphelion: couldn't put $repo back on ${previous_branch#refs/heads/}" >&2
     fi
   else
     if git -C "$repo" -c advice.detachedHead=false checkout --quiet --detach "$previous"; then
       echo "aphelion: moved $repo back to $previous, where it was before" >&2
+      ((marker_existed)) || rm -f "$repo/.git/$upgrade_marker"
     else
       echo "aphelion: couldn't put $repo back on $previous" >&2
     fi
@@ -637,10 +655,12 @@ restore_image() {
 }
 
 cmd_upgrade() {
-  local repo offender origin dirty previous previous_branch before before_tag tag tag_commit at_tag=0 previous_image="" after
+  local marker_path marker_tmp marker_existed=0 repo offender origin dirty previous previous_branch before before_tag tag tag_commit at_tag=0 previous_image="" after
   repo=$APHELION_DEPLOY
   while [[ $repo == */ && $repo != / ]]; do repo=${repo%/}; done
   repo=$(dirname -- "$repo")
+  [[ ${APHELION_HEALTH_WAIT:-300} =~ ^(0|[1-9][0-9]{0,5})$ ]] ||
+    fail "APHELION_HEALTH_WAIT must be a whole number of seconds from 0 to 999999"
   [[ ! -L $repo && ! -L $repo/.git ]] ||
     fail "$repo or $repo/.git is a symbolic link, so upgrade can't check what it points to"
   [[ -d $repo/.git ]] ||
@@ -656,6 +676,9 @@ cmd_upgrade() {
     fail "couldn't check $repo for local changes"
   [[ -z $dirty ]] ||
     fail "$repo has local changes. Clean or stash them before upgrading."
+  marker_path=$repo/.git/$upgrade_marker
+  [[ ! -L $marker_path && ( ! -e $marker_path || -f $marker_path ) ]] ||
+    fail "$marker_path must be a regular file, not a symbolic link or a directory. Remove it and run the command again."
   previous=$(git -C "$repo" rev-parse HEAD) ||
     fail "couldn't read the commit that $repo is on"
   previous_branch=$(git -C "$repo" symbolic-ref -q HEAD) || previous_branch=""
@@ -685,27 +708,36 @@ cmd_upgrade() {
       at_tag=1
     fi
   fi
-  if ((at_tag)) && service_is_up && health_answers; then
+  [[ ! -e $marker_path ]] || marker_existed=1
+  if ((!marker_existed && at_tag)) && service_is_up && health_answers; then
     echo "Aphelion is already at $tag."
     return 0
   fi
+  marker_tmp=$(umask 077 && mktemp "$marker_path.XXXXXX") ||
+    fail "couldn't write $marker_path"
+  if ! echo "$tag" >"$marker_tmp" || ! mv -f "$marker_tmp" "$marker_path"; then
+    rm -f "$marker_tmp"
+    fail "couldn't write $marker_path"
+  fi
   if ((!at_tag)); then
-    git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" ||
+    git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" || {
+      ((marker_existed)) || rm -f "$marker_path"
       fail "git checkout $tag failed"
+    }
   fi
   if [[ ! -x $APHELION_DEPLOY/host/get-image ]]; then
-    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
     fail "$tag has no $APHELION_DEPLOY/host/get-image"
   fi
   previous_image=$(docker image inspect --format '{{.Id}}' aphelion:local 2>/dev/null) || previous_image=""
   if ! "$APHELION_DEPLOY/host/get-image" "$tag"; then
     restore_image "$previous_image"
-    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
     exit 1
   fi
   if ! "$APHELION_DEPLOY/host/install"; then
     restore_image "$previous_image"
-    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
     fail "host/install failed"
   fi
   if ! systemctl restart "$service"; then
@@ -734,6 +766,7 @@ cmd_upgrade() {
       exit 1
     }
   fi
+  rm -f "$marker_path"
 }
 
 cmd_network_check() {
