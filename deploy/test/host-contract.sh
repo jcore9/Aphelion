@@ -1803,6 +1803,8 @@ status=0
 out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_PULLED=$wrong_digest FAKE_RESTORE_FAIL=1 aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
 [[ $status == 1 && $out == *"couldn't put /opt/aphelion back"* && $out != *"moved /opt/aphelion back"* ]] ||
   fail "upgrade printed moved back even though detached restore failed ($status): $out"
+[[ -e /opt/aphelion/.git/aphelion-upgrade-pending ]] ||
+  fail "a failed detached rollback removed the marker"
 reset_upgrade_repo
 echo main >/opt/aphelion/.git/branch
 echo main >/opt/aphelion/.git/branchname
@@ -1811,6 +1813,8 @@ status=0
 out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_PULLED=$wrong_digest FAKE_RESTORE_FAIL=1 aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
 [[ $status == 1 && $out == *"couldn't put /opt/aphelion back on main"* && $out != *"moved /opt/aphelion back"* ]] ||
   fail "upgrade printed moved back even though branch restore failed ($status): $out"
+[[ -e /opt/aphelion/.git/aphelion-upgrade-pending ]] ||
+  fail "a failed branch rollback removed the marker"
 pass "upgrade prints moved back only when restoring the checkout worked"
 
 reset_upgrade_repo
@@ -1943,14 +1947,69 @@ reset_upgrade_repo
 FAKE_PULL=cutoff FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 >/dev/null 2>&1 || true
 reset_calls
 status=0
-out=$(aphelion_210 upgrade v0.1.0-alpha.1 2>&1) || status=$?
-[[ $status == 1 && $out == *"An earlier upgrade to v0.1.0-alpha.2 didn't finish."* && $out == *"sudo aphelion upgrade v0.1.0-alpha.2"* ]] ||
-  fail "upgrade to another tag didn't refuse while v0.1.0-alpha.2 was pending ($status): $out"
-! called "checkout" && ! called "host/get-image" && ! called "host/install" && ! called "systemctl restart" ||
-  fail "upgrade to another tag ran steps while v0.1.0-alpha.2 was pending: $(cat "$FAKE_CALLS")"
-[[ $(cat "$marker") == v0.1.0-alpha.2 && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.2 ]] ||
-  fail "upgrade to another tag changed the marker or the checkout"
-pass "upgrade names the tag to finish first when a rerun asks for another tag"
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.1 2>&1) || status=$?
+[[ $status == 0 && $out == *"Upgraded Aphelion from v0.1.0-alpha.2 to v0.1.0-alpha.1."* ]] ||
+  fail "upgrade to another tag didn't run while a marker existed ($status): $out"
+[[ $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && ! -e $marker ]] ||
+  fail "upgrade to another tag didn't move the checkout and remove the marker"
+pass "upgrade to any tag runs while a marker exists, and removes the marker when it finishes"
+
+reset_upgrade_repo
+status=0
+FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_RESTART_EXIT=1 aphelion_210 upgrade v0.1.0-alpha.2 >/dev/null 2>&1 || status=$?
+[[ $status == 1 && -e $marker ]] || fail "a failed restart didn't keep the marker ($status)"
+reset_calls
+status=0
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.1 2>&1) || status=$?
+[[ $status == 0 && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && ! -e $marker ]] ||
+  fail "the go-back command didn't work after a failed restart ($status): $out"
+pass "the go-back command works after a failed restart"
+
+reset_upgrade_repo
+echo elsewhere >"$FAKE_STATE/outside"
+ln -s "$FAKE_STATE/outside" "$marker"
+reset_calls
+status=0
+out=$(aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 1 && $out == *"$marker"* && $(cat "$FAKE_STATE/outside") == elsewhere && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 ]] ||
+  fail "upgrade didn't refuse a symlinked marker ($status): $out"
+! called "checkout" && ! called "fetch --tags" && ! called "systemctl restart" ||
+  fail "upgrade ran steps with a symlinked marker: $(cat "$FAKE_CALLS")"
+rm -f "$marker"
+ln -s "$FAKE_STATE/nowhere" "$marker"
+status=0
+out=$(aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 1 && ! -e $FAKE_STATE/nowhere ]] ||
+  fail "upgrade followed a dangling symlinked marker ($status): $out"
+rm -f "$marker"
+mkdir "$marker"
+status=0
+out=$(aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 1 && $out == *"$marker"* && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 ]] ||
+  fail "upgrade didn't refuse a marker that is a directory ($status): $out"
+rmdir "$marker"
+pass "upgrade refuses a marker that is a symlink or not a regular file, and changes nothing"
+
+reset_upgrade_repo
+status=0
+(umask 0002 && FAKE_PULL=cutoff FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 >/dev/null 2>&1) || status=$?
+[[ $status != 0 && $(stat -c %a "$marker") == 600 ]] ||
+  fail "the marker wasn't mode 0600 under umask 0002 ($status): $(stat -c %a "$marker")"
+out=$(umask 0002 && FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 2>&1) ||
+  fail "rerun with a mode 0600 marker failed under umask 0002: $out"
+pass "upgrade creates the marker with mode 0600 whatever the umask is"
+
+for bad_wait in -5 abc 1+1 08 1.5 " 3"; do
+  reset_upgrade_repo
+  reset_calls
+  status=0
+  out=$(APHELION_HEALTH_WAIT=$bad_wait aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
+  [[ $status == 1 && $out == *"APHELION_HEALTH_WAIT must be a whole number of seconds"* && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && ! -e $marker ]] ||
+    fail "upgrade didn't refuse APHELION_HEALTH_WAIT='$bad_wait' ($status): $out"
+  ! called "checkout" && ! called "fetch --tags" && ! called "systemctl restart" ||
+    fail "upgrade ran steps with APHELION_HEALTH_WAIT='$bad_wait': $(cat "$FAKE_CALLS")"
+done
+pass "upgrade refuses an APHELION_HEALTH_WAIT that isn't a whole number of seconds, before changing anything"
 
 reset_upgrade_repo
 FAKE_PULL=cutoff FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 >/dev/null 2>&1 || true
@@ -1959,14 +2018,15 @@ status=0
 out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_PULLED=$wrong_digest aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
 [[ $status == 1 && $out == *"digest"* && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.2 && $(cat "$FAKE_STATE/local") == "$old_digest" && -e $marker ]] ||
   fail "an image failure on the partial path didn't keep the checkout and marker or put aphelion:local back ($status): $out"
-! called "host/install" && ! called "systemctl restart" ||
+! called "checkout" && ! called "host/install" && ! called "systemctl restart" ||
   fail "upgrade went on after an image failure on the partial path: $(cat "$FAKE_CALLS")"
 reset_calls
 status=0
 out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_CHECK_KEY=reject aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
 [[ $status == 1 && $out == *"host/install failed"* && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.2 && $(cat "$FAKE_STATE/local") == "$old_digest" && -e $marker ]] ||
   fail "an install failure on the partial path didn't keep the checkout and marker or put aphelion:local back ($status): $out"
-! called "systemctl restart" || fail "upgrade restarted the service after an install failure on the partial path"
+! called "checkout" && ! called "systemctl restart" ||
+  fail "upgrade moved the checkout or restarted the service after an install failure on the partial path"
 pass "upgrade keeps the checkout and the marker, and puts aphelion:local back, when the image or host/install fails on the partial path"
 
 reset_upgrade_repo

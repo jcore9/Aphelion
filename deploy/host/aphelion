@@ -647,10 +647,12 @@ restore_image() {
 }
 
 cmd_upgrade() {
-  local pending repo offender origin dirty previous previous_branch before before_tag tag tag_commit at_tag=0 previous_image="" after
+  local marker_path marker_tmp marker_existed=0 repo offender origin dirty previous previous_branch before before_tag tag tag_commit at_tag=0 previous_image="" after
   repo=$APHELION_DEPLOY
   while [[ $repo == */ && $repo != / ]]; do repo=${repo%/}; done
   repo=$(dirname -- "$repo")
+  [[ ${APHELION_HEALTH_WAIT:-300} =~ ^(0|[1-9][0-9]{0,5})$ ]] ||
+    fail "APHELION_HEALTH_WAIT must be a whole number of seconds"
   [[ ! -L $repo && ! -L $repo/.git ]] ||
     fail "$repo or $repo/.git is a symbolic link, so upgrade can't check what it points to"
   [[ -d $repo/.git ]] ||
@@ -666,6 +668,9 @@ cmd_upgrade() {
     fail "couldn't check $repo for local changes"
   [[ -z $dirty ]] ||
     fail "$repo has local changes. Clean or stash them before upgrading."
+  marker_path=$repo/.git/$upgrade_marker
+  [[ ! -L $marker_path && ( ! -e $marker_path || -f $marker_path ) ]] ||
+    fail "$marker_path must be a regular file, not a symbolic link or a directory. Remove it and run the command again."
   previous=$(git -C "$repo" rev-parse HEAD) ||
     fail "couldn't read the commit that $repo is on"
   previous_branch=$(git -C "$repo" symbolic-ref -q HEAD) || previous_branch=""
@@ -695,20 +700,20 @@ cmd_upgrade() {
       at_tag=1
     fi
   fi
-  if [[ -e $repo/.git/$upgrade_marker ]]; then
-    pending=$(<"$repo/.git/$upgrade_marker") || pending=""
-    if [[ $pending != "$tag" ]]; then
-      fail "An earlier upgrade to ${pending:-another release} didn't finish. Finish it first: sudo aphelion upgrade ${pending:-TAG}"
-    fi
-  elif ((at_tag)) && service_is_up && health_answers; then
+  [[ ! -e $marker_path ]] || marker_existed=1
+  if ((!marker_existed && at_tag)) && service_is_up && health_answers; then
     echo "Aphelion is already at $tag."
     return 0
   fi
-  echo "$tag" >"$repo/.git/$upgrade_marker" ||
-    fail "couldn't write $repo/.git/$upgrade_marker"
+  marker_tmp=$(umask 077 && mktemp "$marker_path.XXXXXX") ||
+    fail "couldn't write $marker_path"
+  if ! echo "$tag" >"$marker_tmp" || ! mv -f "$marker_tmp" "$marker_path"; then
+    rm -f "$marker_tmp"
+    fail "couldn't write $marker_path"
+  fi
   if ((!at_tag)); then
     git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" || {
-      rm -f "$repo/.git/$upgrade_marker"
+      ((marker_existed)) || rm -f "$marker_path"
       fail "git checkout $tag failed"
     }
   fi
@@ -753,7 +758,7 @@ cmd_upgrade() {
       exit 1
     }
   fi
-  rm -f "$repo/.git/$upgrade_marker"
+  rm -f "$marker_path"
 }
 
 cmd_network_check() {
