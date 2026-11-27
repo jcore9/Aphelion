@@ -310,10 +310,17 @@ export interface BotAdapter {
   open(context: AdapterContext): MaybePromise<AdapterSession>;
 }
 
-/** Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends. */
+/** What a decider knows about the bot it answers for. */
+export interface DeciderContext {
+  /** The absolute path of the bot's folder, as the bot runner sent it in `initialize`. */
+  readonly folder: string;
+}
+
+/** Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends, and the bot's folder. */
 export type Decider = (
   request: PermissionRequest,
   signal: AbortSignal,
+  context: DeciderContext,
 ) => MaybePromise<PermissionDecision>;
 
 /** A `Decider` that denies every request with `by: "default"`. */

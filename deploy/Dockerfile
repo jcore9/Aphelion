@@ -36,6 +36,7 @@ RUN apt-get update \
  && for tool in claude grok opencode; do ln -s "/opt/aphelion/tools/$tool/current/$tool" "/usr/local/bin/$tool"; done \
  && ln -s "/opt/aphelion/tools/codex/current/codex-$(uname -m)-unknown-linux-musl" /usr/local/bin/codex \
  && install -d -m 0755 /usr/local/lib/aphelion/adapters/claude \
+ && install -d -m 0755 /etc/claude-code \
  && find / -xdev -type f -perm /6000 -exec chmod ug-s {} +
 COPY --from=build --chmod=0711 /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=build --chmod=0755 /src/apps/server/dist/aphelion /src/apps/server/dist/aphelion-secrets /usr/local/bin/
@@ -43,6 +44,7 @@ COPY --from=build --chmod=0644 /src/apps/server/dist/plugin-runner.js /src/apps/
 COPY --chmod=0644 deploy/ai-tools.json /usr/local/lib/aphelion/ai-tools.json
 COPY --from=build --chmod=0644 /src/packages/claude-adapter/dist/adapter.js /src/packages/claude-adapter/dist/aphelion-plugin.json /usr/local/lib/aphelion/adapters/claude/
 COPY --chown=harness:harness --chmod=0640 docs/reference/config/example/*.yaml /etc/aphelion/
+COPY --chmod=0644 deploy/image/claude-managed-settings.json /etc/claude-code/managed-settings.json
 COPY --chmod=0755 deploy/image/launch /usr/local/lib/aphelion/launch
 ENV DISABLE_AUTOUPDATER=1
 EXPOSE 7400

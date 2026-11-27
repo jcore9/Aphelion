@@ -19,18 +19,29 @@ const kinds = new Map<string, ToolKind>([
 
 export const toolKind = (tool: string): ToolKind => kinds.get(tool) ?? "other";
 
-const pathFields = ["file_path", "notebook_path", "path"] as const;
-
-const patternTools = new Set(["Glob", "Grep"]);
+const pathFields = new Map<string, readonly string[]>([
+  ["Glob", ["path", "pattern"]],
+  ["Grep", ["path"]],
+]);
 
 const maxBytes = 4096;
 
+const startsAtRoot = /(?:^|[{,|(])\s*[/~]/;
+
+const mayLeaveRoot = (filter: string) =>
+  startsAtRoot.test(filter) ||
+  filter.split(/[/{},|()]/).some((part) => part.trim() === "..");
+
 const pathsOf = (tool: string, input: Readonly<Record<string, unknown>>) => {
-  const fields: string[] = [...pathFields];
-  if (patternTools.has(tool)) fields.push("pattern");
-  return fields
-    .map((field) => input[field])
-    .filter((value): value is string => typeof value === "string");
+  const fields = pathFields.get(tool) ?? ["file_path", "notebook_path", "path"];
+  const filter = tool === "Grep" ? input["glob"] : undefined;
+  const paths = [
+    ...fields.map((field) => input[field]),
+    typeof filter === "string" && mayLeaveRoot(filter) ? filter : undefined,
+  ].filter((value): value is string => typeof value === "string");
+  return pathFields.has(tool) && typeof input["path"] !== "string"
+    ? [".", ...paths]
+    : paths;
 };
 
 export interface ToolAsk {

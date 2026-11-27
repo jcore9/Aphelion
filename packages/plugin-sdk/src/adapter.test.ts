@@ -324,6 +324,7 @@ describe("permission request and decision", () => {
     const answer = await denyAll(
       permissionRequest.parse(good),
       new AbortController().signal,
+      { folder: "/work" },
     );
     expect(answer).toEqual({
       decision: "deny",
