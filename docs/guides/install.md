@@ -136,9 +136,9 @@ sudo docker run --rm -it --pull never --network host --entrypoint "" --user harn
 
 `IMAGE` is the first line of `docker compose config --images`, and `ADDRESS` is `APHELION_TAILNET_ADDRESS` in `.env`. [The test client guide](test-client.md) shows a session.
 
-`sign-in`, `backup`, `restore` and `plugin` run Docker for you too. [Back up](#back-up), [Restore on the new host](#restore-on-the-new-host), [Install a plugin](#install-a-plugin) and [Install an AI tool](#install-an-ai-tool) show the Docker commands under each one.
+`sign-in`, `backup`, `restore`, `plugin`, `logs`, `upgrade` and `network-check` run the host and Docker commands for you too. [Back up](#back-up), [Restore on the new host](#restore-on-the-new-host), [Install a plugin](#install-a-plugin), [Install an AI tool](#install-an-ai-tool), [Check the network boundary](#check-the-network-boundary), [Logs](#logs) and [Upgrade](#upgrade) show the commands under each one.
 
-`status` and `check` ask `systemctl`, `docker compose ps`, `docker inspect`, `curl` and `iptables` read-only questions. [The host command](../reference/host-command.md) lists each one.
+`status` and `check` ask `systemctl`, `docker compose ps`, `docker inspect`, `curl`, `iptables` and `ip6tables` read-only questions. [The host command](../reference/host-command.md) lists each one.
 
 ## arm64
 
@@ -307,7 +307,7 @@ Start from a host that has the bootstrap key in `/etc/credstore.encrypted/apheli
 
 Then enroll a device and switch each plugin back on with the commands that the restore printed ([Check the restore](#check-the-restore) shows them).
 
-If the key doesn't match the restored `secrets` volume, the container exits and systemd tries again every 10 seconds. `sudo journalctl -u aphelion` shows `The bootstrap key does not match this secrets store`. The key and the archive came from different installs. Stop the service with `sudo systemctl stop aphelion`, put the right key in place with [Restore on new hardware](#restore-on-new-hardware) steps 2 to 4, and start it again. The volumes stay as they are.
+If the key doesn't match the restored `secrets` volume, the container exits and systemd tries again every 10 seconds. `sudo aphelion logs` shows `The bootstrap key does not match this secrets store`. The key and the archive came from different installs. Stop the service with `sudo systemctl stop aphelion`, put the right key in place with [Restore on new hardware](#restore-on-new-hardware) steps 2 to 4, and start it again. The volumes stay as they are.
 
 A plugin can come back in two ways. Restoring `plugin-files` brings its files back as they were. You can also install it again and skip `plugin-files`. Either way, the plugin starts switched off, because the restore switches it off in step 2. Its approval stays in the database and records the plugin's folder, and a digest of its files. `aphelion plugin enable` shows the permissions it already has and, when you approve, switches it on. The digest is a fingerprint made from each file's path inside the plugin folder and its contents, and [the plugin reference](../reference/plugins.md#permissions) describes it. A plugin that you install again must go in the same folder, with the same files, byte for byte. A file that differs in one byte stops `plugin enable`, and you approve the plugin again with [Install a plugin](#install-a-plugin). The `plugin-data` volume holds data that a plugin stores, and a new install doesn't recreate it, so restore that volume either way.
 
@@ -353,7 +353,7 @@ Run three checks from `/opt/aphelion/deploy` once the service has started. They 
 2. A plugin comes back switched off, and you switch it on. First check that it didn't start. You should see `plugin host started` with `"installed":1`, the line `a switched-off plugin was not started`, and no `aphelion-test-plugin 1.0.0 started`.
 
    ```sh
-   sudo docker compose logs --no-color | grep -E 'plugin host started|switched-off|aphelion-test-plugin'
+   sudo aphelion logs --since "10 minutes ago" | grep -E 'plugin host started|switched-off|aphelion-test-plugin'
    ```
 
    Preview the plugin, then repeat the command with the `--approve` value it printed. You should see `Switched on aphelion-test-plugin. It runs.`
@@ -648,7 +648,17 @@ The command deletes the tool's files from the `ai-tools` volume and prints `Remo
 
 ## Check the network boundary
 
-The container must not reach your LAN, the host or other tailnet devices ([decision 0022](../decisions/0022-bot-network-boundary.md)). [`host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check) connects to six targets as `aphelion-bot` inside the running container. Give it these targets, in this order:
+The container must not reach your LAN, the host or other tailnet devices ([decision 0022](../decisions/0022-bot-network-boundary.md)).
+
+To check that the firewall rules are still in place, run `aphelion network-check` with no targets:
+
+```sh
+sudo aphelion network-check
+```
+
+With no targets, the command reads the firewall without sending traffic. It checks Aphelion's `APHELION-FORWARD` and `APHELION-INPUT` chains and rules, the jump rules in `FORWARD` and `INPUT`, the IPv6 drop rules, Docker's `filter` and `nat` `DOCKER` chains, and ufw's `MANAGE_BUILTINS` setting. It prints `ok` for each passing check and `FAIL` naming each missing rule or chain. Run it after a `sudo ufw reload` or `sudo ufw enable` to confirm no rule was lost. `sudo aphelion check` runs the same read-only firewall check.
+
+To also test connections from inside the container, pass six targets in this order:
 
 1. Your LAN gateway, such as your router.
 2. The host's LAN address.
@@ -660,10 +670,10 @@ The container must not reach your LAN, the host or other tailnet devices ([decis
 Each target is an address and an open port. For example:
 
 ```sh
-sudo host/network-check 10.0.0.1:80 10.0.0.133:22 100.71.226.67:22 100.93.139.95:22 172.30.73.1:22 1.1.1.1:443
+sudo aphelion network-check 10.0.0.1:80 10.0.0.133:22 100.71.226.67:22 100.93.139.95:22 172.30.73.1:22 1.1.1.1:443
 ```
 
-The script first connects to each target from the host itself. It stops if a target doesn't answer, so pick targets with an open port. The first five must then print `blocked`. That means the connection from the container timed out, because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The script exits with code 1 if any check fails, and with code 2 if a target is malformed or the container isn't running.
+The command runs the read-only firewall check first. Next, it connects to each target from the host itself, and stops if a target doesn't answer, so pick targets with an open port. Then it connects to each target as `aphelion-bot` inside the running container. The first five must print `blocked`. That means the connection from the container timed out, because the firewall dropped it. A target that refuses the connection also fails the check, because the refusal came back from that target. The sixth must print `reachable`, and names must resolve. The command exits with code 1 if any check fails, and with code 2 if a target is malformed, the host can't reach a target, or the container isn't running. Underneath, it runs [`deploy/host/network-check`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/network-check).
 
 Aphelion refuses to start when ufw is enabled and `MANAGE_BUILTINS=yes` is set in `/etc/default/ufw`. To fix this, set `MANAGE_BUILTINS=no` in that file, then run these commands.
 
@@ -672,33 +682,75 @@ sudo ufw reload
 sudo systemctl restart docker
 ```
 
-Docker rebuilds its chains, and `aphelion.service` restarts with it and installs Aphelion's rules. Once Aphelion runs again, run the network check above.
+Docker rebuilds its chains, and `aphelion.service` restarts with it and installs Aphelion's rules. Once Aphelion runs again, run `sudo aphelion network-check` above.
 
 Preflight runs only when Aphelion starts. If you set `yes` later, while Aphelion runs, the next `sudo ufw reload` or `sudo ufw enable` removes Aphelion's rules and Docker's chains. They stay gone until you fix the setting and restart Docker as above. Restarting Aphelion alone doesn't bring them back. Make sure `MANAGE_BUILTINS=no` is set before you run either command. Preflight reads `/etc/default/ufw` the way ufw does, so if it sets `MANAGE_BUILTINS` more than once, the last line counts.
 
 The M0 exit test tried two `ufw` settings on Ubuntu 26.04 with Docker 29.10, with ufw turned on:
 
 - With ufw's default setting, `MANAGE_BUILTINS=no` in `/etc/default/ufw`, `sudo ufw reload` left Aphelion's rules in place, and the check still passed.
-- With `MANAGE_BUILTINS=yes`, `sudo ufw reload` removed the rules that send traffic into Aphelion's chains, and deleted Docker's own `DOCKER` chain. The check then showed the container connecting to the host's LAN, tailnet and bridge addresses, and failing to reach `1.1.1.1:443`. Restarting `aphelion` didn't help. `sudo journalctl -u aphelion` showed this line every 10 seconds:
+- With `MANAGE_BUILTINS=yes`, `sudo ufw reload` removed the rules that send traffic into Aphelion's chains, and deleted Docker's own `DOCKER` chain. `sudo aphelion network-check` names those missing jumps and chains. The six-target check showed the container connecting to the host's LAN, tailnet and bridge addresses, and failing to reach `1.1.1.1:443`. Restarting `aphelion` didn't help. `sudo aphelion logs` showed this line every 10 seconds:
 
   ```text
   failed to set up container networking: ... iptables failed: iptables --wait -t filter -I DOCKER ... iptables: No chain/target/match by that name.
   ```
 
-Reloading a file that contains `flush ruleset`, such as `/etc/nftables.conf`, can clear Docker's and Aphelion's rules too, when `iptables` uses the nftables backend. This wasn't tested. After such a reload, restart Docker the same way and run the check again.
+Reloading a file that contains `flush ruleset`, such as `/etc/nftables.conf`, can clear Docker's and Aphelion's rules too, when `iptables` uses the nftables backend. This wasn't tested. After such a reload, restart Docker the same way and run `sudo aphelion network-check` again.
 
 ## Logs
 
+Show the last 100 lines of the service logs:
+
 ```sh
-journalctl -u aphelion
-sudo docker compose logs
+sudo aphelion logs --lines 100
 ```
 
-The launcher, the server, the broker, the plugin runner and the plugins all log to the same stream.
+Without flags, `sudo aphelion logs` prints the whole journal from every restart and boot. You can combine three flags to narrow the output:
+
+- `--follow` keeps printing new lines as they arrive, until you press Ctrl-C.
+- `--lines N` shows only the last `N` lines, where `N` is a positive whole number.
+- `--since TIME` shows lines from `TIME` onward, such as `"1 hour ago"` or `"2026-11-27 00:00:00"`.
+
+```sh
+sudo aphelion logs --follow --lines 50
+sudo aphelion logs --since "1 hour ago"
+```
+
+Underneath, the command runs `journalctl -u aphelion --no-pager` with the flags you gave. It never reads or prints `deploy/.env` or the bootstrap credential. The launcher, the server, the broker, the plugin runner and the plugins all log to the same stream.
 
 ## Upgrade
 
-Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), put it in `tag`, and check it out:
+Move the server to the newest release:
+
+```sh
+sudo aphelion upgrade
+```
+
+To move to one release tag from [the releases page](https://github.com/jcore9/Aphelion/releases), pass the tag name:
+
+```sh
+sudo aphelion upgrade v0.1.0-alpha.2
+```
+
+If `sudo aphelion upgrade` prints `command not found` or the usage text, this server's release is older than the command. Run the steps in [First upgrade from an older release](#first-upgrade-from-an-older-release) once. After that, `sudo aphelion upgrade` works.
+
+The command works in this order:
+
+1. It checks `/opt/aphelion` and stops if it is a symbolic link, has a file that root doesn't own or others can write, has an origin other than `https://github.com/jcore9/Aphelion.git`, or has local changes.
+2. With no tag, it asks GitHub for the newest published release. That includes pre-releases while Aphelion is before v1.0.
+3. It checks whether `/opt/aphelion` is already on that tag. If it is, and `aphelion.service` is enabled and running and `/health` answers, the command prints `Aphelion is already at <tag>.` and exits without changing anything. If `/opt/aphelion` is on that tag but the service isn't enabled and running or `/health` doesn't answer, it skips the checkout and runs steps 4 to 6. Otherwise it fetches tags from GitHub, stops if the tag doesn't exist, and checks out the tag.
+4. It runs `host/get-image` from the checked-out release. If the release has an `aphelion-image.sha256` file, that script downloads the image by its digest, checks that the fingerprint matches, and tags it as `aphelion:local`. If the release has no digest file, or the download fails because the image package is private, it builds `aphelion:local` on the server instead.
+5. It runs `host/install`, which updates the unit file and keeps the existing bootstrap key. If step 4 or step 5 fails, for example on a digest mismatch or a rejected bootstrap key, `upgrade` puts `aphelion:local` back on its earlier image, or removes the new tag when there was none. If step 3 moved `/opt/aphelion`, it also puts `/opt/aphelion` back on its earlier branch or commit.
+6. It restarts `aphelion` and prints the version before and after, or that it finished upgrading to that tag. It then prints `Waiting up to 5 minutes for the server to answer...`, waits up to 300 seconds for `/health`, and runs `aphelion check`. If the restart fails, it prints the log command and, when it moved from an earlier release tag, the command to go back. If the upgrade finishes but `aphelion check` fails, it says so and exits with 1.
+
+### First upgrade from an older release
+
+`v0.1.0-alpha.1` has no `aphelion` command, so `sudo aphelion upgrade` prints `command not found`. A server built from `main` before this command prints the usage text instead. The one-line installer refuses to move a running server to a different tag, so in both cases run these steps once. After that, `sudo aphelion upgrade` works.
+
+1. Find the newest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`.
+2. Fetch tags and check out that release in `/opt/aphelion`.
+3. Download or build the image with `host/get-image`, update the service and command with `host/install`, and restart `aphelion`.
+4. Run `sudo aphelion check` to confirm the server is up. If `/health answers on the tailnet address` fails right after the restart, wait a minute and run `sudo aphelion check` again.
 
 ```sh
 tag=v0.1.0-alpha.2
@@ -706,13 +758,12 @@ cd /opt/aphelion &&
 	sudo git fetch --tags &&
 	sudo git checkout --detach "refs/tags/$tag" &&
 	cd deploy &&
-	sudo docker compose build &&
+	sudo host/get-image "$tag" &&
 	sudo host/install &&
-	sudo systemctl restart aphelion
+	sudo systemctl restart aphelion &&
+	sudo aphelion check
 ```
 
-Each command runs only if the one before it worked, so a mistyped tag stops the upgrade before anything is rebuilt.
-
-`host/install` installs the new unit file and keeps the existing bootstrap key.
+`aphelion upgrade` runs those same steps underneath. `host/get-image` pulls and checks the published image, or builds it with `docker compose build` when the package is private or has no digest file.
 
 If you upgrade from a version that kept plugins in `/opt/aphelion/deploy/plugins`, install each plugin again. That version mounted the host folder. This one keeps plugins in the `plugin-files` volume, and it checks every file of a plugin, so earlier approvals don't carry over. For each folder in `/opt/aphelion/deploy/plugins`, follow [Install a plugin](#install-a-plugin) from step 2. Until you do, the server doesn't start that plugin. Then you can delete `/opt/aphelion/deploy/plugins`. If the service then stops and the log shows `The secrets store holds a plain-text key from before the host credential`, see [Start a fresh store after an older install](#start-a-fresh-store-after-an-older-install). The volumes keep the config, the database, the bot folders, the secrets store and the plugin data.
