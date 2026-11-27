@@ -77,6 +77,8 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
    sudo aphelion device add laptop
    ```
 
+   To try a bot, [chat with it from the command line](test-client.md).
+
 9. Check the host. `check` prints `ok` or `FAIL` for each check the host can run alone, and how many passed. You should see no `FAIL`. `sudo aphelion status` shows whether the service, the container and each installed AI tool are up.
 
    ```sh
@@ -94,7 +96,7 @@ cd /opt/aphelion/deploy
 sudo docker compose exec -T --user harness aphelion aphelion device add laptop
 ```
 
-`sign-in`, `backup`, `restore` and `plugin` run Docker for you too. [Back up](#back-up), [Restore on the new host](#restore-on-the-new-host), [Install a plugin](#install-a-plugin) and [Install an AI tool](#install-an-ai-tool) show the Docker commands under each one.
+`sign-in`, `chat`, `backup`, `restore` and `plugin` run Docker for you too. [Back up](#back-up), [Restore on the new host](#restore-on-the-new-host), [Install a plugin](#install-a-plugin) and [Install an AI tool](#install-an-ai-tool) show the Docker commands under each one.
 
 `status` and `check` ask `systemctl`, `docker compose ps`, `docker inspect`, `curl` and `iptables` read-only questions. [The host command](../reference/host-command.md) lists each one.
 

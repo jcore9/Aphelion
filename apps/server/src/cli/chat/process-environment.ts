@@ -17,8 +17,8 @@ const hiddenInput = () =>
     process.stderr.write("Device token: ");
     const finish = (answer: string) => {
       process.stderr.write("\n");
-      rl.close();
       resolve(answer.trim());
+      rl.close();
     };
     rl.once("SIGINT", () => {
       finish("");
@@ -34,7 +34,9 @@ export const processEnvironment = (): ChatEnvironment => {
   const open = () =>
     (reader ??= createInterface({
       input: process.stdin,
+      ...(process.stdin.isTTY ? { output: process.stdout } : {}),
       terminal: process.stdin.isTTY,
+      prompt: "",
     }));
   return {
     host: {

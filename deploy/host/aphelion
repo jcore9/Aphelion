@@ -24,6 +24,7 @@ usage:
   aphelion tool check                  ask each vendor for its newest version
   aphelion tool remove NAME            remove an installed AI tool
   aphelion sign-in NAME                sign in to an installed AI tool, on your terminal
+  aphelion chat BOT                    chat with a bot in plain lines, on your terminal
   aphelion backup [--to FOLDER]        stop the service, pack the data into a new folder, start the service
   aphelion restore [PATH]              put a backup into new volumes and start the service
   aphelion plugin install FOLDER [--approve DIGEST]
@@ -257,6 +258,20 @@ cmd_sign_in() {
   compose exec --user aphelion-bot "$service" "${argv[@]}"
 }
 
+cmd_chat() {
+  local bot=$1 address image
+  [[ $bot =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
+    fail "$bot isn't a bot name. A bot name is lower case letters, digits and hyphens, like chief."
+  [[ -t 0 && -t 1 ]] ||
+    fail "chat needs a terminal. Run it in a shell on the host, not through a pipe or a script."
+  address=$(tailnet_address)
+  [[ -n $address ]] || fail "set APHELION_TAILNET_ADDRESS in $APHELION_DEPLOY/.env"
+  image=$(service_image)
+  docker run --rm -it --pull never --network host --entrypoint "" --user harness \
+    --cap-drop ALL --security-opt no-new-privileges:true "$image" \
+    aphelion chat "$bot" --url "ws://$address:$health_port/ws"
+}
+
 backup_folder="" backup_restart=0
 backup_cleanup() {
   if ((backup_restart)); then
@@ -472,6 +487,10 @@ case ${1:-} in
   sign-in)
     (($# == 2)) || usage_error
     cmd_sign_in "$2"
+    ;;
+  chat)
+    (($# == 2)) || usage_error
+    cmd_chat "$2"
     ;;
   backup)
     case ${2:-}:$# in

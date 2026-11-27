@@ -2,7 +2,7 @@
 
 `aphelion` on the host is a root-only script, [`deploy/host/aphelion`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/aphelion). It runs the Docker steps of the [install guide](../guides/install.md) for you, so you type no Docker words. [`deploy/host/install`](https://github.com/jcore9/Aphelion/blob/main/deploy/host/install) links it to `/usr/local/bin/aphelion`, a folder on root's PATH, which is the list of folders the shell searches for commands.
 
-It is not the server's [`aphelion` command](cli.md). That one runs inside the container. The host command runs it for the `device`, `tool` and `plugin` commands.
+It is not the server's [`aphelion` command](cli.md). That one runs inside the container. The host command runs it for the `device`, `tool` and `plugin` commands. `chat` runs it in a short-lived container on the host's network, because a chat inside the service's container would end when the service restarts. `chat` refuses without a terminal, and connects to the server at `APHELION_TAILNET_ADDRESS`.
 
 ## Commands
 
@@ -18,6 +18,7 @@ It is not the server's [`aphelion` command](cli.md). That one runs inside the co
 | `sudo aphelion tool check` | Asks each AI tool's vendor for its newest version |
 | `sudo aphelion tool remove NAME` | Removes an installed AI tool |
 | `sudo aphelion sign-in NAME` | Signs in to an installed AI tool, on your terminal |
+| `sudo aphelion chat BOT` | Chats with a bot in plain lines, on your terminal. Asks for a device token. |
 | `sudo aphelion backup [--to FOLDER]` | Stops the service, packs the six volumes into a new folder, starts the service and checks the archive |
 | `sudo aphelion restore [PATH]` | Puts a backup into new volumes, finishes the restore and starts the service |
 | `sudo aphelion plugin install FOLDER [--approve DIGEST]` | Copies a plugin folder into the container, then previews or approves it |
