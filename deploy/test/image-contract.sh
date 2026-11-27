@@ -735,9 +735,9 @@ before=$(snapshot)
 [[ -n $before ]] || fail "the snapshot of the volumes is empty"
 backups=$scratch/backups
 made=$(host_aphelion backup --to "$backups") || fail "backup failed"
-[[ $made == "$backups"/aphelion-backup-* && $(readlink "$backups/latest") == "$(basename "$made")" ]] ||
+[[ $made == "$backups"/aphelion-backup-* && $("${host_root[@]}" readlink "$backups/latest") == "$(basename "$made")" ]] ||
   fail "backup printed something other than its folder: $made"
-(cd "$made" && sha256sum --check --status aphelion-data.tar.gz.sha256) || fail "the backup's checksum doesn't match"
+"${host_root[@]}" sh -c 'cd "$1" && sha256sum --check --status aphelion-data.tar.gz.sha256' sh "$made" || fail "the backup's checksum doesn't match"
 "${compose[@]}" down --volumes >/dev/null 2>&1
 [[ -z $(docker volume ls --quiet --filter "name=${project}_") ]] || fail "down --volumes left volumes behind"
 status=0
