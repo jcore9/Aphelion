@@ -84,7 +84,9 @@ export const toolList = (
       const io = yield* CliIo;
       const list = yield* readList(listFile);
       const here = yield* processor;
-      yield* io.out("NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\tSIGN-IN-COMMAND");
+      yield* io.out(
+        "NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\tSIGN-IN-COMMAND",
+      );
       for (const tool of list.tools) {
         const { state, installed } = yield* Effect.promise(() =>
           toolStatus(options.toolsDir, tool, here),
