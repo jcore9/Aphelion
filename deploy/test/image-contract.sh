@@ -655,6 +655,10 @@ cat >"$fakebin/iptables" <<'FAKE'
 #!/bin/bash
 [[ ${FAKE_FIREWALL:-present} == present ]]
 FAKE
+cat >"$fakebin/ip6tables" <<'FAKE'
+#!/bin/bash
+exit 1
+FAKE
 cat >"$fakebin/curl" <<FAKE
 #!/bin/bash
 address=\$(docker inspect --format '{{(index .NetworkSettings.Networks "aphelion-contract").IPAddress}}' "\$FAKE_CONTAINER")
@@ -713,7 +717,7 @@ read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \
 [[ $status == 0 && -n $total && $passed == "$total" && $checked != *FAIL* ]] ||
   fail "check didn't pass every check (exit $status): $checked"
 for name in "the service is enabled and running" "the container is running" "/health answers on the tailnet address" \
-  "config check accepts the Compose file" "the container is hardened" "the bootstrap credential exists" "the firewall chains exist"; do
+  "config check accepts the Compose file" "the container is hardened" "the bootstrap credential exists" "the firewall rules are in place"; do
   grep -qx "ok    $name" <<<"$checked" || fail "check didn't print ok for: $name"
 done
 pass "check passes every check against the running container"
@@ -723,7 +727,7 @@ checked=$(APHELION_CREDENTIAL=$scratch/no-such-file FAKE_FIREWALL=missing host_a
 [[ $status == 1 ]] || fail "check exited $status with a missing credential and no firewall chains"
 grep -qx "FAIL  the bootstrap credential exists: $scratch/no-such-file is missing. Run host/install." <<<"$checked" ||
   fail "check didn't report the missing credential: $checked"
-grep -qx "FAIL  the firewall chains exist: the APHELION-FORWARD chain is missing. Restart the service to install it." <<<"$checked" ||
+grep -qx "FAIL  the firewall rules are in place: the APHELION-FORWARD chain is missing. Restart the service to install it. Run sudo aphelion network-check for the full list." <<<"$checked" ||
   fail "check didn't report the missing firewall chains: $checked"
 read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \2/p' <<<"$checked")
 [[ $checked == *"ok    the container is hardened"* && -n $total && $passed == $((total - 2)) ]] ||
