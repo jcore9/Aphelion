@@ -19,7 +19,14 @@ export const enabledTools = [
   "Bash",
 ] as const;
 
-export const disabledTools = ["WebFetch", "WebSearch", "Agent"] as const;
+export const givenTools: ReadonlySet<string> = new Set(enabledTools);
+
+export const disabledTools = [
+  "WebFetch",
+  "WebSearch",
+  "Agent",
+  "Skill",
+] as const;
 
 const passedThrough = [
   "HOME",
@@ -72,7 +79,24 @@ export function queryOptions(input: QueryOptionsInput): Options {
     canUseTool: input.canUseTool,
     tools: [...enabledTools],
     disallowedTools: [...disabledTools],
+    skills: [],
     settingSources: [],
+    settings: {
+      disableClaudeAiConnectors: true,
+      syncClaudeAiSkills: false,
+      syncClaudeAiPlugins: false,
+      disableBundledSkills: true,
+      disableSkillShellExecution: true,
+      autoMemoryEnabled: false,
+      autoDreamEnabled: false,
+      disableWorkflows: true,
+      enableWorkflows: false,
+      workflowKeywordTriggerEnabled: false,
+      enableArtifact: false,
+      crossSessionInbound: "refuse",
+      autoUploadSessions: false,
+    },
+    strictMcpConfig: true,
     verbatimPrompts: true,
     includePartialMessages: true,
     env: { ...input.env },

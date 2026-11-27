@@ -18,16 +18,25 @@ import {
 } from "@aphelion/plugin-sdk";
 import { z } from "zod";
 import { channel, drain, type Channel } from "./channel.ts";
-import { preToolUseHook, refusalMessage } from "./hook.ts";
+import {
+  preToolUseHook,
+  refusalMessage,
+  unchecked,
+  untilTrusted,
+  type Trust,
+  type TurnTrust,
+} from "./hook.ts";
 import {
   parseMessage,
   resultOutcome,
   type ClaudeMessage,
+  type Plugin,
   type ToolCall,
 } from "./messages.ts";
 import {
   claudeCodeVersion,
   claudeEnv,
+  givenTools,
   queryOptions,
   type ParentEnv,
 } from "./options.ts";
@@ -62,7 +71,8 @@ type ErrorCode = Extract<AdapterEvent, { type: "error" }>["code"];
 type TurnEndReason = Extract<AdapterEvent, { type: "turn.end" }>["reason"];
 
 type Item =
-  | { readonly kind: "message"; readonly raw: unknown }
+  | { readonly kind: "message"; readonly message: ClaudeMessage }
+  | { readonly kind: "refused" }
   | { readonly kind: "ended" }
   | { readonly kind: "failed"; readonly error: unknown };
 
@@ -70,6 +80,7 @@ interface Live {
   readonly query: ClaudeQuery;
   readonly prompts: Channel<SDKUserMessage>;
   readonly abort: AbortController;
+  readonly trust: Trust;
   readonly done: Promise<void>;
 }
 
@@ -77,6 +88,7 @@ interface ActiveTurn {
   readonly input: TurnInput;
   readonly signal: AbortSignal;
   readonly live: Live;
+  readonly trust: TurnTrust;
   readonly inbox: Channel<Item>;
   readonly denied: Set<string>;
   errorSent: boolean;
@@ -142,6 +154,28 @@ const turnEnd = (reason: TurnEndReason): AdapterEvent => ({
 const lineCount = (data: string) =>
   data.split("\n").filter((line) => line !== "").length;
 
+const builtIn = (plugin: Plugin) =>
+  plugin.path === "builtin" && plugin.name.startsWith("cc-plugin-");
+
+const unexpected = `the CLI didn't start as Claude Code ${claudeCodeVersion} in default permission mode`;
+
+const initProblem = (message: ClaudeMessage): string | undefined => {
+  if (message.kind === "unreadable-init") return unexpected;
+  if (message.kind !== "init") return undefined;
+  if (
+    message.permissionMode !== "default" ||
+    message.version !== claudeCodeVersion
+  ) {
+    return unexpected;
+  }
+  const tools = message.tools.filter((tool) => !givenTools.has(tool)).length;
+  const plugins = message.plugins.filter((plugin) => !builtIn(plugin)).length;
+  if (tools === 0 && message.mcpServers === 0 && plugins === 0) {
+    return undefined;
+  }
+  return `the session reported ${String(tools)} tools, ${String(message.mcpServers)} MCP servers and ${String(plugins)} plugins that Aphelion didn't give it`;
+};
+
 export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
   const interruptWaitMs = options.interruptWaitMs ?? 3000;
   const closeWaitMs = options.closeWaitMs ?? 5000;
@@ -173,10 +207,17 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
 
       const canUseTool =
         (abort: AbortController): CanUseTool =>
-        async (tool, input, { signal, toolUseID, requestId }) => {
+        async (tool, input, { signal, toolUseID, requestId, mcpServer }) => {
           try {
             const turn = active;
             if (turn?.live.abort !== abort) return refusal;
+            if (!givenTools.has(tool) || mcpServer !== undefined) {
+              return refusal;
+            }
+            const { trust } = turn;
+            if (!(await trust.until(signal)) || active !== turn) {
+              return refusal;
+            }
             const request = permissionRequestFor({
               tool,
               input,
@@ -188,6 +229,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               turn.input.decide(request),
               signal,
             );
+            if (!trust.held || active !== turn) return refusal;
             if (decision?.decision === "allow") return { behavior: "allow" };
             if (decision?.announced) {
               turn.denied.add(toolUseID);
@@ -198,11 +240,32 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           }
         };
 
+      const admit = (owner: Live, message: ClaudeMessage) => {
+        const problem = initProblem(message);
+        if (problem !== undefined) {
+          context.log(`${problem}, so the adapter stopped it`);
+          kill(owner);
+          deliver(owner, { kind: "refused" });
+          return false;
+        }
+        if (message.kind === "init") {
+          if (message.skills > 0) {
+            context.log(
+              `the session reported ${String(message.skills)} skills`,
+            );
+          }
+          if (active?.live === owner) active.trust.grant();
+        }
+        return true;
+      };
+
       const pump = async (owner: Live, stderrLines: () => number) => {
         let last: Item;
         try {
           for await (const raw of owner.query) {
-            deliver(owner, { kind: "message", raw });
+            const message = parseMessage(raw);
+            if (!admit(owner, message)) break;
+            deliver(owner, { kind: "message", message });
           }
           last = { kind: "ended" };
         } catch (error) {
@@ -215,6 +278,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         if (lines > 0) {
           context.log(`the CLI wrote ${String(lines)} lines to stderr`);
         }
+        owner.trust.revoke();
         if (live === owner) live = undefined;
         deliver(owner, last);
       };
@@ -222,6 +286,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
       const start = (): Live | undefined => {
         const abort = new AbortController();
         const prompts = channel<SDKUserMessage>();
+        const trust: Trust = unchecked();
         let stderrLines = 0;
         if (saved === null) costBaseline = 0;
         try {
@@ -232,7 +297,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               resume: saved,
               env,
               canUseTool: canUseTool(abort),
-              preToolUse,
+              preToolUse: untilTrusted(trust, preToolUse),
               stderr: (data) => {
                 stderrLines += lineCount(data);
               },
@@ -243,6 +308,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
             query,
             prompts,
             abort,
+            trust,
             done: Promise.resolve().then(() => pump(owner, () => stderrLines)),
           };
           live = owner;
@@ -254,6 +320,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
       };
 
       const kill = (owner: Live) => {
+        owner.trust.revoke();
         owner.abort.abort();
         if (live === owner) live = undefined;
       };
@@ -281,32 +348,13 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         yield { type: "error", code };
       }
 
-      function* stopUnexpected(turn: ActiveTurn): Generator<AdapterEvent> {
-        context.log(
-          `the CLI didn't start as Claude Code ${claudeCodeVersion} in default permission mode, so the adapter stopped it`,
-        );
-        kill(turn.live);
-        yield* error(turn, "vendor");
-        yield turnEnd("error");
-      }
-
       function* translate(
         turn: ActiveTurn,
         message: ClaudeMessage,
         cancelling: boolean,
       ): Generator<AdapterEvent, boolean> {
         switch (message.kind) {
-          case "unreadable-init":
-            yield* stopUnexpected(turn);
-            return true;
           case "init": {
-            if (
-              message.permissionMode !== "default" ||
-              message.version !== claudeCodeVersion
-            ) {
-              yield* stopUnexpected(turn);
-              return true;
-            }
             const ref = claudeRef(message.session);
             if (ref && ref !== announced) {
               announced = ref;
@@ -362,6 +410,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           case "error":
             yield* error(turn, message.code);
             return false;
+          case "unreadable-init":
           case "other":
             return false;
         }
@@ -385,6 +434,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           input,
           signal,
           live: owner,
+          trust: owner.trust.begin(),
           inbox: channel(),
           denied: new Set(),
           errorSent: false,
@@ -415,11 +465,17 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
             const item = turn.inbox.take();
             if (item === undefined) continue;
             if (item.kind === "message") {
-              const message = parseMessage(item.raw);
-              if (yield* translate(turn, message, deadline !== undefined)) {
+              if (
+                yield* translate(turn, item.message, deadline !== undefined)
+              ) {
                 return;
               }
               continue;
+            }
+            if (item.kind === "refused") {
+              yield* error(turn, "vendor");
+              yield turnEnd("error");
+              return;
             }
             if (deadline) {
               yield turnEnd("cancelled");
@@ -438,6 +494,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         } finally {
           cancel.stop();
           deadline?.stop();
+          turn.trust.end();
           if (active === turn) active = undefined;
         }
       }
@@ -447,6 +504,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
         const owner = live;
         live = undefined;
         if (!owner) return;
+        owner.trust.revoke();
         owner.prompts.end();
         if (!(await settlesWithin(owner.done, closeWaitMs))) {
           owner.abort.abort();

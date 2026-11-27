@@ -100,7 +100,41 @@ describe("queryOptions", () => {
       "Grep",
       "Bash",
     ]);
-    expect(options.disallowedTools).toEqual(["WebFetch", "WebSearch", "Agent"]);
+    expect(options.disallowedTools).toEqual([
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Skill",
+    ]);
+  });
+
+  it("enables no skills", () => {
+    expect(build().skills).toEqual([]);
+  });
+
+  it("turns off the account's claude.ai connectors, skills, plugins, memory, workflows, artifacts and session sharing", () => {
+    expect(build().settings).toEqual({
+      disableClaudeAiConnectors: true,
+      syncClaudeAiSkills: false,
+      syncClaudeAiPlugins: false,
+      disableBundledSkills: true,
+      disableSkillShellExecution: true,
+      autoMemoryEnabled: false,
+      autoDreamEnabled: false,
+      disableWorkflows: true,
+      enableWorkflows: false,
+      workflowKeywordTriggerEnabled: false,
+      enableArtifact: false,
+      crossSessionInbound: "refuse",
+      autoUploadSessions: false,
+    });
+  });
+
+  it("uses only the MCP servers the adapter passes, and passes none", () => {
+    const options = build("4f1e2d3c-0000-4000-8000-000000000001");
+    expect(options.strictMcpConfig).toBe(true);
+    expect(options).not.toHaveProperty("mcpServers");
+    expect(options).not.toHaveProperty("plugins");
   });
 
   it("runs the rule's hook before every tool call, and blocks the call if the hook fails", () => {
@@ -114,7 +148,7 @@ describe("queryOptions", () => {
     expect(options).not.toHaveProperty("allowedTools");
     expect(options).not.toHaveProperty("allowDangerouslySkipPermissions");
     expect(options).not.toHaveProperty("permissionPrompts");
-    expect(options).not.toHaveProperty("settings");
+    expect(options.settings).not.toHaveProperty("permissions");
     expect(options.canUseTool).toBe(deny);
   });
 
