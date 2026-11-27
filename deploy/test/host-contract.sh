@@ -1955,6 +1955,20 @@ out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrad
 pass "upgrade to any tag runs while a marker exists, and removes the marker when it finishes"
 
 reset_upgrade_repo
+FAKE_PULL=cutoff FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 >/dev/null 2>&1 || true
+reset_calls
+status=0
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_PULLED=$wrong_digest aphelion_210 upgrade v0.1.0-alpha.1 2>&1) || status=$?
+[[ $status == 1 && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.2 && -e $marker ]] ||
+  fail "a failed switch to another tag didn't put the checkout back and keep the marker ($status): $out"
+reset_calls
+status=0
+out=$(FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
+[[ $status == 0 && $out != *"already at"* && $out == *"Finished upgrading Aphelion to v0.1.0-alpha.2."* && ! -e $marker ]] ||
+  fail "a rerun after a failed switch took the already-at shortcut or kept the marker ($status): $out"
+pass "upgrade keeps a marker that existed when a switch to another tag fails, so a rerun finishes the cut-off upgrade"
+
+reset_upgrade_repo
 status=0
 FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE=$good_digest FAKE_RESTART_EXIT=1 aphelion_210 upgrade v0.1.0-alpha.2 >/dev/null 2>&1 || status=$?
 [[ $status == 1 && -e $marker ]] || fail "a failed restart didn't keep the marker ($status)"
@@ -2004,7 +2018,7 @@ for bad_wait in -5 abc 1+1 08 1.5 " 3"; do
   reset_calls
   status=0
   out=$(APHELION_HEALTH_WAIT=$bad_wait aphelion_210 upgrade v0.1.0-alpha.2 2>&1) || status=$?
-  [[ $status == 1 && $out == *"APHELION_HEALTH_WAIT must be a whole number of seconds"* && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && ! -e $marker ]] ||
+  [[ $status == 1 && $out == *"APHELION_HEALTH_WAIT must be a whole number of seconds from 0 to 999999"* && $(cat /opt/aphelion/.git/tag) == v0.1.0-alpha.1 && ! -e $marker ]] ||
     fail "upgrade didn't refuse APHELION_HEALTH_WAIT='$bad_wait' ($status): $out"
   ! called "checkout" && ! called "fetch --tags" && ! called "systemctl restart" ||
     fail "upgrade ran steps with APHELION_HEALTH_WAIT='$bad_wait': $(cat "$FAKE_CALLS")"

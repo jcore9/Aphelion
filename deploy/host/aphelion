@@ -612,18 +612,18 @@ wait_for_health() {
 }
 
 restore_checkout() {
-  local repo=$1 previous=$2 previous_branch=$3
+  local repo=$1 previous=$2 previous_branch=$3 marker_existed=$4
   if [[ -n $previous_branch ]]; then
     if git -C "$repo" switch --quiet -- "${previous_branch#refs/heads/}"; then
       echo "aphelion: moved $repo back to $previous, where it was before" >&2
-      rm -f "$repo/.git/$upgrade_marker"
+      ((marker_existed)) || rm -f "$repo/.git/$upgrade_marker"
     else
       echo "aphelion: couldn't put $repo back on ${previous_branch#refs/heads/}" >&2
     fi
   else
     if git -C "$repo" -c advice.detachedHead=false checkout --quiet --detach "$previous"; then
       echo "aphelion: moved $repo back to $previous, where it was before" >&2
-      rm -f "$repo/.git/$upgrade_marker"
+      ((marker_existed)) || rm -f "$repo/.git/$upgrade_marker"
     else
       echo "aphelion: couldn't put $repo back on $previous" >&2
     fi
@@ -652,7 +652,7 @@ cmd_upgrade() {
   while [[ $repo == */ && $repo != / ]]; do repo=${repo%/}; done
   repo=$(dirname -- "$repo")
   [[ ${APHELION_HEALTH_WAIT:-300} =~ ^(0|[1-9][0-9]{0,5})$ ]] ||
-    fail "APHELION_HEALTH_WAIT must be a whole number of seconds"
+    fail "APHELION_HEALTH_WAIT must be a whole number of seconds from 0 to 999999"
   [[ ! -L $repo && ! -L $repo/.git ]] ||
     fail "$repo or $repo/.git is a symbolic link, so upgrade can't check what it points to"
   [[ -d $repo/.git ]] ||
@@ -718,18 +718,18 @@ cmd_upgrade() {
     }
   fi
   if [[ ! -x $APHELION_DEPLOY/host/get-image ]]; then
-    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
     fail "$tag has no $APHELION_DEPLOY/host/get-image"
   fi
   previous_image=$(docker image inspect --format '{{.Id}}' aphelion:local 2>/dev/null) || previous_image=""
   if ! "$APHELION_DEPLOY/host/get-image" "$tag"; then
     restore_image "$previous_image"
-    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
     exit 1
   fi
   if ! "$APHELION_DEPLOY/host/install"; then
     restore_image "$previous_image"
-    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch" "$marker_existed"
     fail "host/install failed"
   fi
   if ! systemctl restart "$service"; then
