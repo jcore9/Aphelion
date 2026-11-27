@@ -143,7 +143,7 @@ main() {
   if systemctl is-active --quiet aphelion; then
     ((start)) || stop "aphelion.service is running, so --no-start can't leave it stopped. Stop it first with: sudo systemctl stop aphelion"
     if ((!at_tag)); then
-      stop "aphelion.service is running, and $root isn't at $tag. Move a running server to another release with: sudo aphelion upgrade $tag. If that prints the usage text, this server's release is older than the command, so follow Upgrade in the install guide once."
+      stop "aphelion.service is running, and $root isn't at $tag. Move a running server to another release with: sudo aphelion upgrade $tag. If that prints command not found or the usage text, this server's release is older than the command, so follow Upgrade in the install guide once."
     fi
   fi
 

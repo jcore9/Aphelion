@@ -732,28 +732,28 @@ To move to one release tag from [the releases page](https://github.com/jcore9/Ap
 sudo aphelion upgrade v0.1.0-alpha.2
 ```
 
-If `sudo aphelion upgrade` prints the usage text, this server's release is older than the command. Run the steps in [First upgrade from an older release](#first-upgrade-from-an-older-release) once. After that, `sudo aphelion upgrade` works.
+If `sudo aphelion upgrade` prints `command not found` or the usage text, this server's release is older than the command. Run the steps in [First upgrade from an older release](#first-upgrade-from-an-older-release) once. After that, `sudo aphelion upgrade` works.
 
 The command works in this order:
 
 1. It checks `/opt/aphelion` and stops if it is a symbolic link, has a file that root doesn't own or others can write, has an origin other than `https://github.com/jcore9/Aphelion.git`, or has local changes.
 2. With no tag, it asks GitHub for the newest published release. That includes pre-releases while Aphelion is before v1.0.
-3. It checks whether `/opt/aphelion` is already on that tag. If it is, the command prints `Aphelion is already at <tag>.` and exits without fetching an image, installing or restarting. Otherwise it fetches tags from GitHub, stops if the tag doesn't exist, and checks out the tag.
+3. It checks whether `/opt/aphelion` is already on that tag. If it is, and `aphelion.service` is enabled and running and `/health` answers, the command prints `Aphelion is already at <tag>.` and exits without changing anything. If `/opt/aphelion` is on that tag but the service isn't enabled and running or `/health` doesn't answer, it skips the checkout and runs steps 4 to 6. Otherwise it fetches tags from GitHub, stops if the tag doesn't exist, and checks out the tag.
 4. It runs `host/get-image` from the checked-out release. If the release has an `aphelion-image.sha256` file, that script downloads the image by its digest, checks that the fingerprint matches, and tags it as `aphelion:local`. If the release has no digest file, or the download fails because the image package is private, it builds `aphelion:local` on the server instead.
-5. It runs `host/install`, which updates the unit file and keeps the existing bootstrap key. If step 4 or step 5 fails, for example on a digest mismatch or a rejected bootstrap key, `upgrade` puts `/opt/aphelion` back on its earlier branch or commit and puts `aphelion:local` back on its earlier image, or removes the new tag when there was none.
-6. It restarts `aphelion`, prints the version before and after, waits up to 300 seconds for `/health`, and runs `aphelion check`. If the restart fails, it prints the log command and, when the earlier checkout was a release tag, the command to go back. If the upgrade finishes but `aphelion check` fails, it says so and exits with 1.
+5. It runs `host/install`, which updates the unit file and keeps the existing bootstrap key. If step 4 or step 5 fails, for example on a digest mismatch or a rejected bootstrap key, `upgrade` puts `aphelion:local` back on its earlier image, or removes the new tag when there was none. If step 3 moved `/opt/aphelion`, it also puts `/opt/aphelion` back on its earlier branch or commit.
+6. It restarts `aphelion` and prints the version before and after, or that it finished upgrading to that tag. It then prints `Waiting up to 5 minutes for the server to answer...`, waits up to 300 seconds for `/health`, and runs `aphelion check`. If the restart fails, it prints the log command and, when it moved from an earlier release tag, the command to go back. If the upgrade finishes but `aphelion check` fails, it says so and exits with 1.
 
 ### First upgrade from an older release
 
-Releases up to `v0.1.0-alpha.2` don't have `aphelion upgrade`, so `sudo aphelion upgrade` prints the usage text and exits with 2. Run these steps once to move to a newer release. After that, `sudo aphelion upgrade` works.
+`v0.1.0-alpha.1` has no `aphelion` command, so `sudo aphelion upgrade` prints `command not found`. A server built from `main` before this command prints the usage text instead. The one-line installer refuses to move a running server to a different tag, so in both cases run these steps once. After that, `sudo aphelion upgrade` works.
 
 1. Find the newest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`.
 2. Fetch tags and check out that release in `/opt/aphelion`.
 3. Download or build the image with `host/get-image`, update the service and command with `host/install`, and restart `aphelion`.
-4. Run `sudo aphelion check` to confirm the server is up.
+4. Run `sudo aphelion check` to confirm the server is up. If `/health answers on the tailnet address` fails right after the restart, wait a minute and run `sudo aphelion check` again.
 
 ```sh
-tag=v0.1.0-alpha.3
+tag=v0.1.0-alpha.2
 cd /opt/aphelion &&
 	sudo git fetch --tags &&
 	sudo git checkout --detach "refs/tags/$tag" &&
