@@ -3,7 +3,7 @@ import { Secret } from "./secret";
 
 export const brokerSocket = "/run/aphelion-secrets/broker.sock";
 const maxAnswerBytes = 64 * 1024;
-const timeoutMs = 5_000;
+const defaultTimeoutMs = 5_000;
 
 export class BrokerError extends Error {
   override name = "BrokerError";
@@ -24,10 +24,26 @@ const unreachable = (socketPath: string, error: unknown) => {
   );
 };
 
-function send(socketPath: string, body: Buffer): Promise<Answer> {
+function send(
+  socketPath: string,
+  body: Buffer,
+  timeoutMs: number,
+): Promise<Answer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
+    let settled = false;
+    const wipe = () => {
+      for (const chunk of chunks) chunk.fill(0);
+      chunks.length = 0;
+    };
+    const fail = (error: BrokerError) => {
+      if (settled) return;
+      settled = true;
+      wipe();
+      call.destroy();
+      reject(error);
+    };
     const call = request(
       {
         socketPath,
@@ -40,31 +56,36 @@ function send(socketPath: string, body: Buffer): Promise<Answer> {
       },
       (response) => {
         response.on("data", (chunk: Buffer) => {
-          bytes += chunk.length;
-          if (bytes > maxAnswerBytes) {
-            response.destroy();
-            reject(new BrokerError("the secrets broker's answer is too long"));
+          if (settled) {
+            chunk.fill(0);
             return;
           }
           chunks.push(chunk);
+          bytes += chunk.length;
+          if (bytes > maxAnswerBytes) {
+            fail(new BrokerError("the secrets broker's answer is too long"));
+          }
         });
         response.on("error", () => {
-          reject(new BrokerError("the secrets broker's answer broke off"));
+          fail(new BrokerError("the secrets broker's answer broke off"));
         });
         response.on("end", () => {
-          resolve({
-            status: response.statusCode ?? 0,
-            body: Buffer.concat(chunks),
-          });
-          for (const chunk of chunks) chunk.fill(0);
+          if (settled) return;
+          settled = true;
+          const answer = Buffer.concat(chunks);
+          wipe();
+          resolve({ status: response.statusCode ?? 0, body: answer });
+        });
+        response.on("close", () => {
+          fail(new BrokerError("the secrets broker's answer broke off"));
         });
       },
     );
     call.on("error", (error) => {
-      reject(unreachable(socketPath, error));
+      fail(unreachable(socketPath, error));
     });
     call.setTimeout(timeoutMs, () => {
-      call.destroy(new BrokerError("the secrets broker didn't answer"));
+      fail(new BrokerError("the secrets broker didn't answer"));
     });
     call.end(body);
   });
@@ -73,19 +94,29 @@ function send(socketPath: string, body: Buffer): Promise<Answer> {
 const answered = (status: number) =>
   new BrokerError(`the secrets broker answered HTTP ${String(status)}`);
 
-async function ask(socketPath: string, fields: object): Promise<Answer> {
+async function ask(
+  socketPath: string,
+  timeoutMs: number,
+  fields: object,
+): Promise<Answer> {
   const body = Buffer.from(JSON.stringify(fields));
   try {
-    return await send(socketPath, body);
+    return await send(socketPath, body, timeoutMs);
   } finally {
     body.fill(0);
   }
 }
 
-export function brokerClient(socketPath: string = brokerSocket) {
+export function brokerClient(
+  socketPath: string = brokerSocket,
+  { timeoutMs = defaultTimeoutMs }: { readonly timeoutMs?: number } = {},
+) {
   return {
     async read(ref: string): Promise<Secret | undefined> {
-      const { status, body } = await ask(socketPath, { op: "read", ref });
+      const { status, body } = await ask(socketPath, timeoutMs, {
+        op: "read",
+        ref,
+      });
       try {
         if (status === 404) return undefined;
         if (status !== 200) throw answered(status);
@@ -106,7 +137,7 @@ export function brokerClient(socketPath: string = brokerSocket) {
       }
     },
     async write(ref: string, value: Secret): Promise<void> {
-      const { status } = await ask(socketPath, {
+      const { status } = await ask(socketPath, timeoutMs, {
         op: "write",
         ref,
         value: value.reveal(),
@@ -114,7 +145,10 @@ export function brokerClient(socketPath: string = brokerSocket) {
       if (status !== 204) throw answered(status);
     },
     async delete(ref: string): Promise<boolean> {
-      const { status } = await ask(socketPath, { op: "delete", ref });
+      const { status } = await ask(socketPath, timeoutMs, {
+        op: "delete",
+        ref,
+      });
       if (status === 404) return false;
       if (status !== 204) throw answered(status);
       return true;

@@ -15,6 +15,27 @@ const requestSchema = z.discriminatedUnion("op", [
   z.strictObject({ op: z.literal("delete"), ref: z.string() }),
 ]);
 
+async function readBody(request: IncomingMessage): Promise<Buffer | undefined> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  try {
+    for await (const chunk of request) {
+      if (!Buffer.isBuffer(chunk)) {
+        throw new Error("Unexpected request encoding");
+      }
+      chunks.push(chunk);
+      bytes += chunk.length;
+      if (bytes > maxRequestBytes) {
+        request.destroy();
+        return undefined;
+      }
+    }
+    return Buffer.concat(chunks);
+  } finally {
+    for (const chunk of chunks) chunk.fill(0);
+  }
+}
+
 export async function handleBrokerRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -27,26 +48,17 @@ export async function handleBrokerRequest(
     return;
   }
 
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of request) {
-    if (!Buffer.isBuffer(chunk)) throw new Error("Unexpected request encoding");
-    bytes += chunk.length;
-    if (bytes > maxRequestBytes) {
-      request.destroy();
-      return;
-    }
-    chunks.push(chunk);
-  }
+  const body = await readBody(request);
+  if (body === undefined) return;
 
   let input: unknown;
   try {
-    input = JSON.parse(
-      new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)),
-    );
+    input = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
   } catch {
     response.writeHead(400).end();
     return;
+  } finally {
+    body.fill(0);
   }
   const parsed = requestSchema.safeParse(input);
   const ref = parsed.success && parseSecretReference(parsed.data.ref);

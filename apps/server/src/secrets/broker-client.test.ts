@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +39,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
   await rm(root, { recursive: true, force: true });
 });
@@ -106,8 +107,7 @@ describe("the broker client", () => {
   });
 
   it("refuses an answer that isn't a JSON string, without repeating it", async () => {
-    await new Promise((resolve) => server.close(resolve));
-    server = await listen((_request, response) => {
+    await answerWith((_request, response) => {
       response
         .writeHead(200, { "Content-Type": "application/json" })
         .end(`{"value":"${canary}"}`);
@@ -116,4 +116,57 @@ describe("the broker client", () => {
     expect(message).toContain("the secrets broker gave an answer");
     expect(message).not.toContain(canary);
   });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "says to run it as harness when the socket refuses this user",
+    async () => {
+      await chmod(socket, 0o000);
+      expect(await messageOf(brokerClient(socket).read(ref))).toBe(
+        `BrokerError: this user can't reach the secrets broker at ${socket}. Run it as harness.`,
+      );
+    },
+  );
+
+  it("refuses an answer longer than 64 KiB, without repeating it", async () => {
+    await answerWith((_request, response) => {
+      response
+        .writeHead(200, { "Content-Type": "application/json" })
+        .end(JSON.stringify(canary.repeat(2000)));
+    });
+    const message = await messageOf(brokerClient(socket).read(ref));
+    expect(message).toBe(
+      "BrokerError: the secrets broker's answer is too long",
+    );
+  });
+
+  it("says the answer broke off when the broker stops mid-answer", async () => {
+    await answerWith((_request, response) => {
+      response.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Length": "1000",
+      });
+      response.write(`"${canary}`, () => {
+        response.socket?.destroy();
+      });
+    });
+    const message = await messageOf(brokerClient(socket).read(ref));
+    expect(message).toBe("BrokerError: the secrets broker's answer broke off");
+  });
+
+  it("says the broker didn't answer when it stays silent", async () => {
+    await answerWith((_request, response) => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.write(`"${canary}`);
+    });
+    const message = await messageOf(
+      brokerClient(socket, { timeoutMs: 200 }).read(ref),
+    );
+    expect(message).toBe("BrokerError: the secrets broker didn't answer");
+  });
 });
+
+async function answerWith(handler: Parameters<typeof createServer>[1]) {
+  server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+  server = await listen(handler);
+}
