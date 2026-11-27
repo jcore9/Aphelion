@@ -69,13 +69,13 @@ For each installed tool that has a status command, Aphelion runs that command as
 
 `sudo aphelion sign-in NAME` signs in to the AI tool `NAME`, as the `aphelion-bot` user, with the tool's own sign-in command. It reads that command from the `SIGN-IN-COMMAND` column of [`aphelion tool list`](cli.md#aphelion-tool-list), so the list in `deploy/ai-tools.json` stays the one source.
 
-- It refuses a name that isn't on the list, and a tool that isn't installed, and names the command that installs it.
+- It refuses a name that isn't on the list, and a tool that isn't installed, and names the command that installs it. It also refuses when the list gives no sign-in command for the tool, which means the image is older than the command.
 - It refuses without a terminal, on standard input or standard output, with `sign-in needs a terminal. Run it in a shell on the host, not through a pipe or a script.`
 - The tool talks to your terminal directly. Aphelion doesn't capture or log what it prints, such as a code or a token ([decision 0019](../decisions/0019-cli-subscription-use.md)).
 
 ## `backup`
 
-`sudo aphelion backup [--to FOLDER]` makes one backup and prints its folder. `FOLDER` defaults to `$APHELION_BACKUP_DIR`. In order, it:
+`sudo aphelion backup [--to FOLDER]` makes one backup and prints its folder. `FOLDER` defaults to `$APHELION_BACKUP_DIR`. A folder that exists keeps its mode; a new one is created with mode 0700. In order, it:
 
 1. Stops the service, if it runs. It starts the service again at the end, and also when a step fails.
 2. Packs the six volumes, read-only, in a short-lived container made from the service's own image. The folder is `aphelion-backup-YYYYMMDD-HHMMSS`, and only root can read it. It holds `aphelion-data.tar.gz` and `aphelion-data.tar.gz.sha256`.
@@ -88,16 +88,16 @@ It doesn't copy the backup off the host. [Back up](../guides/install.md#back-up)
 
 `sudo aphelion restore [PATH]` puts a backup into new volumes. `PATH` is a backup folder or an archive file, and defaults to `latest` in `$APHELION_BACKUP_DIR`. In order, it:
 
-1. Checks the archive against its `.sha256` file. A missing file or a mismatch stops it before it changes anything.
+1. Checks the archive against its `.sha256` file. A missing file, a mismatch, or an entry that names another file stops it before it changes anything.
 2. Stops the service, if it runs, and says so.
-3. Refuses if any of the six volumes exists, and prints the commands that remove them. It never removes a volume itself.
+3. Refuses if any of the six volumes exists, or if `docker volume ls` fails, and prints the commands that remove them. It never removes a volume itself.
 4. Creates the six volumes with the Compose labels, and unpacks the archive into them.
 5. Runs [`aphelion restore finish`](cli.md#aphelion-restore-finish) as `harness` in a short-lived container, and prints its output.
 6. Starts the service only if step 5 exited with 0. Otherwise it leaves the service stopped, says so, and prints the commands that remove the volumes, so you can start over.
 
 ## `plugin install`
 
-`sudo aphelion plugin install FOLDER [--approve DIGEST]` takes a folder on the host. The folder's name becomes the plugin's name in the container, so it can hold only letters, digits, dots, dashes and underscores, and must start with a letter or digit. `@` isn't allowed.
+`sudo aphelion plugin install FOLDER [--approve DIGEST]` takes a folder on the host. The folder's name becomes the plugin's name in the container, so it can hold only letters, digits, dots, dashes and underscores, and must start with a letter or digit. `@` isn't allowed. The folder can't be a symbolic link, and the container must be running.
 
 - Without `--approve`, it refuses a plugin that is already in `/opt/aphelion/plugins`. Otherwise it copies the folder in with `docker compose cp` and runs the server's preview.
 - With `--approve`, it doesn't copy again. It runs the server's approval on the folder that is in the container, and, when that works, prints `sudo systemctl restart aphelion` as the next step.

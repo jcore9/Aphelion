@@ -251,6 +251,7 @@ cmd_sign_in() {
     read -ra argv <<<"$signin"
   done < <(tail -n +2 <<<"$rows")
   ((found)) || fail "$name isn't on the list of AI tools. See the list with: sudo aphelion tool list"
+  ((${#argv[@]})) || fail "aphelion tool list gave no sign-in command for $name. Upgrade Aphelion so the image and this command match."
   [[ -t 0 && -t 1 ]] ||
     fail "sign-in needs a terminal. Run it in a shell on the host, not through a pipe or a script."
   compose exec --user aphelion-bot "$service" "${argv[@]}"
@@ -277,8 +278,16 @@ project_name() {
   echo "${COMPOSE_PROJECT_NAME:-aphelion}"
 }
 
+check_sum() {
+  local dir=$1 archive=$2 sum_hash sum_file
+  [[ $(wc -l <"$dir/$archive.sha256") == 1 ]] || return 1
+  read -r sum_hash sum_file <"$dir/$archive.sha256"
+  [[ ${sum_file#\*} == "$archive" ]] || return 1
+  (cd "$dir" && sha256sum --check --status -- "$archive.sha256")
+}
+
 verify_backup() {
-  (cd "$1" && sha256sum --check --status "$archive_name.sha256") && gzip --test "$1/$archive_name"
+  check_sum "$1" "$archive_name" && gzip --test "$1/$archive_name"
 }
 
 cmd_backup() {
@@ -288,7 +297,7 @@ cmd_backup() {
   project=$(project_name)
   image=$(service_image)
   umask 077
-  install -d -m 0700 "$dir"
+  [[ -d $dir ]] || install -d -m 0700 "$dir"
   stamp=$(date +%Y%m%d-%H%M%S)
   new=$dir/aphelion-backup-$stamp
   [[ ! -e $new ]] || fail "$new exists. Wait a second and run it again."
@@ -336,7 +345,7 @@ print_volume_commands() {
 cmd_restore() {
   local source archive dir project image volume have status=0
   local -a mounts=() existing=() listed
-  source=$(realpath -- "${1:-$APHELION_BACKUP_DIR/latest}" 2>/dev/null) || fail "${1:-$APHELION_BACKUP_DIR/latest} doesn't exist"
+  source=$(realpath -e -- "${1:-$APHELION_BACKUP_DIR/latest}" 2>/dev/null) || fail "${1:-$APHELION_BACKUP_DIR/latest} doesn't exist"
   if [[ -d $source ]]; then
     archive=$source/$archive_name
   else
@@ -345,7 +354,7 @@ cmd_restore() {
   [[ -f $archive ]] || fail "there is no archive at $archive"
   [[ -f $archive.sha256 ]] || fail "there is no checksum file at $archive.sha256"
   dir=$(dirname "$archive")
-  (cd "$dir" && sha256sum --check --status "$(basename "$archive").sha256") ||
+  check_sum "$dir" "$(basename -- "$archive")" ||
     fail "the archive doesn't match its checksum, so it is damaged or changed. Nothing was restored."
   project=$(project_name)
   image=$(service_image)
@@ -353,7 +362,9 @@ cmd_restore() {
     systemctl stop "$service"
     echo "Stopped $service."
   fi
-  mapfile -t listed < <(docker volume ls --quiet --filter "name=${project}_")
+  have=$(docker volume ls --quiet --filter "name=${project}_") ||
+    fail "docker volume ls failed, so the restore can't tell whether the volumes exist. Is Docker running? Nothing was restored."
+  mapfile -t listed <<<"$have"
   for volume in "${volumes[@]}"; do
     for have in "${listed[@]}"; do
       [[ $have != "${project}_$volume" ]] || existing+=("$have")
@@ -377,7 +388,7 @@ cmd_restore() {
   }
   docker run --rm --pull never --network none --entrypoint "" \
     "${mounts[@]}" -v "$dir:/backup:ro" "$image" \
-    tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file "/backup/$(basename "$archive")" --directory /data ||
+    tar --extract --gzip --numeric-owner --same-owner --preserve-permissions --file "/backup/$(basename -- "$archive")" --directory /data ||
     start_over "unpacking the archive failed"
   docker run --rm --pull never --network none --entrypoint "" --user harness \
     -v "${project}_state:/var/lib/aphelion" "$image" aphelion restore finish || status=$?
@@ -387,7 +398,7 @@ cmd_restore() {
 }
 
 cmd_plugin() {
-  local subcommand=$1 folder name
+  local subcommand=$1 folder raw name present test_flag status
   shift
   case $subcommand in
     dev)
@@ -396,12 +407,26 @@ cmd_plugin() {
     install)
       folder=$1
       shift
-      [[ -d $folder ]] || fail "$folder isn't a folder"
-      folder=$(realpath -- "$folder")
-      name=$(basename -- "$folder")
+      raw=$folder
+      while [[ $raw == */ && $raw != / ]]; do raw=${raw%/}; done
+      [[ -d $raw ]] || fail "$folder isn't a folder"
+      [[ ! -L $raw ]] || fail "$folder is a symbolic link. Give the folder itself, so its name is the plugin's name."
+      name=$(basename -- "$raw")
       [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && $name != *@* ]] ||
         fail "the folder's name '$name' must be letters, digits, dots, dashes and underscores, and start with a letter or digit. Rename the folder."
-      if in_container harness test -e "$plugins_dir/$name"; then
+      folder=$(realpath -e -- "$raw")
+      [[ -n $(container_id) ]] || fail "the $service container isn't running. Start it with: sudo systemctl start $service"
+      present=0
+      for test_flag in -e -L; do
+        status=0
+        in_container harness test "$test_flag" "$plugins_dir/$name" || status=$?
+        case $status in
+          0) present=1 ;;
+          1) ;;
+          *) fail "couldn't check the container for $name (exit $status). Check with: sudo aphelion status" ;;
+        esac
+      done
+      if ((present)); then
         (($#)) || fail "$name is already in the container. To change it, run: sudo aphelion plugin update $name"
       else
         compose cp "$folder" "$service:$plugins_dir/$name" || fail "copying $folder into the container failed"

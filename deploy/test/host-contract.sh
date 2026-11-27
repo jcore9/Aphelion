@@ -264,7 +264,7 @@ case " $* " in
     exit 0 ;;
   *" volume ls "*)
     for volume in ${FAKE_VOLUMES:-}; do echo "$volume"; done
-    exit 0 ;;
+    exit "${FAKE_VOLUME_LS_EXIT:-0}" ;;
   *" volume create "*)
     echo "${*: -1}"
     exit 0 ;;
@@ -279,6 +279,7 @@ case " $* " in
     declare -A check=([claude]="claude auth status --text" [codex]="codex login status" [grok]=- [opencode]=-)
     declare -A signin=([claude]="claude auth login" [codex]="codex login --device-auth" [grok]="grok login --device-auth" [opencode]="opencode auth login")
     printf 'NAME\tVERSION\tINSTALLED\tSTATE\tSTATUS-COMMAND\tSIGN-IN-COMMAND\n'
+    [[ -z ${FAKE_NO_SIGNIN:-} ]] || signin=([claude]="" [codex]="" [grok]="" [opencode]="")
     for name in claude codex grok opencode; do
       state="not installed" installed=-
       if [[ " ${FAKE_TOOLS:-} " == *" $name "* ]]; then
@@ -301,6 +302,8 @@ case " $* " in
     last=${*: -1}
     [[ " ${FAKE_PLUGINS:-} " == *" ${last##*/} "* ]]
     exit ;;
+  *" --user harness aphelion test -L "*)
+    exit 1 ;;
   *" --user aphelion-bot aphelion "*" auth login "* | *" --user aphelion-bot aphelion "*" login --device-auth "*)
     echo "SECRET-FROM-THE-TOOL"
     exit "${FAKE_SIGN_IN_EXIT:-0}" ;;
@@ -492,7 +495,11 @@ out=$(as_root_aphelion sign-in claude </dev/null 2>&1) || status=$?
 [[ $status == 1 && $out == "aphelion: sign-in needs a terminal. Run it in a shell on the host, not through a pipe or a script." ]] ||
   fail "sign-in didn't refuse without a terminal ($status, $out)"
 ! called "aphelion-bot" || fail "sign-in ran the tool without a terminal"
-pass "sign-in refuses an unknown tool, a tool that isn't installed, and a run without a terminal"
+status=0
+out=$(FAKE_TOOLS=claude FAKE_NO_SIGNIN=1 with_terminal /opt/aphelion/deploy/host/aphelion sign-in claude 2>&1) || status=$?
+[[ $status == 1 && $out == *"gave no sign-in command for claude"* ]] || fail "sign-in ran with an empty sign-in command ($status, $out)"
+! called "aphelion-bot" || fail "sign-in ran compose exec with no command"
+pass "sign-in refuses an unknown tool, a tool that isn't installed, a run without a terminal, and an empty sign-in command"
 
 bk=$(mktemp -d)/backups
 export APHELION_BACKUP_DIR=$bk
@@ -548,7 +555,11 @@ out=$(FAKE_SERVICE=inactive as_root_aphelion backup --to "$elsewhere") || fail "
 [[ $out == "$elsewhere"/aphelion-backup-* && -f $out/aphelion-data.tar.gz && -L $elsewhere/latest ]] ||
   fail "backup --to didn't write into the folder it was given: $out"
 ! called "systemctl stop" && ! called "systemctl start" || fail "backup touched a service that wasn't running"
-pass "backup --to writes into the given folder, and leaves a service that isn't running alone"
+existing=$(mktemp -d)
+chmod 1777 "$existing"
+FAKE_SERVICE=inactive as_root_aphelion backup --to "$existing" >/dev/null || fail "backup --to an existing folder failed"
+[[ $(stat -c %a "$existing") == 1777 ]] || fail "backup --to changed the mode of a folder that existed: $(stat -c %a "$existing")"
+pass "backup --to writes into the given folder, keeps the mode of a folder that exists, and leaves a service that isn't running alone"
 
 reset_calls
 status=0
@@ -603,7 +614,28 @@ out=$(as_root_aphelion restore "$damaged" 2>&1) || status=$?
 status=0
 out=$(as_root_aphelion restore "$damaged/none" 2>&1) || status=$?
 [[ $status == 1 ]] || fail "restore accepted a path that doesn't exist"
-pass "restore refuses an archive whose checksum is wrong or missing before it touches the host"
+status=0
+out=$(as_root_aphelion restore "$damaged/none" 2>&1) || status=$?
+[[ $status == 1 && $out == *"doesn't exist"* ]] || fail "restore didn't say a missing path doesn't exist ($status, $out)"
+mkdir "$damaged/swapped"
+cp "$third/aphelion-data.tar.gz" "$damaged/swapped/"
+echo "other" >"$damaged/swapped/other"
+(cd "$damaged/swapped" && sha256sum other >aphelion-data.tar.gz.sha256)
+reset_calls
+status=0
+out=$(as_root_aphelion restore "$damaged/swapped" 2>&1) || status=$?
+[[ $status == 1 && $out == *"checksum"* ]] || fail "restore accepted a checksum file that names another file ($status, $out)"
+! called "systemctl" && ! called "volume" || fail "restore touched the host after a checksum for another file"
+mkdir "$damaged/-dash"
+cp "$third/." "$damaged/-dash/" -r
+reset_calls
+as_root_aphelion restore "$damaged/-dash/aphelion-data.tar.gz" >/dev/null 2>&1 || fail "restore failed for a good archive in a folder with a leading dash"
+reset_calls
+status=0
+out=$(FAKE_VOLUME_LS_EXIT=1 as_root_aphelion restore 2>&1) || status=$?
+[[ $status == 1 && $out == *"docker volume ls failed"* ]] || fail "restore went on after docker volume ls failed ($status, $out)"
+! called "volume create" && ! called "tar --extract" && ! called "systemctl start" || fail "restore changed things after docker volume ls failed"
+pass "restore refuses an archive whose checksum is wrong, missing or for another file, a missing path, and a failed volume list, before it changes anything"
 
 reset_calls
 status=0
@@ -661,7 +693,12 @@ status=0
 out=$(FAKE_PLUGIN_EXIT=1 as_root_aphelion plugin install "$source_folder" --approve abc123 2>&1) || status=$?
 [[ $status == 1 && $out != *"systemctl restart"* ]] || fail "plugin install named the next step after a failure ($status, $out)"
 unset FAKE_PLUGINS
-pass "plugin install copies a host folder into the container, refuses a folder that is already there, and after --approve names the next step"
+reset_calls
+status=0
+out=$(FAKE_CONTAINER=down as_root_aphelion plugin install "$source_folder" 2>&1) || status=$?
+[[ $status == 1 && $out == *"isn't running"* ]] || fail "plugin install went on with the container stopped ($status, $out)"
+! called " cp " && ! called "plugin install" || fail "plugin install copied into a stopped container"
+pass "plugin install copies a host folder into the container, refuses a stopped container and a folder that is already there, and after --approve names the next step"
 
 mkdir -p "$(dirname "$source_folder")/bad name" "$(dirname "$source_folder")/-flag" "$(dirname "$source_folder")/my-plugin@1.0.0"
 touch "$(dirname "$source_folder")/a-file"
@@ -672,4 +709,15 @@ for bad in "bad name" -flag my-plugin@1.0.0 a-file missing; do
   [[ $status == 1 && $out == "aphelion: "* ]] || fail "plugin install accepted '$bad' ($status, $out)"
   ! called " cp " && ! called "plugin install" || fail "plugin install went on with '$bad'"
 done
-pass "plugin install refuses a name that isn't a plain folder name, a file, and a folder that doesn't exist"
+ln -s "$source_folder" "$(dirname "$source_folder")/linked-plugin"
+for bad in "my-plugin/.." "my-plugin/../my-plugin/.." ".." linked-plugin linked-plugin/; do
+  reset_calls
+  status=0
+  case $bad in
+    ..) out=$(cd "$(dirname "$source_folder")/my-plugin" && as_root_aphelion plugin install .. 2>&1) || status=$? ;;
+    *) out=$(as_root_aphelion plugin install "$(dirname "$source_folder")/$bad" 2>&1) || status=$? ;;
+  esac
+  [[ $status == 1 && $out == "aphelion: "* ]] || fail "plugin install accepted '$bad' ($status, $out)"
+  ! called " cp " && ! called "plugin install" || fail "plugin install went on with '$bad'"
+done
+pass "plugin install refuses a name that isn't a plain folder name, a symlink, a parent folder, a file, and a folder that doesn't exist"

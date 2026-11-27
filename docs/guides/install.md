@@ -541,8 +541,8 @@ A tool's version changes only when the list changes. You see whether a newer ver
    ```
 
    ```text
-   NAME    VERSION  INSTALLED  STATE             STATUS-COMMAND
-   claude  2.1.332  2.1.330    update available  claude auth status --text
+   NAME    VERSION  INSTALLED  STATE             STATUS-COMMAND            SIGN-IN-COMMAND
+   claude  2.1.332  2.1.330    update available  claude auth status --text  claude auth login
    ```
 
    `sudo aphelion status` adds `(update available: 2.1.330 -> 2.1.332)` to the tool's line.
