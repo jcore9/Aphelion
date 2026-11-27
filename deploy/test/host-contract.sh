@@ -313,6 +313,29 @@ case " $* " in
     echo "SECRET-FROM-THE-TOOL"
     [[ " ${FAKE_SIGNED_IN:-} " == *" ${rest%% *} "* ]]
     exit ;;
+  *" compose version "*)
+    [[ -e ${FAKE_STATE:-/nonexistent}/docker ]]
+    exit ;;
+  *" pull "*)
+    [[ ${FAKE_PULL:-ok} == ok ]] || exit 1
+    echo "${FAKE_PULLED:-${*: -1}}" >"$FAKE_STATE/pulled"
+    exit 0 ;;
+  *" image inspect "*)
+    if [[ ${*: -1} == aphelion:local ]]; then cat "$FAKE_STATE/local"; else cat "$FAKE_STATE/pulled"; fi
+    exit ;;
+  *" tag "*)
+    cp "$FAKE_STATE/pulled" "$FAKE_STATE/local"
+    exit 0 ;;
+  *" --project-directory "*" build "*)
+    : >"$FAKE_STATE/local"
+    exit 0 ;;
+  *" --check-key "*)
+    cat >/dev/null
+    [[ ${FAKE_CHECK_KEY:-accept} == accept ]]
+    exit ;;
+  *" --new-key "*)
+    echo "${FAKE_NEW_KEY:-AGE-SECRET-KEY-1FAKE}"
+    exit 0 ;;
   *" run "*)
     mount=""
     for argument in "$@"; do
@@ -356,6 +379,18 @@ chmod 0777 /opt/aphelion/deploy/host/aphelion
 if /opt/aphelion/deploy/host/install >/dev/null 2>&1; then fail "install linked a host command that anyone can write"; fi
 chmod 0755 /opt/aphelion/deploy/host/aphelion
 pass "install links the host command into /usr/local/bin, changes nothing on a second run, keeps a file it doesn't own, and refuses a command others can write"
+
+unit=/etc/systemd/system/aphelion.service
+before=$(stat -c '%i %Z' "$unit")
+/opt/aphelion/deploy/host/install >/dev/null || fail "install failed over an unchanged unit"
+[[ $(stat -c '%i %Z' "$unit") == "$before" ]] || fail "a second install rewrote an unchanged unit"
+status=0
+error=$(FAKE_CHECK_KEY=reject /opt/aphelion/deploy/host/install 2>&1 >/dev/null) || status=$?
+[[ $status == 1 && $error == *"holds no bootstrap key"* ]] ||
+  fail "install kept a bootstrap key that the broker's parser rejects ($status, $error)"
+[[ $(systemd-creds decrypt --name=bootstrap "$credential" - 2>/dev/null) == "${key}Q" ]] ||
+  fail "install changed the bootstrap key it refused"
+pass "install asks the broker's own parser about the bootstrap key, refuses one it rejects, and leaves an unchanged unit alone"
 
 status=0
 error=$(setpriv --reuid=65534 --regid=65534 --clear-groups "$link" status 2>&1 >/dev/null) || status=$?
@@ -721,3 +756,215 @@ for bad in "my-plugin/.." "my-plugin/../my-plugin/.." ".." linked-plugin linked-
   ! called " cp " && ! called "plugin install" || fail "plugin install went on with '$bad'"
 done
 pass "plugin install refuses a name that isn't a plain folder name, a symlink, a parent folder, a file, and a folder that doesn't exist"
+
+installer_template=$(mktemp -d)
+cp -a /opt/aphelion/deploy "$installer_template/deploy"
+rm -f "$installer_template/deploy/.env"
+export FAKE_STATE
+FAKE_STATE=$(mktemp -d)
+installbin=$(mktemp -d)
+cat >"$installbin/uname" <<'FAKE'
+#!/bin/bash
+echo x86_64
+FAKE
+cat >"$installbin/tailscale" <<'FAKE'
+#!/bin/bash
+[[ ${FAKE_TAILSCALE:-up} == up ]] || exit 1
+echo 100.100.5.1
+FAKE
+cat >"$installbin/apt-get" <<'FAKE'
+#!/bin/bash
+echo "apt-get $*" >>"$FAKE_CALLS"
+[[ $* != *docker-ce* ]] || touch "$FAKE_STATE/docker"
+FAKE
+cat >"$installbin/git" <<'FAKE'
+#!/bin/bash
+echo "git $*" >>"$FAKE_CALLS"
+args=" $* "
+case $args in
+  *" clone "*)
+    target=${*: -1}
+    mkdir -p "$target"
+    cp -a "$FAKE_TEMPLATE/deploy" "$target/deploy"
+    mkdir "$target/.git"
+    echo "${FAKE_CLONE_TAG:?}" >"$target/.git/tag" ;;
+  *" status "*) cat /opt/aphelion/.git/dirty 2>/dev/null || true ;;
+  *" describe "*) cat /opt/aphelion/.git/tag ;;
+  *" checkout "*) echo "${*: -1}" | sed 's|^tags/||' >/opt/aphelion/.git/tag ;;
+esac
+FAKE
+cat >"$installbin/curl" <<'FAKE'
+#!/bin/bash
+echo "curl $*" >>"$FAKE_CALLS"
+output=""
+while (($#)); do
+  [[ $1 != -o ]] || output=$2
+  last=$1
+  shift
+done
+case $last in
+  */aphelion-image.sha256)
+    [[ ${FAKE_DIGEST_FILE:-} == present ]] || exit 22
+    printf '%s\n' "$FAKE_DIGEST_LINE" ;;
+  https://download.docker.com/*) echo key >"$output" ;;
+  *) exit 7 ;;
+esac
+FAKE
+cat >"$installbin/systemctl" <<'FAKE'
+#!/bin/bash
+echo "systemctl $*" >>"$FAKE_CALLS"
+case $1 in
+  is-active) [[ -e $FAKE_STATE/active ]] ;;
+  start) touch "$FAKE_STATE/active" ;;
+esac
+FAKE
+chmod +x "$installbin"/*
+export FAKE_TEMPLATE=$installer_template
+export FAKE_DIGEST_LINE=ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000001
+export FAKE_CLONE_TAG=v9.9.9
+export PATH=$installbin:$PATH
+mount -t tmpfs tmpfs /opt
+
+unit=/etc/systemd/system/aphelion.service
+link=/usr/local/bin/aphelion
+fresh_host() {
+  rm -rf /opt/aphelion "$FAKE_STATE"
+  mkdir "$FAKE_STATE"
+  rm -f "$credential" "$unit" "$link"
+  unset FAKE_PULL FAKE_PULLED FAKE_DIGEST_FILE FAKE_CHECK_KEY FAKE_TAILSCALE
+  reset_calls
+}
+run_installer() {
+  local status=0
+  bash -s -- "$@" <"$installer_template/deploy/install.sh" >/tmp/installer-out 2>&1 || status=$?
+  return "$status"
+}
+snapshot() {
+  find /opt/aphelion "$unit" "$link" "$credential" -printf '%p %i %C@ %s\n' | sort
+}
+
+fresh_host
+cpuinfo=$(mktemp)
+grep -v sse4_2 /proc/cpuinfo | sed 's/^flags.*/flags : fpu/' >"$cpuinfo"
+mount --bind "$cpuinfo" /proc/cpuinfo
+status=0
+run_installer --tag v9.9.9 || status=$?
+umount /proc/cpuinfo
+[[ $status == 1 ]] || fail "the installer went on without sse4_2 ($status)"
+grep -q "sse4_2" /tmp/installer-out && grep -q "CPU type" /tmp/installer-out ||
+  fail "the installer didn't explain the missing sse4_2: $(cat /tmp/installer-out)"
+[[ ! -s $FAKE_CALLS && ! -e /opt/aphelion ]] || fail "the installer changed the host before it stopped for sse4_2: $(cat "$FAKE_CALLS")"
+pass "the installer stops for a missing sse4_2 before it changes anything"
+
+for bad in "" "--tag" "--tag main" "--tag v1;rm" "--frobnicate" "--tag v9.9.9 extra"; do
+  fresh_host
+  status=0
+  # shellcheck disable=SC2086
+  run_installer $bad || status=$?
+  [[ $status == 2 && ! -s $FAKE_CALLS ]] || fail "the installer accepted '$bad' ($status)"
+done
+fresh_host
+FAKE_TAILSCALE=down
+export FAKE_TAILSCALE
+status=0
+run_installer --tag v9.9.9 || status=$?
+unset FAKE_TAILSCALE
+[[ $status == 1 && ! -e /opt/aphelion ]] && grep -q "Tailscale" /tmp/installer-out ||
+  fail "the installer went on without a tailnet address ($status)"
+pass "the installer refuses a missing or odd tag and a host without a tailnet address, and changes nothing"
+
+fresh_host
+export FAKE_DIGEST_FILE=present
+run_installer --tag v9.9.9 --no-start || fail "a fresh install with --no-start failed: $(cat /tmp/installer-out)"
+ordered "apt-get install" "git clone" && ordered "git clone" "docker pull" && ordered "docker pull" "--new-key" ||
+  fail "the installer didn't install Docker, clone, download the image, then create the key: $(cat "$FAKE_CALLS")"
+called " build" && fail "the installer built an image it could download"
+called "docker tag $FAKE_DIGEST_LINE aphelion:local" || fail "the installer didn't tag the downloaded image as aphelion:local"
+[[ $(cat /opt/aphelion/deploy/.env) == APHELION_TAILNET_ADDRESS=100.100.5.1 ]] || fail "the installer wrote another .env: $(cat /opt/aphelion/deploy/.env)"
+[[ $(readlink "$link") == /opt/aphelion/deploy/host/aphelion && -f $unit && -f $credential ]] ||
+  fail "the installer didn't run host/install"
+called "systemctl start" && fail "--no-start started the service"
+grep -q "sudo aphelion" /tmp/installer-out || fail "the installer didn't say what to do next"
+pass "a fresh install with --no-start installs Docker, clones the tag, writes .env, downloads and tags the image, runs host/install, and leaves the service stopped"
+
+before=$(snapshot)
+reset_calls
+run_installer --tag v9.9.9 --no-start || fail "a second install failed: $(cat /tmp/installer-out)"
+[[ $(snapshot) == "$before" ]] || fail "a second install changed files: $(diff <(echo "$before") <(snapshot))"
+! grep -qE "apt-get|git (clone|fetch|checkout)|docker (pull|tag|compose.*build)|systemctl (start|restart)" "$FAKE_CALLS" ||
+  fail "a second install repeated a step: $(cat "$FAKE_CALLS")"
+grep -q "already" /tmp/installer-out || fail "a second install didn't say that the steps were done"
+pass "a second run changes no file, runs no install, clone, download or start, and says each step is done"
+
+echo "# local edit" >/opt/aphelion/.git/dirty
+status=0
+run_installer --tag v9.8.8 --no-start || status=$?
+[[ $status == 1 ]] && grep -q "local changes" /tmp/installer-out && ! called "git checkout" ||
+  fail "the installer moved a checkout that has local changes ($status)"
+rm /opt/aphelion/.git/dirty
+reset_calls
+FAKE_DIGEST_LINE=ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000003 \
+  run_installer --tag v9.8.8 --no-start || fail "moving to another tag failed: $(cat /tmp/installer-out)"
+ordered "fetch --tags" "checkout --quiet tags/v9.8.8" || fail "the installer didn't fetch before it moved to the tag: $(cat "$FAKE_CALLS")"
+called "docker pull" || fail "the installer kept the image of another tag"
+pass "the installer refuses a checkout with local changes, and moves a clean one to another tag, fetching first and downloading that tag's image"
+
+fresh_host
+export FAKE_DIGEST_FILE=present FAKE_PULLED=ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000002
+status=0
+run_installer --tag v9.9.9 --no-start || status=$?
+[[ $status != 0 ]] && grep -q "digest" /tmp/installer-out || fail "the installer accepted an image with another digest ($status)"
+! called "docker tag" && ! called "compose --project-directory /opt/aphelion/deploy build" && ! called "--new-key" && [[ ! -e $FAKE_STATE/local && ! -e $unit ]] ||
+  fail "the installer went on after a wrong digest: $(cat "$FAKE_CALLS")"
+pass "the installer refuses an image whose digest differs, and tags, builds and installs nothing"
+
+fresh_host
+export FAKE_DIGEST_FILE=present FAKE_PULL=fail
+run_installer --tag v9.9.9 --no-start || fail "the installer stopped when the download failed: $(cat /tmp/installer-out)"
+called "docker compose --project-directory /opt/aphelion/deploy build" && ! called "docker tag" && [[ -e $FAKE_STATE/local && -f $unit ]] ||
+  fail "a failed download didn't fall back to a build: $(cat "$FAKE_CALLS")"
+pass "the installer builds the image on the host when the download fails"
+
+fresh_host
+run_installer --tag v9.9.9 --no-start || fail "the installer stopped when the release had no digest: $(cat /tmp/installer-out)"
+called "docker compose --project-directory /opt/aphelion/deploy build" && ! called "docker pull" ||
+  fail "a missing digest file didn't fall back to a build: $(cat "$FAKE_CALLS")"
+pass "the installer builds the image on the host when the release has no digest file"
+
+fresh_host
+export FAKE_DIGEST_FILE=present FAKE_DIGEST_LINE='ghcr.io/other/aphelion@sha256:00'
+status=0
+run_installer --tag v9.9.9 --no-start || status=$?
+export FAKE_DIGEST_LINE=ghcr.io/jcore9/aphelion@sha256:0000000000000000000000000000000000000000000000000000000000000001
+[[ $status != 0 ]] && ! called "docker pull" && ! called " build" || fail "the installer used a digest file that isnt one image reference ($status): $(cat /tmp/installer-out) $(cat "$FAKE_CALLS")"
+pass "the installer refuses a digest file that isn't one ghcr.io/jcore9/aphelion@sha256 reference"
+
+fresh_host
+export FAKE_DIGEST_FILE=present
+status=0
+run_installer --tag v9.9.9 || status=$?
+[[ $status == 1 ]] && grep -q "terminal" /tmp/installer-out && grep -q "recovery" /tmp/installer-out && ! called "systemctl start" ||
+  fail "without a terminal the installer didn't stop before the recovery key and the start ($status): $(cat /tmp/installer-out)"
+! grep -q "AGE-SECRET-KEY-1FAKE" /tmp/installer-out || fail "the installer printed the key without a terminal"
+[[ -f $credential ]] || fail "the installer didn't create the key before it stopped"
+pass "without a terminal the installer stops before the recovery key and the start, and says how to finish"
+
+reset_calls
+printf 'wrong\nsaved\n' | script -qec "bash -s -- --tag v9.9.9 </opt/aphelion/deploy/install.sh" /tmp/installer-tty >/dev/null 2>&1 || fail "the installer failed with a terminal: $(cat /tmp/installer-tty)"
+grep -q "AGE-SECRET-KEY-1FAKE" /tmp/installer-tty && called "systemctl start aphelion" ||
+  fail "with a terminal the installer didn't show the key and start the service: $(cat /tmp/installer-tty)"
+ordered "docker compose --profile * config" "systemctl start aphelion" || fail "the installer started the service before the preflight"
+reset_calls
+before=$(snapshot)
+run_installer --tag v9.9.9 || fail "a second run of a started install failed: $(cat /tmp/installer-out)"
+[[ $(snapshot) == "$before" ]] && ! called "systemctl start" && ! grep -q "AGE-SECRET-KEY" /tmp/installer-out ||
+  fail "a second run of a started install changed something or showed the key"
+pass "with a terminal the installer shows the key until you type saved, then starts the service, and a second run neither shows the key nor starts it again"
+
+for direct in "" "v1" "v9.9.9 extra" "--x"; do
+  status=0
+  # shellcheck disable=SC2086
+  "$installer_template/deploy/host/get-image" $direct >/dev/null 2>&1 || status=$?
+  [[ $status == 2 ]] || fail "get-image accepted '$direct' ($status)"
+done
+pass "get-image takes one tag, and refuses anything else"
