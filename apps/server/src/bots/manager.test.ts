@@ -181,6 +181,29 @@ const silentStarts = (
     return { incoming, sent, shape };
   });
 
+const heldStops = () =>
+  Effect.gen(function* () {
+    const incoming = yield* Queue.unbounded<RunnerReply, Cause.Done>();
+    const sent: RunnerRequest[] = [];
+    const shape = (link: Context.Service.Shape<typeof BotRunnerLink>) => {
+      Effect.runFork(
+        Queue.take(link.incoming).pipe(
+          Effect.flatMap((reply) => Queue.offer(incoming, reply)),
+          Effect.forever,
+          Effect.ignore,
+        ),
+      );
+      return {
+        incoming,
+        send: (message: RunnerRequest) => {
+          sent.push(message);
+          return message.type === "stop" ? Effect.void : link.send(message);
+        },
+      };
+    };
+    return { incoming, sent, shape };
+  });
+
 const eventually = (until: () => boolean) =>
   Effect.gen(function* () {
     while (!until()) yield* Effect.sleep("10 millis");
@@ -1945,6 +1968,101 @@ describe("the bot manager", () => {
         expect(yield* manager.status("chief")).toEqual({ state: "stopped" });
         expect(fake.killAttempts).toEqual(["chief", "chief"]);
       }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "arms one retry and logs once for a flood of stop-failed replies, and ignores one for another run or state",
+    () =>
+      Effect.gen(function* () {
+        const { incoming, sent, shape } = yield* heldStops();
+        const { logs, manager, reach } = yield* system(
+          recording([sessionTurn]).bot,
+          () => Effect.void,
+          "fake",
+          memorySessionRefs,
+          undefined,
+          shape,
+          { policy: { ...policy, graceMs: 400 } },
+        );
+        yield* manager.start("chief");
+        yield* reach("running");
+        const run = sent.find((message) => message.type === "start")?.run ?? 0;
+        const failed = (count: number, at = run) =>
+          Queue.offerAll(
+            incoming,
+            Array.from({ length: count }, () => ({
+              type: "stop-failed" as const,
+              bot: "chief",
+              run: at,
+            })),
+          );
+        const logged = () => logs.filter(({ msg }) => msg === stopFailed);
+        const stops = () => sent.filter(({ type }) => type === "stop");
+
+        yield* failed(1, run + 1);
+        yield* Effect.sleep("100 millis");
+        expect(yield* manager.status("chief")).toEqual({ state: "running" });
+        expect(logged()).toEqual([]);
+
+        const stopping = yield* manager.stop("chief").pipe(Effect.forkScoped);
+        yield* eventually(() => stops().length === 1);
+        yield* failed(1000);
+        yield* eventually(() => logged().length === 1);
+        expect(stops()).toHaveLength(1);
+        yield* eventually(() => stops().length === 2);
+        yield* Effect.sleep("1 second");
+        expect(stops()).toHaveLength(2);
+
+        yield* failed(1000);
+        yield* eventually(() => stops().length === 3);
+        yield* Effect.sleep("1 second");
+        expect(stops()).toHaveLength(3);
+        expect(logged()).toHaveLength(2);
+
+        yield* Queue.offer(incoming, { type: "stopped", bot: "chief", run });
+        yield* Fiber.join(stopping).pipe(Effect.timeout("5 seconds"));
+        yield* failed(1);
+        yield* Effect.sleep("100 millis");
+        expect(logged()).toHaveLength(2);
+        expect(yield* manager.status("chief")).toEqual({ state: "stopped" });
+      }).pipe(Effect.scoped),
+    20_000,
+  );
+
+  it.live(
+    "keeps a cancelled bot's run while its processes can't be removed, retries the stop, and starts the bot again",
+    () =>
+      Effect.gen(function* () {
+        const chief = recording([[{ waitForAbort: true }], sessionTurn]);
+        const { fake, logs, manager, reach } = yield* system({
+          ...chief.bot,
+          killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+        });
+        yield* manager.start("chief");
+        yield* reach("running");
+        const turn = yield* manager.startTurn("chief", "hi");
+        expect(turn.outcome).toBe("accepted");
+        yield* manager.cancelTurn("chief", turn.turn);
+        yield* eventually(() => fake.killAttempts.length === 2);
+        yield* reach("running");
+        expect(logs).toContainEqual(
+          expect.objectContaining({ msg: stopFailed, bot: "chief" }),
+        );
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            msg: "bot state changed",
+            from: "running",
+            to: "stopping",
+          }),
+        );
+        expect(fake.killAttempts).toEqual(["chief", "chief"]);
+        expect(fake.runs[0]?.alive()).toBe(false);
+        expect(chief.made).toHaveLength(2);
+        expect(
+          logs.filter(({ msg }) => msg === "a bot process exited"),
+        ).toEqual([]);
+      }).pipe(Effect.scoped),
+    15_000,
   );
 
   it.live(

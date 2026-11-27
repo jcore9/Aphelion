@@ -125,6 +125,7 @@ type LoopEvent =
   | (Tag & { readonly type: "stdout-closed" })
   | (Tag & { readonly type: "cancel-done" })
   | (Tag & { readonly type: "killed"; readonly ok: boolean })
+  | (Tag & { readonly type: "unkilled" })
   | (Tag & { readonly type: "ended"; readonly ok: boolean });
 
 const tagOf = (slot: Slot): Tag => ({
@@ -445,12 +446,6 @@ export const runBotRunner = (
       if (slot.next !== undefined) yield* begin(slot.next);
     });
 
-    const settle = Effect.fnUntraced(function* (slot: Slot, ok: boolean) {
-      if (ok || slot.stopReplies === 0) return yield* close(slot);
-      slot.phase = "unkilled";
-      yield* link.send({ type: "stop-failed", ...frameOf(slot) });
-    });
-
     const reap = Effect.fnUntraced(function* (slot: Slot, exit: ProcessExit) {
       slot.phase = "stopping";
       slot.restarting = false;
@@ -570,10 +565,33 @@ export const runBotRunner = (
       }
     });
 
+    const keepUnkilled = Effect.fnUntraced(function* (slot: Slot) {
+      yield* abandon(slot);
+      slot.phase = "unkilled";
+      slot.cancel = undefined;
+      slot.restarting = false;
+      yield* link.send({ type: "stop-failed", ...frameOf(slot) });
+    });
+
+    const settle = (slot: Slot, ok: boolean) =>
+      ok ? close(slot) : keepUnkilled(slot);
+
     const loseProcess = Effect.fnUntraced(function* (slot: Slot) {
       slot.phase = "lost";
       const { process } = slot;
-      if (process) yield* FiberSet.run(work, kill(slot.start.bot, process));
+      if (process === undefined) return;
+      const tag = tagOf(slot);
+      yield* FiberSet.run(
+        work,
+        kill(tag.bot, process).pipe(
+          Effect.flatMap((ok) =>
+            ok
+              ? Effect.void
+              : Queue.offer(events, { type: "unkilled", ...tag }),
+          ),
+          Effect.asVoid,
+        ),
+      );
     });
 
     const turnOpen = (slot: Slot, turn: TurnId) =>
@@ -702,15 +720,7 @@ export const runBotRunner = (
           if (slot === undefined) return;
           if (slot.phase === "stopping") return yield* settle(slot, event.ok);
           if (slot.phase !== "killing") return;
-          if (!event.ok) {
-            slots.delete(event.bot);
-            return yield* link.send({
-              type: "exited",
-              ...frameOf(slot),
-              code: null,
-              signal: null,
-            });
-          }
+          if (!event.ok) return yield* keepUnkilled(slot);
           yield* abandon(slot);
           slot.seqBase = slot.stream.last();
           slot.gen += 1;
@@ -719,6 +729,11 @@ export const runBotRunner = (
           slot.phase = "launching";
           yield* FiberSet.run(launches, launch(slot));
           return;
+        }
+        case "unkilled": {
+          const slot = current(event);
+          if (slot?.phase !== "lost") return;
+          return yield* keepUnkilled(slot);
         }
         case "ended": {
           const slot = current(event);

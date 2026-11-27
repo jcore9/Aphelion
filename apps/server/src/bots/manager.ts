@@ -162,6 +162,8 @@ interface Slot {
   recovering: boolean;
   restart: boolean;
   stopped: boolean;
+  stopSent: boolean;
+  graceRun: number | undefined;
   stderrLines: number;
   readonly turns: Map<TurnId, TurnRequest>;
   readonly pending: Set<TurnRequest>;
@@ -487,12 +489,17 @@ export const botManagerLayer = (options: BotManagerOptions) =>
               return;
             case "shutdown":
             case "kill":
+              slot.stopSent = true;
               return yield* sendToRunner({
                 type: "stop",
                 bot: slot.bot.name,
                 run: slot.state.run,
               });
             case "arm":
+              if (command.deadline === "grace") {
+                if (slot.graceRun === command.run) return;
+                slot.graceRun = command.run;
+              }
               yield* Effect.sleep(command.ms).pipe(
                 Effect.andThen(
                   Queue.offer(slot.mailbox, {
@@ -521,6 +528,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }
           if (next.state.run !== before.run) {
             slot.expired.clear();
+            slot.stopSent = false;
           }
           if (
             next.state.state === "running"
@@ -558,6 +566,31 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           if (restarting) {
             slot.restart = false;
             yield* apply(slot, { type: "start" });
+          }
+        });
+
+      const onStopFailed = (slot: Slot, at: number) =>
+        Effect.gen(function* () {
+          const { state } = slot;
+          if (at !== state.run) return;
+          switch (state.state) {
+            case "stopping":
+              if (!slot.stopSent) return;
+              slot.stopSent = false;
+              logger.error(stopFailed, { bot: slot.bot.name, run: at });
+              return yield* run(slot, {
+                type: "arm",
+                run: at,
+                deadline: "grace",
+                ms: policy.graceMs,
+              });
+            case "running":
+            case "starting":
+              logger.error(stopFailed, { bot: slot.bot.name, run: at });
+              slot.restart = state.state === "running";
+              return yield* apply(slot, { type: "stop" });
+            default:
+              return;
           }
         });
 
@@ -668,19 +701,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             case "stopped":
               return yield* apply(slot, { type: "killed", run: reply.run });
             case "stop-failed":
-              logger.error(stopFailed, { bot, run: reply.run });
-              if (
-                slot.state.state !== "stopping" ||
-                reply.run !== slot.state.run
-              ) {
-                return;
-              }
-              return yield* run(slot, {
-                type: "arm",
-                run: reply.run,
-                deadline: "grace",
-                ms: policy.graceMs,
-              });
+              return yield* onStopFailed(slot, reply.run);
           }
         });
 
@@ -752,6 +773,11 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 text: input.text,
               });
             }
+            case "timer":
+              if (input.deadline === "grace" && input.run === slot.graceRun) {
+                slot.graceRun = undefined;
+              }
+              return yield* apply(slot, input);
             case "recover":
               if (
                 slot.state.state !== "running" ||
@@ -794,6 +820,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             recovering: false,
             restart: false,
             stopped: false,
+            stopSent: false,
+            graceRun: undefined,
             stderrLines: 0,
             turns: new Map(),
             pending: new Set(),

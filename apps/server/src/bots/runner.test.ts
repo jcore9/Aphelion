@@ -689,6 +689,133 @@ describe("the bot runner", () => {
   );
 
   it.live(
+    "keeps a cancelled run whose kill failed, ends its turn, answers stop-failed instead of exited, and kills it on the next stop",
+    () =>
+      Effect.gen(function* () {
+        const alpha: FakeBot = {
+          adapter: () =>
+            fakeAdapter([
+              [
+                { emit: { type: "session", ref: sessionRef.parse("s-1") } },
+                { emit: { type: "text.delta", text: "working" } },
+                { waitForAbort: true },
+              ],
+            ]),
+          killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+        };
+        const { fake, frames, until, send } = yield* runner({ alpha });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        const turn = (id: string) =>
+          send({
+            type: "turn.start",
+            bot: "alpha",
+            run: 1,
+            turn: id,
+            text: "go",
+          });
+        yield* turn("t1");
+        yield* until(
+          (frame) =>
+            frame.type === "event" &&
+            frame.envelope.event.type === "text.delta",
+        );
+        yield* send({ type: "turn.cancel", bot: "alpha", run: 1, turn: "t1" });
+        expect(yield* until(is("stop-failed"))).toEqual({
+          type: "stop-failed",
+          bot: "alpha",
+          run: 1,
+        });
+        expect(frames.filter(is("exited"))).toEqual([]);
+        expect(checkStream(envelopesOf(frames, "alpha"))).toEqual([]);
+        yield* turn("t2");
+        expect(yield* until(is("turn.refused"))).toMatchObject({
+          turn: "t2",
+          reason: "not-running",
+        });
+        yield* send({ type: "stop", bot: "alpha", run: 1 });
+        yield* until(is("stopped"));
+        expect(fake.killAttempts).toEqual(["alpha", "alpha"]);
+        expect(fake.runs).toHaveLength(1);
+        expect(fake.runs[0]?.alive()).toBe(false);
+        expect(frames.filter(is("exited"))).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "answers stop-failed instead of exited when the kill of a replacement adapter that never answered fails",
+    () =>
+      Effect.gen(function* () {
+        const killFails = { reason: "populated: ETIMEDOUT", times: 0 };
+        const alpha: FakeBot = {
+          adapter: () =>
+            fakeAdapter([
+              [
+                { emit: { type: "session", ref: sessionRef.parse("s-1") } },
+                { emit: { type: "text.delta", text: "working" } },
+                { waitForAbort: true },
+              ],
+            ]),
+          silent: (launch) => launch > 0,
+          killFails,
+        };
+        const { fake, frames, until, send } = yield* runner({ alpha });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        yield* send({
+          type: "turn.start",
+          bot: "alpha",
+          run: 1,
+          turn: "t1",
+          text: "go",
+        });
+        yield* until(
+          (frame) =>
+            frame.type === "event" &&
+            frame.envelope.event.type === "text.delta",
+        );
+        yield* send({ type: "turn.cancel", bot: "alpha", run: 1, turn: "t1" });
+        for (let tries = 0; tries < 200 && fake.runs.length < 2; tries++) {
+          yield* Effect.sleep("10 millis");
+        }
+        killFails.times = 1;
+        yield* Effect.sleep("4 seconds");
+        yield* until(is("stop-failed"));
+        expect(frames.filter(is("exited"))).toEqual([]);
+        expect(fake.runs[1]?.alive()).toBe(true);
+        yield* send({ type: "stop", bot: "alpha", run: 1 });
+        yield* until(is("stopped"));
+        expect(fake.killAttempts).toEqual(["alpha", "alpha", "alpha"]);
+        expect(fake.runs[1]?.alive()).toBe(false);
+      }).pipe(Effect.scoped),
+    15_000,
+  );
+
+  it.live(
+    "answers stop-failed when the kill of a process that stopped reading fails",
+    () =>
+      Effect.gen(function* () {
+        const alpha = scripted([[{ hang: true }]]);
+        const { fake, frames, until, send } = yield* runner({
+          alpha: {
+            ...alpha.bot,
+            killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+          },
+        });
+        yield* send(startFrame("alpha"));
+        yield* until(is("started"));
+        fake.latest("alpha")?.closeStdout();
+        yield* until(is("stop-failed"));
+        expect(fake.runs[0]?.alive()).toBe(true);
+        expect(frames.filter(is("exited"))).toEqual([]);
+        yield* send({ type: "stop", bot: "alpha", run: 1 });
+        yield* until(is("stopped"));
+        expect(fake.killAttempts).toEqual(["alpha", "alpha"]);
+        expect(fake.runs[0]?.alive()).toBe(false);
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
     "kills a replacement adapter that never answers initialize, and reports the bot exited",
     () =>
       Effect.gen(function* () {
