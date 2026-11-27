@@ -31,6 +31,10 @@ const parsed = async (argv: string[]) => {
     toolRemove: record("toolRemove"),
     toolUpdate: record("toolUpdate"),
     toolCheck: record("toolCheck"),
+    keyAdd: record("keyAdd"),
+    keyReplace: record("keyReplace"),
+    keyTest: record("keyTest"),
+    keyRemove: record("keyRemove"),
     restoreFinish: record("restoreFinish"),
   };
   const result = await capture(makeCli(handlers)(argv));
@@ -208,6 +212,36 @@ describe("accepted command lines", () => {
       { kind: "tool update", stateDir: "/s", toolsDir: "/t", name: "codex" },
     ],
     [["tool", "check"], { kind: "tool check" }],
+    [
+      ["key", "add", "claude"],
+      { kind: "key add", stateDir: defaultStateDir, tool: "claude" },
+    ],
+    [
+      ["key", "replace", "codex", "--state-dir", "/s"],
+      { kind: "key replace", stateDir: "/s", tool: "codex" },
+    ],
+    [
+      ["key", "remove", "grok"],
+      { kind: "key remove", stateDir: defaultStateDir, tool: "grok" },
+    ],
+    [
+      ["key", "test", "claude"],
+      {
+        kind: "key test",
+        stateDir: defaultStateDir,
+        tool: "claude",
+        testUrl: undefined,
+      },
+    ],
+    [
+      ["key", "test", "grok", "--test-url", "http://127.0.0.1:8098"],
+      {
+        kind: "key test",
+        stateDir: defaultStateDir,
+        tool: "grok",
+        testUrl: "http://127.0.0.1:8098",
+      },
+    ],
     [
       ["plugin", "dev", "/opt/aphelion/dev-plugin"],
       {
@@ -405,6 +439,17 @@ describe("refused command lines", () => {
       '"tool update" takes no more than one tool name, but got 2',
     ],
     [["tool", "check", "claude"], '"tool check" takes no arguments, but got 1'],
+    [["key", "add"], '"key add" needs a tool name'],
+    [["key", "add", "claude", "x"], '"key add" takes one tool name, but got 2'],
+    [["key", "test", "gemini"], "the tool name must be claude, codex or grok"],
+    [
+      ["key", "test", "claude", "--test-url", "https://api.anthropic.com"],
+      "--test-url must be http://127.0.0.1:PORT",
+    ],
+    [
+      ["key", "add", "claude", "--test-url", "http://127.0.0.1:8098"],
+      '--test-url isn\'t an option of "key add"',
+    ],
     [
       ["tool", "check", "--tools-dir", "/t"],
       '--tools-dir isn\'t an option of "tool check"',
