@@ -89,10 +89,10 @@ The adapter builds a `PermissionRequest` and passes it to the turn's `decide`. I
 
 `decide` always resolves with a `TurnDecision`: a `PermissionDecision` (`{ decision, by, reason }`) plus `announced`. `announced` is `true` when the runtime sent a `permission.decision` event for the request, and `false` for a request it denied without an event (see [What the runtime does](#what-the-runtime-does)). Report a call as `denied` only when its deny has `announced: true`, and as `error` otherwise, so the stream keeps rule 6. `announced` lives only in the adapter's memory. It never goes on the wire and is never saved, so adding it changes no event and no stored data. A grant covers that one request only. There is no "allow for the rest of the session" ([decision 0034](../decisions/0034-vendor-protocol-per-cli.md)).
 
-A **decider** is the function that answers. You give one to `runAdapter` in its options.
+A **decider** is the function that answers. You give one to `runAdapter` in its options. It gets the request, the turn's signal, and `{ folder }`, the bot's folder from `initialize`.
 
 - `denyAll` is the default. It denies every request, with `by: "default"` and reason `no-decider`.
-- M1 adds a fixed rule ([#20](https://github.com/jcore9/Aphelion/issues/20) and [decision 0063](../decisions/0063-m1-planning-answers.md)). It reads `kind` and `paths`, so it works for every tool.
+- `folderRule(realpath)` is M1's fixed rule ([#214](https://github.com/jcore9/Aphelion/issues/214) and [decision 0063](../decisions/0063-m1-planning-answers.md)). It reads `kind` and `paths`, so it works for every vendor. The [Claude adapter](claude-adapter.md#what-the-first-bot-may-do) says what it allows. `realpath` is the function that follows links on disk. It resolves to `undefined` when nothing exists at the path, not even a broken link. The plugin SDK leaves it to the adapter, because the SDK uses only web-standard APIs.
 - M2 replaces it with a decider that asks the policy engine over the wire. The adapter code stays the same.
 
 ## Rules a stream follows
@@ -161,7 +161,7 @@ A package that holds an adapter says so in `aphelion-plugin.json`:
 `@aphelion/plugin-sdk/testing` has what an adapter's tests need.
 
 - `fakeAdapter(script)` is an adapter that runs a script. Each turn is a list of steps: yield an event, call `decide`, wait for a promise or for the cancel, hang, or throw.
-- `runTurn(adapter, options)` plays the bot runner for one turn. It sends `initialize`, `turn.start` and `shutdown`, and returns every event. Pass `decider`, `decisionDeadlineMs` or `cancelGraceMs` to change the runtime.
+- `runTurn(adapter, options)` plays the bot runner for one turn. It sends `initialize`, `turn.start` and `shutdown`, and returns every event. Pass `decider`, `decisionDeadlineMs` or `cancelGraceMs` to change the runtime, and `folder` to send another folder than `/work`.
 - `startAdapter(adapter, options)` gives the same fake bot runner step by step, with `startTurn`, `cancel`, `shutdown` and `untilEvent`, for tests that cancel or start a second turn.
 - `checkStream(events)` checks a stream against [the rules](#rules-a-stream-follows).
 

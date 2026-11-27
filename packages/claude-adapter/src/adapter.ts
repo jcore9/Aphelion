@@ -11,12 +11,14 @@ import {
   type AdapterEvent,
   type AdapterSession,
   type BotAdapter,
+  type Decider,
   type SessionRef,
   type ToolCallId,
   type TurnInput,
 } from "@aphelion/plugin-sdk";
 import { z } from "zod";
 import { channel, drain, type Channel } from "./channel.ts";
+import { preToolUseHook, refusalMessage } from "./hook.ts";
 import {
   parseMessage,
   resultOutcome,
@@ -51,6 +53,7 @@ export type QueryFunction = (params: {
 export interface ClaudeAdapterOptions {
   readonly query: QueryFunction;
   readonly env: ParentEnv;
+  readonly rule: Decider;
   readonly interruptWaitMs?: number;
   readonly closeWaitMs?: number;
 }
@@ -96,7 +99,7 @@ const claudeRef = (value: string): SessionRef | undefined => {
 
 const refusal: PermissionResult = {
   behavior: "deny",
-  message: "Aphelion denied this tool call.",
+  message: refusalMessage,
 };
 
 const failureClasses = [
@@ -161,6 +164,8 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
           "the saved session ref isn't a Claude session id, so the bot starts a new session",
         );
       }
+
+      const preToolUse = preToolUseHook(options.rule, context.folder);
 
       const deliver = (owner: Live, item: Item) => {
         if (active?.live === owner) active.inbox.push(item);
@@ -227,6 +232,7 @@ export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
               resume: saved,
               env,
               canUseTool: canUseTool(abort),
+              preToolUse,
               stderr: (data) => {
                 stderrLines += lineCount(data);
               },

@@ -199,14 +199,27 @@ type ContributionKind = "secretSchemes" | "screens";
 
 ### `Decider`
 
-Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends.
+Answers permission requests. It gets the turn's signal, which aborts on cancel and when the turn ends, and the bot's folder.
 
 ```ts
 type Decider = (
   request: PermissionRequest,
   signal: AbortSignal,
+  context: DeciderContext,
 ) => MaybePromise<PermissionDecision>;
 ```
+
+### `DeciderContext`
+
+What a decider knows about the bot it answers for.
+
+```ts
+interface DeciderContext {
+  readonly folder: string;
+}
+```
+
+- `folder`: The absolute path of the bot's folder, as the bot runner sent it in `initialize`.
 
 ### `HostError`
 
@@ -535,6 +548,15 @@ A full page that a plugin's client part declares in `contributes.screens`. The a
 
 ```ts
 type PluginScreen = PluginManifest["contributes"]["screens"][number];
+```
+
+### `RealPath`
+
+Resolves every link in an absolute path that holds no `.` or `..` part.
+It resolves to `undefined` when nothing exists at the path, not even a broken link, and rejects on any other failure.
+
+```ts
+type RealPath = (path: string) => Promise<string | undefined>;
 ```
 
 ### `RpcError`
@@ -945,6 +967,18 @@ const failure: (
   id: RpcId | null,
   error: RpcError,
 ) => { jsonrpc: string; id: RpcId | null; error: RpcError };
+```
+
+### `folderRule`
+
+The fixed rule for a bot before approvals exist. It allows file tools only inside the bot's folder, allows shell commands, and denies web and every other tool.
+A path is resolved against the folder, `..` is applied, and every link is followed with `realpath`, so a link inside the folder that points out of it counts as outside.
+A path that doesn't exist yet is judged by the nearest folder above it that does.
+A pattern such as `src/*.ts` is judged by its fixed part before the first wildcard. A pattern with `..` after a wildcard is denied.
+Each answer covers one request.
+
+```ts
+function folderRule(realpath: RealPath): Decider;
 ```
 
 ### `initializeParams`
@@ -1466,7 +1500,7 @@ interface AdapterHarness {
 - `logs`: The messages that the runtime logged.
 - `problems`: Lines the runtime sent that the harness couldn't read, such as an event that fails its schema. A good test leaves this empty.
 - `done`: Settles when the runtime stops: it resolves after `shutdown` and rejects when the runtime fails.
-- `initialize`: Sends `initialize` for a bot called `bot-1` in the folder `/work`, with no session to resume unless `resume` says otherwise.
+- `initialize`: Sends `initialize` for a bot called `bot-1` in the folder from the options, with no session to resume unless `resume` says otherwise.
 - `startTurn`: Sends `turn.start`. The reply comes when the runtime accepts the turn, not when the turn ends.
 - `cancel`: Sends `turn.cancel`.
 - `shutdown`: Sends `shutdown` and waits for the reply.
@@ -1590,6 +1624,18 @@ interface Grant {
 - `kind`: The manifest list in `permissions` that the permission is in.
 - `name`: The event name, hostname or secret reference.
 
+### `HarnessOptions`
+
+What `startAdapter` and `runTurn` can be told: the runtime's options and the bot's folder.
+
+```ts
+interface HarnessOptions extends RunAdapterOptions {
+  readonly folder?: string;
+}
+```
+
+- `folder`: The folder that `initialize` sends. The default is `/work`.
+
 ### `HostCall`
 
 One request that the plugin sent to the test host.
@@ -1702,7 +1748,7 @@ Runs one turn the way the bot runner does: `initialize`, `turn.start`, waiting f
 ```ts
 function runTurn(
   adapter: BotAdapter,
-  options?: RunAdapterOptions & { turn?: string; text?: string },
+  options?: HarnessOptions & { turn?: string; text?: string },
 ): Promise<TurnRun>;
 ```
 
@@ -1713,7 +1759,7 @@ Starts the adapter's runtime with a fake bot runner on the other end of its line
 ```ts
 function startAdapter(
   adapter: BotAdapter,
-  options?: RunAdapterOptions,
+  options?: HarnessOptions,
 ): AdapterHarness;
 ```
 

@@ -55,8 +55,33 @@ describe("permissionRequestFor", () => {
     expect(
       ask("Glob", { pattern: "../**/*.key", path: "/work" })?.paths,
     ).toEqual(["/work", "../**/*.key"]);
-    expect(ask("Grep", { pattern: "/etc/.*" })?.paths).toEqual(["/etc/.*"]);
     expect(ask("Read", { file_path: 42 })?.paths).toEqual([]);
+  });
+
+  it("gives a search with no path the folder, and leaves out Grep's regex", () => {
+    expect(ask("Glob", { pattern: "**/*.md" })?.paths).toEqual([
+      ".",
+      "**/*.md",
+    ]);
+    expect(ask("Grep", { pattern: "/etc/.*" })?.paths).toEqual(["."]);
+    expect(
+      ask("Grep", { pattern: "x", path: "/work/src", glob: "*.ts" })?.paths,
+    ).toEqual(["/work/src"]);
+  });
+
+  it("judges Grep's file filter as a path only when it could name one outside the search folder", () => {
+    const filtered = (glob: string) =>
+      ask("Grep", { pattern: "x", glob })?.paths;
+    expect(filtered("*..*.ts")).toEqual(["."]);
+    expect(filtered("**/*.ts")).toEqual(["."]);
+    expect(filtered("{a,b}/*.ts")).toEqual(["."]);
+    expect(filtered("../*.ts")).toEqual([".", "../*.ts"]);
+    expect(filtered("src/../../x")).toEqual([".", "src/../../x"]);
+    expect(filtered("/etc/*")).toEqual([".", "/etc/*"]);
+    expect(filtered("~/.ssh/*")).toEqual([".", "~/.ssh/*"]);
+    expect(filtered("{a,../b}/*")).toEqual([".", "{a,../b}/*"]);
+    expect(filtered("{a, /etc}/*")).toEqual([".", "{a, /etc}/*"]);
+    expect(filtered("@(a|/etc)/*")).toEqual([".", "@(a|/etc)/*"]);
   });
 
   it("gives the decider a shell tool's command and no command for other tools", () => {

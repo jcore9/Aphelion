@@ -6,12 +6,15 @@ import { claudeCodeVersion, claudeEnv, queryOptions } from "./options.ts";
 const deny = () =>
   Promise.resolve({ behavior: "deny" as const, message: "denied" });
 
+const preToolUse = () => Promise.resolve({});
+
 const build = (resume: string | null = null) =>
   queryOptions({
     folder: "/var/lib/aphelion-bots/bot-1",
     resume: resume === null ? null : sessionRef.parse(resume),
     env: { HOME: "/var/lib/aphelion-bots" },
     canUseTool: deny,
+    preToolUse,
     stderr: () => undefined,
     abortController: new AbortController(),
   });
@@ -96,9 +99,14 @@ describe("queryOptions", () => {
       "Glob",
       "Grep",
       "Bash",
-      "TodoWrite",
     ]);
     expect(options.disallowedTools).toEqual(["WebFetch", "WebSearch", "Agent"]);
+  });
+
+  it("runs the rule's hook before every tool call, and blocks the call if the hook fails", () => {
+    expect(build().hooks).toEqual({
+      PreToolUse: [{ hooks: [preToolUse], onFailure: "block" }],
+    });
   });
 
   it("never sets an option that approves a tool without asking", () => {

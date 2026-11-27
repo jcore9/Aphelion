@@ -116,6 +116,20 @@ grep -qF '"event":{"type":"error","code":"cli-not-found"}' <<<"$adapter_out" || 
 [[ $adapter_out != *sk-ant* ]] || fail "the Claude adapter printed the key from its environment"
 pass "the image runs the bundled Claude adapter with no node_modules, ships no other claude binary, and reports the missing CLI without the key"
 
+as_root bash -euo pipefail -c '
+  settings=/etc/claude-code/managed-settings.json
+  [[ $(stat -c "%U:%G %a" "${settings%/*}" "$settings" | tr "\n" " ") == "root:root 755 root:root 644 " ]]
+  [[ $(ls -A "${settings%/*}") == managed-settings.json ]]
+  bun -e "
+    const { permissions } = await Bun.file(\"$settings\").json();
+    if (permissions.disableBypassPermissionsMode !== \"disable\" || permissions.disableAutoMode !== \"disable\") process.exit(1);
+  "
+' || fail "Claude Code's managed settings aren't root-owned, or don't turn off bypassPermissions and auto mode"
+docker run --rm --entrypoint "" --network none --user aphelion-bot "$image" bash -c '
+  [[ -r /etc/claude-code/managed-settings.json && ! -w /etc/claude-code/managed-settings.json && ! -w /etc/claude-code ]]
+' || fail "aphelion-bot can change Claude Code's managed settings, or can't read them"
+pass "Claude Code's managed settings turn off bypassPermissions and auto mode, and aphelion-bot can read but not change them"
+
 cp deploy/test/probe.mjs deploy/test/probe-plugin/* "$scratch/plugins/contract-probe/"
 cat >"$scratch/plugins/contract-probe/checks.json" <<'EOF'
 [

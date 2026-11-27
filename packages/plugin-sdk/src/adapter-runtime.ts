@@ -12,6 +12,7 @@ import {
   type AdapterSession,
   type BotAdapter,
   type Decider,
+  type DeciderContext,
   type PermissionDecision,
   type PermissionRequest,
   type PermissionRequestId,
@@ -53,8 +54,14 @@ interface Ask {
   resolve(decision: TurnDecision): void;
 }
 
+interface Opened {
+  readonly session: AdapterSession;
+  readonly context: DeciderContext;
+}
+
 interface Turn {
   readonly id: TurnId;
+  readonly context: DeciderContext;
   readonly controller: AbortController;
   readonly asks: Map<PermissionRequestId, Ask>;
   readonly denied: { any: boolean; readonly calls: Set<ToolCallId> };
@@ -108,7 +115,7 @@ export async function runAdapter(
   const cancelGraceMs = options.cancelGraceMs ?? defaultCancelGraceMs;
   const calls = new Map<ToolCallId, Call>();
   const started = new Set<TurnId>();
-  let session: AdapterSession | undefined;
+  let opened: Opened | undefined;
   let closing = false;
   let current: Turn | undefined;
   let seq = 0;
@@ -276,14 +283,14 @@ export async function runAdapter(
     }
   };
 
-  const consume = async (opened: AdapterSession, turn: Turn, text: string) => {
+  const consume = async (session: AdapterSession, turn: Turn, text: string) => {
     try {
       const input: TurnInput = {
         turn: turn.id,
         text,
         decide: (raw) => decide(turn, raw),
       };
-      for await (const raw of opened.turn(input, turn.controller.signal)) {
+      for await (const raw of session.turn(input, turn.controller.signal)) {
         handle(turn, raw);
       }
       if (turn.phase === "cancelling") {
@@ -308,7 +315,7 @@ export async function runAdapter(
     let decision: PermissionDecision;
     try {
       const answer = permissionDecision.safeParse(
-        await decider(request, turn.controller.signal),
+        await decider(request, turn.controller.signal, turn.context),
       );
       decision = answer.success ? answer.data : deny("invalid-decision");
     } catch {
@@ -357,7 +364,11 @@ export async function runAdapter(
     return answered;
   };
 
-  const startTurn = (opened: AdapterSession, id: TurnId, text: string) => {
+  const startTurn = (
+    { session, context }: Opened,
+    id: TurnId,
+    text: string,
+  ) => {
     started.add(id);
     const [oldest] = started;
     if (started.size > rememberedTurns && oldest !== undefined) {
@@ -365,6 +376,7 @@ export async function runAdapter(
     }
     const turn: Turn = {
       id,
+      context,
       controller: new AbortController(),
       asks: new Map(),
       denied: { any: false, calls: new Set() },
@@ -373,7 +385,7 @@ export async function runAdapter(
       cancelTimer: undefined,
     };
     current = turn;
-    void consume(opened, turn, text);
+    void consume(session, turn, text);
   };
 
   const closeDown = async () => {
@@ -385,7 +397,7 @@ export async function runAdapter(
       conclude(turn, [{ type: "turn.end", reason: "cancelled" }]);
     }
     try {
-      await session?.close?.();
+      await opened?.session.close?.();
     } catch (error) {
       io.log(`the adapter's close failed: ${describeError(error)}`);
     }
@@ -411,15 +423,15 @@ export async function runAdapter(
     switch (method) {
       case adapterMethods.initialize: {
         const parsed = adapterInitializeParams.safeParse(params);
-        if (session || !parsed.success) {
+        if (opened || !parsed.success) {
           refuse(
             id,
-            session ? rpcErrors.invalidRequest : rpcErrors.invalidParams,
+            opened ? rpcErrors.invalidRequest : rpcErrors.invalidParams,
           );
           return false;
         }
         try {
-          session = await adapter.open({
+          const session = await adapter.open({
             bot: parsed.data.bot,
             folder: parsed.data.folder,
             resume: parsed.data.resume,
@@ -427,6 +439,7 @@ export async function runAdapter(
               io.log(message);
             },
           });
+          opened = { session, context: { folder: parsed.data.folder } };
         } catch (error) {
           io.log(`the adapter's open failed: ${describeError(error)}`);
           refuse(id, rpcErrors.operationFailed);
@@ -437,7 +450,7 @@ export async function runAdapter(
       }
       case adapterMethods.turnStart: {
         const parsed = turnStartParams.safeParse(params);
-        if (!session) {
+        if (!opened) {
           refuse(id, rpcErrors.invalidRequest);
         } else if (!parsed.success) {
           refuse(id, rpcErrors.invalidParams);
@@ -452,7 +465,7 @@ export async function runAdapter(
           refuse(id, rpcErrors.busy);
         } else {
           reply(id, {});
-          startTurn(session, parsed.data.turn, parsed.data.text);
+          startTurn(opened, parsed.data.turn, parsed.data.text);
         }
         return false;
       }

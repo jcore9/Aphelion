@@ -1,3 +1,4 @@
+import { denyAll } from "@aphelion/plugin-sdk";
 import { checkStream, runTurn } from "@aphelion/plugin-sdk/testing";
 import { describe, expect, it } from "vitest";
 import { claudeAdapter } from "./adapter.ts";
@@ -15,6 +16,7 @@ describe("recordingQuery", () => {
           recorded.push(message);
         }),
         env: {},
+        rule: denyAll,
       }),
     );
 
