@@ -22,6 +22,8 @@ The broker wraps the key in a `Secret`, so the logger masks it. The key never re
 
 `aphelion-secrets --new-key` prints a new age identity and a line break, and exits. It runs as any user. The host install uses it. Any other argument is refused.
 
+`aphelion-secrets --check-key` reads a key from standard input, checks it with the same code the broker uses at startup, and exits. It never prints the key. On a valid age identity it prints `The bootstrap key is a valid age identity` and exits 0. On a key that is empty, longer than 1 KiB or not a valid age identity, it logs `Secrets broker startup failed` with the matching reason from [Startup refusals](#startup-refusals) and exits 1. The host install uses it to check a key that already exists.
+
 | Path | Owner and mode | Purpose |
 | --- | --- | --- |
 | `/run/aphelion-secrets/` | `aphelion-secrets:harness`, `2710` | Gives members of the private `harness` group permission to reach the socket. The set-group-ID bit makes the socket inherit that group. |
@@ -49,7 +51,7 @@ At startup the broker checks the key against the store. When a check fails, the 
 | `The bootstrap key is not a valid age identity` | The key isn't an age identity. |
 | `The secrets store holds a plain-text key from before the host credential` | `identity.agekey` is still in the store. [Start a fresh store after an older install](../guides/install.md#start-a-fresh-store-after-an-older-install) explains what to do. |
 | `The bootstrap key does not match this secrets store` | `recipient.pub` holds another public key. Or `recipient.pub` is missing, and an entry doesn't decrypt with the key or doesn't match its filename. |
-| `The secrets broker takes no arguments except --new-key` | The broker was started with another argument. |
+| `The secrets broker takes no arguments except --new-key and --check-key` | The broker was started with another argument. |
 
 If `recipient.pub` is missing and entries exist, as after restoring a backup of only the entries, the broker checks every entry first, as described above. Then it writes `recipient.pub`. Other startup failures, such as a folder with the wrong owner or mode, log `Secrets broker startup failed` with no reason.
 

@@ -19,29 +19,29 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
 ### Install with one command
 
-The installer does everything under [Install step by step](#install-step-by-step) except one thing: it asks you to save the recovery key. Run it on an Ubuntu host that has Tailscale signed in. Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`:
+The installer does everything under [Install step by step](#install-step-by-step) except one thing: it asks you to save the recovery key. Run it on an Ubuntu host that has Tailscale signed in. Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`. The first release that has the installer is `v0.1.0-alpha.2`:
 
 ```sh
-tag=v0.1.0-alpha.1
-curl -fsSL "https://raw.githubusercontent.com/jcore9/Aphelion/$tag/deploy/install.sh" | sudo bash -s -- --tag "$tag"
+tag=v0.1.0-alpha.2
+script=$(mktemp) && curl -fsSLo "$script" "https://raw.githubusercontent.com/jcore9/Aphelion/$tag/deploy/install.sh" && sudo bash "$script" --tag "$tag"
 ```
 
-The command downloads the installer script of that release and runs it as root. To read it first, open [`deploy/install.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/install.sh). The script does these steps in order. Each step checks first and skips itself when it is already done.
+The command saves the installer script of that release to a file, and runs it as root only if the download worked. A download that fails or stops halfway runs nothing. To read the script first, open [`deploy/install.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/install.sh). The script does these steps in order. Each step checks first and skips itself when it is already done.
 
-1. It stops, before it changes anything, if the host isn't Ubuntu, if an x86-64 processor hides SSE4.2 ([What you need](#what-you-need) explains the setting), or if Tailscale has no address for the host.
+1. It stops, before it changes anything, if the host isn't Ubuntu, if an x86-64 processor hides SSE4.2 ([What you need](#what-you-need) explains the setting), if Tailscale has no address for the host, or if ufw is enabled with `MANAGE_BUILTINS=yes`. It also looks at an existing `/opt/aphelion`, and stops if root doesn't own it, if others can write to it, if its origin isn't the Aphelion repository, or if it has local changes. It never writes firewall rules.
 2. It installs Docker Engine and the Compose plugin from Docker's Ubuntu repository, if Compose isn't there.
-3. It clones the tag to `/opt/aphelion`. If the clone is already there, it moves a clean clone to the tag. It stops if the clone has local changes.
+3. It clones the tag to `/opt/aphelion`. If the clone is already there, it moves a clean clone to the tag.
 4. It writes `/opt/aphelion/deploy/.env` with the host's tailnet address, unless the file exists. It never changes an existing file.
-5. It gets the image. It tries to download the image that the release published, and refuses the download if the image's digest differs from the one in the release's `aphelion-image.sha256` file. If there is no such file, or the download fails, it builds the image on the host. The image package is private today, so expect the build. It takes a while.
+5. It gets the image. It tries to download the image that the release published, and refuses the download if the image's digest differs from the one in the release's `aphelion-image.sha256` file. If there is no such file, or the download fails, it builds the image on the host. The image package is private today, so expect the build. It takes a while. This step runs every time, so a run that finds a stale image replaces it. If the image fails the digest check after the installer moved an existing clone to another tag, the installer moves the clone back to the commit it was on.
 6. It runs `host/install`, which creates the bootstrap key and installs the service.
 7. It shows the bootstrap key on your screen, so you can save a recovery copy. You type `saved` to go on. The key goes to your terminal only, never to a file or a pipe.
-8. It runs `host/preflight` and starts the service.
+8. It starts the service. The service runs `host/preflight` itself first, and the start fails if a check fails. The installer doesn't run the preflight, because the check needs the bootstrap key that only the running service has.
 
-Run the same command again, and each step says it is already done and changes nothing. The installer doesn't restart a running service. To move a running server to a newer release, see [Upgrade](#upgrade).
+Run the same command again, and each step says it is already done and changes nothing. With a built image, the build step runs again, and Docker's cache makes it quick. The installer doesn't restart a running service. It refuses `--no-start` and a different tag while the service runs, and changes nothing. To move a running server to a newer release, see [Upgrade](#upgrade).
 
 The installer reads your answers from the terminal, not from the pipe. With no terminal, it does steps 1 to 6, then stops before the key and the start. It says what to run to finish: print and save the key, then `sudo systemctl start aphelion`.
 
-To install without starting the service, add `--no-start` after `--tag "$tag"`. Use it on a host where you restore a backup next ([Restore on new hardware](#restore-on-new-hardware)). With `--no-start`, the installer skips steps 7 and 8.
+To install without starting the service, add `--no-start` after `--tag "$tag"`. Use it on a host where you restore a backup next ([Restore on new hardware](#restore-on-new-hardware)). With `--no-start`, the installer skips steps 7 and 8. It refuses `--no-start` while the service runs: stop the service first with `sudo systemctl stop aphelion`.
 
 ### Install step by step
 
