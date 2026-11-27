@@ -42,7 +42,6 @@
 | `--days DAYS` | `device add` | `90` | How long the token works, from 1 to 365 days |
 | `--plugin-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the plugin runner's pipes, from 3 up. The server reads the runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
 | `--bot-runner-fds REPLIES,REQUESTS` | `--headless` | none | The two file descriptors of the [bot runner](bot-runner.md)'s pipes, from 3 up and not the plugin runner's. The server reads the bot runner's replies on `REPLIES` and writes its requests on `REQUESTS`. |
-| `--test-url URL` | `key test` | none | Only for Aphelion's own tests. Sends the check to a fake provider at `http://127.0.0.1:PORT` instead of the real one. Any other address is refused. |
 | `--plugin-dev FOLDER` | `--headless` | none | An absolute path. Turns on [dev mode](plugins.md#dev-mode): `plugin dev` can reload the approved plugin in `FOLDER` through the server's [control socket](plugins.md#control-socket). Needs `--plugin-runner-fds` to have any effect. |
 
 The folders match [decision 0014](../decisions/0014-filesystem-layout.md). Pass other folders on a developer's machine. Write each option after the command, as in `aphelion device list --state-dir /s`. An option before the command is an error. An option that a command doesn't use is an error, and so is an option given twice or given an empty value. A mistyped command never runs with an option silently ignored or replaced. `--help` anywhere on the line prints the commands and ignores the rest. An error message never repeats the words you typed after the command, so a token pasted by mistake doesn't end up in a log.
@@ -382,7 +381,7 @@ The command:
 
 1. Asks the [secrets broker](secrets.md#local-secrets-broker) whether a key is stored. If one is, it exits with 1 and says to use `key replace`. It reads no key in that case.
 2. Reads the key from standard input, never from the command line. On a terminal it prints `API key for claude (an Anthropic API key): ` on standard error and turns the echo off, so the key doesn't show as you type. Enter ends the key, and Ctrl-C stops without storing anything. From a pipe it reads up to the end of the input.
-3. Removes one line break from the end, then refuses a key that is empty, longer than 512 bytes, or holds another line break or control character. It doesn't check the vendor's key format, because vendors change it.
+3. Removes one line break from the end, then refuses a key that is empty or longer than 512 bytes. It also refuses a key with any character other than the printable ASCII characters `!` to `~`. That rules out spaces, tabs, line breaks, control characters and letters outside ASCII, such as `é` or an invisible zero-width space, which a copy from a web page can add. It doesn't check the vendor's key format, because vendors change it.
 4. Asks the broker to store the key at `local://apikey/NAME`, encrypted like every local secret.
 5. Prints `Stored the claude API key. Test it with: aphelion key test claude`.
 
@@ -400,7 +399,7 @@ Reads the stored key and asks the provider to list its models with it. This is a
 | `codex` | `GET https://api.openai.com/v1/models`, with the key in `Authorization: Bearer` |
 | `grok` | `GET https://api.x.ai/v1/models`, with the key in `Authorization: Bearer` |
 
-The addresses are fixed in the code. The request follows no redirect, so the key goes only to the provider's address, and it gives up after 10 seconds. The command prints one fixed line and never the provider's answer:
+The addresses are fixed in the code, and no option or setting changes them. The request follows no redirect, so the key goes only to the provider's address, and it gives up after 10 seconds. The command prints one fixed line and never the provider's answer:
 
 | Answer | Line | Exit code |
 | --- | --- | --- |

@@ -33,7 +33,7 @@ It is not the server's [`aphelion` command](cli.md). That one runs inside the co
 | `sudo aphelion check` | Runs every check the host can run alone |
 | `aphelion --help` | Prints the commands. Works without `sudo`. |
 
-Run any other command without root, and it prints `Run it with sudo: sudo aphelion <what you typed>` and exits with status 2. An unknown command, or a command with the wrong number of words, prints the usage and exits with status 2.
+Run any other command without root, and it prints `Run it with sudo, for example: sudo aphelion status` and exits with status 2. The line never repeats what you typed, so a key pasted on the command line by mistake doesn't show. An unknown command, or a command with the wrong number of words, prints the usage and exits with status 2.
 
 ## Exit codes
 
@@ -43,7 +43,7 @@ Run any other command without root, and it prints `Run it with sudo: sudo apheli
 | 1 | `status` found the service or `/health` down. `check` found a failed check. |
 | 2 | The command was misused, or it wasn't run as root. |
 
-A `device`, `tool`, `key` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `sign-in` exits with the code of the tool's own sign-in. `sign-in`, `key add`, `key replace`, `backup` and `restore` exit with 1 when they refuse or a step fails. `plugin install` exits with 1 when it refuses.
+A `device`, `tool`, `key` or `plugin` command exits with the code of the server's own command, which [the aphelion command](cli.md#exit-codes) lists. `sign-in` exits with the code of the tool's own sign-in. `sign-in`, `key add`, `key replace`, `backup` and `restore` exit with 1 when they refuse or a step fails. A `key` command exits with 2 when it refuses the tool name. `plugin install` exits with 1 when it refuses.
 
 ## `status`
 
@@ -90,9 +90,17 @@ Stored the claude API key. Test it with: aphelion key test claude
 - It asks `API key for NAME: ` and turns the echo off, so the key doesn't show as you type or paste it. Press Enter after the key.
 - It sends the key to the server's command on standard input. The key never appears on a command line, so it isn't in the shell history or in the list of running processes.
 - It refuses without a terminal on standard input, with `key add needs a terminal, so you can type the key without it showing. Run it in a shell on the host, not through a pipe or a script.`
-- For a name other than `claude`, `codex` or `grok`, it asks for no key. The server's command refuses the name and says why.
+- It keeps the line as you typed it, with any spaces or tabs, so the server's command can refuse a key that holds them.
+- Ctrl-D at the prompt stops it with `Stopped. No API key was read.` and exit code 1. It runs nothing in the container.
 
 `sudo aphelion key test NAME` and `sudo aphelion key remove NAME` run the server's command and pass its output and exit code through.
+
+Every `key` command checks `NAME` on the host before it runs anything in the container. This way a key typed in place of the name never goes on a Docker command line, where other processes on the host and in the container could read it. Each refusal exits with status 2 and prints a fixed line that doesn't repeat what you typed:
+
+| `NAME` | Line |
+| --- | --- |
+| `opencode` | `the tool name can't be opencode, which has no single API key. Sign it in with: sudo aphelion sign-in opencode` |
+| Anything other than `claude`, `codex` or `grok` | `the tool name must be claude, codex or grok` |
 
 ## `backup`
 
@@ -164,7 +172,7 @@ Compose's own `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` pass through to every ca
 | --- | --- |
 | `device …` | `docker compose exec -T --user harness aphelion aphelion device …`, with output and exit code passed through |
 | `tool …` | `docker compose exec -T --user harness aphelion aphelion tool …`, with output and exit code passed through |
-| `key add NAME`, `key replace NAME` | Reads the key with `read -s`, then `printf '%s\n' KEY \| docker compose exec -T --user harness aphelion aphelion key add NAME`, or `key replace NAME`. `printf` is built into the shell, so the key isn't on any command line. |
+| `key add NAME`, `key replace NAME` | Reads the key with `IFS= read -r -s`, then `printf '%s\n' KEY \| docker compose exec -T --user harness aphelion aphelion key add NAME`, or `key replace NAME`. `printf` is built into the shell, so the key isn't on any command line. |
 | `key test NAME`, `key remove NAME` | `docker compose exec -T --user harness aphelion aphelion key …`, with output and exit code passed through |
 | `plugin dev …` | `docker compose exec --user harness aphelion aphelion plugin dev …`, without `-T`, so Ctrl-C stops it |
 | `plugin install FOLDER` | `docker compose cp FOLDER aphelion:/opt/aphelion/plugins/NAME`, then `docker compose exec -T --user harness aphelion aphelion plugin install /opt/aphelion/plugins/NAME …` |
