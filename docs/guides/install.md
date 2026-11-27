@@ -17,6 +17,36 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
 ## Install
 
+### Install with one command
+
+The installer does everything under [Install step by step](#install-step-by-step) except one thing: it asks you to save the recovery key. Run it on an Ubuntu host that has Tailscale signed in. Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`:
+
+```sh
+tag=v0.1.0-alpha.1
+curl -fsSL "https://raw.githubusercontent.com/jcore9/Aphelion/$tag/deploy/install.sh" | sudo bash -s -- --tag "$tag"
+```
+
+The command downloads the installer script of that release and runs it as root. To read it first, open [`deploy/install.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/install.sh). The script does these steps in order. Each step checks first and skips itself when it is already done.
+
+1. It stops, before it changes anything, if the host isn't Ubuntu, if an x86-64 processor hides SSE4.2 ([What you need](#what-you-need) explains the setting), or if Tailscale has no address for the host.
+2. It installs Docker Engine and the Compose plugin from Docker's Ubuntu repository, if Compose isn't there.
+3. It clones the tag to `/opt/aphelion`. If the clone is already there, it moves a clean clone to the tag. It stops if the clone has local changes.
+4. It writes `/opt/aphelion/deploy/.env` with the host's tailnet address, unless the file exists. It never changes an existing file.
+5. It gets the image. It tries to download the image that the release published, and refuses the download if the image's digest differs from the one in the release's `aphelion-image.sha256` file. If there is no such file, or the download fails, it builds the image on the host. The image package is private today, so expect the build. It takes a while.
+6. It runs `host/install`, which creates the bootstrap key and installs the service.
+7. It shows the bootstrap key on your screen, so you can save a recovery copy. You type `saved` to go on. The key goes to your terminal only, never to a file or a pipe.
+8. It runs `host/preflight` and starts the service.
+
+Run the same command again, and each step says it is already done and changes nothing. The installer doesn't restart a running service. To move a running server to a newer release, see [Upgrade](#upgrade).
+
+The installer reads your answers from the terminal, not from the pipe. With no terminal, it does steps 1 to 6, then stops before the key and the start. It says what to run to finish: print and save the key, then `sudo systemctl start aphelion`.
+
+To install without starting the service, add `--no-start` after `--tag "$tag"`. Use it on a host where you restore a backup next ([Restore on new hardware](#restore-on-new-hardware)). With `--no-start`, the installer skips steps 7 and 8.
+
+### Install step by step
+
+Do these steps by hand if you want to see each one, or if the installer stopped and you want to continue from there.
+
 1. Clone the latest release to `/opt/aphelion` as root. A release is a tag, which is a name fixed to one commit. You install a version that was tested, not whatever is on `main` today. The service runs the files in that folder, so only root may change them. Find the latest tag on [the releases page](https://github.com/jcore9/Aphelion/releases), and put it in `tag`:
 
    ```sh
@@ -51,7 +81,7 @@ Don't add anyone to the `docker` group. Membership in that group is the same as 
 
    The secrets store is the encrypted folder where Aphelion keeps passwords and API keys. The secrets broker is the small program in the container that opens the store. The bootstrap key unlocks the store ([decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md)).
 
-   The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a whole key, the script stops and leaves the file and the service as they are.
+   The first time, the script creates the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap`. `systemd-creds`, a tool that comes with systemd, keeps the key encrypted on disk and decrypts it only for `aphelion.service`. The script never replaces a key that exists. If the file exists but doesn't hold a valid key, the script stops and leaves the file and the service as they are. The script asks the image's own `aphelion-secrets --check-key`, the same check the broker makes when it starts. A key with a typo is caught here and not at the first start.
 
    When it creates the key, the script may print `Credential secret file '/var/lib/systemd/credential.secret' is not located on encrypted media, using anyway.` `systemd-creds` prints this when its host key sits on a disk that isn't encrypted. The host key is the key that `systemd-creds` encrypts the bootstrap key with. A TPM is a security chip on the motherboard. On a host without a TPM, the host key is the only protection. Anyone who copies the whole disk can then decrypt the bootstrap key. [Decision 0050](../decisions/0050-bootstrap-key-is-the-store-key.md#what-it-protects) accepts this. Encrypting the host's disk closes the gap.
 
@@ -146,7 +176,7 @@ Put the bootstrap key on the new host before you run `host/install`, so that the
    sudo systemd-creds decrypt --name=bootstrap /etc/credstore.encrypted/aphelion-bootstrap - | grep -cEx 'AGE-SECRET-KEY-1[0-9A-Z]{58}'
    ```
 
-5. Follow [Install](#install) steps 1 to 4. Stop there and don't start the service. If you start it now, the secrets broker creates an empty store. Don't reboot either, because `host/install` enables the service, so it starts at boot. Then follow [Back up and restore](#back-up-and-restore) to put your data back.
+5. Run the installer with `--no-start` ([Install with one command](#install-with-one-command)), or follow [Install step by step](#install-step-by-step) steps 1 to 4. Stop there and don't start the service. If you start it now, the secrets broker creates an empty store. Don't reboot either, because `host/install` enables the service, so it starts at boot. Then follow [Back up and restore](#back-up-and-restore) to put your data back.
 
 The key alone restores nothing. The secrets themselves are in the `secrets` volume. [Back up and restore](#back-up-and-restore) moves that volume and the other five to a new host. The commands were run with Docker on a development machine and test data. The M0 exit test restored test data from an Ubuntu 26.04 VM on an existing Ubuntu 24.04 machine. That machine also held the backup, so the archive was copied locally instead of fetched over `ssh`. All three checks passed. The guide has not yet been tested on a host that holds real secrets.
 
@@ -222,7 +252,7 @@ sudo systemctl start aphelion
 
 ### Restore on the new host
 
-Start from a host that has the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap` ([Restore on new hardware](#restore-on-new-hardware)) and has finished [Install](#install) steps 1 to 4. The service must not have started. The first start creates empty volumes, and the secrets broker writes a new store in them.
+Start from a host that has the bootstrap key in `/etc/credstore.encrypted/aphelion-bootstrap` ([Restore on new hardware](#restore-on-new-hardware)) and has finished the installer with `--no-start`, or [Install step by step](#install-step-by-step) steps 1 to 4. The service must not have started. The first start creates empty volumes, and the secrets broker writes a new store in them.
 
 1. Put the archive and its checksum file in a private folder on the new host. For example, run these on the new host to fetch them from the backup machine. Put the name of the backup folder in place of `aphelion-backup-20261123-120000`.
 
