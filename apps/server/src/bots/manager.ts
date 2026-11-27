@@ -163,6 +163,8 @@ interface Slot {
   restart: boolean;
   stopped: boolean;
   stopSent: boolean;
+  pendingStop: number | undefined;
+  afterStop: LifecycleEvent | undefined;
   graceRun: number | undefined;
   stderrLines: number;
   readonly turns: Map<TurnId, TurnRequest>;
@@ -490,6 +492,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             case "shutdown":
             case "kill":
               slot.stopSent = true;
+              slot.pendingStop = slot.state.run;
               return yield* sendToRunner({
                 type: "stop",
                 bot: slot.bot.name,
@@ -517,6 +520,10 @@ export const botManagerLayer = (options: BotManagerOptions) =>
         Effect.gen(function* () {
           const before = slot.state;
           const next = step(before, event, policy);
+          if (next.state.run !== before.run && slot.pendingStop !== undefined) {
+            slot.afterStop = event;
+            return;
+          }
           slot.state = next.state;
           const restarting =
             !channelFailed &&
@@ -574,24 +581,51 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           const { state } = slot;
           if (at !== state.run) return;
           switch (state.state) {
+            case "running":
+            case "starting":
+              logger.error(stopFailed, { bot: slot.bot.name, run: at });
+              slot.restart = state.state === "running";
+              return yield* apply(slot, { type: "stop" });
             case "stopping":
-              if (!slot.stopSent) return;
+            case "crashed":
+            case "stopped":
+              if (!slot.stopSent || slot.pendingStop !== at) return;
               slot.stopSent = false;
               logger.error(stopFailed, { bot: slot.bot.name, run: at });
+              if (state.state !== "stopping") {
+                slot.restart = false;
+                slot.afterStop = undefined;
+                slot.state = { state: "stopping", run: at };
+                logger.info("bot state changed", {
+                  bot: slot.bot.name,
+                  from: state.state,
+                  to: "stopping",
+                  run: at,
+                });
+                yield* settleWaiters(slot);
+              }
               return yield* run(slot, {
                 type: "arm",
                 run: at,
                 deadline: "grace",
                 ms: policy.graceMs,
               });
-            case "running":
-            case "starting":
-              logger.error(stopFailed, { bot: slot.bot.name, run: at });
-              slot.restart = state.state === "running";
-              return yield* apply(slot, { type: "stop" });
             default:
               return;
           }
+        });
+
+      const onStopAnswered = (slot: Slot, run: number, event: LifecycleEvent) =>
+        Effect.gen(function* () {
+          if (run === slot.pendingStop) {
+            slot.pendingStop = undefined;
+            slot.stopSent = false;
+          }
+          yield* apply(slot, event);
+          const deferred = slot.afterStop;
+          if (deferred === undefined || slot.pendingStop !== undefined) return;
+          slot.afterStop = undefined;
+          yield* apply(slot, deferred);
         });
 
       const onReply = (slot: Slot, reply: RunnerReply) =>
@@ -693,13 +727,16 @@ export const botManagerLayer = (options: BotManagerOptions) =>
                 code: reply.code,
                 signal: reply.signal,
               });
-              return yield* apply(slot, {
+              return yield* onStopAnswered(slot, reply.run, {
                 type: "exited",
                 run: reply.run,
                 at: yield* Clock.currentTimeMillis,
               });
             case "stopped":
-              return yield* apply(slot, { type: "killed", run: reply.run });
+              return yield* onStopAnswered(slot, reply.run, {
+                type: "killed",
+                run: reply.run,
+              });
             case "stop-failed":
               return yield* onStopFailed(slot, reply.run);
           }
@@ -790,6 +827,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             case "stop":
               slot.restart = false;
               slot.recovering = false;
+              slot.afterStop = undefined;
               return yield* apply(slot, input);
             case "cancel":
               if (slot.state.state !== "running" || slot.turn !== input.turn)
@@ -821,6 +859,8 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             restart: false,
             stopped: false,
             stopSent: false,
+            pendingStop: undefined,
+            afterStop: undefined,
             graceRun: undefined,
             stderrLines: 0,
             turns: new Map(),
