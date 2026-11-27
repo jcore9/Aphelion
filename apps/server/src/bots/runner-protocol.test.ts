@@ -6,7 +6,7 @@ const start = {
   bot: "chief-of-staff",
   run: 1,
   provider: "claude",
-  adapter: "/usr/local/lib/aphelion/adapters/claude/adapter.js",
+  adapter: "claude",
   folder: "/var/lib/aphelion-bots/chief-of-staff",
   resume: null,
 };
@@ -31,8 +31,14 @@ describe("the bot runner's frames", () => {
     expect(accepts({ ...start, bot: "a/b" })).toBe(false);
   });
 
-  it("refuses a relative adapter path or folder", () => {
-    expect(accepts({ ...start, adapter: "adapter.js" })).toBe(false);
+  it("names the adapter by its key in the supervisor's table, never by a path, and refuses a relative folder", () => {
+    expect(
+      accepts({
+        ...start,
+        adapter: "/usr/local/lib/aphelion/adapters/claude/adapter.js",
+      }),
+    ).toBe(false);
+    expect(accepts({ ...start, adapter: "../claude" })).toBe(false);
     expect(accepts({ ...start, folder: "bots/chief-of-staff" })).toBe(false);
   });
 

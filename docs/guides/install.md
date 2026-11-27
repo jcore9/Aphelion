@@ -8,6 +8,13 @@ The install was tested in parts on Debian 13 with Docker 29.10 and Compose 5.8 o
 
 - Ubuntu 26.04 LTS ([decision 0011](../decisions/0011-ubuntu-lts.md)).
 - Docker Engine and the Compose plugin, installed from [Docker's Ubuntu repository](https://docs.docker.com/engine/install/ubuntu/). Keep Docker's default iptables firewall. The host firewall was tested only with it.
+- A Docker that supports the `writable-cgroups` security option, on a host with cgroup v2, which Ubuntu 26.04 uses by default. Docker 29.10 supports it. Aphelion gives each bot run its own cgroup, so that a cancel or a stop kills everything the bot started ([decision 0068](../decisions/0068-cgroup-per-bot.md)). Rootless Docker and `userns-remap` weren't tested. If your Docker doesn't know the option, the container doesn't start, and `sudo journalctl -u aphelion` shows a line like this one:
+
+  ```text
+  Error response from daemon: invalid --security-opt 2: "writable-cgroups=true"
+  ```
+
+  If Docker accepts the option but the container still can't write its cgroups, the server runs but starts no bot. `sudo aphelion check` then prints `FAIL  the bots' cgroups pass the start probe`, and the container log shows `bots can't start, because the cgroup check failed`.
 - For x86-64, a 64-bit x86 processor with SSE4.2, a set of processor instructions that Bun, the program that runs the server, needs. Check with `grep -c sse4_2 /proc/cpuinfo`. It must print a number above 0. A virtual machine can hide the instructions from Ubuntu. In Proxmox, set the VM's CPU type to `host` (VM, Hardware, Processors, Edit, Type), then stop the VM fully and start it again. A reboot from inside the VM doesn't apply the change. Proxmox's `x86-64-v2-AES` type wasn't tested, so run the same check if you use it.
 - Or a 64-bit arm64 processor, also called aarch64. See [arm64](#arm64).
 - Tailscale, signed in. `tailscale ip -4` prints the host's tailnet address.

@@ -10,6 +10,8 @@ export interface StreamTracker {
   readonly observe: (envelope: AdapterEnvelope) => void;
   readonly begin: (turn: TurnId) => void;
   readonly repair: () => AdapterEnvelope[];
+  readonly last: () => number;
+  readonly open: () => TurnId | undefined;
 }
 
 interface Ask {
@@ -91,5 +93,5 @@ export function streamTracker(): StreamTracker {
     return repaired;
   };
 
-  return { observe, begin, repair };
+  return { observe, begin, repair, last: () => seq, open: () => open };
 }
