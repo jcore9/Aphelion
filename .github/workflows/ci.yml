@@ -45,3 +45,25 @@ jobs:
           persist-credentials: false
       - run: bash deploy/test/image-contract.sh
       - run: bash deploy/test/host-contract.sh
+
+  container-arm64:
+    name: container (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: uname -m
+      - run: bash deploy/test/image-contract.sh
+
+  image-smoke-arm64:
+    name: image smoke (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: uname -m
+      - run: bash deploy/test/image-smoke.sh

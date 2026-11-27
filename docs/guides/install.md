@@ -8,7 +8,8 @@ The install was tested in parts on Debian 13 with Docker 29.10 and Compose 5.8 o
 
 - Ubuntu 26.04 LTS ([decision 0011](../decisions/0011-ubuntu-lts.md)).
 - Docker Engine and the Compose plugin, installed from [Docker's Ubuntu repository](https://docs.docker.com/engine/install/ubuntu/). Keep Docker's default iptables firewall. The host firewall was tested only with it.
-- A 64-bit x86 processor with SSE4.2, a set of processor instructions that Bun, the program that runs the server, needs. Check with `grep -c sse4_2 /proc/cpuinfo`. It must print a number above 0. A virtual machine can hide the instructions from Ubuntu. In Proxmox, set the VM's CPU type to `host` (VM, Hardware, Processors, Edit, Type), then stop the VM fully and start it again. A reboot from inside the VM doesn't apply the change. Proxmox's `x86-64-v2-AES` type wasn't tested, so run the same check if you use it. arm64 hosts come in M1 ([#180](https://github.com/jcore9/Aphelion/issues/180)).
+- For x86-64, a 64-bit x86 processor with SSE4.2, a set of processor instructions that Bun, the program that runs the server, needs. Check with `grep -c sse4_2 /proc/cpuinfo`. It must print a number above 0. A virtual machine can hide the instructions from Ubuntu. In Proxmox, set the VM's CPU type to `host` (VM, Hardware, Processors, Edit, Type), then stop the VM fully and start it again. A reboot from inside the VM doesn't apply the change. Proxmox's `x86-64-v2-AES` type wasn't tested, so run the same check if you use it.
+- Or a 64-bit arm64 processor, also called aarch64. See [arm64](#arm64).
 - Tailscale, signed in. `tailscale ip -4` prints the host's tailnet address.
 - `git`, and an account with `sudo`.
 
@@ -94,6 +95,16 @@ sudo docker compose exec -T --user harness aphelion aphelion device add laptop
 ```
 
 `status` and `check` ask `systemctl`, `docker compose ps`, `docker inspect`, `curl` and `iptables` read-only questions. [The host command](../reference/host-command.md) lists each one.
+
+## arm64
+
+The image builds for x86-64 and arm64 from the same `deploy/Dockerfile`, and the install steps are the same on both. Docker picks the right build for the host.
+
+The arm64 build is tested on one machine: GitHub's hosted arm64 runner (`ubuntu-24.04-arm`) in Aphelion's CI. There, the container checks in [`deploy/test/image-contract.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/image-contract.sh) pass, and a smoke test starts the image, checks `/health`, runs `aphelion tool install claude`, and runs `claude --version` as `aphelion-bot`. The smoke test is [`deploy/test/image-smoke.sh`](https://github.com/jcore9/Aphelion/blob/main/deploy/test/image-smoke.sh).
+
+Not tested on arm64: signing in to an AI tool, and chatting with a bot. The host steps (the systemd service, the firewall, the installer) were tested only on x86-64.
+
+`aphelion tool install` picks the arm64 download for each tool from the list. A tool whose list entry has no arm64 download shows `unavailable` in `aphelion tool list`, and `aphelion tool install` refuses it. All four tools on the shipped list have an arm64 entry.
 
 ## Keep a recovery copy of the bootstrap key
 

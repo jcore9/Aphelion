@@ -381,6 +381,80 @@ test("tool remove deletes the tool and can run twice", async () => {
   expect(await stateOf()).toContain("not installed");
 });
 
+async function onProcessor<T>(arch: string, work: () => Promise<T>) {
+  const real = Object.getOwnPropertyDescriptor(process, "arch");
+  Object.defineProperty(process, "arch", { value: arch, configurable: true });
+  try {
+    return await work();
+  } finally {
+    if (real !== undefined) Object.defineProperty(process, "arch", real);
+  }
+}
+
+async function writeTwoBuilds() {
+  const other = Buffer.from("#!/bin/sh\necho hello from the other build\n");
+  served.set("/claude-x64", script);
+  served.set("/claude-arm64", other);
+  const build = (path: string, bytes: Buffer) => ({
+    url: `${origin()}${path}`,
+    sha256: sha(bytes),
+    size: bytes.length,
+    format: "binary",
+    entry: "claude",
+  });
+  await writeEntry({
+    version: "1.2.3",
+    name: "claude",
+    build: {},
+    builds: {
+      x86_64: build("/claude-x64", script),
+      aarch64: build("/claude-arm64", other),
+    },
+  });
+}
+
+test("on arm64, tool install downloads the aarch64 build, and on x86-64 the x86_64 one", async () => {
+  await writeTwoBuilds();
+  const program = join(toolsDir, "claude", "current", "claude");
+  expect((await onProcessor("arm64", install)).code).toBe(0);
+  expect(requests).toEqual(["/claude-arm64"]);
+  expect((await run(program)).stdout).toBe("hello from the other build\n");
+
+  await rm(toolsDir, { recursive: true });
+  await mkdir(toolsDir);
+  requests.length = 0;
+  expect((await onProcessor("x64", install)).code).toBe(0);
+  expect(requests).toEqual(["/claude-x64"]);
+  expect((await run(program)).stdout).toBe("hello from the tool\n");
+});
+
+test("on arm64, a tool with only an x86_64 build is unavailable and install refuses it", async () => {
+  await writeEntry({
+    version: "1.2.3",
+    name: "claude",
+    build: {},
+    builds: {
+      x86_64: {
+        url: `${origin()}/claude`,
+        sha256: sha(script),
+        size: script.length,
+        format: "binary",
+        entry: "claude",
+      },
+    },
+  });
+  served.set("/claude", script);
+  const listed = await onProcessor("arm64", () => invoke(listArgs()));
+  expect(listed.out[1]).toBe(
+    "claude\t1.2.3\t-\tunavailable\tclaude auth status",
+  );
+  const refused = await onProcessor("arm64", install);
+  expect(refused.code).toBe(1);
+  expect(refused.err[0]).toContain("has no build");
+  expect(requests).toEqual([]);
+  expect((await onProcessor("x64", install)).code).toBe(0);
+});
+
 const update = (name?: string) =>
   invoke(["tool", "update", ...(name === undefined ? [] : [name]), ...dirs()]);
 

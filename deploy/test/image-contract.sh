@@ -272,10 +272,10 @@ docker exec --privileged "$container" bash -euo pipefail -c '
     held=$(stat -L -c %d:%i "$fd" 2>/dev/null) || continue
     pid=${fd#/proc/}; pid=${pid%%/*}
     if [[ $held == "$requests" || $held == "$replies" ]]; then
-      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[runner]}" ]] || { echo "process $pid holds the plugin runner pipe"; exit 1; }
+      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[runner]}" ]] || { echo "process $pid ($(tr "\0" " " <"/proc/$pid/cmdline")) holds the plugin runner pipe through $fd"; exit 1; }
     fi
     if [[ $held == "$bot_requests" || $held == "$bot_replies" ]]; then
-      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[bot_runner]}" ]] || { echo "process $pid holds the bot runner pipe"; exit 1; }
+      [[ $pid == "${pid_of[server]}" || $pid == "${pid_of[bot_runner]}" ]] || { echo "process $pid ($(tr "\0" " " <"/proc/$pid/cmdline")) holds the bot runner pipe through $fd"; exit 1; }
     fi
   done
 ' || fail "a process runs with the wrong user, privileges or pipes"
