@@ -159,23 +159,18 @@ export const runChat = (options: ChatOptions, host: ChatHost) =>
       sendCancel();
     }
 
-    const markHealthy = () => {
+    const markLive = () => {
+      if (ready) return;
+      ready = true;
       attempt = 0;
       historyFailures = 0;
-      if (outage && announced) view.status(messages.back);
-      outage = false;
-    };
-
-    const markReady = (healthy: boolean) => {
-      const wasReady = ready;
-      ready = true;
       if (!announced) {
         announced = true;
-        outage = false;
         view.info(messages.greeting(options.bot));
+      } else if (outage) {
+        view.status(messages.back);
       }
-      if (healthy) markHealthy();
-      if (wasReady) return;
+      outage = false;
       for (const frame of pending.values()) send(frame);
       if (cancelWanted) sendCancel();
     };
@@ -194,10 +189,6 @@ export const runChat = (options: ChatOptions, host: ChatHost) =>
     };
 
     const onFrame = (frame: ServerFrame) => {
-      if (cursor !== null && frame.type !== "resync") {
-        const pingOnly = frame.type === "result" && frame.name === "ping";
-        markReady(!pingOnly || historyFailures === 0);
-      }
       switch (frame.type) {
         case "resync": {
           const restored =
@@ -209,10 +200,19 @@ export const runChat = (options: ChatOptions, host: ChatHost) =>
             view.status(messages.cursorFile);
           }
           send({ v: 1, type: "resume", cursor });
-          markReady(true);
           if (restored) view.notice(messages.restored);
           return;
         }
+        case "live":
+          if (cursor === null) return;
+          if (
+            frame.cursor.stream === cursor.stream &&
+            frame.cursor.seq > cursor.seq
+          ) {
+            advance(frame.cursor.seq);
+          }
+          markLive();
+          return;
         case "event": {
           if (cursor === null || frame.seq <= cursor.seq) return;
           advance(frame.seq);
@@ -278,15 +278,6 @@ export const runChat = (options: ChatOptions, host: ChatHost) =>
               }
               socket = opened;
               send({ v: 1, type: "resume", cursor });
-              if (cursor !== null) {
-                send({
-                  v: 1,
-                  type: "command",
-                  id: commandId.parse(host.uuid()),
-                  name: "ping",
-                  payload: {},
-                });
-              }
             },
             (error: unknown) => {
               done(

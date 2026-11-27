@@ -16,7 +16,7 @@
    sudo aphelion chat chief
    ```
 
-3. Paste the token when it asks `Device token:`. Nothing shows on screen while you paste, and the token is not saved. Ctrl-C or Ctrl-D at this prompt prints `aphelion: no device token entered` and leaves with exit status 0.
+3. Paste the token when it asks `Device token:`. Nothing shows on screen while you paste, and the token is not saved. Ctrl-C or Ctrl-D at this prompt, or a `SIGINT` signal sent to the client, prints `aphelion: no device token entered` and leaves with exit status 0.
 
 4. Type a message and press Enter.
 
@@ -56,7 +56,7 @@ Only the chosen bot's events show. The client strips control characters from the
 
 ## When the connection drops
 
-The client says `aphelion: lost the connection to the server, trying again`. It waits, starting at a quarter of a second and growing to 5 seconds, and tries again. It counts as back when the server has accepted the request to continue, and then it says `aphelion: connected again` and shows the events it missed, each once. A server that keeps closing the connection with an error makes the client say it once, not on every try, and the client gives up after 5 tries in a row. A message you sent just before the drop is sent again with the same ID, so the bot answers once. Nothing you type goes out before the client knows where it is in the server's history.
+The client says `aphelion: lost the connection to the server, trying again`. It waits, starting at a quarter of a second and growing to 5 seconds, and tries again. It shows the events it missed, each once. It counts as back when the server says it has sent them all and now sends events as they happen. Then the client says `aphelion: connected again` and sends anything you typed during the pause. A server that keeps closing the connection with an error makes the client say it once, not on every try, and the client gives up after 5 tries in a row. A message you sent just before the drop is sent again with the same ID, so the bot answers once.
 
 If the server's history was restored from a backup, so that it is a different history from the one the client knew, the client says `[notice] the server's history was restored; continuing from now` and carries on from the newest event. If the server only trimmed old events, the client carries on without a notice.
 
