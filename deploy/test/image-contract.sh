@@ -461,6 +461,55 @@ probe harness '[
 ]'
 pass "harness reads the config, state and bot folders, writes the plugin files and reaches the broker, and nothing else"
 
+fake_key=sk-ant-fake-image-canary-0123456789abcdef
+key_command=(docker exec --user harness "$container" aphelion key)
+typed_key() {
+  printf '%s\n' "$1" | docker exec -i --user harness "$container" aphelion key "$2" claude 2>&1
+}
+out=$(typed_key "$fake_key" add) || fail "key add failed: $out"
+[[ $out == "Stored the claude API key. Test it with: aphelion key test claude" ]] || fail "key add printed something else: $out"
+out=$(typed_key sk-ant-fake-wrong-key add) && fail "key add replaced a stored key"
+[[ $out == "An API key for claude is already stored. To change it, run: aphelion key replace claude" ]] ||
+  fail "key add over a stored key printed something else: $out"
+out=$(typed_key sk-ant-fake-wrong-key replace) || fail "key replace failed: $out"
+[[ $out == "Replaced the claude API key. Test it with: aphelion key test claude" ]] || fail "key replace printed something else: $out"
+docker network disconnect aphelion-contract "$container"
+status=0
+out=$("${key_command[@]}" test claude 2>&1) || status=$?
+docker network connect aphelion-contract "$container"
+[[ $status == 1 && $out == "Couldn't reach the provider, or it didn't answer within 10 seconds." ]] ||
+  fail "key test without a network didn't fail with the fixed line ($status, $out)"
+out=$("${key_command[@]}" remove claude 2>&1) || fail "key remove failed: $out"
+[[ $out == "Removed the claude API key." ]] || fail "key remove printed something else: $out"
+status=0
+out=$("${key_command[@]}" test claude 2>&1) || status=$?
+[[ $status == 1 && $out == "No API key is stored for claude. Add one with: aphelion key add claude" ]] ||
+  fail "key test after key remove printed something else ($status, $out)"
+status=0
+out=$(docker exec --user aphelion-bot "$container" aphelion key test claude 2>&1) || status=$?
+[[ $status == 1 && $out == "this user can't reach the secrets broker at /run/aphelion-secrets/broker.sock. Run it as harness."* ]] ||
+  fail "aphelion-bot ran key test without a refusal ($status, $out)"
+rows=$(docker exec --user harness "$container" bun -e "
+  const { Database } = require('bun:sqlite');
+  const db = new Database('/var/lib/aphelion/aphelion.db', { readonly: true });
+  for (const row of db.query(\"SELECT action, outcome, detail FROM audit_log WHERE action LIKE 'key.%' ORDER BY id\").all()) console.log(Object.values(row).join(' '));
+")
+grep -qx 'key.add succeeded {"tool":"claude","result":"stored"}' <<<"$rows" &&
+  grep -qx 'key.replace succeeded {"tool":"claude","result":"replaced"}' <<<"$rows" &&
+  grep -qx 'key.test failed {"tool":"claude","result":"unreachable"}' <<<"$rows" &&
+  grep -qx 'key.remove succeeded {"tool":"claude","result":"removed"}' <<<"$rows" ||
+  fail "the audit log has no key rows: $rows"
+{
+  "${compose[@]}" logs --no-color 2>&1
+  echo "$rows"
+  docker exec --user harness "$container" bash -c 'cat /var/lib/aphelion/aphelion.db*'
+  docker exec --user aphelion-secrets "$container" bash -c 'cat /var/lib/aphelion-secrets/*'
+} >"$scratch/key-canary"
+if grep -aqF -e "$fake_key" -e sk-ant-fake-wrong-key "$scratch/key-canary"; then
+  fail "a fake API key reached the logs, the audit log or the secrets volume in plain text"
+fi
+pass "harness adds, replaces, tests with no route to the provider, and removes an API key, with an audit row each time; aphelion-bot can't; the key reaches no log and no file in plain text"
+
 probe aphelion-secrets '[
   ["list", "/etc/aphelion", "EACCES"],
   ["list", "/var/lib/aphelion", "EACCES"],
@@ -695,6 +744,10 @@ cat >"$fakebin/iptables" <<'FAKE'
 #!/bin/bash
 [[ ${FAKE_FIREWALL:-present} == present ]]
 FAKE
+cat >"$fakebin/ip6tables" <<'FAKE'
+#!/bin/bash
+exit 1
+FAKE
 cat >"$fakebin/curl" <<FAKE
 #!/bin/bash
 address=\$(docker inspect --format '{{(index .NetworkSettings.Networks "aphelion-contract").IPAddress}}' "\$FAKE_CONTAINER")
@@ -786,7 +839,7 @@ read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \
   fail "check didn't pass every check (exit $status): $checked"
 for name in "the service is enabled and running" "the container is running" "/health answers on the tailnet address" \
   "config check accepts the Compose file" "the container is hardened" "the bots' cgroups pass the start probe" \
-  "the bootstrap credential exists" "the firewall chains exist"; do
+  "the bootstrap credential exists" "the firewall rules are in place"; do
   grep -qx "ok    $name" <<<"$checked" || fail "check didn't print ok for: $name"
 done
 pass "check passes every check against the running container"
@@ -796,7 +849,7 @@ checked=$(APHELION_CREDENTIAL=$scratch/no-such-file FAKE_FIREWALL=missing host_a
 [[ $status == 1 ]] || fail "check exited $status with a missing credential and no firewall chains"
 grep -qx "FAIL  the bootstrap credential exists: $scratch/no-such-file is missing. Run host/install." <<<"$checked" ||
   fail "check didn't report the missing credential: $checked"
-grep -qx "FAIL  the firewall chains exist: the APHELION-FORWARD chain is missing. Restart the service to install it." <<<"$checked" ||
+grep -qx "FAIL  the firewall rules are in place: the APHELION-FORWARD chain is missing. Restart the service to install it. Run sudo aphelion network-check for the full list." <<<"$checked" ||
   fail "check didn't report the missing firewall chains: $checked"
 read -r passed total < <(sed -n 's/^\([0-9]*\) of \([0-9]*\) checks passed$/\1 \2/p' <<<"$checked")
 [[ $checked == *"ok    the container is hardened"* && -n $total && $passed == $((total - 2)) ]] ||

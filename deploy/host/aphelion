@@ -4,7 +4,10 @@ set -euo pipefail
 readonly APHELION_DEPLOY=${APHELION_DEPLOY:-/opt/aphelion/deploy}
 readonly APHELION_CREDENTIAL=${APHELION_CREDENTIAL:-/etc/credstore.encrypted/aphelion-bootstrap}
 readonly APHELION_BACKUP_DIR=${APHELION_BACKUP_DIR:-/var/backups/aphelion}
+readonly host_dir=$(dirname "$(realpath -e -- "$0")")
 readonly service=aphelion
+readonly github_repo=jcore9/Aphelion
+readonly repository_url=https://github.com/$github_repo.git
 readonly volumes=(config state bots secrets plugin-data plugin-files)
 readonly archive_name=aphelion-data.tar.gz
 readonly plugins_dir=/opt/aphelion/plugins
@@ -15,6 +18,10 @@ usage() {
   cat <<'USAGE'
 usage:
   aphelion status                      show whether the service, the container and the AI tools are up
+  aphelion logs [--follow] [--lines N] [--since TIME]
+                                       show the service logs
+  aphelion upgrade [TAG]               move the server to a release, or the newest release
+  aphelion network-check [TARGETS...]  check the firewall rules, and with six IP:PORT targets test them from the container
   aphelion device add NAME [--days N]  add a device and print its token
   aphelion device list                 list the devices
   aphelion device revoke ID            stop a device from signing in
@@ -24,6 +31,10 @@ usage:
   aphelion tool check                  ask each vendor for its newest version
   aphelion tool remove NAME            remove an installed AI tool
   aphelion sign-in NAME                sign in to an installed AI tool, on your terminal
+  aphelion key add|replace NAME        type an API key for claude, codex or grok and store it encrypted
+  aphelion key test NAME               ask the tool's provider whether it accepts the stored key
+  aphelion key remove NAME             delete the stored API key for a tool
+  aphelion chat BOT                    chat with a bot in plain lines, on your terminal
   aphelion backup [--to FOLDER]        stop the service, pack the data into a new folder, start the service
   aphelion restore [PATH]              put a backup into new volumes and start the service
   aphelion plugin install FOLDER [--approve DIGEST]
@@ -37,7 +48,7 @@ usage:
   aphelion --help                      show this text
 
 Run it as root: sudo aphelion status
-The device, tool and plugin commands run the server's own aphelion command inside the container.
+The device, tool, key and plugin commands run the server's own aphelion command inside the container.
 USAGE
 }
 
@@ -48,6 +59,11 @@ fail() {
 
 usage_error() {
   usage >&2
+  exit 2
+}
+
+refuse_usage() {
+  echo "aphelion: $*" >&2
   exit 2
 }
 
@@ -146,11 +162,14 @@ check_credential() {
 }
 
 check_firewall() {
-  local chain
-  for chain in APHELION-FORWARD APHELION-INPUT; do
-    iptables -w 10 -t mangle -S "$chain" >/dev/null 2>&1 ||
-      { echo "the $chain chain is missing. Restart the service to install it."; return 1; }
-  done
+  local output first detail
+  if output=$(env "APHELION_DEPLOY=$APHELION_DEPLOY" "$host_dir/network-check" 2>&1); then
+    return 0
+  fi
+  first=$(sed -n 's/^FAIL  //p' <<<"$output" | head -n 1)
+  detail=${first:-$output}
+  echo "${detail%.}. Run sudo aphelion network-check for the full list."
+  return 1
 }
 
 check_cpu() {
@@ -230,7 +249,7 @@ cmd_check() {
   tally "the container is hardened" check_hardening
   tally "the bots' cgroups pass the start probe" check_cgroups
   tally "the bootstrap credential exists" check_credential
-  tally "the firewall chains exist" check_firewall
+  tally "the firewall rules are in place" check_firewall
   if [[ $(uname -m) == x86_64 ]]; then
     tally "the processor has sse4_2" check_cpu
   fi
@@ -263,6 +282,43 @@ cmd_sign_in() {
   [[ -t 0 && -t 1 ]] ||
     fail "sign-in needs a terminal. Run it in a shell on the host, not through a pipe or a script."
   compose exec --user aphelion-bot "$service" "${argv[@]}"
+}
+
+cmd_chat() {
+  local bot=$1 address image
+  [[ $bot =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
+    fail "that isn't a bot name. A bot name is lower case letters, digits and hyphens, like chief."
+  [[ -t 0 && -t 1 ]] ||
+    fail "chat needs a terminal. Run it in a shell on the host, not through a pipe or a script."
+  address=$(tailnet_address)
+  [[ -n $address ]] || fail "set APHELION_TAILNET_ADDRESS in $APHELION_DEPLOY/.env"
+  image=$(service_image)
+  docker run --rm -it --pull never --network host --entrypoint "" --user harness \
+    --cap-drop ALL --security-opt no-new-privileges:true "$image" \
+    aphelion chat "$bot" --url "ws://$address:$health_port/ws"
+}
+
+cmd_key() {
+  local subcommand=$1 name=$2 key
+  case $name in
+    claude | codex | grok) ;;
+    opencode) refuse_usage "the tool name can't be opencode, which has no single API key. Sign it in with: sudo aphelion sign-in opencode" ;;
+    *) refuse_usage "the tool name must be claude, codex or grok" ;;
+  esac
+  case $subcommand in
+    test | remove)
+      in_container harness aphelion key "$subcommand" "$name" </dev/null
+      return
+      ;;
+  esac
+  [[ -t 0 ]] ||
+    fail "key $subcommand needs a terminal, so you can type the key without it showing. Run it in a shell on the host, not through a pipe or a script."
+  if ! IFS= read -r -s -p "API key for $name: " key; then
+    echo >&2
+    fail "Stopped. No API key was read."
+  fi
+  echo >&2
+  printf '%s\n' "$key" | in_container harness aphelion key "$subcommand" "$name"
 }
 
 backup_folder="" backup_restart=0
@@ -450,6 +506,240 @@ cmd_plugin() {
   esac
 }
 
+cmd_logs() {
+  local follow=0 lines="" since=""
+  local -a args=(-u "$service" --no-pager)
+  while (($#)); do
+    case $1 in
+      --follow)
+        follow=1
+        shift
+        ;;
+      --lines)
+        (($# >= 2)) && [[ $2 =~ ^[1-9][0-9]*$ ]] || usage_error
+        lines=$2
+        shift 2
+        ;;
+      --since)
+        (($# >= 2)) && [[ -n $2 ]] || usage_error
+        since=$2
+        shift 2
+        ;;
+      *)
+        usage_error
+        ;;
+    esac
+  done
+  ((!follow)) || args+=(--follow)
+  [[ -z $lines ]] || args+=(--lines "$lines")
+  [[ -z $since ]] || args+=(--since "$since")
+  journalctl "${args[@]}"
+}
+
+latest_release_tag() {
+  local json tag
+  json=$(curl --fail --silent --show-error --location --max-time 30 \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$github_repo/releases?per_page=20") ||
+    fail "couldn't read the releases list from GitHub"
+  tag=$(perl -0777 -ne '
+    my ($in_array, $depth, $key, $expect_val, $tag, $draft) = (0, 0, "", 0, undef, undef);
+    my $unescape = sub {
+      my ($s) = @_;
+      $s =~ s/^"|"$//g;
+      $s =~ s/\\(["\\\/])/$1/g;
+      return $s;
+    };
+    while (/\G\s*(?:("(?:\\.|[^"\\])*")|([\{\}\[\]:,])|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null))/gc) {
+      my ($str, $pun, $lit) = ($1, $2, $3);
+      if (defined $pun) {
+        if ($pun eq "{" || $pun eq "[") {
+          $in_array = 1 if $depth == 0 && $pun eq "[";
+          $depth++;
+          if ($in_array && $depth == 2 && $pun eq "{") {
+            ($tag, $draft, $key, $expect_val) = (undef, undef, "", 0);
+          }
+        } elsif ($pun eq "}" || $pun eq "]") {
+          if ($in_array && $depth == 2 && $pun eq "}") {
+            if (defined $tag && defined $draft && $draft eq "false") {
+              print "$tag\n";
+              exit 0;
+            }
+          }
+          $depth--;
+          $expect_val = 0 if $depth <= 2;
+        } elsif ($pun eq ":") {
+          $expect_val = 1 if $in_array && $depth == 2;
+        } elsif ($pun eq ",") {
+          $expect_val = 0 if $in_array && $depth == 2;
+        }
+      } elsif (defined $str) {
+        if ($in_array && $depth == 2) {
+          if ($expect_val) {
+            $tag = $unescape->($str) if $key eq "tag_name";
+            $expect_val = 0;
+          } else {
+            $key = $unescape->($str);
+          }
+        }
+      } elsif (defined $lit) {
+        if ($in_array && $depth == 2 && $expect_val) {
+          $draft = $lit if $key eq "draft";
+          $expect_val = 0;
+        }
+      }
+    }
+  ' <<<"$json")
+  [[ -n $tag ]] || fail "no published release found for $github_repo"
+  echo "$tag"
+}
+
+wait_for_health() {
+  local deadline=$((SECONDS + ${APHELION_HEALTH_WAIT:-300}))
+  echo "Waiting up to 5 minutes for the server to answer..."
+  until health_answers; do
+    ((SECONDS < deadline)) || return 0
+    sleep 1
+  done
+}
+
+restore_checkout() {
+  local repo=$1 previous=$2 previous_branch=$3
+  if [[ -n $previous_branch ]]; then
+    if git -C "$repo" switch --quiet -- "${previous_branch#refs/heads/}"; then
+      echo "aphelion: moved $repo back to $previous, where it was before" >&2
+    else
+      echo "aphelion: couldn't put $repo back on ${previous_branch#refs/heads/}" >&2
+    fi
+  else
+    if git -C "$repo" -c advice.detachedHead=false checkout --quiet --detach "$previous"; then
+      echo "aphelion: moved $repo back to $previous, where it was before" >&2
+    else
+      echo "aphelion: couldn't put $repo back on $previous" >&2
+    fi
+  fi
+}
+
+restore_image() {
+  local previous_image=$1 current_image
+  current_image=$(docker image inspect --format '{{.Id}}' aphelion:local 2>/dev/null) || current_image=""
+  if [[ -n $previous_image ]]; then
+    if [[ $current_image != "$previous_image" ]]; then
+      if ! docker tag "$previous_image" aphelion:local >/dev/null 2>&1; then
+        echo "aphelion: couldn't put aphelion:local back on $previous_image" >&2
+      fi
+    fi
+  elif [[ -n $current_image ]]; then
+    if ! docker image rm aphelion:local >/dev/null 2>&1; then
+      echo "aphelion: couldn't remove the new aphelion:local tag" >&2
+    fi
+  fi
+}
+
+cmd_upgrade() {
+  local repo offender origin dirty previous previous_branch before before_tag tag tag_commit at_tag=0 previous_image="" after
+  repo=$APHELION_DEPLOY
+  while [[ $repo == */ && $repo != / ]]; do repo=${repo%/}; done
+  repo=$(dirname -- "$repo")
+  [[ ! -L $repo && ! -L $repo/.git ]] ||
+    fail "$repo or $repo/.git is a symbolic link, so upgrade can't check what it points to"
+  [[ -d $repo/.git ]] ||
+    fail "$repo isn't a git checkout"
+  offender=$(find "$repo" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit) ||
+    fail "couldn't read the files in $repo"
+  [[ -z $offender ]] ||
+    fail "$offender must be owned by root and writable only by root"
+  origin=$(git -C "$repo" remote get-url origin 2>/dev/null) || origin=""
+  [[ $origin == "$repository_url" ]] ||
+    fail "$repo isn't a clone of $repository_url (its origin is ${origin:-unknown})"
+  dirty=$(git --no-optional-locks -C "$repo" status --porcelain) ||
+    fail "couldn't check $repo for local changes"
+  [[ -z $dirty ]] ||
+    fail "$repo has local changes. Clean or stash them before upgrading."
+  previous=$(git -C "$repo" rev-parse HEAD) ||
+    fail "couldn't read the commit that $repo is on"
+  previous_branch=$(git -C "$repo" symbolic-ref -q HEAD) || previous_branch=""
+  before_tag=$(git -C "$repo" describe --tags --exact-match 2>/dev/null) || before_tag=""
+  if [[ -n $before_tag ]]; then
+    before=$before_tag
+  else
+    before=$(git -C "$repo" rev-parse --short HEAD) ||
+      fail "couldn't read the current version in $repo"
+  fi
+  if [[ -n ${1:-} ]]; then
+    tag=$1
+  else
+    tag=$(latest_release_tag)
+  fi
+  [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && $tag != *..* ]] ||
+    fail "'$tag' isn't a release tag, such as v0.1.0-alpha.2"
+  tag_commit=$(git -C "$repo" rev-parse --verify --quiet "refs/tags/$tag^{commit}" 2>/dev/null) || tag_commit=""
+  if [[ -n $tag_commit && $tag_commit == "$previous" ]]; then
+    at_tag=1
+  else
+    git -C "$repo" fetch --tags ||
+      fail "git fetch --tags failed in $repo"
+    tag_commit=$(git -C "$repo" rev-parse --verify --quiet "refs/tags/$tag^{commit}" 2>/dev/null) ||
+      fail "tag $tag doesn't exist in $repo"
+    if [[ $tag_commit == "$previous" ]]; then
+      at_tag=1
+    fi
+  fi
+  if ((at_tag)) && service_is_up && health_answers; then
+    echo "Aphelion is already at $tag."
+    return 0
+  fi
+  if ((!at_tag)); then
+    git -C "$repo" -c advice.detachedHead=false checkout --detach "refs/tags/$tag" ||
+      fail "git checkout $tag failed"
+  fi
+  if [[ ! -x $APHELION_DEPLOY/host/get-image ]]; then
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    fail "$tag has no $APHELION_DEPLOY/host/get-image"
+  fi
+  previous_image=$(docker image inspect --format '{{.Id}}' aphelion:local 2>/dev/null) || previous_image=""
+  if ! "$APHELION_DEPLOY/host/get-image" "$tag"; then
+    restore_image "$previous_image"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    exit 1
+  fi
+  if ! "$APHELION_DEPLOY/host/install"; then
+    restore_image "$previous_image"
+    ((at_tag)) || restore_checkout "$repo" "$previous" "$previous_branch"
+    fail "host/install failed"
+  fi
+  if ! systemctl restart "$service"; then
+    echo "aphelion: restarting $service failed" >&2
+    echo "Read why with: sudo aphelion logs --lines 50" >&2
+    if ((!at_tag)) && [[ -n $before_tag && $before_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && $before_tag != *..* ]]; then
+      echo "To go back: sudo aphelion upgrade $before_tag" >&2
+    fi
+    exit 1
+  fi
+  after=$(git -C "$repo" describe --tags --exact-match 2>/dev/null || echo "$tag")
+  if ((at_tag)); then
+    echo "Finished upgrading Aphelion to $after."
+  else
+    echo "Upgraded Aphelion from $before to $after."
+  fi
+  wait_for_health
+  if [[ -x $APHELION_DEPLOY/host/aphelion ]]; then
+    env "APHELION_DEPLOY=$APHELION_DEPLOY" "$APHELION_DEPLOY/host/aphelion" check || {
+      echo "aphelion: The upgrade finished, but aphelion check failed." >&2
+      exit 1
+    }
+  else
+    cmd_check || {
+      echo "aphelion: The upgrade finished, but aphelion check failed." >&2
+      exit 1
+    }
+  fi
+}
+
+cmd_network_check() {
+  env "APHELION_DEPLOY=$APHELION_DEPLOY" "$host_dir/network-check" "$@"
+}
+
 case ${1:-} in
   -h | --help | help)
     usage
@@ -457,13 +747,25 @@ case ${1:-} in
     ;;
 esac
 if ((EUID != 0)); then
-  echo "Run it with sudo: sudo aphelion $*" >&2
+  echo "Run it with sudo, for example: sudo aphelion status" >&2
   exit 2
 fi
 case ${1:-} in
   status | check)
     (($# == 1)) || usage_error
     "cmd_$1"
+    ;;
+  logs)
+    cmd_logs "${@:2}"
+    ;;
+  upgrade)
+    (($# <= 2)) || usage_error
+    [[ ${2:-} != -* ]] || usage_error
+    cmd_upgrade "${2:-}"
+    ;;
+  network-check)
+    (($# == 1 || $# == 7)) || usage_error
+    cmd_network_check "${@:2}"
     ;;
   device)
     case ${2:-}:$# in
@@ -477,9 +779,19 @@ case ${1:-} in
       *) usage_error ;;
     esac
     ;;
+  key)
+    case ${2:-}:$# in
+      add:3 | replace:3 | test:3 | remove:3) cmd_key "$2" "$3" ;;
+      *) usage_error ;;
+    esac
+    ;;
   sign-in)
     (($# == 2)) || usage_error
     cmd_sign_in "$2"
+    ;;
+  chat)
+    (($# == 2)) || usage_error
+    cmd_chat "$2"
     ;;
   backup)
     case ${2:-}:$# in

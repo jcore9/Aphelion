@@ -39,6 +39,7 @@ function capture() {
     out: (line) => Effect.sync(() => void out.push(line)),
     err: (line) => Effect.sync(() => void err.push(line)),
     stdin: Effect.succeed(""),
+    readApiKey: () => Effect.die("unused"),
   });
   return { out, err, layer };
 }
@@ -246,6 +247,7 @@ describe("aphelion plugin dev", () => {
             out: (line) => Effect.sync(() => void order.push(`out ${line}`)),
             err: (line) => Effect.sync(() => void order.push(`err ${line}`)),
             stdin: Effect.succeed(""),
+            readApiKey: () => Effect.die("unused"),
           });
           const watching = yield* pluginDev({
             stateDir,

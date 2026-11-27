@@ -1,13 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
-if (($# != 6)); then
-  cat >&2 <<'USAGE'
-usage: network-check LAN_GATEWAY:PORT HOST_LAN:PORT HOST_TAILNET:PORT TAILNET_PEER:PORT BRIDGE_GATEWAY:PORT INTERNET:PORT
+readonly bridge=aphelion0
+readonly port=7400
+readonly blocked=(
+  0.0.0.0/8
+  10.0.0.0/8
+  100.64.0.0/10
+  127.0.0.0/8
+  169.254.0.0/16
+  172.16.0.0/12
+  192.168.0.0/16
+  224.0.0.0/4
+  240.0.0.0/4
+)
+readonly deploy_dir=${APHELION_DEPLOY:-$(cd "$(dirname "$(realpath -e -- "$0")")/.." && pwd)}
 
-Connects to each target as aphelion-bot inside the running container.
-The first five must time out, because the firewall drops them.
-The last must connect.
+if (($# != 0 && $# != 6)); then
+  cat >&2 <<'USAGE'
+usage: network-check [LAN_GATEWAY:PORT HOST_LAN:PORT HOST_TAILNET:PORT TAILNET_PEER:PORT BRIDGE_GATEWAY:PORT INTERNET:PORT]
+
+With no targets, checks Aphelion's firewall chains and rules, Docker's chains,
+and ufw's MANAGE_BUILTINS setting, and names each missing rule.
+With six targets, runs that check first, then connects to each target as
+aphelion-bot inside the running container. The first five must time out,
+because the firewall drops them. The last must connect.
 USAGE
   exit 2
 fi
@@ -19,6 +36,144 @@ for target in "$@"; do
   }
 done
 
+tailnet_interface() {
+  local value=${APHELION_TAILNET_INTERFACE:-}
+  if [[ -z $value && -r $deploy_dir/.env ]]; then
+    value=$(sed -n 's/^APHELION_TAILNET_INTERFACE=//p' "$deploy_dir/.env" 2>/dev/null | tail -n 1)
+    value=${value%%[[:space:]]#*}
+    value=${value//[\"\']/}
+    value=${value%%[[:space:]]*}
+  fi
+  echo "${value:-tailscale0}"
+}
+
+readonly tailnet=$(tailnet_interface)
+
+failed=0
+
+check_mangle_rule() {
+  local chain=$1
+  shift
+  iptables -w 10 -t mangle -C "$chain" "$@" >/dev/null 2>&1 || {
+    echo "FAIL  mangle $chain rule '$*' is missing"
+    return 1
+  }
+}
+
+check_firewall_rules() {
+  local fw_failed=0 has_forward=0 has_input=0 missing range table chain direction interface
+  local -a ufw
+
+  if [[ ! $tailnet =~ ^[A-Za-z0-9_.-]{1,15}$ ]]; then
+    echo "FAIL  APHELION_TAILNET_INTERFACE '$tailnet' isn't a valid network interface name"
+    failed=1
+    return 0
+  fi
+
+  if iptables -w 10 -t mangle -S APHELION-FORWARD >/dev/null 2>&1; then
+    echo "ok    mangle APHELION-FORWARD chain exists"
+    has_forward=1
+  else
+    echo "FAIL  the APHELION-FORWARD chain is missing. Restart the service to install it."
+    fw_failed=1
+  fi
+
+  if iptables -w 10 -t mangle -S APHELION-INPUT >/dev/null 2>&1; then
+    echo "ok    mangle APHELION-INPUT chain exists"
+    has_input=1
+  else
+    echo "FAIL  the APHELION-INPUT chain is missing. Restart the service to install it."
+    fw_failed=1
+  fi
+
+  if iptables -w 10 -t mangle -C FORWARD -j APHELION-FORWARD >/dev/null 2>&1; then
+    echo "ok    mangle FORWARD jumps to APHELION-FORWARD"
+  else
+    echo "FAIL  mangle FORWARD rule '-j APHELION-FORWARD' is missing"
+    fw_failed=1
+  fi
+
+  if iptables -w 10 -t mangle -C INPUT -j APHELION-INPUT >/dev/null 2>&1; then
+    echo "ok    mangle INPUT jumps to APHELION-INPUT"
+  else
+    echo "FAIL  mangle INPUT rule '-j APHELION-INPUT' is missing"
+    fw_failed=1
+  fi
+
+  if ((has_forward)); then
+    missing=0
+    check_mangle_rule APHELION-FORWARD -i "$bridge" -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j RETURN || missing=1
+    for range in "${blocked[@]}"; do
+      check_mangle_rule APHELION-FORWARD -i "$bridge" -d "$range" -j DROP || missing=1
+    done
+    check_mangle_rule APHELION-FORWARD -o "$bridge" -i "$tailnet" -p tcp --dport "$port" -m conntrack --ctstate NEW -j RETURN || missing=1
+    check_mangle_rule APHELION-FORWARD -o "$bridge" -m conntrack --ctstate NEW -j DROP || missing=1
+    if ((missing)); then
+      fw_failed=1
+    else
+      echo "ok    mangle APHELION-FORWARD rules are in place"
+    fi
+  fi
+
+  if ((has_input)); then
+    missing=0
+    check_mangle_rule APHELION-INPUT -i "$bridge" -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j RETURN || missing=1
+    check_mangle_rule APHELION-INPUT -i "$bridge" -j DROP || missing=1
+    if ((missing)); then
+      fw_failed=1
+    else
+      echo "ok    mangle APHELION-INPUT rules are in place"
+    fi
+  fi
+
+  if ip6tables -w 10 -t mangle -n -L INPUT >/dev/null 2>&1; then
+    missing=0
+    for rule in "INPUT -i $bridge" "FORWARD -i $bridge" "FORWARD -o $bridge"; do
+      read -r chain direction interface <<<"$rule"
+      if ! ip6tables -w 10 -t mangle -C "$chain" "$direction" "$interface" -j DROP >/dev/null 2>&1; then
+        echo "FAIL  ip6tables mangle $chain rule '$direction $interface -j DROP' is missing"
+        missing=1
+      fi
+    done
+    if ((missing)); then
+      fw_failed=1
+    else
+      echo "ok    ip6tables mangle rules for $bridge are in place"
+    fi
+  fi
+
+  for table in filter nat; do
+    if iptables -w 10 -t "$table" -n -L DOCKER >/dev/null 2>&1; then
+      echo "ok    $table DOCKER chain exists"
+    else
+      echo "FAIL  $table DOCKER chain is missing"
+      fw_failed=1
+    fi
+  done
+
+  mapfile -t ufw < <(sh -c 'for f; do [ -r "$f" ] && . "$f"; done >/dev/null 2>&1
+    command printf "%s\n%s\nend\n" "${ENABLED-}" "${MANAGE_BUILTINS-}"' sh /etc/default/ufw /etc/ufw/ufw.conf)
+  if [[ ${ufw[2]-} != end ]]; then
+    echo "FAIL  reading /etc/default/ufw and /etc/ufw/ufw.conf with sh stopped early, so the ufw settings are unknown"
+    fw_failed=1
+  elif [[ ${ufw[0]} =~ ^(yes|YES)$ && ${ufw[1]} == yes ]]; then
+    echo "FAIL  ufw is enabled with MANAGE_BUILTINS=yes in /etc/default/ufw, which removes Docker and Aphelion firewall rules on ufw reload"
+    fw_failed=1
+  else
+    echo "ok    ufw is not set to flush built-in chains"
+  fi
+
+  if ((fw_failed)); then
+    echo "To restore the rules: set MANAGE_BUILTINS=no in /etc/default/ufw if ufw is enabled, run sudo ufw reload, then run sudo systemctl restart docker."
+    failed=1
+  fi
+}
+
+check_firewall_rules
+if (($# == 0)); then
+  exit "$failed"
+fi
+
 for target in "$@"; do
   timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "${target%:*}" "${target##*:}" 2>/dev/null || {
     echo "network-check: the host itself can't connect to $target. Pick an address and an open port that the host reaches, so a timeout from the container means the firewall dropped it." >&2
@@ -26,9 +181,8 @@ for target in "$@"; do
   }
 done
 
-cd "$(dirname "$0")/.."
 in_container() {
-  docker compose exec -T --user aphelion-bot aphelion "$@"
+  docker compose --project-directory "$deploy_dir" exec -T --user aphelion-bot aphelion "$@"
 }
 in_container true || {
   echo "network-check: the aphelion container isn't running. Start it with: sudo systemctl start aphelion" >&2
@@ -46,7 +200,6 @@ probe() {
   esac
 }
 
-failed=0
 for target in "${@:1:5}"; do
   result=$(probe "$target")
   if [[ $result == "timed out" ]]; then

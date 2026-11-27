@@ -21,6 +21,9 @@ export const options = {
   pluginRunnerFds: "plugin-runner-fds",
   botRunnerFds: "bot-runner-fds",
   pluginDev: "plugin-dev",
+  url: "url",
+  tokenFile: "token-file",
+  cursorFile: "cursor-file",
 } as const;
 
 export const operands = {
@@ -39,7 +42,12 @@ export const operands = {
   "tool remove": "tool name",
   "tool update": "tool name",
   "tool check": undefined,
+  "key add": "tool name",
+  "key replace": "tool name",
+  "key test": "tool name",
+  "key remove": "tool name",
   "restore finish": undefined,
+  chat: "bot",
 } as const;
 
 export const optionalOperands: ReadonlySet<string> = new Set(["tool update"]);

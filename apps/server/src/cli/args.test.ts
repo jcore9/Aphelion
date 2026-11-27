@@ -31,7 +31,12 @@ const parsed = async (argv: string[]) => {
     toolRemove: record("toolRemove"),
     toolUpdate: record("toolUpdate"),
     toolCheck: record("toolCheck"),
+    keyAdd: record("keyAdd"),
+    keyReplace: record("keyReplace"),
+    keyTest: record("keyTest"),
+    keyRemove: record("keyRemove"),
     restoreFinish: record("restoreFinish"),
+    chat: record("chat"),
   };
   const result = await capture(makeCli(handlers)(argv));
   return { ...result, calls };
@@ -209,6 +214,22 @@ describe("accepted command lines", () => {
     ],
     [["tool", "check"], { kind: "tool check" }],
     [
+      ["key", "add", "claude"],
+      { kind: "key add", stateDir: defaultStateDir, tool: "claude" },
+    ],
+    [
+      ["key", "replace", "codex", "--state-dir", "/s"],
+      { kind: "key replace", stateDir: "/s", tool: "codex" },
+    ],
+    [
+      ["key", "remove", "grok"],
+      { kind: "key remove", stateDir: defaultStateDir, tool: "grok" },
+    ],
+    [
+      ["key", "test", "claude"],
+      { kind: "key test", stateDir: defaultStateDir, tool: "claude" },
+    ],
+    [
       ["plugin", "dev", "/opt/aphelion/dev-plugin"],
       {
         kind: "plugin dev",
@@ -278,6 +299,34 @@ describe("accepted command lines", () => {
     [
       ["restore", "finish", "--state-dir", "/data"],
       { kind: "restore finish", stateDir: "/data" },
+    ],
+    [
+      ["chat", "chief"],
+      {
+        kind: "chat",
+        bot: "chief",
+        url: "ws://127.0.0.1:7400/ws",
+        tokenFile: undefined,
+        cursorFile: undefined,
+      },
+    ],
+    [
+      [
+        "chat",
+        "chief",
+        "--url",
+        "http://100.71.226.67:7400",
+        "--token-file=/t",
+        "--cursor-file",
+        "/c",
+      ],
+      {
+        kind: "chat",
+        bot: "chief",
+        url: "ws://100.71.226.67:7400/ws",
+        tokenFile: "/t",
+        cursorFile: "/c",
+      },
     ],
     [
       ["device", "revoke", "0123456789abcdef"],
@@ -405,6 +454,13 @@ describe("refused command lines", () => {
       '"tool update" takes no more than one tool name, but got 2',
     ],
     [["tool", "check", "claude"], '"tool check" takes no arguments, but got 1'],
+    [["key", "add"], '"key add" needs a tool name'],
+    [["key", "add", "claude", "x"], '"key add" takes one tool name, but got 2'],
+    [["key", "test", "gemini"], "the tool name must be claude, codex or grok"],
+    [
+      ["key", "test", "claude", "--test-url", "http://127.0.0.1:8098"],
+      "unknown option --test-url",
+    ],
     [
       ["tool", "check", "--tools-dir", "/t"],
       '--tools-dir isn\'t an option of "tool check"',
@@ -426,6 +482,17 @@ describe("refused command lines", () => {
     [
       ["restore", "finish", "--approve", "abc"],
       '--approve isn\'t an option of "restore finish"',
+    ],
+    [["chat"], '"chat" needs a bot'],
+    [["chat", "a", "b"], '"chat" takes one bot, but got 2'],
+    [["chat", "Chief"], "the bot name must be lower case letters"],
+    [
+      ["chat", "chief", "--url", "ftp://host"],
+      "--url must be an http, https, ws or wss address",
+    ],
+    [
+      ["chat", "chief", "--state-dir", "/s"],
+      '--state-dir isn\'t an option of "chat"',
     ],
     [
       ["plugin", "rollback", "weather", "--approve", "abc"],

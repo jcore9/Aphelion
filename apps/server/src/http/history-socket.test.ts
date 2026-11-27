@@ -90,9 +90,10 @@ layer(
         });
 
         first.send({ v: 1, type: "resume", cursor: cursor(0) });
+        yield* first.until(2);
         yield* say(store, "one");
         yield* say(store, "two");
-        expect(seqs(yield* first.until(3))).toEqual(["resync", 1, 2]);
+        expect(seqs(yield* first.until(4))).toEqual(["resync", "live", 1, 2]);
         first.close();
 
         yield* say(store, "three");
@@ -100,11 +101,11 @@ layer(
 
         const second = yield* connect;
         second.send({ v: 1, type: "resume", cursor: cursor(2) });
-        expect(seqs(yield* second.until(2))).toEqual([3, 4]);
+        expect(seqs(yield* second.until(3))).toEqual([3, 4, "live"]);
         yield* say(store, "five");
-        const frames = yield* second.until(3);
-        expect(seqs(frames)).toEqual([3, 4, 5]);
-        expect(frames[2]).toMatchObject({
+        const frames = yield* second.until(4);
+        expect(seqs(frames)).toEqual([3, 4, "live", 5]);
+        expect(frames[3]).toMatchObject({
           name: "bot.event",
           payload: {
             bot: "chief",
@@ -141,12 +142,12 @@ layer(
     Effect.gen(function* () {
       const client = yield* connect;
       client.send({ v: 1, type: "resume", cursor: cursor(0) });
-      yield* client.until(store.head());
+      yield* client.until(store.head() + 1);
       client.send({ v: 1, type: "resume", cursor: cursor(store.head() - 1) });
 
-      const frames = yield* client.until(store.head() + 1);
+      const frames = yield* client.until(store.head() + 3);
 
-      expect(seqs(frames).slice(-1)).toEqual([store.head()]);
+      expect(seqs(frames).slice(-2)).toEqual([store.head(), "live"]);
       client.close();
     }),
   );
@@ -172,9 +173,9 @@ layer(
 
       const client = yield* connect;
       client.send({ v: 1, type: "resume", cursor: cursor(before - 1) });
-      const frames = yield* client.until(2);
+      const frames = yield* client.until(3);
 
-      expect(seqs(frames)).toEqual([before, before + 1]);
+      expect(seqs(frames)).toEqual([before, before + 1, "live"]);
       client.close();
     }),
   );

@@ -3,6 +3,7 @@ import {
   version,
   type Cursor,
   type EventFrame,
+  type LiveFrame,
   type ResyncFrame,
 } from "@aphelion/protocol";
 import { Data, Effect, PubSub, Queue } from "effect";
@@ -43,7 +44,7 @@ export const eventFrame = (saved: SavedEvent): EventFrame | undefined => {
 export const follow = <E>(
   log: EventLog,
   cursor: Cursor | null,
-  send: (frame: EventFrame | ResyncFrame) => Effect.Effect<void, E>,
+  send: (frame: EventFrame | ResyncFrame | LiveFrame) => Effect.Effect<void, E>,
   limit: number = liveBufferLimit,
 ) => {
   const sendSaved = (saved: SavedEvent) => {
@@ -87,6 +88,11 @@ export const follow = <E>(
           }
           page = page.length < replayPage ? [] : log.read(last, replayPage);
         }
+        yield* send({
+          v: version,
+          type: "live",
+          cursor: { stream, seq: last },
+        });
         for (;;) {
           const saved = yield* Queue.take(live);
           if (saved.position <= last) continue;

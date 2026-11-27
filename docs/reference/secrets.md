@@ -65,10 +65,33 @@ The socket accepts HTTP `POST /v1/local` with a UTF-8 JSON body of at most 64 Ki
 | --- | --- | --- |
 | Write | `{"op":"write","ref":"local://github/webhook-secret","value":"example"}` | `204`, empty body |
 | Read | `{"op":"read","ref":"local://github/webhook-secret"}` | `200`, the value as a JSON string |
+| Delete | `{"op":"delete","ref":"local://github/webhook-secret"}` | `204`, empty body |
 
-An invalid request returns `400`. An unknown endpoint or missing entry returns `404`. A broker error returns `500` with an empty body. A request that exceeds the size limit closes the connection. Error logs contain fixed messages. The plaintext value crosses the socket only when the harness writes or reads it.
+An invalid request returns `400`. An unknown endpoint, or a read or delete of a missing entry, returns `404`. A delete removes the entry's file and syncs the folder, so the deletion survives a power cut. A broker error returns `500` with an empty body. A request that exceeds the size limit closes the connection. Error logs contain fixed messages. The plaintext value crosses the socket only when the harness writes or reads it.
 
-The Linux contract test builds the executable, runs it as `aphelion-secrets` in Docker, and connects as each service account. It feeds the broker a key from `--new-key` on standard input, as the launcher does. It checks that `harness` reads a value after restart and that `aphelion-bot` and `aphelion-plugins` get a permission error from Linux. It checks that the store holds `recipient.pub` and no `identity.agekey`. It checks that the broker refuses an empty standard input and another key, each with its reason. It also scans the broker logs and store files for the test value and for both keys.
+The Linux contract test builds the executable, runs it as `aphelion-secrets` in Docker, and connects as each service account. It feeds the broker a key from `--new-key` on standard input, as the launcher does. It checks that `harness` reads a value after restart, deletes it, and gets `404` for a second delete, and that `aphelion-bot` and `aphelion-plugins` get a permission error from Linux. It checks that the store holds `recipient.pub` and no `identity.agekey`. It checks that the broker refuses an empty standard input and another key, each with its reason. It also scans the broker logs and store files for the test value and for both keys.
+
+### The broker client
+
+`apps/server/src/secrets/broker-client.ts` is the client that server code and the `aphelion` command use to read, write and delete entries. It talks to `/run/aphelion-secrets/broker.sock`, so only a process in the `harness` group can use it.
+
+- `read(ref)` returns the value in a `Secret`, or `undefined` when no entry exists.
+- `write(ref, secret)` reads the `Secret` only to build the request. The caller still owns the `Secret` and wipes it.
+- `delete(ref)` returns `true` when it removed an entry and `false` when there was none.
+
+Every failure is a `BrokerError` with a fixed message, such as `can't reach the secrets broker at /run/aphelion-secrets/broker.sock`. The message never holds a value or the broker's answer.
+
+### API keys for AI tools
+
+[`aphelion key`](cli.md#aphelion-key-add-name) stores an API key for an AI tool as a local entry named after the tool:
+
+| Tool | Entry | Key |
+| --- | --- | --- |
+| `claude` | `local://apikey/claude` | An Anthropic API key |
+| `codex` | `local://apikey/codex` | An OpenAI API key |
+| `grok` | `local://apikey/grok` | An xAI API key |
+
+The command wraps the key in a `Secret` as soon as it reads it, and wipes it when it is done. It reads the value in only two places: to build the request to the broker, and to build the header of `aphelion key test`. Bots don't get the key yet. The hand-off at bot start comes in a later change for [#181](https://github.com/jcore9/Aphelion/issues/181).
 
 ## Code
 
@@ -78,6 +101,9 @@ The Linux contract test builds the executable, runs it as `aphelion-secrets` in 
 | `apps/server/src/secrets/reference.ts` | `parseSecretReference` and the reasons it gives |
 | `apps/server/src/secrets/local-store.ts` | The local encrypted store and its startup refusals |
 | `apps/server/src/secrets/broker-main.ts` | The broker process: `--new-key`, reading the key, and the socket |
+| `apps/server/src/secrets/broker-handler.ts` | The broker's answer to each socket request |
+| `apps/server/src/secrets/broker-client.ts` | The client that reads, writes and deletes entries over the socket |
+| `apps/server/src/secrets/api-key.ts` | The AI tools that take an API key, the check on a typed key, and the provider check behind `aphelion key test` |
 | `apps/server/src/secrets/canary.test.ts` | The test that a canary value never reaches the logs or the database files |
 
 Server code imports `Secret` and `parseSecretReference` from `@aphelion/server/secrets`.
