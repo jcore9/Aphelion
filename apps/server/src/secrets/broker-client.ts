@@ -93,20 +93,38 @@ function send(
   });
 }
 
-const takesConnection = (socketPath: string, limitMs: number) =>
+const takesConnection = (
+  socketPath: string,
+  limitMs: number,
+  signal?: AbortSignal,
+) =>
   new Promise<boolean>((resolve) => {
     const probe = connect(socketPath);
     const refuse = () => {
+      signal?.removeEventListener("abort", refuse);
       probe.destroy();
       resolve(false);
     };
+    signal?.addEventListener("abort", refuse, { once: true });
     probe.setTimeout(Math.max(limitMs, 1), refuse);
     probe.once("error", refuse);
     probe.once("connect", () => {
+      signal?.removeEventListener("abort", refuse);
       probe.setTimeout(0);
       probe.end();
       resolve(true);
     });
+  });
+
+const pause = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
   });
 
 async function answersWithin(
@@ -115,13 +133,15 @@ async function answersWithin(
   signal?: AbortSignal,
 ): Promise<boolean> {
   const until = Date.now() + limitMs;
+  const gaveUp = () => signal?.aborted === true;
   for (;;) {
-    if (await takesConnection(socketPath, until - Date.now())) return true;
+    if (gaveUp()) return false;
+    if (await takesConnection(socketPath, until - Date.now(), signal)) {
+      return true;
+    }
     const left = until - Date.now();
-    if (left <= 0 || signal?.aborted === true) return false;
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(answerRetryMs, left)),
-    );
+    if (left <= 0 || gaveUp()) return false;
+    await pause(Math.min(answerRetryMs, left), signal);
   }
 }
 

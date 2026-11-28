@@ -1,5 +1,6 @@
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateIdentity } from "age-encryption";
@@ -211,5 +212,20 @@ describe("waiting for the broker", () => {
       ),
     ).toBe(false);
     expect(Date.now() - began).toBeLessThan(1_000);
+  });
+
+  it("answers false without trying the socket when its caller already gave up", async () => {
+    const live = join(root, "live.sock");
+    const server = createNetServer().listen(live);
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const gaveUp = new AbortController();
+      gaveUp.abort();
+      expect(await brokerClient(live).answers(3_000, gaveUp.signal)).toBe(
+        false,
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

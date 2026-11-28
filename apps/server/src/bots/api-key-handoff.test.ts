@@ -329,3 +329,63 @@ describe("the secrets broker at server start", () => {
     }).pipe(Effect.scoped),
   );
 });
+
+describe("a shutdown while bots wait for the secrets broker", () => {
+  it.live("reads no key and sends no start for the waiting bots", () =>
+    Effect.gen(function* () {
+      const reads: string[] = [];
+      const sent: RunnerRequest[] = [];
+      const source: ApiKeySource = {
+        read: (ref) => {
+          reads.push(ref);
+          return Promise.resolve(Secret.make(fakeKey, { label: "API key" }));
+        },
+        answers: (_limitMs, signal) =>
+          new Promise((resolve) => {
+            signal.addEventListener("abort", () => {
+              resolve(false);
+            });
+          }),
+      };
+      const fake = fakes();
+      const logger = createLogger({ write: () => undefined });
+      const link = yield* fakeRunnerLink(fake, logger);
+      const app = yield* Scope.make();
+      const manager = yield* Effect.gen(function* () {
+        const services = yield* Layer.build(
+          botManagerLayer({
+            bots,
+            logger,
+            adapters,
+            apiKeys: source,
+          }).pipe(
+            Layer.provideMerge(memorySessionRefs),
+            Layer.provide(
+              Layer.succeed(BotRunnerLink, {
+                incoming: link.incoming,
+                send: (message) => {
+                  sent.push(message);
+                  return link.send(message);
+                },
+              }),
+            ),
+          ),
+        );
+        return Context.get(services, BotManager);
+      }).pipe(Scope.provide(app));
+      for (const bot of bots) yield* manager.start(bot.name);
+      yield* manager
+        .waitFor("plain", (state: BotState) => state.state === "running")
+        .pipe(Effect.timeout("5 seconds"), Effect.orDie);
+      yield* Scope.close(app, Exit.void);
+      expect(reads).toEqual([]);
+      expect(
+        sent.filter(
+          (message) =>
+            message.type === "start" &&
+            (message.bot === "chief" || message.bot === "scout"),
+        ),
+      ).toEqual([]);
+    }),
+  );
+});

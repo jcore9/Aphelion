@@ -521,25 +521,29 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           ? Effect.void
           : Deferred.await(brokerAnswered)
         ).pipe(
-          Effect.andThen(
-            Effect.acquireUseRelease(
-              readApiKey(slot.bot),
-              (apiKey) =>
-                sendToRunner({
-                  type: "start",
-                  bot: slot.bot.name,
-                  run,
-                  provider: slot.bot.provider,
-                  adapter: slot.adapter,
-                  folder: slot.bot.folder,
-                  resume: slot.resume,
-                  ...(apiKey === undefined ? {} : { apiKey: apiKey.reveal() }),
-                }),
-              (apiKey) =>
-                Effect.sync(() => {
-                  apiKey?.wipe();
-                }),
-            ),
+          Effect.andThen(() =>
+            shuttingDown || channelFailed
+              ? Effect.void
+              : Effect.acquireUseRelease(
+                  readApiKey(slot.bot),
+                  (apiKey) =>
+                    sendToRunner({
+                      type: "start",
+                      bot: slot.bot.name,
+                      run,
+                      provider: slot.bot.provider,
+                      adapter: slot.adapter,
+                      folder: slot.bot.folder,
+                      resume: slot.resume,
+                      ...(apiKey === undefined
+                        ? {}
+                        : { apiKey: apiKey.reveal() }),
+                    }),
+                  (apiKey) =>
+                    Effect.sync(() => {
+                      apiKey?.wipe();
+                    }),
+                ),
           ),
         );
 
