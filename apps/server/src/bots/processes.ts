@@ -1,10 +1,12 @@
 import { Context, Data, type Effect, type Stream } from "effect";
 import type { ProcessExit, SpawnFailed } from "../plugins/processes";
+import type { Secret } from "../secrets/secret";
 
 export interface BotSpec {
   readonly bot: string;
   readonly adapter: string;
   readonly folder: string;
+  readonly apiKey?: Secret;
 }
 
 export class KillFailed extends Data.TaggedError("KillFailed")<{

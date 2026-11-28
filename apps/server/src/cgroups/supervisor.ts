@@ -12,6 +12,7 @@ import {
 import type { Logger } from "../log";
 import type { Link } from "../plugins/link";
 import type { ProcessExit } from "../plugins/processes";
+import { Secret } from "../secrets/secret";
 import {
   botIdPattern,
   isBotFolder,
@@ -23,6 +24,7 @@ import {
 export interface AdapterEntry {
   readonly bundle: string;
   readonly env: Readonly<Record<string, string>>;
+  readonly apiKeyVariable?: string;
 }
 
 export interface RunPaths {
@@ -89,6 +91,23 @@ export const probeFolderOf = (run: string) => `/tmp/aphelion-probe-${run}`;
 export const probeReserved =
   "only the supervisor's start probe may use the probe adapter or bot id";
 export const unsafeReason = "the cgroup check failed, so no bot starts";
+export const keyRefused = "that adapter takes no API key";
+
+type StartFields = Omit<
+  Extract<SupervisorRequest, { type: "start" }>,
+  "apiKey"
+>;
+
+const keyedEntry = (
+  entry: AdapterEntry,
+  apiKey: Secret | undefined,
+): AdapterEntry =>
+  apiKey === undefined || entry.apiKeyVariable === undefined
+    ? entry
+    : {
+        ...entry,
+        env: { ...entry.env, [entry.apiKeyVariable]: apiKey.reveal() },
+      };
 
 export interface SupervisorOptions {
   readonly adapters: Readonly<Record<string, AdapterEntry>>;
@@ -127,6 +146,7 @@ export const runSupervisor = (
       bot: string,
       adapter: string,
       folder: string,
+      keyed = false,
     ) =>
       Effect.gen(function* () {
         if (!runIdPattern.test(run)) {
@@ -137,6 +157,9 @@ export const runSupervisor = (
           : undefined;
         if (entry === undefined) {
           return yield* new Refused({ reason: "no adapter has that name" });
+        }
+        if (keyed && entry.apiKeyVariable === undefined) {
+          return yield* new Refused({ reason: keyRefused });
         }
         if (!botIdPattern.test(bot)) {
           return yield* new Refused({ reason: "the bot id isn't valid" });
@@ -168,13 +191,17 @@ export const runSupervisor = (
       record: RunRecord,
       entry: AdapterEntry,
       kind: SpawnKind,
+      apiKey?: Secret,
     ) =>
       Effect.gen(function* () {
         const paths = yield* host.makeRun(run);
         record.paths = paths;
         const child = yield* host
-          .spawn(paths, entry, bot, folder, kind)
-          .pipe(Effect.tapError(() => Effect.ignore(host.removeRun(paths))));
+          .spawn(paths, keyedEntry(entry, apiKey), bot, folder, kind)
+          .pipe(
+            Effect.ensuring(Effect.sync(() => apiKey?.wipe())),
+            Effect.tapError(() => Effect.ignore(host.removeRun(paths))),
+          );
         record.child = child;
         if (yield* child.placed) return { paths, child } satisfies Started;
         yield* child.abort;
@@ -286,24 +313,32 @@ export const runSupervisor = (
       });
     }
 
-    const startRequest = (
-      request: Extract<SupervisorRequest, { type: "start" }>,
-    ) =>
+    const startRequest = (request: StartFields, apiKey: Secret | undefined) =>
       Effect.gen(function* () {
         const failed = (reason: string) =>
-          link.send({ type: "start-failed", run: request.run, reason });
+          Effect.sync(() => apiKey?.wipe()).pipe(
+            Effect.andThen(
+              link.send({ type: "start-failed", run: request.run, reason }),
+            ),
+          );
         if (unsafe !== undefined) return yield* failed(unsafeReason);
         if (request.adapter === probeAdapter || request.bot === probeBot) {
           return yield* failed(probeReserved);
         }
         const registered = yield* Effect.result(
-          register(request.run, request.bot, request.adapter, request.folder),
+          register(
+            request.run,
+            request.bot,
+            request.adapter,
+            request.folder,
+            apiKey !== undefined,
+          ),
         );
         if (registered._tag === "Failure") {
           return yield* failed(registered.failure.reason);
         }
         const { record, entry } = registered.success;
-        yield* FiberSet.run(
+        const launching = yield* FiberSet.run(
           work,
           launch(
             request.run,
@@ -312,6 +347,7 @@ export const runSupervisor = (
             record,
             entry,
             "bot",
+            apiKey,
           ).pipe(
             Effect.matchEffect({
               onFailure: (error) => {
@@ -340,6 +376,7 @@ export const runSupervisor = (
             }),
           ),
         );
+        launching.addObserver(() => apiKey?.wipe());
       });
 
     const killRequest = (run: string) =>
@@ -376,11 +413,16 @@ export const runSupervisor = (
     );
 
     yield* Queue.take(link.incoming).pipe(
-      Effect.flatMap((request) =>
-        request.type === "start"
-          ? startRequest(request)
-          : killRequest(request.run),
-      ),
+      Effect.flatMap((request) => {
+        if (request.type === "kill") return killRequest(request.run);
+        const { apiKey, ...fields } = request;
+        return startRequest(
+          fields,
+          apiKey === undefined
+            ? undefined
+            : Secret.make(apiKey, { label: "API key" }),
+        );
+      }),
       Effect.forever,
     );
   }).pipe(Effect.catchIf(Cause.isDone, () => Effect.void));

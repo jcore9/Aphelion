@@ -30,6 +30,7 @@ import { LineSplitter, type LinePiece } from "../plugins/lines";
 import type { Link } from "../plugins/link";
 import type { ProcessExit } from "../plugins/processes";
 import { logBudget, utf8Bytes } from "../plugins/runner";
+import { Secret } from "../secrets/secret";
 import { BotProcesses, type BotProcess } from "./processes";
 import type {
   RunnerNotice,
@@ -76,8 +77,16 @@ type Phase =
   | "stopping"
   | "unkilled";
 
+type Start = Omit<StartRequest, "apiKey"> & {
+  readonly apiKey: Secret | undefined;
+};
+
+const forget = (start: Start | undefined) => {
+  start?.apiKey?.wipe();
+};
+
 interface Slot {
-  readonly start: StartRequest;
+  readonly start: Start;
   phase: Phase;
   gen: number;
   process: BotProcess | undefined;
@@ -97,7 +106,7 @@ interface Slot {
   exit: ProcessExit | undefined;
   stopReplies: number;
   failure: string | undefined;
-  next: StartRequest | undefined;
+  next: Start | undefined;
 }
 
 interface Tag {
@@ -199,6 +208,10 @@ export const runBotRunner = (
       Effect.gen(function* () {
         yield* Queue.end(events);
         yield* FiberSet.awaitEmpty(launches);
+        for (const slot of slots.values()) {
+          forget(slot.start);
+          forget(slot.next);
+        }
         yield* Effect.forEach(
           [...slots.values()],
           (slot) =>
@@ -360,6 +373,9 @@ export const runBotRunner = (
             bot: slot.start.bot,
             adapter: slot.start.adapter,
             folder: slot.start.folder,
+            ...(slot.start.apiKey === undefined
+              ? {}
+              : { apiKey: slot.start.apiKey }),
           })
           .pipe(
             Effect.matchEffect({
@@ -386,20 +402,23 @@ export const runBotRunner = (
       );
     };
 
-    const begin = Effect.fnUntraced(function* (start: StartRequest) {
+    const begin = Effect.fnUntraced(function* (start: Start) {
       const existing = slots.get(start.bot);
       if (existing?.phase === "stopping") {
+        forget(existing.next);
         existing.next = start;
         return;
       }
-      const refuse = (reason: string) =>
-        link.send({
+      const refuse = (reason: string) => {
+        forget(start);
+        return link.send({
           type: "start-failed",
           bot: start.bot,
           run: start.run,
           stage: "spawn",
           reason,
         });
+      };
       if (wedged.has(start.bot)) return yield* refuse(wedgedReason);
       if (existing !== undefined) return yield* refuse("already running");
       const slot: Slot = {
@@ -427,8 +446,9 @@ export const runBotRunner = (
       yield* FiberSet.run(launches, launch(slot));
     });
 
-    const close = Effect.fnUntraced(function* (slot: Slot) {
+    const sendEnd = Effect.fnUntraced(function* (slot: Slot) {
       slots.delete(slot.start.bot);
+      forget(slot.start);
       if (slot.failure !== undefined) {
         yield* link.send({
           type: "start-failed",
@@ -443,8 +463,19 @@ export const runBotRunner = (
       for (let count = 0; count < slot.stopReplies; count++) {
         yield* link.send({ type: "stopped", ...frameOf(slot) });
       }
-      if (slot.next !== undefined) yield* begin(slot.next);
     });
+
+    const close = (slot: Slot) =>
+      sendEnd(slot).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            forget(slot.next);
+          }),
+        ),
+        Effect.andThen(() =>
+          slot.next === undefined ? Effect.void : begin(slot.next),
+        ),
+      );
 
     const reap = Effect.fnUntraced(function* (slot: Slot, exit: ProcessExit) {
       slot.phase = "stopping";
@@ -570,8 +601,10 @@ export const runBotRunner = (
       slot.phase = "unkilled";
       slot.cancel = undefined;
       slot.restarting = false;
+      forget(slot.start);
       const queued = slot.next;
       slot.next = undefined;
+      forget(queued);
       if (queued !== undefined) {
         yield* link.send({
           type: "start-failed",
@@ -613,8 +646,16 @@ export const runBotRunner = (
 
     const handle = Effect.fnUntraced(function* (event: LoopEvent) {
       switch (event.type) {
-        case "start":
-          return yield* begin(event);
+        case "start": {
+          const { apiKey, ...start } = event;
+          return yield* begin({
+            ...start,
+            apiKey:
+              apiKey === undefined
+                ? undefined
+                : Secret.make(apiKey, { label: "API key" }),
+          });
+        }
         case "launched": {
           const slot = current(event);
           if (slot === undefined) {
@@ -658,6 +699,7 @@ export const runBotRunner = (
           if (slot === undefined) return;
           if (slot.phase === "stopping") return yield* close(slot);
           slots.delete(event.bot);
+          forget(slot.start);
           if (slot.restarting) {
             return yield* link.send({
               type: "exited",
@@ -815,7 +857,10 @@ export const runBotRunner = (
           const slot = slots.get(event.bot);
           if (slot === undefined) return yield* stopped;
           if (slot.start.run !== event.run) {
-            if (slot.next?.run === event.run) slot.next = undefined;
+            if (slot.next?.run === event.run) {
+              forget(slot.next);
+              slot.next = undefined;
+            }
             return yield* stopped;
           }
           slot.stopReplies++;

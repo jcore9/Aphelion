@@ -559,7 +559,11 @@ The tools' own auto-update is off. Claude Code and Codex are switched off in the
 
 ## Use an API key instead of a sign-in
 
-This step is optional. An **API key** is a long password from an AI vendor's developer console. A tool that runs on a key bills each request to that vendor account, instead of using your subscription. You can store a key now, but bots don't use it yet: the change that hands the key to a bot at start is still to come ([#181](https://github.com/jcore9/Aphelion/issues/181)). When it comes, a working sign-in still wins over a key.
+This step is optional. An **API key** is a long password from an AI vendor's developer console. A tool that runs on a key bills each request to that vendor account, instead of using your subscription.
+
+A bot gets the stored key each time it starts. A working sign-in still wins. A Claude bot that is signed in leaves the key unused, and uses it only when it starts with no working sign-in. Today only Claude bots run, so only the `claude` key reaches a bot. Codex and Grok bots come later.
+
+A bot that runs on a key can read the key, as it can read its sign-in token. A tricked bot could leak it, and so could another bot, because all bots share one user. Set a small spending limit on the key in the vendor's console. [The API key at start](../reference/bot-runner.md#the-api-key-at-start) has the details.
 
 | Tool | Key it takes |
 | --- | --- |
@@ -585,7 +589,13 @@ OpenCode signs in to many vendors, so it has no single key. Use `sudo aphelion s
 
    `The provider accepted the claude API key.` means the key works. `The provider refused the claude API key.` means the vendor doesn't accept it: check that you copied all of it, and that it is still active in the vendor's console.
 
-To change a key, run `sudo aphelion key replace claude`. To delete it, run `sudo aphelion key remove claude`. [The host command](../reference/host-command.md#key) has the details.
+3. Restart Aphelion, so the bots start again and get the key.
+
+   ```sh
+   sudo systemctl restart aphelion
+   ```
+
+To change a key, run `sudo aphelion key replace claude`. To delete it, run `sudo aphelion key remove claude`. Restart Aphelion after either one, so the bots start with the new key or with none. [The host command](../reference/host-command.md#key) has the details.
 
 ## Update an AI tool
 

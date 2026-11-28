@@ -35,11 +35,11 @@ import {
 } from "./messages.ts";
 import {
   claudeCodeVersion,
-  claudeEnv,
   givenTools,
   queryOptions,
   type ParentEnv,
 } from "./options.ts";
+import { sessionEnv, type SignInCheck } from "./sign-in.ts";
 import { splitBytes } from "./text.ts";
 import {
   after,
@@ -62,6 +62,7 @@ export type QueryFunction = (params: {
 export interface ClaudeAdapterOptions {
   readonly query: QueryFunction;
   readonly env: ParentEnv;
+  readonly signedIn?: SignInCheck;
   readonly rule: Decider;
   readonly interruptWaitMs?: number;
   readonly closeWaitMs?: number;
@@ -179,11 +180,11 @@ const initProblem = (message: ClaudeMessage): string | undefined => {
 export function claudeAdapter(options: ClaudeAdapterOptions): BotAdapter {
   const interruptWaitMs = options.interruptWaitMs ?? 3000;
   const closeWaitMs = options.closeWaitMs ?? 5000;
-  const env = claudeEnv(options.env);
 
   return {
     provider: "claude",
-    open(context: AdapterContext): AdapterSession {
+    async open(context: AdapterContext): Promise<AdapterSession> {
+      const env = await sessionEnv(options.env, options.signedIn);
       const calls = new Map<string, Call>();
       let saved =
         context.resume === null ? null : (claudeRef(context.resume) ?? null);

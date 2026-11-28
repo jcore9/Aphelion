@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 import { z } from "zod";
+import { apiKeyText } from "../secrets/api-key";
 
 export const maxSupervisorFrameBytes = 16 * 1024;
 
@@ -38,6 +39,7 @@ export const supervisorRequestSchema = z.discriminatedUnion("type", [
     bot: z.string().max(64),
     adapter: z.string().max(64),
     folder: z.string().max(2 * maxBotFolderBytes),
+    apiKey: apiKeyText.optional(),
   }),
   z.strictObject({ type: z.literal("kill"), run }),
 ]);

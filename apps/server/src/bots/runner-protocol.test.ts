@@ -42,6 +42,20 @@ describe("the bot runner's frames", () => {
     expect(accepts({ ...start, folder: "bots/chief-of-staff" })).toBe(false);
   });
 
+  it("accepts a start with an API key of up to 512 printable ASCII bytes, and refuses any other key", () => {
+    const fake = "sk-ant-fake-runner-protocol";
+    expect(accepts({ ...start, apiKey: fake })).toBe(true);
+    expect(accepts({ ...start, apiKey: "a".repeat(512) })).toBe(true);
+    expect(accepts({ ...start, apiKey: "a".repeat(513) })).toBe(false);
+    expect(accepts({ ...start, apiKey: "" })).toBe(false);
+    expect(accepts({ ...start, apiKey: `${fake}\nX=1` })).toBe(false);
+    expect(accepts({ ...start, apiKey: `${fake} x` })).toBe(false);
+    expect(accepts({ ...start, apiKey: "é".repeat(10) })).toBe(false);
+    expect(accepts({ type: "stop", bot: "triage", run: 1, apiKey: fake })).toBe(
+      false,
+    );
+  });
+
   it("refuses a frame with a field it doesn't know", () => {
     expect(accepts({ type: "stop", bot: "triage", run: 1 })).toBe(true);
     expect(

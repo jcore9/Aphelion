@@ -51,12 +51,21 @@ const fixed = {
 
 export type ParentEnv = Readonly<Record<string, string | undefined>>;
 
-export function claudeEnv(parent: ParentEnv): Record<string, string> {
+export const apiKeyVariable = "ANTHROPIC_API_KEY";
+
+export type SignIn = "working" | "none";
+
+export function claudeEnv(
+  parent: ParentEnv,
+  signIn: SignIn = "working",
+): Record<string, string> {
   const env: Record<string, string> = {};
   for (const name of passedThrough) {
     const value = parent[name];
     if (value !== undefined) env[name] = value;
   }
+  const key = parent[apiKeyVariable];
+  if (signIn === "none" && key !== undefined) env[apiKeyVariable] = key;
   return { ...env, ...fixed };
 }
 

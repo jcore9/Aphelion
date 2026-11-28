@@ -1,0 +1,110 @@
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { fakeClaude, type FakeClaude } from "./fake-claude.ts";
+import { claudeSignedIn, sessionEnv } from "./sign-in.ts";
+
+const fakeKey = "sk-ant-api03-fake-sign-in-0123456789";
+
+const parent = {
+  HOME: "/var/lib/aphelion-bots",
+  PATH: "/usr/bin:/bin",
+  ANTHROPIC_API_KEY: fakeKey,
+};
+
+const made: FakeClaude[] = [];
+const claude = (answer: Parameters<typeof fakeClaude>[0]) => {
+  const fake = fakeClaude(answer);
+  made.push(fake);
+  return fake;
+};
+
+afterEach(() => {
+  for (const fake of made.splice(0)) fake.remove();
+});
+
+describe("claudeSignedIn", () => {
+  it("runs claude auth status without the API key and answers true when it exits 0", async () => {
+    const fake = claude("signed-in");
+    expect(await claudeSignedIn(parent, fake.path)).toBe(true);
+    expect(fake.calls()).toEqual([
+      "auth status key= home=/var/lib/aphelion-bots",
+    ]);
+  });
+
+  it("answers false when claude auth status exits 1", async () => {
+    const fake = claude("signed-out");
+    expect(await claudeSignedIn(parent, fake.path)).toBe(false);
+    expect(fake.calls()).toEqual([
+      "auth status key= home=/var/lib/aphelion-bots",
+    ]);
+  });
+
+  it("runs the check outside the bot's folder, so a .claude/settings.json there can't make it answer true", () => {
+    const fake = claude("reads-project-settings");
+    const folder = mkdtempSync(join(tmpdir(), "aphelion-bot-folder-"));
+    try {
+      mkdirSync(join(folder, ".claude"));
+      writeFileSync(
+        join(folder, ".claude", "settings.json"),
+        '{"apiKeyHelper": "echo sk-ant-fake-helper"}',
+      );
+      const check = [
+        `import { claudeSignedIn } from ${JSON.stringify(join(import.meta.dirname, "sign-in.ts"))};`,
+        `const parent = ${JSON.stringify(parent)};`,
+        `process.stdout.write(String(await claudeSignedIn(parent, ${JSON.stringify(fake.path)})));`,
+      ].join("\n");
+      const ran = spawnSync(process.execPath, ["-e", check], {
+        cwd: folder,
+        encoding: "utf8",
+      });
+      expect(ran.stderr).toBe("");
+      expect(ran.stdout).toBe("false");
+      expect(fake.calls()).toHaveLength(1);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("answers false when the CLI is missing", async () => {
+    expect(await claudeSignedIn(parent, "/nonexistent/claude")).toBe(false);
+  });
+
+  it("answers false and kills the check when it runs past its limit", async () => {
+    const fake = claude("hangs");
+    const began = Date.now();
+    expect(await claudeSignedIn(parent, fake.path, 200)).toBe(false);
+    expect(Date.now() - began).toBeLessThan(3_000);
+  });
+});
+
+describe("sessionEnv", () => {
+  it("never runs the check when no API key came", async () => {
+    let checks = 0;
+    const env = await sessionEnv({ HOME: "/home/bots" }, () => {
+      checks += 1;
+      return Promise.resolve(false);
+    });
+    expect(checks).toBe(0);
+    expect(env).not.toHaveProperty("ANTHROPIC_API_KEY");
+  });
+
+  it("leaves the key out when the sign-in works", async () => {
+    const fake = claude("signed-in");
+    const env = await sessionEnv(parent, (from) =>
+      claudeSignedIn(from, fake.path),
+    );
+    expect(env).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(env["HOME"]).toBe("/var/lib/aphelion-bots");
+  });
+
+  it("passes the key when there is no working sign-in", async () => {
+    const fake = claude("signed-out");
+    const env = await sessionEnv(parent, (from) =>
+      claudeSignedIn(from, fake.path),
+    );
+    expect(env["ANTHROPIC_API_KEY"]).toBe(fakeKey);
+  });
+});

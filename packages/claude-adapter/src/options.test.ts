@@ -50,6 +50,26 @@ describe("claudeEnv", () => {
     });
   });
 
+  it("passes ANTHROPIC_API_KEY only when told there is no working sign-in, and never the other tokens", () => {
+    const parent = {
+      HOME: "/var/lib/aphelion-bots",
+      ANTHROPIC_API_KEY: "sk-ant-fake",
+      ANTHROPIC_AUTH_TOKEN: "fake-token",
+      CLAUDE_CODE_OAUTH_TOKEN: "fake-oauth",
+    };
+    expect(claudeEnv(parent, "none")).toEqual({
+      HOME: "/var/lib/aphelion-bots",
+      ANTHROPIC_API_KEY: "sk-ant-fake",
+      DISABLE_AUTOUPDATER: "1",
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+    });
+    expect(claudeEnv(parent, "working")).toEqual(claudeEnv(parent));
+    expect(claudeEnv(parent)).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(claudeEnv({ HOME: "/h" }, "none")).not.toHaveProperty(
+      "ANTHROPIC_API_KEY",
+    );
+  });
+
   it("leaves out a variable the parent doesn't have", () => {
     expect(claudeEnv({})).toEqual({
       DISABLE_AUTOUPDATER: "1",

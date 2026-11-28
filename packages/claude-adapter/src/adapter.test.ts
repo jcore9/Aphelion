@@ -15,31 +15,52 @@ import {
   type AdapterHarness,
 } from "@aphelion/plugin-sdk/testing";
 import type { HookCallback, Options } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { claudeAdapter } from "./adapter.ts";
+import { fakeClaude, type FakeClaude } from "./fake-claude.ts";
 import {
   abortedError,
   scriptedQuery,
   sdk,
   type ScriptStep,
 } from "./scripted-query.ts";
+import { claudeSignedIn } from "./sign-in.ts";
 import { settlesWithin, whenAborted } from "./timing.ts";
 
 const fakeKey = "sk-ant-api03-fake-0123456789abcdefghijklmnopqrstuvwxyz";
 
+const fakes: FakeClaude[] = [];
+
+afterEach(() => {
+  for (const fake of fakes.splice(0)) fake.remove();
+});
+
+const statusFrom = (answer: "signed-in" | "signed-out") => {
+  const fake = fakeClaude(answer);
+  fakes.push(fake);
+  return {
+    fake,
+    signedIn: (env: Record<string, string | undefined>) =>
+      claudeSignedIn(env, fake.path),
+  };
+};
+
 const setup = (
   turns: readonly (readonly ScriptStep[])[],
   env: Record<string, string> = { HOME: "/var/lib/aphelion-bots" },
+  signIn: "signed-in" | "signed-out" = "signed-in",
 ) => {
   const scripted = scriptedQuery(turns);
+  const status = statusFrom(signIn);
   const adapter = claudeAdapter({
     query: scripted.query,
     env,
+    signedIn: status.signedIn,
     rule: denyAll,
     interruptWaitMs: 50,
     closeWaitMs: 100,
   });
-  return { scripted, adapter };
+  return { scripted, adapter, status: status.fake };
 };
 
 const eventsOf = (run: {
@@ -837,6 +858,50 @@ describe("when the session has more than the adapter gave it", () => {
     }
   });
 
+  it("checks the sign-in before the first query and still holds tools until the init, with a key and no sign-in", async () => {
+    const gate = held();
+    const scripted = scriptedQuery([
+      [gate.step, { send: dirtyInit }, { send: sdk.result() }],
+    ]);
+    const status = statusFrom("signed-out");
+    const checksAtQuery: number[] = [];
+    const adapter = claudeAdapter({
+      query: (params) => {
+        checksAtQuery.push(status.fake.calls().length);
+        return scripted.query(params);
+      },
+      env: { HOME: "/var/lib/aphelion-bots", ANTHROPIC_API_KEY: fakeKey },
+      signedIn: status.signedIn,
+      rule: allow,
+      interruptWaitMs: 50,
+      closeWaitMs: 100,
+    });
+    const harness = startAdapter(adapter, { decider: allow });
+    await harness.initialize();
+    const hook = hookOf(scripted.runs[0]?.options);
+
+    expect(checksAtQuery).toEqual([1]);
+    expect(scripted.runs[0]?.options.env?.["ANTHROPIC_API_KEY"]).toBe(fakeKey);
+    expect(await askHook(hook)).toEqual(blocked);
+    await harness.startTurn("t1", "hi");
+    await gate.reached;
+    const early = askHook(hook);
+
+    expect(await pending(early)).toBe(true);
+    gate.release();
+    await untilTurnEnd(harness, "t1");
+    expect(await early).toEqual(blocked);
+    await harness.shutdown();
+    await harness.done;
+    expect(harness.logs).toContain(
+      "the session reported 1 tools, 0 MCP servers and 0 plugins that Aphelion didn't give it, so the adapter stopped it",
+    );
+    expect(
+      JSON.stringify([harness.events, harness.logs, harness.problems]),
+    ).not.toContain("sk-ant");
+    expect(checkStream(harness.events)).toEqual([]);
+  });
+
   it("runs a session that reports only the seven tools and built-in plugins as before", async () => {
     const { adapter, scripted } = allowingAdapter([
       [
@@ -1369,6 +1434,7 @@ describe("keys stay out of events and logs", () => {
         return scripted.query(params);
       },
       env: { HOME: "/var/lib/aphelion-bots", ANTHROPIC_API_KEY: fakeKey },
+      signedIn: statusFrom("signed-out").signedIn,
       rule: denyAll,
       interruptWaitMs: 50,
       closeWaitMs: 100,
@@ -1386,12 +1452,72 @@ describe("keys stay out of events and logs", () => {
       harness.events,
       harness.logs,
       harness.problems,
-      scripted.runs.map(({ options }) => options.env),
     ]);
     expect(seen).not.toContain("sk-ant");
+    expect(
+      scripted.runs.map(({ options }) => options.env?.["ANTHROPIC_API_KEY"]),
+    ).toEqual([fakeKey, fakeKey]);
     expect(harness.logs).toContain("the CLI wrote 1 lines to stderr");
     expect(harness.events.map(({ event }) => event.type)).toContain("error");
     expect(checkStream(harness.events)).toEqual([]);
+  });
+});
+
+describe("an API key next to a sign-in", () => {
+  const keyed = {
+    HOME: "/var/lib/aphelion-bots",
+    PATH: "/usr/bin",
+    ANTHROPIC_API_KEY: fakeKey,
+  };
+
+  it("leaves the key out of every query when claude auth status finds a working sign-in", async () => {
+    const { adapter, scripted, status } = setup(
+      [completed, completed],
+      keyed,
+      "signed-in",
+    );
+    const harness = startAdapter(adapter);
+    await harness.initialize();
+    await harness.startTurn("t1", "one");
+    await untilTurnEnd(harness, "t1");
+    await harness.shutdown();
+    await harness.done;
+    expect(status.calls()).toEqual([
+      "auth status key= home=/var/lib/aphelion-bots",
+    ]);
+    expect(scripted.runs[0]?.options.env).not.toHaveProperty(
+      "ANTHROPIC_API_KEY",
+    );
+  });
+
+  it("passes the key to the query when there is no working sign-in, and checks only once", async () => {
+    const { adapter, scripted, status } = setup(
+      [[{ throws: new Error("exited") }], completed],
+      keyed,
+      "signed-out",
+    );
+    const harness = startAdapter(adapter);
+    await harness.initialize();
+    await harness.startTurn("t1", "one");
+    await untilTurnEnd(harness, "t1");
+    await harness.startTurn("t2", "two");
+    await untilTurnEnd(harness, "t2");
+    await harness.shutdown();
+    await harness.done;
+    expect(status.calls()).toHaveLength(1);
+    expect(scripted.runs).toHaveLength(2);
+    for (const run of scripted.runs) {
+      expect(run.options.env?.["ANTHROPIC_API_KEY"]).toBe(fakeKey);
+    }
+    expect(
+      JSON.stringify([harness.events, harness.logs, harness.problems]),
+    ).not.toContain("sk-ant");
+  });
+
+  it("never runs the check when no key came", async () => {
+    const { adapter, status } = setup([completed]);
+    await runTurn(adapter);
+    expect(status.calls()).toEqual([]);
   });
 });
 

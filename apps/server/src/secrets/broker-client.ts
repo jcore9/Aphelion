@@ -1,9 +1,11 @@
 import { request } from "node:http";
+import { connect } from "node:net";
 import { Secret } from "./secret";
 
 export const brokerSocket = "/run/aphelion-secrets/broker.sock";
 const maxAnswerBytes = 64 * 1024;
 const defaultTimeoutMs = 5_000;
+const answerRetryMs = 100;
 
 export class BrokerError extends Error {
   override name = "BrokerError";
@@ -91,6 +93,58 @@ function send(
   });
 }
 
+const takesConnection = (
+  socketPath: string,
+  limitMs: number,
+  signal?: AbortSignal,
+) =>
+  new Promise<boolean>((resolve) => {
+    const probe = connect(socketPath);
+    const refuse = () => {
+      signal?.removeEventListener("abort", refuse);
+      probe.destroy();
+      resolve(false);
+    };
+    signal?.addEventListener("abort", refuse, { once: true });
+    probe.setTimeout(Math.max(limitMs, 1), refuse);
+    probe.once("error", refuse);
+    probe.once("connect", () => {
+      signal?.removeEventListener("abort", refuse);
+      probe.setTimeout(0);
+      probe.end();
+      resolve(true);
+    });
+  });
+
+const pause = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+
+async function answersWithin(
+  socketPath: string,
+  limitMs: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const until = Date.now() + limitMs;
+  const gaveUp = () => signal?.aborted === true;
+  for (;;) {
+    if (gaveUp()) return false;
+    if (await takesConnection(socketPath, until - Date.now(), signal)) {
+      return true;
+    }
+    const left = until - Date.now();
+    if (left <= 0 || gaveUp()) return false;
+    await pause(Math.min(answerRetryMs, left), signal);
+  }
+}
+
 const answered = (status: number) =>
   new BrokerError(`the secrets broker answered HTTP ${String(status)}`);
 
@@ -112,6 +166,8 @@ export function brokerClient(
   { timeoutMs = defaultTimeoutMs }: { readonly timeoutMs?: number } = {},
 ) {
   return {
+    answers: (limitMs: number, signal?: AbortSignal) =>
+      answersWithin(socketPath, limitMs, signal),
     async read(ref: string): Promise<Secret | undefined> {
       const { status, body } = await ask(socketPath, timeoutMs, {
         op: "read",

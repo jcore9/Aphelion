@@ -917,4 +917,169 @@ describe("the bot runner", () => {
         expect(fake.runs).toEqual([]);
       }).pipe(Effect.scoped),
   );
+
+  describe("an API key in the start", () => {
+    const fakeKey = "sk-ant-fake-runner-canary-0123456789";
+    const keyOf = (run: { readonly spec: { readonly apiKey?: unknown } }) =>
+      run.spec.apiKey as
+        { readonly wiped: boolean; reveal(): string } | undefined;
+
+    it.live(
+      "hands the key to the adapter's spawn, hands it again to the fresh adapter after a cancel, and wipes it when the run ends",
+      () =>
+        Effect.gen(function* () {
+          const made: FakeAdapter[] = [];
+          const alpha: FakeBot = {
+            adapter: () => {
+              const adapter = fakeAdapter(
+                made.length === 0
+                  ? [
+                      [
+                        { emit: { type: "text.delta", text: "working" } },
+                        { waitForAbort: true },
+                      ],
+                    ]
+                  : [reply],
+              );
+              made.push(adapter);
+              return adapter;
+            },
+          };
+          const { fake, frames, until, send, logs } = yield* runner({ alpha });
+          yield* send({ ...startFrame("alpha"), apiKey: fakeKey });
+          yield* until(is("started"));
+          const first = fake.runs[0];
+          expect(first?.spec).toMatchObject({
+            bot: "alpha",
+            adapter: "fake",
+            folder: "/bots/alpha",
+          });
+          expect(keyOf(first ?? { spec: {} })?.reveal().length).toBe(
+            fakeKey.length,
+          );
+          yield* send({
+            type: "turn.start",
+            bot: "alpha",
+            run: 1,
+            turn: "t1",
+            text: "go",
+          });
+          yield* until(
+            (frame) =>
+              frame.type === "event" &&
+              frame.envelope.event.type === "text.delta",
+          );
+          yield* send({
+            type: "turn.cancel",
+            bot: "alpha",
+            run: 1,
+            turn: "t1",
+          });
+          yield* until(turnEnded("alpha"));
+          for (let tries = 0; tries < 200 && fake.runs.length < 2; tries++) {
+            yield* Effect.sleep("10 millis");
+          }
+          const second = fake.runs[1];
+          expect(keyOf(second ?? { spec: {} })?.reveal().length).toBe(
+            fakeKey.length,
+          );
+          yield* send({ type: "stop", bot: "alpha", run: 1 });
+          yield* until(is("stopped"));
+          expect(keyOf(second ?? { spec: {} })?.wiped).toBe(true);
+          expect(JSON.stringify(frames)).not.toContain(fakeKey);
+          expect(JSON.stringify(logs)).not.toContain(fakeKey);
+        }).pipe(Effect.scoped),
+    );
+
+    const keyedStart = (bot: string) => ({
+      ...startFrame(bot),
+      apiKey: fakeKey,
+    });
+
+    it.live("wipes the key when the adapter crashes and the run ends", () =>
+      Effect.gen(function* () {
+        const alpha = scripted([[{ hang: true }]]);
+        const { fake, until, send } = yield* runner({ alpha: alpha.bot });
+        yield* send(keyedStart("alpha"));
+        yield* until(is("started"));
+        fake.latest("alpha")?.crash();
+        yield* until(is("exited"));
+        expect(keyOf(fake.runs[0] ?? { spec: {} })?.wiped).toBe(true);
+      }).pipe(Effect.scoped),
+    );
+
+    it.live(
+      "wipes the key of a run kept after its kill failed, before any retried stop",
+      () =>
+        Effect.gen(function* () {
+          const alpha = scripted([reply]);
+          const { fake, until, send } = yield* runner({
+            alpha: {
+              ...alpha.bot,
+              killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+            },
+          });
+          yield* send(keyedStart("alpha"));
+          yield* until(is("started"));
+          yield* send({ type: "stop", bot: "alpha", run: 1 });
+          yield* until(is("stop-failed"));
+          expect(keyOf(fake.runs[0] ?? { spec: {} })?.wiped).toBe(true);
+        }).pipe(Effect.scoped),
+    );
+
+    it.live(
+      "wipes the key of a run whose process was lost and couldn't be killed",
+      () =>
+        Effect.gen(function* () {
+          const alpha = scripted([[{ hang: true }]]);
+          const { fake, until, send } = yield* runner({
+            alpha: {
+              ...alpha.bot,
+              killFails: { reason: "populated: ETIMEDOUT", times: 1 },
+            },
+          });
+          yield* send(keyedStart("alpha"));
+          yield* until(is("started"));
+          fake.latest("alpha")?.closeStdout();
+          yield* until(is("stop-failed"));
+          expect(keyOf(fake.runs[0] ?? { spec: {} })?.wiped).toBe(true);
+        }).pipe(Effect.scoped),
+    );
+
+    it.live("wipes the key of a live run when the runner shuts down", () =>
+      Effect.gen(function* () {
+        const alpha = scripted([[{ hang: true }]]);
+        const key = yield* Effect.gen(function* () {
+          const { fake, until, send } = yield* runner({ alpha: alpha.bot });
+          yield* send(keyedStart("alpha"));
+          yield* until(is("started"));
+          const held = keyOf(fake.runs[0] ?? { spec: {} });
+          expect(held?.wiped).toBe(false);
+          return held;
+        }).pipe(Effect.scoped);
+        expect(key?.wiped).toBe(true);
+      }),
+    );
+
+    it.live(
+      "starts without a key when the start has none, and wipes a key whose spawn failed",
+      () =>
+        Effect.gen(function* () {
+          const alpha = scripted([reply]);
+          const { fake, until, send } = yield* runner({
+            alpha: alpha.bot,
+            beta: { adapter: () => fakeAdapter([]), refuses: "no such file" },
+          });
+          yield* send(startFrame("alpha"));
+          yield* until(is("started", "alpha"));
+          expect(keyOf(fake.runs[0] ?? { spec: {} })).toBeUndefined();
+          yield* send({ ...startFrame("beta"), apiKey: fakeKey });
+          expect(yield* until(is("start-failed", "beta"))).toMatchObject({
+            reason: "no such file",
+          });
+          const refused = fake.starts.find((spec) => spec.bot === "beta");
+          expect(keyOf({ spec: refused ?? {} })?.wiped).toBe(true);
+        }).pipe(Effect.scoped),
+    );
+  });
 });

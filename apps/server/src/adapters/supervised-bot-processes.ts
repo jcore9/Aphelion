@@ -171,6 +171,9 @@ export const supervisedBotProcesses = (
             bot: spec.bot,
             adapter: spec.adapter,
             folder: spec.folder,
+            ...(spec.apiKey === undefined
+              ? {}
+              : { apiKey: spec.apiKey.reveal() }),
           });
           const paths = yield* Deferred.await(waiting.started).pipe(
             Effect.timeoutOrElse({

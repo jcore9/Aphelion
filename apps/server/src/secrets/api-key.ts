@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Secret } from "./secret";
 
 export const apiKeyTools = ["claude", "codex", "grok"] as const;
@@ -6,6 +7,13 @@ export type ApiKeyTool = (typeof apiKeyTools)[number];
 export const apiKeyRef = (tool: ApiKeyTool) => `local://apikey/${tool}`;
 
 export const maxApiKeyBytes = 512;
+
+export const apiKeyText = z
+  .string()
+  .min(1)
+  .max(maxApiKeyBytes)
+  .regex(/^[\x21-\x7e]+$/);
+
 const checkTimeoutMs = 10_000;
 
 interface Provider {

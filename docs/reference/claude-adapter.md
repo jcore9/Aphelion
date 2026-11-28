@@ -28,7 +28,7 @@ A test fails when the SDK's own `claudeCodeVersion` differs from the version the
 
 ## Sessions and turns
 
-A **query** is one running Claude Code process that the SDK talks to. The adapter starts one query when the bot runner opens the session, and keeps it for every turn. A turn sends the prompt into the running query and reads the SDK's messages until that turn's result.
+A **query** is one running Claude Code process that the SDK talks to. The adapter starts one query when the bot runner opens the session, and keeps it for every turn. When the owner stored an API key, opening the session first runs the sign-in check that [The environment Claude Code gets](#the-environment-claude-code-gets) describes. No query, and so no tool call, exists until that check ends. A turn sends the prompt into the running query and reads the SDK's messages until that turn's result.
 
 - When the query has stopped, the next turn starts a new query that resumes the last session id Claude Code reported. The first query resumes the `resume` ref that the bot runner saved, if it has the form of a Claude session id.
 - On shutdown, the adapter closes the query's input and waits up to 5 seconds for Claude Code to exit, then aborts it.
@@ -52,7 +52,7 @@ A **query** is one running Claude Code process that the SDK talks to. The adapte
 | `verbatimPrompts` | `true`, so each prompt reaches Claude Code exactly as typed. See [Prompts are passed as typed](#prompts-are-passed-as-typed). |
 | `includePartialMessages` | `true`, so text arrives in small pieces |
 | `resume` | The session to resume, when there is one |
-| `env` | Built from the allow list below |
+| `env` | Built from the allow list below. It holds `ANTHROPIC_API_KEY` only when there is no working sign-in. |
 | `stderr` | Counts the lines Claude Code writes to its error output, and keeps none of them |
 | `executable` | `bun` |
 
@@ -110,7 +110,11 @@ The cost: Claude Code also skips the context it would normally attach at the sta
 
 The SDK's `env` option replaces Claude Code's whole environment. The adapter copies only these variables from its own environment: `HOME`, `PATH`, `LANG`, `TZ`, `TMPDIR`, and the proxy variables `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and `ALL_PROXY` in upper and lower case. It then sets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so Claude Code doesn't update itself and runs no command in the background.
 
-No key passes. An `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` in the bot process's environment never reaches Claude Code. Claude Code finds its sign-in in `HOME`. [#181](https://github.com/jcore9/Aphelion/issues/181) adds an API key for a bot that has no sign-in.
+An `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` in the adapter's environment never reaches Claude Code. Claude Code finds its sign-in in `HOME`.
+
+`ANTHROPIC_API_KEY` reaches Claude Code only when there is no working sign-in. The supervisor sets it in the adapter's environment when the owner stored a Claude API key ([the API key at start](bot-runner.md#the-api-key-at-start)). Claude Code uses an `ANTHROPIC_API_KEY` ahead of its sign-in, so the adapter checks the sign-in first. Before its first query, it runs `claude auth status` once, with the variables above and without the key, a 5-second limit, and its output thrown away. It runs the check from `/`, not from the bot's folder, so a `.claude/settings.json` in that folder, such as one with an `apiKeyHelper`, can't make the check pass. Turns read no settings files, so such a check would keep the key out of turns that then fail to sign in. Exit status 0 means a working sign-in. The adapter then leaves the key out of every query's environment, and the subscription pays. Exit status 1, a missing CLI, or no answer within 5 seconds means no working sign-in, and the adapter passes the key. Without a key, the adapter runs no check. The key changes nothing about which tool calls run: each turn still starts unchecked, and its `init` check works the same with or without the key.
+
+`claudeEnv` in `packages/claude-adapter/src/options.ts` makes that choice, and `sessionEnv` in `packages/claude-adapter/src/sign-in.ts` runs the check. The check runs once per adapter process, so a sign-in that stops working brings the key in only at the next adapter start, such as after a cancel or a bot restart. Whether `claude auth status` reports an expired sign-in as signed out isn't measured yet. The owner's live check with a throwaway key covers it.
 
 ## How messages become events
 
@@ -213,7 +217,7 @@ When the runtime aborts the turn's signal, the adapter asks Claude Code to inter
 
 ## Logs
 
-Nothing that Claude Code or the SDK prints reaches an event or a log line. Events carry fixed codes, errors are mapped by their type, and the error output is only counted. A test runs a turn with a fake key in the environment, in Claude Code's error output and in a thrown error, and checks that no event and no log line holds it.
+Nothing that Claude Code or the SDK prints reaches an event or a log line. Events carry fixed codes, errors are mapped by their type, and the error output is only counted. A test runs a turn with a fake key in the environment, in Claude Code's error output and in a thrown error, and checks that no event and no log line holds it. Another passes the key to a session whose `init` the adapter stops, and checks that the log line holds no key.
 
 The adapter writes these lines to the log:
 

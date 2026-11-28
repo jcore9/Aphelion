@@ -34,6 +34,8 @@ import {
   type RestartPolicy,
 } from "../plugins/lifecycle";
 import type { Link } from "../plugins/link";
+import { apiKeyRef, apiKeyTools, type ApiKeyTool } from "../secrets/api-key";
+import type { Secret } from "../secrets/secret";
 import type {
   RunnerNotice,
   RunnerReply,
@@ -51,6 +53,22 @@ export const cgroupsUnsafe =
 
 export const stopFailed =
   "the bot's processes couldn't be removed, so the bot stays stopping and the server tries again";
+
+export const apiKeyReadFailed =
+  "the server couldn't read the bot's API key from the secrets broker, so the bot starts without it";
+
+export const brokerWaitMs = 10_000;
+
+export const brokerSilent =
+  "the secrets broker didn't answer within 10 seconds, so bots start without API keys";
+
+export interface ApiKeySource {
+  readonly read: (ref: string) => Promise<Secret | undefined>;
+  readonly answers?: (limitMs: number, signal: AbortSignal) => Promise<boolean>;
+}
+
+const keyTool = (provider: string): ApiKeyTool | undefined =>
+  apiKeyTools.find((tool) => tool === provider);
 
 export const resumeFailed =
   "the saved session could not be resumed, so the bot started a new one";
@@ -208,6 +226,7 @@ export interface BotManagerOptions {
   readonly logger: Logger;
   readonly policy?: RestartPolicy;
   readonly adapters?: Readonly<Record<string, string>>;
+  readonly apiKeys?: ApiKeySource;
   readonly stopDeadlineMs?: number;
   readonly drainDeadlineMs?: number;
   readonly turnAcceptDeadlineMs?: number;
@@ -257,6 +276,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
       const definitions = new Map(options.bots.map((bot) => [bot.name, bot]));
       const slots = new Map<string, Slot>();
       const channelDown = yield* Deferred.make<undefined>();
+      const brokerAnswered = yield* Deferred.make<undefined>();
       const incomingDrained = yield* Deferred.make<undefined>();
       const channelTeardownDone = yield* Deferred.make<undefined>();
       let channelFailed = false;
@@ -419,6 +439,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
             if (channelFailed) return;
             channelFailed = true;
             yield* Deferred.succeed(channelDown, undefined);
+            yield* Deferred.succeed(brokerAnswered, undefined);
             if (reason === "write-timeout") {
               logger.error(runnerChannelFailedMessage, {
                 deadlineMs: writeDeadlineMs,
@@ -461,17 +482,69 @@ export const botManagerLayer = (options: BotManagerOptions) =>
           }
         });
 
+      const source = options.apiKeys;
+      const answers = source?.answers;
+      if (
+        answers === undefined ||
+        options.bots.every((bot) => keyTool(bot.provider) === undefined)
+      ) {
+        yield* Deferred.succeed(brokerAnswered, undefined);
+      } else {
+        yield* Effect.forkIn(
+          Effect.promise((signal) => answers(brokerWaitMs, signal)).pipe(
+            Effect.map((answered) => {
+              if (!answered) logger.warn(brokerSilent);
+            }),
+            Effect.ensuring(Deferred.succeed(brokerAnswered, undefined)),
+          ),
+          work,
+        );
+      }
+
+      const readApiKey = (bot: BotDefinition) => {
+        const tool = keyTool(bot.provider);
+        if (tool === undefined || source === undefined) {
+          return Effect.succeed(undefined);
+        }
+        return Effect.tryPromise(() => source.read(apiKeyRef(tool))).pipe(
+          Effect.catch(() =>
+            Effect.sync(() => {
+              logger.warn(apiKeyReadFailed, { bot: bot.name });
+              return undefined;
+            }),
+          ),
+        );
+      };
+
       const sendStart = (slot: Slot, run: number) =>
-        Effect.suspend(() =>
-          sendToRunner({
-            type: "start",
-            bot: slot.bot.name,
-            run,
-            provider: slot.bot.provider,
-            adapter: slot.adapter,
-            folder: slot.bot.folder,
-            resume: slot.resume,
-          }),
+        (keyTool(slot.bot.provider) === undefined
+          ? Effect.void
+          : Deferred.await(brokerAnswered)
+        ).pipe(
+          Effect.andThen(() =>
+            shuttingDown || channelFailed
+              ? Effect.void
+              : Effect.acquireUseRelease(
+                  readApiKey(slot.bot),
+                  (apiKey) =>
+                    sendToRunner({
+                      type: "start",
+                      bot: slot.bot.name,
+                      run,
+                      provider: slot.bot.provider,
+                      adapter: slot.adapter,
+                      folder: slot.bot.folder,
+                      resume: slot.resume,
+                      ...(apiKey === undefined
+                        ? {}
+                        : { apiKey: apiKey.reveal() }),
+                    }),
+                  (apiKey) =>
+                    Effect.sync(() => {
+                      apiKey?.wipe();
+                    }),
+                ),
+          ),
         );
 
       const run = (slot: Slot, command: LifecycleCommand) =>
@@ -1026,6 +1099,7 @@ export const botManagerLayer = (options: BotManagerOptions) =>
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           shuttingDown = true;
+          yield* Deferred.succeed(brokerAnswered, undefined);
           if (!channelFailed) {
             yield* Effect.forEach([...slots.keys()], stop, {
               concurrency: "unbounded",

@@ -1,5 +1,6 @@
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateIdentity } from "age-encryption";
@@ -170,3 +171,61 @@ async function answerWith(handler: Parameters<typeof createServer>[1]) {
   await new Promise((resolve) => server.close(resolve));
   server = await listen(handler);
 }
+
+describe("waiting for the broker", () => {
+  it("answers true once the broker's socket takes a connection, even when it starts late", async () => {
+    const late = join(root, "late.sock");
+    const started: Server[] = [];
+    const timer = setTimeout(() => {
+      started.push(createServer().listen(late));
+    }, 200);
+    try {
+      expect(await brokerClient(late).answers(3_000)).toBe(true);
+    } finally {
+      clearTimeout(timer);
+      for (const made of started) {
+        await new Promise((resolve) => made.close(resolve));
+      }
+    }
+  });
+
+  it("answers false when nothing takes a connection before the limit", async () => {
+    const began = Date.now();
+    expect(await brokerClient(join(root, "missing.sock")).answers(300)).toBe(
+      false,
+    );
+    const waited = Date.now() - began;
+    expect(waited).toBeGreaterThanOrEqual(250);
+    expect(waited).toBeLessThan(2_000);
+  });
+
+  it("answers false soon after its caller gives up", async () => {
+    const giveUp = new AbortController();
+    setTimeout(() => {
+      giveUp.abort();
+    }, 150);
+    const began = Date.now();
+    expect(
+      await brokerClient(join(root, "missing.sock")).answers(
+        10_000,
+        giveUp.signal,
+      ),
+    ).toBe(false);
+    expect(Date.now() - began).toBeLessThan(1_000);
+  });
+
+  it("answers false without trying the socket when its caller already gave up", async () => {
+    const live = join(root, "live.sock");
+    const server = createNetServer().listen(live);
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const gaveUp = new AbortController();
+      gaveUp.abort();
+      expect(await brokerClient(live).answers(3_000, gaveUp.signal)).toBe(
+        false,
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
